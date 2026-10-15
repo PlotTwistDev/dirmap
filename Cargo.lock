@@ -735,8 +735,10 @@ name = "dirmap"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "libc",
  "rayon",
  "rfd",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

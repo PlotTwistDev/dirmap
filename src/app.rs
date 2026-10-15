@@ -1,5 +1,6 @@
 //! The desktop GUI: directory tree, extension list and treemap.
 
+use crate::drives::{self, Drive};
 use crate::scan::{self, ExtStat, Node, Options, Progress};
 use crate::treemap::{self, Tile};
 use eframe::egui::{self, ecolor::Hsva, pos2, vec2, Color32, Id, Mesh, Rect, Sense, Stroke};
@@ -44,6 +45,9 @@ pub struct App {
     sort: SortBy,
     highlight_ext: Option<String>,
     cache: Option<LayoutCache>,
+    drives: Vec<Drive>,
+    drives_rx: Option<mpsc::Receiver<Vec<Drive>>>,
+    show_drives: bool,
 }
 
 impl App {
@@ -67,7 +71,11 @@ impl App {
             sort: SortBy::Size,
             highlight_ext: None,
             cache: None,
+            drives: Vec::new(),
+            drives_rx: None,
+            show_drives: false,
         };
+        app.refresh_drives();
         if path.is_some() {
             app.start_scan();
         }
@@ -75,7 +83,13 @@ impl App {
     }
 
     fn start_scan(&mut self) {
-        let path = PathBuf::from(self.path_input.trim());
+        let mut input = self.path_input.trim().to_string();
+        // "D:" alone means "current directory on D:" to Windows; the user means the whole drive.
+        if cfg!(windows) && input.len() == 2 && input.ends_with(':') {
+            input.push('\\');
+            self.path_input = input.clone();
+        }
+        let path = PathBuf::from(input);
         if let Some(job) = &self.job {
             job.progress.cancel.store(true, Ordering::Relaxed);
         }
@@ -131,10 +145,86 @@ impl App {
         self.reveal = true;
     }
 
+    /// Enumerate drives on a background thread: a slow or disconnected network share must not
+    /// freeze the window.
+    fn refresh_drives(&mut self) {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(drives::list());
+        });
+        self.drives_rx = Some(rx);
+    }
+
+    /// Table of drives like WinDirStat's "Select Drives" dialog. Returns the root to scan if one was picked.
+    fn drive_table(&mut self, ui: &mut egui::Ui) -> Option<PathBuf> {
+        if let Some(rx) = &self.drives_rx {
+            match rx.try_recv() {
+                Ok(d) => {
+                    self.drives = d;
+                    self.drives_rx = None;
+                }
+                Err(_) => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Looking for drives…");
+                    });
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                }
+            }
+        }
+        let mut picked = None;
+        egui::Grid::new("drives").striped(true).num_columns(6).spacing([14.0, 6.0]).show(ui, |ui| {
+            for h in ["Drive", "Total", "Free", "Used", "", ""] {
+                ui.strong(h);
+            }
+            ui.end_row();
+            for d in &self.drives {
+                let name = if d.label.is_empty() {
+                    d.root.display().to_string()
+                } else {
+                    format!("{}  ({})", d.root.display(), d.label)
+                };
+                let name = if d.network { format!("{name}  [network]") } else { name };
+                if ui.link(name).on_hover_text("Scan this drive").clicked() {
+                    picked = Some(d.root.clone());
+                }
+                ui.label(scan::human(d.total));
+                ui.label(scan::human(d.free));
+                let frac = if d.total > 0 { d.used() as f32 / d.total as f32 } else { 0.0 };
+                let (r, _) = ui.allocate_exact_size(vec2(140.0, 14.0), Sense::hover());
+                ui.painter().rect_filled(r, 2.0, ui.visuals().extreme_bg_color);
+                let mut fill = r;
+                fill.set_width(r.width() * frac);
+                ui.painter().rect_filled(fill, 2.0, Color32::from_rgb(90, 90, 200));
+                ui.label(format!("{:.1}%", frac * 100.0));
+                if ui.button("Scan").clicked() {
+                    picked = Some(d.root.clone());
+                }
+                ui.end_row();
+            }
+        });
+        if self.drives_rx.is_none() && self.drives.is_empty() {
+            ui.label("No drives found. Type a folder path above instead.");
+        }
+        picked
+    }
+
+    fn scan_root(&mut self, root: PathBuf) {
+        self.path_input = root.display().to_string();
+        self.show_drives = false;
+        self.start_scan();
+    }
+
     // ---------- toolbar ----------
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
+            if ui.button("Drives…").clicked() {
+                self.show_drives = !self.show_drives;
+                if self.show_drives {
+                    self.refresh_drives();
+                }
+            }
             ui.label("Folder:");
             let edit = ui.add(egui::TextEdit::singleline(&mut self.path_input).desired_width(400.0));
             if ui.button("Browse…").clicked() {
@@ -398,6 +488,18 @@ impl eframe::App for App {
 
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
 
+        if self.show_drives && self.tree.is_some() {
+            let mut open = true;
+            let mut picked = None;
+            egui::Window::new("Select drive").open(&mut open).collapsible(false).show(ui.ctx(), |ui| {
+                picked = self.drive_table(ui);
+            });
+            self.show_drives = open;
+            if let Some(root) = picked {
+                self.scan_root(root);
+            }
+        }
+
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
                 if let Some(job) = &self.job {
@@ -433,9 +535,15 @@ impl eframe::App for App {
 
         if self.tree.is_none() {
             egui::CentralPanel::default().show(ui, |ui| {
-                ui.centered_and_justified(|ui| {
-                    ui.heading(if self.job.is_some() { "Scanning…" } else { "No scan yet" });
-                });
+                if self.job.is_some() {
+                    ui.centered_and_justified(|ui| ui.heading("Scanning…"));
+                } else {
+                    ui.heading("Pick a drive to scan, or type a folder above");
+                    ui.add_space(8.0);
+                    if let Some(root) = self.drive_table(ui) {
+                        self.scan_root(root);
+                    }
+                }
             });
             return;
         }

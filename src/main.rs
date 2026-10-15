@@ -5,6 +5,7 @@
 //!   --all-fs                           descend into other mounted filesystems
 
 mod app;
+mod drives;
 mod scan;
 mod treemap;
 

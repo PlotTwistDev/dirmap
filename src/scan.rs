@@ -86,8 +86,10 @@ fn scan_dir(path: PathBuf, name: Box<str>, opts: Options, dev: Option<u64>, p: &
             if p.cancel.load(Ordering::Relaxed) {
                 return None;
             }
-            // symlink_metadata: never follow symlinks, so no cycles or double counting.
-            let md = match e.path().symlink_metadata() {
+            // DirEntry::metadata never follows symlinks (no cycles or double counting), and on
+            // Windows it comes from the directory listing itself, so it costs no extra syscall.
+            // Junctions report as symlinks and are skipped too.
+            let md = match e.metadata() {
                 Ok(m) => m,
                 Err(_) => {
                     p.errors.fetch_add(1, Ordering::Relaxed);

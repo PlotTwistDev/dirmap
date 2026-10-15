@@ -4,6 +4,8 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
 
 ![screenshot](screenshot.png)
 
+- **Drive picker** listing every drive (or mounted volume on Linux/macOS) with total, free and used space,
+  network drives included. Click one to scan the whole drive, e.g. `D:\`.
 - **Parallel scan** (rayon) that never follows symlinks and, by default, stays on one filesystem.
 - **Directory tree** sorted by size, name or file count, with percentage bars.
 - **Extension list** with totals per file type. Click one to highlight those files in the treemap.
