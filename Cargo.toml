@@ -1,0 +1,9 @@
+[package]
+name = "dirmap"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = { version = "0.36.2", features = ["glow"] }
+rayon = "1.12.0"
+rfd = "0.17.2"
