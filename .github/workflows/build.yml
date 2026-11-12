@@ -86,3 +86,23 @@ jobs:
           name: dirmap ${{ inputs.release || github.ref_name }}
           target_commitish: ${{ github.sha }}
           files: dist/dirmap-${{ matrix.name }}.*
+
+  # The manual as a website. The checks that keep it accurate (links, images, settings,
+  # shortcuts, filter examples) run as part of `cargo test` above; this makes sure mdBook can
+  # build it too and keeps a copy of the site with each run.
+  docs:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+
+      - name: Build the manual
+        run: mdbook build docs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dirmap-manual
+          path: docs/book

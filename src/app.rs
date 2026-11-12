@@ -4,6 +4,7 @@ use crate::categories::{self, Category};
 use crate::drives::{self, Drive};
 use crate::dupes;
 use crate::elevate::{self, AdminMode};
+use crate::help::{self, topics};
 use crate::camera::{self, Feel};
 use crate::icons::Icons;
 use crate::mapview::{self, Look, MapView, Paint};
@@ -244,6 +245,14 @@ pub struct App {
     ops: menus::Ops,
     /// Text to put on the clipboard this frame.
     ctx_copy: Option<String>,
+    /// The Help Centre and About windows.
+    help: help::Help,
+    /// Where each part of the window was drawn last frame, with its help page, for F1.
+    help_regions: Vec<(egui::Rect, &'static str)>,
+    /// Folders and files the last scan couldn't read.
+    scan_errors: u64,
+    /// The renderer in use, for About.
+    renderer: &'static str,
 }
 
 impl App {
@@ -316,6 +325,16 @@ impl App {
             admin_declined: false,
             ops: Default::default(),
             ctx_copy: None,
+            help: Default::default(),
+            help_regions: Vec::new(),
+            scan_errors: 0,
+            renderer: if cc.wgpu_render_state.is_some() {
+                "WebGPU (wgpu)"
+            } else if cc.gl.is_some() {
+                "OpenGL (glow)"
+            } else {
+                "unknown"
+            },
         };
         app.refresh_drives();
         if let Some(n) = std::env::var("DIRMAP_SYNTHETIC").ok().and_then(|s| s.parse::<usize>().ok()) {
@@ -697,11 +716,77 @@ impl App {
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("⚙ Settings").clicked() {
+                if ui.button("⚙ Settings").on_hover_text("Appearance, scan filters, treemap look and more").clicked() {
                     self.dialog.open(&self.settings);
                 }
+                self.help_menu(ui);
             });
         });
+    }
+
+    // ---------- help ----------
+
+    /// The ❓ Help menu on the toolbar.
+    fn help_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("❓ Help", |ui| {
+            let pages = [
+                ("Help Centre", "F1", topics::HOME),
+                ("Getting Started", "", topics::QUICK_START),
+                ("Keyboard Shortcuts", "", topics::KEYBOARD),
+                ("Mouse Controls", "", topics::MOUSE),
+                ("Search and Filter Examples", "", topics::EXAMPLES),
+                ("Troubleshooting", "", topics::TROUBLESHOOTING),
+                ("What's New", "", topics::WHATS_NEW),
+            ];
+            for (label, key, topic) in pages {
+                if ui.add(egui::Button::new(label).shortcut_text(key)).clicked() {
+                    self.help.show_topic(topic);
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.button("About dirmap").clicked() {
+                self.help.about_open = true;
+                ui.close();
+            }
+        })
+        .response
+        .on_hover_text("The manual, shortcuts and troubleshooting (F1 for help on what's under the pointer)");
+    }
+
+    /// F1: help for the part of the window under the pointer (as drawn last frame).
+    fn help_keys(&mut self, ctx: &egui::Context) {
+        if !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F1)) {
+            return;
+        }
+        if self.help.hovered {
+            return;
+        }
+        let at = ctx.pointer_hover_pos().and_then(|p| {
+            if self.dialog.rect.is_some_and(|r| r.contains(p)) {
+                return Some(self.dialog.topic());
+            }
+            self.help_regions.iter().find(|(r, _)| r.contains(p)).map(|(_, t)| *t)
+        });
+        let fallback = if self.job.is_some() {
+            topics::WHILE_SCANNING
+        } else if self.tree.is_none() {
+            topics::QUICK_START
+        } else {
+            topics::HOME
+        };
+        self.help.show_topic(at.unwrap_or(fallback));
+    }
+
+    /// The help page for the side panel's current tab.
+    fn side_topic(&self) -> &'static str {
+        match self.side_tab {
+            SideTab::Types => topics::FILE_TYPES,
+            SideTab::Sizes => topics::HISTOGRAM,
+            SideTab::Changes => topics::SNAPSHOTS,
+            SideTab::Duplicates => topics::DUPLICATES,
+            SideTab::Sequences => topics::SEQUENCES,
+        }
     }
 
     // ---------- tree table (shared by live and finished scans) ----------
@@ -734,6 +819,14 @@ impl App {
         for (i, (key, title, w)) in cols.iter().enumerate() {
             let cell = Rect::from_min_size(pos2(x, rect.top()), vec2(*w, ROW_H));
             let resp = ui.interact(cell, ui.id().with(("hdr", i)), if sortable { Sense::click() } else { Sense::hover() });
+            let tip = match *title {
+                "Name" => "File or folder name",
+                "Size" => "Total size of everything inside (the files' own sizes, not space on disk)",
+                "% of parent" => "Share of the folder this item is in",
+                "Files" => "How many files are inside, counting subfolders",
+                _ => "The most recent change to anything inside",
+            };
+            let resp = resp.on_hover_text(if sortable { format!("{tip}. Click to sort.") } else { tip.to_string() });
             let arrow = if sortable && self.sort == *key && *title != "% of parent" {
                 if self.sort_desc { " ⏷" } else { " ⏶" }
             } else {
@@ -1168,7 +1261,17 @@ impl App {
             for (tab, label) in
                 [(SideTab::Types, "File types"), (SideTab::Sizes, "Sizes"), (SideTab::Changes, "Changes"), (SideTab::Duplicates, "Duplicates"), (SideTab::Sequences, "Sequences")]
             {
-                ui.selectable_value(&mut self.side_tab, tab, label);
+                let tip = match tab {
+                    SideTab::Types => "Space used by each file type; click one to highlight it on the map",
+                    SideTab::Sizes => "How many files fall into each size range",
+                    SideTab::Changes => "Compare with a saved snapshot to see what grew or shrank",
+                    SideTab::Duplicates => "Find files with exactly the same contents",
+                    SideTab::Sequences => "Numbered file sequences (renders, scans) and their missing frames",
+                };
+                ui.selectable_value(&mut self.side_tab, tab, label).on_hover_text(tip);
+            }
+            if help::link_button(ui, "Help for this tab") {
+                self.help.show_topic(self.side_topic());
             }
         });
         ui.separator();
@@ -1435,6 +1538,9 @@ impl App {
             } else {
                 "Finds files with exactly the same contents. Files are first matched by size, so only possible duplicates are read."
             });
+            if ui.link("How duplicates are found").clicked() {
+                self.help.show_topic(topics::DUPLICATES_HOW);
+            }
             return;
         }
         let wasted: u64 = self.dup_groups.iter().map(|g| g.wasted()).sum();
@@ -1776,6 +1882,8 @@ impl App {
         let first_pass = ctx.current_pass_index() == 0;
         let pointer = resp.hover_pos();
         let typing = ctx.egui_wants_keyboard_input();
+        // The help window has its own Back and Forward.
+        let help_hovered = self.help.hovered;
         let (wheel, pinch, back, forward, home, plus, minus) = ui.input(|i| {
             let mut wheel = 0.0f64;
             for e in &i.raw.events {
@@ -1795,8 +1903,8 @@ impl App {
             (
                 wheel,
                 i.zoom_delta() as f64,
-                i.pointer.button_pressed(egui::PointerButton::Extra1) || (!typing && alt && i.key_pressed(egui::Key::ArrowLeft)),
-                i.pointer.button_pressed(egui::PointerButton::Extra2) || (!typing && alt && i.key_pressed(egui::Key::ArrowRight)),
+                (!help_hovered && i.pointer.button_pressed(egui::PointerButton::Extra1)) || (!typing && alt && i.key_pressed(egui::Key::ArrowLeft)),
+                (!help_hovered && i.pointer.button_pressed(egui::PointerButton::Extra2)) || (!typing && alt && i.key_pressed(egui::Key::ArrowRight)),
                 !typing && i.key_pressed(egui::Key::Home),
                 !typing && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals)),
                 !typing && i.key_pressed(egui::Key::Minus),
@@ -1971,14 +2079,22 @@ impl App {
             }
             ui.add_space(12.0);
             ui.weak("Wheel to zoom, drag to pan, right-click to zoom out.");
+            if help::link_button(ui, "Moving around the map") {
+                self.help.show_topic(match self.map_kind {
+                    MapKind::Treemap => topics::TREEMAP_NAV,
+                    MapKind::Sunburst => topics::SUNBURST,
+                });
+            }
             ui.separator();
             ui.label("View:");
-            ui.selectable_value(&mut self.map_kind, MapKind::Treemap, "Treemap");
-            ui.selectable_value(&mut self.map_kind, MapKind::Sunburst, "Sunburst");
+            ui.selectable_value(&mut self.map_kind, MapKind::Treemap, "Treemap")
+                .on_hover_text("Rectangles sized by space used; zoom and pan freely");
+            ui.selectable_value(&mut self.map_kind, MapKind::Sunburst, "Sunburst")
+                .on_hover_text("Rings: the centre is the folder, each ring one level deeper");
             ui.separator();
             ui.label("Color by:");
             let before = self.color_mode;
-            ui.selectable_value(&mut self.color_mode, ColorMode::Type, "Type");
+            ui.selectable_value(&mut self.color_mode, ColorMode::Type, "Type").on_hover_text("A colour per file type, as in the File types list");
             ui.selectable_value(&mut self.color_mode, ColorMode::Age, "Age").on_hover_text("How long since each file last changed");
             let has_diff = self.diff.is_some();
             ui.add_enabled_ui(has_diff, |ui| {
@@ -2134,6 +2250,13 @@ impl eframe::App for App {
         }
         scan::set_decimal_units(self.view().units == settings::SizeUnits::Decimal);
 
+        self.help_keys(&ctx);
+        let about = help::AboutInfo { renderer: self.renderer, elevated: elevate::is_elevated() };
+        if let Some(help::Action::ApplyFilter(p)) = self.help.ui(&ctx, &about) {
+            self.set_custom(&p);
+        }
+        self.help_regions.clear();
+
         if let settings::Outcome::Apply = self.dialog.show(&ctx) {
             if self.dialog.draft.admin != self.settings.admin {
                 elevate::save_mode(self.dialog.draft.admin);
@@ -2141,6 +2264,9 @@ impl eframe::App for App {
             }
             self.settings = self.dialog.draft.clone();
             self.rows = None;
+        }
+        if let Some(t) = self.dialog.help_request.take() {
+            self.help.show_topic(t);
         }
         if std::mem::take(&mut self.dialog.restart_as_admin) {
             self.restart_as_admin(&ctx);
@@ -2169,6 +2295,7 @@ impl eframe::App for App {
             if let Ok((tree, exts)) = job.rx.try_recv() {
                 let job = self.job.take().unwrap();
                 if !job.progress.cancel.load(Ordering::Relaxed) {
+                    self.scan_errors = job.progress.errors.load(Ordering::Relaxed);
                     self.finish_scan(job.root, tree, exts, job.started.elapsed().as_secs_f32());
                 } else {
                     std::thread::spawn(move || drop(tree));
@@ -2219,11 +2346,12 @@ impl eframe::App for App {
         self.drive_filter(&ctx);
         self.poll_sequences(&ctx);
 
-        egui::Panel::top("toolbar").show(ui, |ui| {
+        let r = egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(2.0);
             self.toolbar(ui);
             ui.add_space(2.0);
         });
+        self.help_regions.push((r.response.rect, topics::TOOLBAR));
 
         if self.show_drives && self.tree.is_some() {
             let mut open = true;
@@ -2238,7 +2366,7 @@ impl eframe::App for App {
         }
 
         let mut rescan = false;
-        egui::Panel::bottom("status").show(ui, |ui| {
+        let r = egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
                 if let Some(op) = &self.ops.job {
                     ui.spinner();
@@ -2268,6 +2396,17 @@ impl eframe::App for App {
                         group(t.files),
                         self.scan_secs
                     ));
+                    if self.scan_errors > 0 {
+                        let text = if self.scan_errors == 1 {
+                            "1 item couldn't be read.".to_string()
+                        } else {
+                            format!("{} items couldn't be read.", group(self.scan_errors))
+                        };
+                        ui.colored_label(ui.visuals().warn_fg_color, text).on_hover_text(
+                            "Folders or files dirmap wasn't allowed to open (or that vanished during the scan). \
+                             Their space isn't counted. Press F1 for why and what to do.",
+                        );
+                    }
                     if let Some(s) = &self.shown {
                         ui.separator();
                         ui.label(format!("Showing {} matching files ({})", group(s.tree.files), scan::human(s.tree.size)));
@@ -2287,36 +2426,53 @@ impl eframe::App for App {
                 }
             });
         });
+        self.help_regions.push((r.response.rect, if self.scan_errors > 0 { topics::UNREADABLE } else { topics::RESULTS }));
         if rescan {
             self.path_input = self.scanned_path.display().to_string();
             self.start_scan();
         }
 
         if self.job.is_some() {
-            egui::CentralPanel::default().show(ui, |ui| self.scan_screen(ui));
+            let r = egui::CentralPanel::default().show(ui, |ui| self.scan_screen(ui));
+            self.help_regions.push((r.response.rect, topics::WHILE_SCANNING));
             return;
         }
 
         if self.tree.is_none() {
-            egui::CentralPanel::default().show(ui, |ui| {
-                ui.heading("Pick a drive to scan, or type a folder above");
+            let r = egui::CentralPanel::default().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Pick a drive to scan, or type a folder above");
+                    ui.add_space(16.0);
+                    if ui.link("New to dirmap? Read the Quick Start").clicked() {
+                        self.help.show_topic(topics::QUICK_START);
+                    }
+                });
                 ui.add_space(8.0);
                 if let Some(root) = self.drive_table(ui) {
                     self.scan_root(root);
                 }
             });
+            self.help_regions.push((r.response.rect, topics::SCANNING));
             return;
         }
 
-        egui::Panel::right("exts").default_size(330.0).resizable(true).show(ui, |ui| self.side_panel(ui));
-        egui::Panel::top("tree").default_size(320.0).resizable(true).show(ui, |ui| self.tree_panel(ui));
+        let r = egui::Panel::right("exts").default_size(330.0).resizable(true).show(ui, |ui| self.side_panel(ui));
+        self.help_regions.push((r.response.rect, self.side_topic()));
+        let r = egui::Panel::top("tree").default_size(320.0).resizable(true).show(ui, |ui| self.tree_panel(ui));
+        self.help_regions.push((r.response.rect, topics::TREE));
         // Its own panel, so it gets the theme's background (readable in light and dark themes).
-        egui::Panel::top("filters").show(ui, |ui| {
+        let r = egui::Panel::top("filters").show(ui, |ui| {
             ui.add_space(2.0);
             self.filter_bar(ui);
             ui.add_space(2.0);
         });
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+        let custom_focused = ctx.memory(|m| m.has_focus(egui::Id::new("custom-filter-input")));
+        self.help_regions.push((r.response.rect, if custom_focused { topics::SYNTAX } else { topics::FILTERING }));
+        let map_topic = match self.map_kind {
+            MapKind::Treemap => topics::TREEMAP_NAV,
+            MapKind::Sunburst => topics::SUNBURST,
+        };
+        let r = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let rect = ui.max_rect();
             match self.map_kind {
                 MapKind::Treemap => self.treemap_panel(ui),
@@ -2327,6 +2483,7 @@ impl eframe::App for App {
                 ui.painter().text(rect.center(), Align2::CENTER_CENTER, msg, FontId::proportional(16.0), Color32::GRAY);
             }
         });
+        self.help_regions.push((r.response.rect, map_topic));
     }
 }
 

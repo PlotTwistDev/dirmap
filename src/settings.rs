@@ -196,11 +196,15 @@ pub struct Dialog {
     tab: Tab,
     /// Set when "Restart as administrator now" was pressed; the app acts on it and clears it.
     pub restart_as_admin: bool,
+    /// Set when the help button (or F1 over the window) asks for this tab's help page.
+    pub help_request: Option<&'static str>,
+    /// Where the window was last drawn, for F1.
+    pub rect: Option<egui::Rect>,
 }
 
 impl Default for Dialog {
     fn default() -> Self {
-        Self { open: false, draft: Settings::default(), tab: Tab::General, restart_as_admin: false }
+        Self { open: false, draft: Settings::default(), tab: Tab::General, restart_as_admin: false, help_request: None, rect: None }
     }
 }
 
@@ -217,14 +221,29 @@ impl Dialog {
         self.open = true;
     }
 
+    /// The help page for the tab on show.
+    pub fn topic(&self) -> &'static str {
+        use crate::help::topics;
+        match self.tab {
+            Tab::General => topics::SETTINGS_GENERAL,
+            Tab::Filtering => topics::SETTINGS_FILTERING,
+            Tab::FolderList => topics::SETTINGS_FOLDER_LIST,
+            Tab::Treemap => topics::SETTINGS_TREEMAP,
+            Tab::Advanced => topics::SETTINGS_ADVANCED,
+        }
+    }
+
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome {
         if !self.open {
+            self.rect = None;
             return Outcome::None;
         }
         let before = self.draft.clone();
         let mut outcome = Outcome::None;
         let mut open = true;
-        egui::Window::new("Settings")
+        let topic = self.topic();
+        let mut help = false;
+        let shown = egui::Window::new("Settings")
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -260,6 +279,7 @@ impl Dialog {
                     if ui.button("Reset all").on_hover_text("Restore every setting to its default").clicked() {
                         *d = Settings::default();
                     }
+                    help = ui.button("❓ Help").on_hover_text("What each setting on this tab does (F1)").clicked();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("Apply").clicked() {
                             outcome = Outcome::Apply;
@@ -274,6 +294,10 @@ impl Dialog {
                     });
                 });
             });
+        self.rect = shown.map(|r| r.response.rect);
+        if help {
+            self.help_request = Some(topic);
+        }
         if !open {
             self.open = false;
         }
@@ -288,7 +312,7 @@ fn general(ui: &mut egui::Ui, d: &mut Settings) {
     ui.heading("Appearance");
     ui.horizontal(|ui| {
         ui.label("Theme:");
-        ui.radio_value(&mut d.theme, Theme::System, "Follow system");
+        ui.radio_value(&mut d.theme, Theme::System, "Follow system").on_hover_text("Use the light or dark mode your system is set to");
         ui.radio_value(&mut d.theme, Theme::Dark, "Dark");
         ui.radio_value(&mut d.theme, Theme::Light, "Light");
     });
@@ -297,10 +321,11 @@ fn general(ui: &mut egui::Ui, d: &mut Settings) {
         ui.radio_value(&mut d.units, SizeUnits::Binary, "Binary (1 KB = 1024 bytes, like Explorer)");
         ui.radio_value(&mut d.units, SizeUnits::Decimal, "Decimal (1 kB = 1000 bytes)");
     });
-    ui.checkbox(&mut d.stripes, "Striped rows in lists");
+    ui.checkbox(&mut d.stripes, "Striped rows in lists").on_hover_text("Shade every other row so long lists are easier to follow");
     ui.add_space(8.0);
     ui.heading("Scanning");
-    ui.checkbox(&mut d.live_tree, "Show folders and files as they are found");
+    ui.checkbox(&mut d.live_tree, "Show folders and files as they are found")
+        .on_hover_text("Fill in the folder list during a scan. Off shows only the progress.");
 }
 
 fn filtering(ui: &mut egui::Ui, d: &mut Settings) {
@@ -310,13 +335,16 @@ fn filtering(ui: &mut egui::Ui, d: &mut Settings) {
         ui.vertical(|ui| {
             ui.label("Folders to skip");
             let hint = if cfg!(windows) { "C:\\Windows\\WinSxS" } else { "/proc" };
-            ui.add(egui::TextEdit::multiline(&mut d.exclude_folders).desired_rows(9).desired_width(250.0).hint_text(hint));
+            ui.add(egui::TextEdit::multiline(&mut d.exclude_folders).desired_rows(9).desired_width(250.0).hint_text(hint))
+                .on_hover_text("Full paths, one per line. Each folder and everything in it is skipped.");
         });
         ui.vertical(|ui| {
             ui.label("File names to skip");
-            ui.add(egui::TextEdit::multiline(&mut d.exclude_files).desired_rows(4).desired_width(250.0).hint_text("*.tmp\n~$*"));
+            ui.add(egui::TextEdit::multiline(&mut d.exclude_files).desired_rows(4).desired_width(250.0).hint_text("*.tmp\n~$*"))
+                .on_hover_text("Name patterns, one per line, using * and ?. Matching files are not counted.");
             ui.label("Only count file names matching");
-            ui.add(egui::TextEdit::multiline(&mut d.include_files).desired_rows(3).desired_width(250.0).hint_text("(empty = all files)"));
+            ui.add(egui::TextEdit::multiline(&mut d.include_files).desired_rows(3).desired_width(250.0).hint_text("(empty = all files)"))
+                .on_hover_text("If you enter any patterns, only files matching one of them are counted.");
         });
     });
     ui.add_space(6.0);
@@ -330,7 +358,8 @@ fn filtering(ui: &mut egui::Ui, d: &mut Settings) {
     });
     ui.horizontal(|ui| {
         ui.label("Skip files not changed for");
-        ui.add(egui::DragValue::new(&mut d.max_age_days).range(0..=36500).suffix(" days"));
+        ui.add(egui::DragValue::new(&mut d.max_age_days).range(0..=36500).suffix(" days"))
+            .on_hover_text("Count only files changed within this many days");
         ui.weak("(0 = off)");
     });
 }
@@ -338,9 +367,9 @@ fn filtering(ui: &mut egui::Ui, d: &mut Settings) {
 fn folder_list(ui: &mut egui::Ui, d: &mut Settings) {
     ui.heading("Columns");
     ui.label("Name and Size are always shown.");
-    ui.checkbox(&mut d.col_percent, "Percentage of parent (with bar)");
-    ui.checkbox(&mut d.col_files, "Files");
-    ui.checkbox(&mut d.col_modified, "Last change");
+    ui.checkbox(&mut d.col_percent, "Percentage of parent (with bar)").on_hover_text("Each item's share of the folder it is in");
+    ui.checkbox(&mut d.col_files, "Files").on_hover_text("How many files each folder holds, counting subfolders");
+    ui.checkbox(&mut d.col_modified, "Last change").on_hover_text("The newest change to anything inside");
 }
 
 fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
@@ -351,6 +380,7 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
             ui.add(egui::Slider::new(v, 0.0..=1.0).custom_formatter(|x, _| format!("{:.0}", x * 100.0)));
             ui.end_row();
         };
+        // The four shading sliders together set the cushion look; see the Treemap settings help.
         pct(ui, "Brightness", &mut d.brightness);
         pct(ui, "Cushion shading", &mut d.cushion);
         pct(ui, "Height", &mut d.height);
@@ -368,7 +398,8 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
         });
         ui.end_row();
         ui.label("Labels");
-        ui.checkbox(&mut d.show_labels, "Show file names on tiles with room for them");
+        ui.checkbox(&mut d.show_labels, "Show file names on tiles with room for them")
+            .on_hover_text("Write names on tiles big enough to hold them");
         ui.end_row();
         ui.label("Selection border");
         ui.color_edit_button_srgba(&mut d.selection_color);
@@ -396,7 +427,8 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
         ui.checkbox(&mut d.smooth_zoom, "Smooth zoom").on_hover_text("Animate zooming and moving around the map");
         ui.horizontal(|ui| {
             ui.label("Zoom sensitivity");
-            ui.add(egui::Slider::new(&mut d.zoom_sensitivity, 0.25..=3.0).show_value(false));
+            ui.add(egui::Slider::new(&mut d.zoom_sensitivity, 0.25..=3.0).show_value(false))
+                .on_hover_text("How far each wheel notch or pinch zooms");
         });
         ui.add_enabled_ui(d.smooth_zoom, |ui| {
             ui.horizontal(|ui| {
@@ -425,14 +457,17 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
 
 fn advanced(ui: &mut egui::Ui, d: &mut Settings, restart: &mut bool) {
     ui.heading("Scanning");
-    ui.checkbox(&mut d.one_file_system, "Stay on the scanned drive (don't follow other mounted drives)");
-    ui.checkbox(&mut d.skip_hidden, "Skip hidden files and folders");
+    ui.checkbox(&mut d.one_file_system, "Stay on the scanned drive (don't follow other mounted drives)")
+        .on_hover_text("Linux and macOS: skip other drives mounted inside the folder being scanned");
+    ui.checkbox(&mut d.skip_hidden, "Skip hidden files and folders")
+        .on_hover_text("Leave out hidden items (and dot-files on Linux and macOS). Their space is then not counted.");
     ui.label("Symbolic links and junctions are never followed, so nothing is counted twice.");
     ui.add_space(6.0);
     ui.heading("Performance");
     ui.horizontal(|ui| {
         ui.label("Scanner threads");
-        ui.add(egui::DragValue::new(&mut d.threads).range(0..=256));
+        ui.add(egui::DragValue::new(&mut d.threads).range(0..=256))
+            .on_hover_text("How many folders are read at once. 0 picks one per CPU core.");
         ui.weak(format!("(0 = automatic, {} on this PC)", std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)));
     });
     ui.label("Network drives often scan faster with more threads, e.g. 32.");

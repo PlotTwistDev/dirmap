@@ -85,6 +85,18 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
 - **Settings** (saved between runs): theme, size units, filters (folders and file patterns to skip or include,
   minimum size, maximum age), tree columns, treemap look with live preview, hidden files, scanner threads.
 
+## Help and documentation
+
+The full manual is built into dirmap: press **F1** for help on whatever is under the pointer, or
+use the **❓ Help** menu for the Help Centre, Getting Started, keyboard shortcuts, mouse controls,
+filter examples and troubleshooting. It works offline and always matches the version you have.
+
+The same pages are plain Markdown in [`docs/src`](docs/src) (start at
+[the Help Centre](docs/src/index.md)), and every CI run builds them into a website with
+[mdBook](https://rust-lang.github.io/mdBook/) (the **dirmap-manual** artifact). `cargo test`
+checks that the manual still matches the program: links, screenshots, every setting, every
+shortcut and every filter example. See [How the help is built](docs/src/advanced/architecture.md#the-help-system).
+
 ## Download
 
 Every push to `main` builds Windows, Linux and macOS versions on GitHub Actions (the **build**
