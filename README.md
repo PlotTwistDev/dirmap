@@ -30,6 +30,9 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
   opens the GUI comparing against it.
 - **Duplicate finder** (Duplicates tab): files with identical contents, matched by size, then the first 64 KB,
   then the whole file, with how much space removing the extra copies would free.
+- **Run as administrator** (Windows): the first time it starts without admin rights it asks whether to
+  restart as administrator (always, just this once, or never), so system and other users' folders can be read.
+  Change it later under Settings > Advanced.
 - **Settings** (saved between runs): theme, size units, filters (folders and file patterns to skip or include,
   minimum size, maximum age), tree columns, treemap look with live preview, hidden files, scanner threads.
 

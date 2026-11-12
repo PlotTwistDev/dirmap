@@ -13,6 +13,7 @@ mod app;
 mod categories;
 mod drives;
 mod dupes;
+mod elevate;
 mod icons;
 mod settings;
 mod scan;
@@ -30,6 +31,7 @@ fn main() -> eframe::Result {
     let mut path = None;
     let mut save_snapshot = None;
     let mut compare = None;
+    let mut restarted = false;
     let mut opts = scan::Options { one_file_system: true, ..Default::default() };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -39,6 +41,8 @@ fn main() -> eframe::Result {
             "--top" => top = args.next().and_then(|s| s.parse().ok()).unwrap_or(top),
             "--save-snapshot" => save_snapshot = args.next().map(PathBuf::from),
             "--compare" => compare = args.next().map(PathBuf::from),
+            // Added when dirmap restarts itself as administrator; stops it trying twice.
+            elevate::ELEVATED_FLAG => restarted = true,
             "-h" | "--help" => {
                 println!("usage: dirmap [--cli [--top N] [--save-snapshot FILE]] [--compare FILE] [--all-fs] [PATH]");
                 return Ok(());
@@ -54,6 +58,17 @@ fn main() -> eframe::Result {
             AttachConsole(ATTACH_PARENT_PROCESS);
         }
         report(&path.unwrap_or_else(|| PathBuf::from(".")), opts, top, save_snapshot);
+        return Ok(());
+    }
+
+    // "Always run as administrator": hand over to an elevated copy before any window opens.
+    // If the Windows prompt is declined, carry on without.
+    if elevate::can_elevate()
+        && !restarted
+        && !elevate::is_elevated()
+        && elevate::load_mode() == elevate::AdminMode::Always
+        && elevate::relaunch_elevated()
+    {
         return Ok(());
     }
 

@@ -3,6 +3,7 @@
 use crate::categories::{self, Category};
 use crate::drives::{self, Drive};
 use crate::dupes;
+use crate::elevate::{self, AdminMode};
 use crate::icons::Icons;
 use crate::scan::{self, ExtStat, LiveDir, Node, Options, Progress};
 use crate::settings::{self, Settings};
@@ -230,11 +231,17 @@ pub struct App {
     dupes_only: bool,
     /// A duplicate search has finished for the current scan.
     dup_done: bool,
+    /// Show the "run as administrator?" question (first start without admin rights).
+    admin_prompt: bool,
+    /// Set when a restart as administrator didn't happen, to say so.
+    admin_declined: bool,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext, path: Option<PathBuf>, force_all_fs: bool, compare: Option<PathBuf>) -> Self {
-        let settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, "settings")).unwrap_or_default();
+        let mut settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, "settings")).unwrap_or_default();
+        settings.admin = elevate::load_mode();
+        let admin_prompt = elevate::can_elevate() && !elevate::is_elevated() && settings.admin == AdminMode::Ask;
         let mut app = Self {
             settings,
             dialog: Default::default(),
@@ -289,6 +296,8 @@ impl App {
             dup_set: HashSet::new(),
             dupes_only: false,
             dup_done: false,
+            admin_prompt,
+            admin_declined: false,
         };
         app.refresh_drives();
         if let Some(f) = compare {
@@ -380,6 +389,79 @@ impl App {
         self.dup_done = false;
         self.compare();
         self.paint_gen += 1;
+    }
+
+    /// Start an elevated copy and close this one. If Windows' prompt is declined, stay open and say so.
+    fn restart_as_admin(&mut self, ctx: &egui::Context) {
+        if elevate::relaunch_elevated() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else {
+            self.admin_declined = true;
+        }
+    }
+
+    /// Asked once, the first time dirmap starts without administrator rights; the answer is
+    /// remembered and can be changed under Settings > Advanced.
+    fn admin_question(&mut self, ctx: &egui::Context) {
+        if self.admin_declined {
+            let mut open = true;
+            egui::Window::new("Not running as administrator")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.label("Windows didn't start dirmap as administrator, so it's carrying on as it is.");
+                    if ui.button("OK").clicked() {
+                        self.admin_declined = false;
+                    }
+                });
+            if !open {
+                self.admin_declined = false;
+            }
+            return;
+        }
+        if !self.admin_prompt {
+            return;
+        }
+        let mut choice = None;
+        egui::Window::new("Run as administrator?")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.set_max_width(440.0);
+                ui.label(
+                    "dirmap isn't running as administrator. Windows keeps some folders (other users' files, parts of \
+                     Windows itself) closed to ordinary programs, so they would be counted as unreadable and \
+                     left out of the totals.",
+                );
+                ui.add_space(4.0);
+                ui.weak("You can change this later under Settings > Advanced.");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("🛡 Yes, always").on_hover_text("Restart as administrator now and every time").clicked() {
+                        choice = Some((Some(AdminMode::Always), true));
+                    }
+                    if ui.button("Just this once").on_hover_text("Restart as administrator now; ask again next time").clicked() {
+                        choice = Some((None, true));
+                    }
+                    if ui.button("No, don't ask again").clicked() {
+                        choice = Some((Some(AdminMode::Never), false));
+                    }
+                });
+            });
+        if let Some((mode, restart)) = choice {
+            self.admin_prompt = false;
+            if let Some(m) = mode {
+                self.settings.admin = m;
+                self.dialog.draft.admin = m;
+                elevate::save_mode(m);
+            }
+            if restart {
+                self.restart_as_admin(ctx);
+            }
+        }
     }
 
     /// Compare the current scan with the loaded snapshot.
@@ -1847,9 +1929,17 @@ impl eframe::App for App {
         scan::set_decimal_units(self.view().units == settings::SizeUnits::Decimal);
 
         if let settings::Outcome::Apply = self.dialog.show(&ctx) {
+            if self.dialog.draft.admin != self.settings.admin {
+                elevate::save_mode(self.dialog.draft.admin);
+                self.admin_prompt = false;
+            }
             self.settings = self.dialog.draft.clone();
             self.rows = None;
         }
+        if std::mem::take(&mut self.dialog.restart_as_admin) {
+            self.restart_as_admin(&ctx);
+        }
+        self.admin_question(&ctx);
 
         if let Some(rx) = &self.drives_rx {
             match rx.try_recv() {

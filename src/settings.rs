@@ -1,5 +1,6 @@
 //! User preferences, saved between runs, and the tabbed Settings window.
 
+use crate::elevate::{self, AdminMode};
 use eframe::egui::{self, Color32};
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +63,10 @@ pub struct Settings {
     pub skip_hidden: bool,
     /// Scanner threads (0 = one per CPU core).
     pub threads: usize,
+    /// Whether to restart as administrator at start. Kept in its own file (see `elevate`), not
+    /// with the rest, so it can be read before the window opens.
+    #[serde(skip)]
+    pub admin: AdminMode,
 }
 
 impl Default for Settings {
@@ -92,6 +97,7 @@ impl Default for Settings {
             one_file_system: true,
             skip_hidden: false,
             threads: 0,
+            admin: AdminMode::Ask,
         }
     }
 }
@@ -149,11 +155,13 @@ pub struct Dialog {
     pub open: bool,
     pub draft: Settings,
     tab: Tab,
+    /// Set when "Restart as administrator now" was pressed; the app acts on it and clears it.
+    pub restart_as_admin: bool,
 }
 
 impl Default for Dialog {
     fn default() -> Self {
-        Self { open: false, draft: Settings::default(), tab: Tab::General }
+        Self { open: false, draft: Settings::default(), tab: Tab::General, restart_as_admin: false }
     }
 }
 
@@ -196,6 +204,7 @@ impl Dialog {
                 });
                 ui.separator();
                 let d = &mut self.draft;
+                let restart = &mut self.restart_as_admin;
                 ui.vertical(|ui| {
                     // Same height on every tab, so the buttons don't jump around.
                     ui.set_min_height(320.0);
@@ -204,7 +213,7 @@ impl Dialog {
                         Tab::Filtering => filtering(ui, d),
                         Tab::FolderList => folder_list(ui, d),
                         Tab::Treemap => treemap(ui, d),
-                        Tab::Advanced => advanced(ui, d),
+                        Tab::Advanced => advanced(ui, d, restart),
                     }
                 });
                 ui.separator();
@@ -343,7 +352,7 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
     });
 }
 
-fn advanced(ui: &mut egui::Ui, d: &mut Settings) {
+fn advanced(ui: &mut egui::Ui, d: &mut Settings, restart: &mut bool) {
     ui.heading("Scanning");
     ui.checkbox(&mut d.one_file_system, "Stay on the scanned drive (don't follow other mounted drives)");
     ui.checkbox(&mut d.skip_hidden, "Skip hidden files and folders");
@@ -356,4 +365,37 @@ fn advanced(ui: &mut egui::Ui, d: &mut Settings) {
         ui.weak(format!("(0 = automatic, {} on this PC)", std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)));
     });
     ui.label("Network drives often scan faster with more threads, e.g. 32.");
+    ui.add_space(6.0);
+    ui.heading("Administrator");
+    let elevated = elevate::is_elevated();
+    ui.label(if elevated {
+        "dirmap is running as administrator."
+    } else {
+        "dirmap is not running as administrator, so folders that need it are counted as unreadable."
+    });
+    if elevate::can_elevate() {
+        ui.horizontal(|ui| {
+            ui.label("When dirmap starts:");
+            egui::ComboBox::from_id_salt("admin")
+                .selected_text(admin_label(d.admin))
+                .show_ui(ui, |ui| {
+                    for m in [AdminMode::Always, AdminMode::Ask, AdminMode::Never] {
+                        ui.selectable_value(&mut d.admin, m, admin_label(m));
+                    }
+                });
+        });
+        if !elevated && ui.button("🛡 Restart as administrator now").clicked() {
+            *restart = true;
+        }
+    } else if !elevated {
+        ui.label("On Linux and macOS, start it from a terminal with sudo to read other users' files.");
+    }
+}
+
+fn admin_label(m: AdminMode) -> &'static str {
+    match m {
+        AdminMode::Always => "Always run as administrator",
+        AdminMode::Ask => "Ask if it isn't",
+        AdminMode::Never => "Never (don't ask)",
+    }
 }
