@@ -165,6 +165,20 @@ impl App {
         }
     }
 
+    /// Go back to showing the whole scan and forget results computed from the current tree,
+    /// before the tree itself changes. The filter stays and is reapplied to the new tree.
+    pub(super) fn drop_filtered_view(&mut self) {
+        self.set_shown(None);
+        if let Some(j) = self.filter_job.take() {
+            j.cancel.store(true, Ordering::Relaxed);
+        }
+        self.filter_stats = None;
+        if let Some((c, _)) = self.seq.job.take() {
+            c.store(true, Ordering::Relaxed);
+        }
+        self.seq.list = None;
+    }
+
     /// Forget everything tied to the previous scan.
     pub(super) fn reset_custom_for_new_tree(&mut self) {
         if let Some(j) = self.filter_job.take() {

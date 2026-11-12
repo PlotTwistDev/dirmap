@@ -16,6 +16,8 @@ use crate::treemap::{self, Cushion};
 #[cfg(test)]
 use crate::treemap::Tile;
 use custom::{CustomUi, FilterJob, SeqState, Shown};
+mod menus;
+
 use eframe::egui::{
     self, ecolor::Hsva, pos2, vec2, Align2, Color32, FontId, Rect, Sense, Stroke,
 };
@@ -238,6 +240,10 @@ pub struct App {
     admin_prompt: bool,
     /// Set when a restart as administrator didn't happen, to say so.
     admin_declined: bool,
+    /// Right-click menus: running file operation, their windows and the last result.
+    ops: menus::Ops,
+    /// Text to put on the clipboard this frame.
+    ctx_copy: Option<String>,
 }
 
 impl App {
@@ -308,6 +314,8 @@ impl App {
             dup_done: false,
             admin_prompt,
             admin_declined: false,
+            ops: Default::default(),
+            ctx_copy: None,
         };
         app.refresh_drives();
         if let Some(n) = std::env::var("DIRMAP_SYNTHETIC").ok().and_then(|s| s.parse::<usize>().ok()) {
@@ -339,7 +347,10 @@ impl App {
     }
 
     fn scan_options(&self) -> Options {
-        let s = &self.settings;
+        self.options_for(&self.settings)
+    }
+
+    fn options_for(&self, s: &Settings) -> Options {
         let lines = |t: &str| t.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect::<Vec<_>>();
         let now = chrono::Utc::now().timestamp();
         Options {
@@ -858,6 +869,7 @@ impl App {
         }
         let mut clicked = None;
         let mut toggled = None;
+        let mut menu_pick = None;
         ui.spacing_mut().item_spacing.y = 0.0;
         area.show_rows(ui, ROW_H, rows.len(), |ui, range| {
             for (k, row) in rows[range.clone()].iter().enumerate() {
@@ -882,9 +894,22 @@ impl App {
                 let on_arrow = resp.interact_pointer_pos().is_some_and(|p| arrow.expand2(vec2(4.0, 0.0)).contains(p));
                 if n.is_dir && ((resp.clicked() && on_arrow) || resp.double_clicked()) {
                     toggled = Some(row.path.clone());
-                } else if resp.clicked() {
+                } else if resp.clicked() || resp.secondary_clicked() {
                     clicked = Some(row.path.to_vec());
                 }
+                // (The tree is taken out of `self` while drawing, so describe the row here.)
+                let info = menus::ItemInfo {
+                    is_dir: n.is_dir,
+                    open: line.open,
+                    is_root: row.path.is_empty(),
+                    is_drive: row.path.is_empty() && self.scanned_path.parent().is_none(),
+                    busy: self.ops.job.is_some(),
+                };
+                resp.context_menu(|ui| {
+                    if let Some(a) = Self::tree_menu(ui, &info) {
+                        menu_pick = Some((a, row.path.to_vec()));
+                    }
+                });
             }
         });
         self.rows = Some(rows);
@@ -896,6 +921,9 @@ impl App {
         }
         if let Some(p) = clicked {
             self.selected = Some(p);
+        }
+        if let Some((a, p)) = menu_pick {
+            self.tree_action(a, p);
         }
     }
 
@@ -1062,6 +1090,7 @@ impl App {
             self.highlight_ext = None;
         }
         let mut toggle = None;
+        let mut menu_pick = None;
         let font = FontId::proportional(13.0);
         let (hdr, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
         let w = hdr.width();
@@ -1108,14 +1137,23 @@ impl App {
                 let pct = format!("{:.1}", e.bytes as f64 * 100.0 / total as f64);
                 ui.painter().text(pos2(rect.right() - 60.0, cy), Align2::RIGHT_CENTER, pct, font.clone(), vis.weak_text_color());
                 ui.painter().text(pos2(rect.right() - 4.0, cy), Align2::RIGHT_CENTER, group(e.files), font.clone(), vis.weak_text_color());
-                if resp.on_hover_text("Click to highlight in the treemap").clicked() {
+                let resp = resp.on_hover_text("Click to highlight in the treemap, right-click for more");
+                if resp.clicked() {
                     toggle = Some(e.ext.clone());
                 }
+                resp.context_menu(|ui| {
+                    if let Some(a) = Self::ext_menu(ui, &e.ext, on) {
+                        menu_pick = Some((a, e.ext.clone()));
+                    }
+                });
             }
         });
         match &mut self.shown {
             Some(s) => s.exts = exts,
             None => self.exts = exts,
+        }
+        if let Some((a, ext)) = menu_pick {
+            self.ext_action(a, ext);
         }
         if let Some(t) = toggle {
             self.highlight_ext = if self.highlight_ext.as_ref() == Some(&t) { None } else { Some(t) };
@@ -2108,6 +2146,8 @@ impl eframe::App for App {
             self.restart_as_admin(&ctx);
         }
         self.admin_question(&ctx);
+        self.tree_shortcuts(&ctx);
+        self.ops_ui(&ctx);
 
         if let Some(rx) = &self.drives_rx {
             match rx.try_recv() {
@@ -2200,6 +2240,21 @@ impl eframe::App for App {
         let mut rescan = false;
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
+                if let Some(op) = &self.ops.job {
+                    ui.spinner();
+                    ui.label(format!("{}…", op.label));
+                    ui.separator();
+                } else if let Some((text, error)) = self.ops.notice.clone() {
+                    if error {
+                        ui.colored_label(ui.visuals().error_fg_color, text);
+                    } else {
+                        ui.label(text);
+                    }
+                    if ui.small_button("✖").on_hover_text("Dismiss").clicked() {
+                        self.ops.notice = None;
+                    }
+                    ui.separator();
+                }
                 if let Some(h) = self.hover_status.as_ref().filter(|_| self.job.is_none()) {
                     ui.strong(h);
                 } else if let Some(job) = &self.job {

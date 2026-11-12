@@ -11,7 +11,14 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
 - **Parallel scan** (rayon) that never follows symlinks or junctions and, by default, stays on one drive.
 - **Directory tree** with Explorer's own file icons on Windows, sortable Name / Size / Files / Last change
   columns and percentage bars. Only visible rows are drawn, so huge folders stay fast.
-- **File types list** with totals per extension. Click one to highlight those files in the treemap.
+- **Right-click menu** on any file or folder in the tree, like WinDirStat's: Open, Copy Path, Select in
+  Explorer (Finder / file manager), Open in Command Prompt or PowerShell (Terminal elsewhere), Refresh Selected,
+  Properties, Compute Hash (SHA-256), Add to Exclusion Filter, Delete Permanently, Delete to Recycle Bin (Trash),
+  Remove Empty Folders, Empty Folder and Move to. Deleting always asks first. The same keys work on the
+  selection: Enter, Ctrl+C, Ctrl+E, Ctrl+P / Ctrl+S, F5, Alt+Enter, Ctrl+H, Del, Shift+Del, Ctrl+M.
+  After a change only that item is read again, so the tree and map update without a full rescan.
+- **File types list** with totals per extension. Click one to highlight those files in the treemap; right-click
+  to list every file of that type, highlight it, copy the extension or add `*.ext` to the exclusion filter.
 - **Cushion treemap** (van Wijk & van de Wetering, like WinDirStat) colored by file type, drawn on the GPU.
   Hovering shows the path, size and date in the status bar; click to select (the tree jumps to it).
   - **Smooth zoom towards the pointer**: the wheel (or trackpad pinch) zooms continuously and the spot under the

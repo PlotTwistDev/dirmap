@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// One file or directory in the scanned tree. Children are sorted by size, largest first.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node {
     pub name: Box<str>,
     pub size: u64,
