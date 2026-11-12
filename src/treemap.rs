@@ -8,19 +8,37 @@ pub struct Tile {
     /// Child-index path from the layout root.
     pub path: Vec<u32>,
     pub is_dir: bool,
+    /// Cushion surface coefficients (x², y², x, y) accumulated from every ancestor,
+    /// as in van Wijk & van de Wetering's cushion treemaps. Shading comes from these.
+    pub surface: [f32; 4],
 }
 
 /// Lay out `root` into `bounds`. Tiles are emitted parents-before-children, so later tiles
-/// draw on top. Anything smaller than about a pixel is dropped.
-pub fn layout(root: &Node, bounds: Rect) -> Vec<Tile> {
+/// draw on top. Anything smaller than about a pixel is dropped. `height` is the cushion
+/// ridge height at the top level and `scale` how much it shrinks per level.
+pub fn layout(root: &Node, bounds: Rect, height: f32, scale: f32) -> Vec<Tile> {
     let mut out = Vec::new();
     let mut path = Vec::new();
-    place(root, bounds, &mut path, &mut out);
+    place(root, bounds, &mut path, [0.0; 4], height, scale, &mut out);
     out
 }
 
-fn place(node: &Node, rect: Rect, path: &mut Vec<u32>, out: &mut Vec<Tile>) {
-    out.push(Tile { rect, path: path.clone(), is_dir: node.is_dir });
+fn add_ridge(x1: f32, x2: f32, h: f32, lin: &mut f32, sq: &mut f32) {
+    if x2 - x1 <= 0.0 {
+        return;
+    }
+    let h4 = 4.0 * h / (x2 - x1);
+    *lin += h4 * (x2 + x1);
+    *sq -= h4;
+}
+
+fn place(node: &Node, rect: Rect, path: &mut Vec<u32>, mut surface: [f32; 4], h: f32, f: f32, out: &mut Vec<Tile>) {
+    if h > 0.0 {
+        let [sq_x, sq_y, lin_x, lin_y] = &mut surface;
+        add_ridge(rect.min.x, rect.max.x, h, lin_x, sq_x);
+        add_ridge(rect.min.y, rect.max.y, h, lin_y, sq_y);
+    }
+    out.push(Tile { rect, path: path.clone(), is_dir: node.is_dir, surface });
     if !node.is_dir || rect.width() < 2.0 || rect.height() < 2.0 {
         return;
     }
@@ -35,7 +53,7 @@ fn place(node: &Node, rect: Rect, path: &mut Vec<u32>, out: &mut Vec<Tile>) {
             continue;
         }
         path.push(i as u32);
-        place(&node.children[i], r, path, out);
+        place(&node.children[i], r, path, surface, h * f, f, out);
         path.pop();
     }
 }

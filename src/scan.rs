@@ -3,7 +3,7 @@
 use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// One file or directory in the scanned tree. Children are sorted by size, largest first.
@@ -13,20 +13,16 @@ pub struct Node {
     pub size: u64,
     /// Number of files at or below this node (1 for a file).
     pub files: u64,
+    /// Last modification, seconds since the Unix epoch (newest file inside, for folders).
+    pub modified: i64,
     pub is_dir: bool,
     pub children: Vec<Node>,
 }
 
 impl Node {
-    /// Lowercased extension for files, e.g. "rs". Empty if none.
+    /// Extension for files, e.g. "rs". Empty if none.
     pub fn ext(&self) -> &str {
-        if self.is_dir {
-            return "";
-        }
-        match self.name.rfind('.') {
-            Some(i) if i > 0 && i + 1 < self.name.len() => &self.name[i + 1..],
-            _ => "",
-        }
+        if self.is_dir { "" } else { ext_of(&self.name) }
     }
 
     /// Walk a path of child indices from this node.
@@ -39,6 +35,13 @@ impl Node {
     }
 }
 
+pub fn ext_of(name: &str) -> &str {
+    match name.rfind('.') {
+        Some(i) if i > 0 && i + 1 < name.len() => &name[i + 1..],
+        _ => "",
+    }
+}
+
 /// Live counters shared between the scanning thread and the UI.
 #[derive(Default)]
 pub struct Progress {
@@ -47,32 +50,170 @@ pub struct Progress {
     pub bytes: AtomicU64,
     pub errors: AtomicU64,
     pub cancel: AtomicBool,
+    /// Set once the walk is done and the result is being assembled.
+    pub finishing: AtomicBool,
     /// A folder currently being read, for display only.
     pub current: Mutex<PathBuf>,
 }
 
-#[derive(Clone, Copy)]
-pub struct Options {
-    /// Don't descend into other mounted filesystems (e.g. /proc when scanning /).
-    pub one_file_system: bool,
+/// A folder as the scan sees it while still running. The UI reads these concurrently to show
+/// the tree filling in; sizes are totals of everything found below so far.
+pub struct LiveDir {
+    pub name: Box<str>,
+    pub size: AtomicU64,
+    pub files: AtomicU64,
+    pub modified: AtomicI64,
+    /// This folder and everything under it has been read.
+    pub done: AtomicBool,
+    pub kids: Mutex<LiveKids>,
 }
 
-impl Default for Options {
-    fn default() -> Self {
-        Self { one_file_system: true }
+#[derive(Default)]
+pub struct LiveKids {
+    pub dirs: Vec<Arc<LiveDir>>,
+    pub files: Vec<LiveFile>,
+}
+
+pub struct LiveFile {
+    pub name: Box<str>,
+    pub size: u64,
+    pub modified: i64,
+}
+
+impl LiveDir {
+    fn new(name: Box<str>) -> Self {
+        Self {
+            name,
+            size: AtomicU64::new(0),
+            files: AtomicU64::new(0),
+            modified: AtomicI64::new(0),
+            done: AtomicBool::new(false),
+            kids: Mutex::new(LiveKids::default()),
+        }
     }
 }
 
-pub fn scan(root: &Path, opts: Options, progress: &Arc<Progress>) -> Node {
-    let name = root
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| root.to_string_lossy().into_owned());
-    let dev = device_of(root);
-    scan_dir(root.to_path_buf(), name.into(), opts, dev, progress)
+/// What to scan and what to leave out.
+#[derive(Clone, Default)]
+pub struct Options {
+    /// Don't descend into other mounted filesystems (e.g. /proc when scanning /).
+    pub one_file_system: bool,
+    pub skip_hidden: bool,
+    pub exclude_folders: Vec<String>,
+    pub exclude_files: Vec<String>,
+    pub include_files: Vec<String>,
+    pub min_file_size: u64,
+    /// Files modified before this (seconds since epoch) are skipped; 0 = off.
+    pub min_modified: i64,
+    /// 0 = one per CPU core.
+    pub threads: usize,
 }
 
-fn scan_dir(path: PathBuf, name: Box<str>, opts: Options, dev: Option<u64>, p: &Progress) -> Node {
+impl Options {
+    fn folder_excluded(&self, path: &Path) -> bool {
+        if self.exclude_folders.is_empty() {
+            return false;
+        }
+        let p = norm_path(&path.to_string_lossy());
+        self.exclude_folders.iter().any(|x| {
+            let x = norm_path(x);
+            !x.is_empty() && (p == x || p.starts_with(&format!("{x}/")))
+        })
+    }
+
+    fn file_excluded(&self, name: &str, size: u64, modified: i64) -> bool {
+        size < self.min_file_size
+            || (self.min_modified != 0 && modified < self.min_modified)
+            || self.exclude_files.iter().any(|g| glob(g, name))
+            || (!self.include_files.is_empty() && !self.include_files.iter().any(|g| glob(g, name)))
+    }
+}
+
+fn norm_path(s: &str) -> String {
+    let s = s.trim().replace('\\', "/");
+    let s = s.trim_end_matches('/');
+    if cfg!(windows) { s.to_lowercase() } else { s.to_string() }
+}
+
+/// Case-insensitive glob match supporting `*` and `?`.
+pub fn glob(pattern: &str, name: &str) -> bool {
+    let p: Vec<char> = pattern.trim().to_lowercase().chars().collect();
+    let n: Vec<char> = name.to_lowercase().chars().collect();
+    let (mut pi, mut ni, mut star, mut mark) = (0, 0, None, 0);
+    while ni < n.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == n[ni]) {
+            pi += 1;
+            ni += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = ni;
+            pi += 1;
+        } else if let Some(s) = star {
+            pi = s + 1;
+            mark += 1;
+            ni = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// Ancestors of the folder being scanned, as a linked list on the stack. Sizes found in a
+/// folder are added to every ancestor so the live tree always shows correct totals.
+struct Chain<'a> {
+    dir: &'a LiveDir,
+    up: Option<&'a Chain<'a>>,
+}
+
+impl Chain<'_> {
+    fn add(&self, bytes: u64, files: u64, modified: i64) {
+        let mut c = Some(self);
+        while let Some(link) = c {
+            link.dir.size.fetch_add(bytes, Ordering::Relaxed);
+            link.dir.files.fetch_add(files, Ordering::Relaxed);
+            link.dir.modified.fetch_max(modified, Ordering::Relaxed);
+            c = link.up;
+        }
+    }
+}
+
+/// Scan `root`, filling in `live` as it goes, and return the finished tree.
+pub fn scan(root: &Path, opts: &Options, progress: &Progress, live: &LiveDir) -> Node {
+    let dev = device_of(root);
+    let run = || scan_dir(root.to_path_buf(), live, None, opts, dev, progress);
+    match (opts.threads > 0).then(|| rayon::ThreadPoolBuilder::new().num_threads(opts.threads).build()) {
+        Some(Ok(pool)) => pool.install(run),
+        _ => run(),
+    }
+    progress.finishing.store(true, Ordering::Relaxed);
+    freeze(live)
+}
+
+pub fn root_name(root: &Path) -> Box<str> {
+    root.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| root.to_string_lossy().into_owned())
+        .into()
+}
+
+pub fn new_live(root: &Path) -> Arc<LiveDir> {
+    Arc::new(LiveDir::new(root_name(root)))
+}
+
+enum Entry {
+    Dir(PathBuf, Box<str>),
+    File(LiveFile),
+}
+
+fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, dev: Option<u64>, p: &Progress) {
+    if p.cancel.load(Ordering::Relaxed) {
+        dir.done.store(true, Ordering::Release);
+        return;
+    }
     p.dirs.fetch_add(1, Ordering::Relaxed);
     // try_lock: never make scanner threads wait on each other just to update a label.
     if let Ok(mut cur) = p.current.try_lock() {
@@ -86,7 +227,7 @@ fn scan_dir(path: PathBuf, name: Box<str>, opts: Options, dev: Option<u64>, p: &
         }
     };
 
-    let mut children: Vec<Node> = entries
+    let found: Vec<Entry> = entries
         .into_par_iter()
         .filter_map(|e| {
             if p.cancel.load(Ordering::Relaxed) {
@@ -103,27 +244,97 @@ fn scan_dir(path: PathBuf, name: Box<str>, opts: Options, dev: Option<u64>, p: &
                 }
             };
             let name: Box<str> = e.file_name().to_string_lossy().into();
+            if opts.skip_hidden && is_hidden(&name, &md) {
+                return None;
+            }
             if md.is_dir() {
                 if opts.one_file_system && dev.is_some() && dev_of_md(&md) != dev {
                     return None;
                 }
-                Some(scan_dir(e.path(), name, opts, dev, p))
+                let child = e.path();
+                if opts.folder_excluded(&child) {
+                    return None;
+                }
+                Some(Entry::Dir(child, name))
             } else if md.is_file() {
                 let size = md.len();
-                p.files.fetch_add(1, Ordering::Relaxed);
-                p.bytes.fetch_add(size, Ordering::Relaxed);
-                Some(Node { name, size, files: 1, is_dir: false, children: Vec::new() })
+                let modified = mtime(&md);
+                if opts.file_excluded(&name, size, modified) {
+                    return None;
+                }
+                Some(Entry::File(LiveFile { name, size, modified }))
             } else {
                 None // symlinks, sockets, devices
             }
         })
         .collect();
 
+    let mut subdirs = Vec::new();
+    let mut files = Vec::new();
+    for e in found {
+        match e {
+            Entry::Dir(path, name) => subdirs.push((path, Arc::new(LiveDir::new(name)))),
+            Entry::File(f) => files.push(f),
+        }
+    }
+    let bytes: u64 = files.iter().map(|f| f.size).sum();
+    let newest = files.iter().map(|f| f.modified).max().unwrap_or(0);
+    let count = files.len() as u64;
+    p.files.fetch_add(count, Ordering::Relaxed);
+    p.bytes.fetch_add(bytes, Ordering::Relaxed);
+    {
+        let mut k = dir.kids.lock().unwrap();
+        k.files = files;
+        k.dirs = subdirs.iter().map(|(_, d)| d.clone()).collect();
+    }
+    let chain = Chain { dir, up };
+    chain.add(bytes, count, newest);
+
+    subdirs.into_par_iter().for_each(|(path, d)| {
+        scan_dir(path, &d, Some(&chain), opts, dev, p);
+    });
+    dir.done.store(true, Ordering::Release);
+}
+
+/// Turn the live tree into the compact, sorted tree the UI browses. Empties `live`.
+fn freeze(live: &LiveDir) -> Node {
+    let kids = std::mem::take(&mut *live.kids.lock().unwrap());
+    let mut children: Vec<Node> = kids.dirs.par_iter().map(|d| freeze(d)).collect();
+    children.extend(kids.files.into_iter().map(|f| Node {
+        name: f.name,
+        size: f.size,
+        files: 1,
+        modified: f.modified,
+        is_dir: false,
+        children: Vec::new(),
+    }));
     children.sort_unstable_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
     children.shrink_to_fit();
     let size = children.iter().map(|c| c.size).sum();
     let files = children.iter().map(|c| c.files).sum();
-    Node { name, size, files, is_dir: true, children }
+    let modified = children.iter().map(|c| c.modified).max().unwrap_or(0);
+    Node { name: live.name.clone(), size, files, modified, is_dir: true, children }
+}
+
+fn mtime(md: &fs::Metadata) -> i64 {
+    md.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+#[cfg(windows)]
+fn is_hidden(_name: &str, md: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const HIDDEN: u32 = 0x2;
+    const SYSTEM: u32 = 0x4;
+    md.file_attributes() & (HIDDEN | SYSTEM) != 0
+}
+
+#[cfg(not(windows))]
+fn is_hidden(name: &str, _md: &fs::Metadata) -> bool {
+    name.starts_with('.')
 }
 
 fn device_of(path: &Path) -> Option<u64> {
@@ -181,17 +392,42 @@ pub fn ext_stats(root: &Node) -> Vec<ExtStat> {
     v
 }
 
+static DECIMAL: AtomicBool = AtomicBool::new(false);
+
+/// Choose between 1024-based (default) and 1000-based size display.
+pub fn set_decimal_units(on: bool) {
+    DECIMAL.store(on, Ordering::Relaxed);
+}
+
 pub fn human(bytes: u64) -> String {
-    const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
+    let (base, units) = if DECIMAL.load(Ordering::Relaxed) {
+        (1000.0, ["B", "kB", "MB", "GB", "TB", "PB"])
+    } else {
+        (1024.0, ["B", "KB", "MB", "GB", "TB", "PB"])
+    };
     let mut v = bytes as f64;
     let mut u = 0;
-    while v >= 1024.0 && u < UNITS.len() - 1 {
-        v /= 1024.0;
+    while v >= base && u < units.len() - 1 {
+        v /= base;
         u += 1;
     }
     if u == 0 {
         format!("{bytes} B")
     } else {
-        format!("{v:.1} {}", UNITS[u])
+        format!("{v:.1} {}", units[u])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glob;
+
+    #[test]
+    fn globs() {
+        assert!(glob("*.tmp", "a.TMP"));
+        assert!(glob("~$*", "~$doc.docx"));
+        assert!(glob("a?c", "abc"));
+        assert!(!glob("*.tmp", "a.tmp.txt"));
+        assert!(glob("*", ""));
     }
 }

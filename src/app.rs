@@ -1,9 +1,13 @@
 //! The desktop GUI: directory tree, extension list and treemap.
 
 use crate::drives::{self, Drive};
-use crate::scan::{self, ExtStat, Node, Options, Progress};
+use crate::icons::Icons;
+use crate::scan::{self, ExtStat, LiveDir, Node, Options, Progress};
+use crate::settings::{self, Settings};
 use crate::treemap::{self, Tile};
-use eframe::egui::{self, ecolor::Hsva, pos2, vec2, Color32, ColorImage, Rect, Sense, Stroke, TextureHandle, TextureOptions};
+use eframe::egui::{
+    self, ecolor::Hsva, pos2, vec2, Align2, Color32, ColorImage, FontId, Rect, Sense, Stroke, TextureHandle, TextureOptions,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -12,14 +16,16 @@ use std::time::{Duration, Instant};
 
 #[derive(PartialEq, Clone, Copy)]
 enum SortBy {
-    Size,
     Name,
+    Size,
     Files,
+    Modified,
 }
 
 struct Job {
     root: PathBuf,
     progress: Arc<Progress>,
+    live: Arc<LiveDir>,
     rx: mpsc::Receiver<(Node, Vec<ExtStat>)>,
     started: Instant,
     /// Used space on the drive when scanning a whole drive, to estimate percent complete.
@@ -33,22 +39,59 @@ struct LayoutCache {
     px: [usize; 2],
     zoom: Vec<u32>,
     highlight: Option<String>,
+    look: [u32; 9],
     /// Tiles in pixel coordinates relative to the treemap's top-left corner.
     tiles: Vec<Tile>,
     texture: TextureHandle,
 }
 
-/// One visible line of the directory tree.
+/// One visible line of the finished directory tree.
 struct Row {
     path: Box<[u32]>,
     depth: u16,
 }
 
+/// One visible line of the tree while a scan is still running.
+enum LiveRow {
+    Dir { dir: Arc<LiveDir>, depth: u16, parent_size: u64 },
+    File { name: Box<str>, size: u64, modified: i64, depth: u16, parent_size: u64 },
+    More { count: usize, depth: u16 },
+}
+
+/// What a tree line shows, independent of whether it comes from a live or finished scan.
+struct LineView<'a> {
+    depth: u16,
+    is_dir: bool,
+    open: bool,
+    name: &'a str,
+    size: u64,
+    parent_size: u64,
+    files: u64,
+    modified: i64,
+    busy: bool,
+    color: Color32,
+}
+
+const ROW_H: f32 = 20.0;
+const INDENT: f32 = 16.0;
+
 pub struct App {
+    settings: Settings,
+    dialog: settings::Dialog,
+    icons: Icons,
+    /// `--all-fs` on the command line overrides the "stay on drive" setting for this run.
+    force_all_fs: bool,
+    applied_theme: Option<settings::Theme>,
+
     path_input: String,
     scanned_path: PathBuf,
-    opts: Options,
+    /// Filters in effect for the tree on screen, to tell when a rescan is needed.
+    scanned_with: Option<Settings>,
     job: Option<Job>,
+    live_open: HashSet<usize>,
+    /// Last order shown for each live folder's subfolders, reused while the mouse is over the
+    /// list so rows don't jump around as sizes change.
+    live_order: HashMap<usize, Vec<Arc<LiveDir>>>,
     tree: Option<Node>,
     scan_secs: f32,
     exts: Vec<ExtStat>,
@@ -57,6 +100,7 @@ pub struct App {
     reveal: bool,
     zoom: Vec<u32>,
     sort: SortBy,
+    sort_desc: bool,
     highlight_ext: Option<String>,
     cache: Option<LayoutCache>,
     /// When the treemap's size last changed; it is re-rendered once the size settles.
@@ -69,16 +113,24 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(path: Option<PathBuf>, opts: Options) -> Self {
+    pub fn new(cc: &eframe::CreationContext, path: Option<PathBuf>, force_all_fs: bool) -> Self {
+        let settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, "settings")).unwrap_or_default();
         let mut app = Self {
+            settings,
+            dialog: Default::default(),
+            icons: Icons::default(),
+            force_all_fs,
+            applied_theme: None,
             path_input: path
                 .clone()
                 .or_else(|| std::env::current_dir().ok())
                 .map(|p| p.display().to_string())
                 .unwrap_or_default(),
             scanned_path: PathBuf::new(),
-            opts,
+            scanned_with: None,
             job: None,
+            live_open: HashSet::new(),
+            live_order: HashMap::new(),
             tree: None,
             scan_secs: 0.0,
             exts: Vec::new(),
@@ -87,6 +139,7 @@ impl App {
             reveal: false,
             zoom: Vec::new(),
             sort: SortBy::Size,
+            sort_desc: true,
             highlight_ext: None,
             cache: None,
             resize_since: None,
@@ -103,6 +156,28 @@ impl App {
         app
     }
 
+    /// Settings that drive what's on screen: the draft while the Settings window is open,
+    /// so changes preview live.
+    fn view(&self) -> &Settings {
+        if self.dialog.open { &self.dialog.draft } else { &self.settings }
+    }
+
+    fn scan_options(&self) -> Options {
+        let s = &self.settings;
+        let lines = |t: &str| t.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect::<Vec<_>>();
+        let now = chrono::Utc::now().timestamp();
+        Options {
+            one_file_system: s.one_file_system && !self.force_all_fs,
+            skip_hidden: s.skip_hidden,
+            exclude_folders: lines(&s.exclude_folders),
+            exclude_files: lines(&s.exclude_files),
+            include_files: lines(&s.include_files),
+            min_file_size: s.min_file_size,
+            min_modified: if s.max_age_days > 0 { now - s.max_age_days as i64 * 86_400 } else { 0 },
+            threads: s.threads,
+        }
+    }
+
     fn start_scan(&mut self) {
         let mut input = self.path_input.trim().to_string();
         // "D:" alone means "current directory on D:" to Windows; the user means the whole drive.
@@ -115,26 +190,26 @@ impl App {
             job.progress.cancel.store(true, Ordering::Relaxed);
         }
         let progress = Arc::new(Progress::default());
+        let live = scan::new_live(&path);
         let (tx, rx) = mpsc::channel();
-        let (p, opts, root) = (progress.clone(), self.opts, path.clone());
+        let (p, l, opts, root) = (progress.clone(), live.clone(), self.scan_options(), path.clone());
         std::thread::spawn(move || {
-            let tree = scan::scan(&root, opts, &p);
+            let tree = scan::scan(&root, &opts, &p, &l);
             // Summarise here too, so the window doesn't stall when a big scan lands.
             let exts = scan::ext_stats(&tree);
             let _ = tx.send((tree, exts));
         });
-        self.job = Some(Job { root: path, progress, rx, started: Instant::now(), expected: None });
+        self.live_open.clear();
+        self.live_order.clear();
+        self.live_open.insert(Arc::as_ptr(&live) as usize);
+        self.job = Some(Job { root: path, progress, live, rx, started: Instant::now(), expected: None });
     }
 
     fn finish_scan(&mut self, root: PathBuf, tree: Node, exts: Vec<ExtStat>, secs: f32) {
         self.scanned_path = root;
+        self.scanned_with = Some(self.settings.clone());
         self.exts = exts;
-        self.colors = self
-            .exts
-            .iter()
-            .enumerate()
-            .map(|(i, e)| (e.ext.clone(), ext_color(&e.ext, i)))
-            .collect();
+        self.colors = self.exts.iter().enumerate().map(|(i, e)| (e.ext.clone(), ext_color(&e.ext, i))).collect();
         // Freeing millions of nodes can take a while; do it off the UI thread.
         if let Some(old) = self.tree.replace(tree) {
             std::thread::spawn(move || drop(old));
@@ -149,12 +224,15 @@ impl App {
         self.rows = None;
     }
 
-    fn color_of(&self, n: &Node) -> Color32 {
-        let ext = n.ext();
+    fn color_for_ext(&self, ext: &str) -> Color32 {
         match self.colors.get(ext) {
             Some(&c) => c,
             None => self.colors.get(&ext.to_lowercase()).copied().unwrap_or(Color32::GRAY),
         }
+    }
+
+    fn color_of(&self, n: &Node) -> Color32 {
+        self.color_for_ext(n.ext())
     }
 
     fn full_path(&self, path: &[u32]) -> PathBuf {
@@ -242,14 +320,13 @@ impl App {
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button("Drives…").clicked() {
+            if ui.button("🖴 Drives…").clicked() {
                 self.show_drives = !self.show_drives;
                 if self.show_drives {
                     self.refresh_drives();
                 }
             }
-            ui.label("Folder:");
-            let edit = ui.add(egui::TextEdit::singleline(&mut self.path_input).desired_width(400.0));
+            let edit = ui.add(egui::TextEdit::singleline(&mut self.path_input).desired_width(380.0).hint_text("Folder to scan"));
             if ui.button("Browse…").clicked() {
                 if let Some(dir) = rfd::FileDialog::new().set_directory(self.path_input.trim()).pick_folder() {
                     self.path_input = dir.display().to_string();
@@ -257,12 +334,11 @@ impl App {
                 }
             }
             let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.button("Scan").clicked() || enter {
+            if ui.button("⟳ Scan").clicked() || enter {
                 self.start_scan();
             }
-            ui.checkbox(&mut self.opts.one_file_system, "Stay on this filesystem");
             ui.separator();
-            ui.add_enabled_ui(self.tree.is_some(), |ui| {
+            ui.add_enabled_ui(self.tree.is_some() && self.job.is_none(), |ui| {
                 if ui.button("Zoom to selection").clicked() {
                     if let Some(sel) = &self.selected {
                         let n = self.tree.as_ref().unwrap();
@@ -277,23 +353,154 @@ impl App {
                     self.zoom.pop();
                 }
             });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("⚙ Settings").clicked() {
+                    self.dialog.open(&self.settings);
+                }
+            });
         });
     }
 
-    // ---------- directory tree ----------
+    // ---------- tree table (shared by live and finished scans) ----------
 
-    fn tree_panel(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Sort:");
-            let before = self.sort;
-            ui.selectable_value(&mut self.sort, SortBy::Size, "Size");
-            ui.selectable_value(&mut self.sort, SortBy::Name, "Name");
-            ui.selectable_value(&mut self.sort, SortBy::Files, "Files");
-            if self.sort != before {
+    /// Column layout: name takes what's left after the enabled fixed-width columns.
+    fn columns(&self, width: f32) -> Vec<(SortBy, &'static str, f32)> {
+        let v = self.view();
+        let mut cols = vec![(SortBy::Size, "Size", 80.0)];
+        if v.col_percent {
+            cols.push((SortBy::Size, "% of parent", 120.0));
+        }
+        if v.col_files {
+            cols.push((SortBy::Files, "Files", 80.0));
+        }
+        if v.col_modified {
+            cols.push((SortBy::Modified, "Last change", 130.0));
+        }
+        let fixed: f32 = cols.iter().map(|c| c.2).sum();
+        cols.insert(0, (SortBy::Name, "Name", (width - fixed).max(160.0)));
+        cols
+    }
+
+    /// Column headers; clicking one sorts by it (if `sortable`).
+    fn header(&mut self, ui: &mut egui::Ui, sortable: bool) {
+        let width = ui.available_width();
+        let (rect, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
+        ui.painter().rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
+        let mut x = rect.left();
+        let cols = self.columns(width);
+        for (i, (key, title, w)) in cols.iter().enumerate() {
+            let cell = Rect::from_min_size(pos2(x, rect.top()), vec2(*w, ROW_H));
+            let resp = ui.interact(cell, ui.id().with(("hdr", i)), if sortable { Sense::click() } else { Sense::hover() });
+            let arrow = if sortable && self.sort == *key && *title != "% of parent" {
+                if self.sort_desc { " ⏷" } else { " ⏶" }
+            } else {
+                ""
+            };
+            let text = format!("{title}{arrow}");
+            let color = if resp.hovered() && sortable { ui.visuals().strong_text_color() } else { ui.visuals().text_color() };
+            let (pos, align) = if i == 0 {
+                (pos2(cell.left() + 6.0, cell.center().y), Align2::LEFT_CENTER)
+            } else {
+                (pos2(cell.right() - 8.0, cell.center().y), Align2::RIGHT_CENTER)
+            };
+            ui.painter().text(pos, align, text, FontId::proportional(13.0), color);
+            if resp.clicked() {
+                if self.sort == *key {
+                    self.sort_desc = !self.sort_desc;
+                } else {
+                    self.sort = *key;
+                    self.sort_desc = *key != SortBy::Name;
+                }
                 self.rows = None;
             }
-        });
-        ui.separator();
+            x += w;
+        }
+    }
+
+    /// Paint one tree line. Returns the rect of the expand arrow, so clicks there toggle.
+    fn paint_line(&mut self, ui: &egui::Ui, rect: Rect, line: &LineView, selected: bool, hovered: bool, stripe: bool) -> Rect {
+        let vis = ui.visuals().clone();
+        let p = ui.painter().clone();
+        if selected {
+            p.rect_filled(rect, 2.0, vis.selection.bg_fill);
+        } else if hovered {
+            p.rect_filled(rect, 2.0, vis.widgets.hovered.weak_bg_fill);
+        } else if stripe && self.view().stripes {
+            p.rect_filled(rect, 0.0, vis.faint_bg_color);
+        }
+        let text_color = if selected { vis.selection.stroke.color } else { vis.text_color() };
+        let weak = if selected { text_color } else { vis.weak_text_color() };
+        let font = FontId::proportional(13.0);
+        let cols = self.columns(rect.width());
+        let cy = rect.center().y;
+
+        // Name column: indent, arrow, icon, name.
+        let name_w = cols[0].2;
+        let mut x = rect.left() + 4.0 + line.depth as f32 * INDENT;
+        let arrow = Rect::from_center_size(pos2(x + 6.0, cy), vec2(14.0, ROW_H));
+        if line.is_dir {
+            let c = arrow.center();
+            let pts = if line.open {
+                vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)]
+            } else {
+                vec![c + vec2(-2.0, -4.0), c + vec2(3.0, 0.0), c + vec2(-2.0, 4.0)]
+            };
+            p.add(egui::Shape::convex_polygon(pts, weak, Stroke::NONE));
+        }
+        x += 14.0;
+        let icon = Rect::from_min_size(pos2(x, cy - 8.0), vec2(16.0, 16.0));
+        self.icons.paint(ui, icon, line.is_dir, scan::ext_of(line.name), line.color);
+        x += 21.0;
+        let name_clip = Rect::from_min_max(pos2(x, rect.top()), pos2(rect.left() + name_w - 6.0, rect.bottom()));
+        let np = p.with_clip_rect(name_clip.intersect(p.clip_rect()));
+        let galley = np.layout_no_wrap(line.name.to_string(), font.clone(), text_color);
+        let text_w = galley.size().x;
+        np.galley(pos2(x, cy - galley.size().y / 2.0), galley, text_color);
+        if line.busy {
+            let sr = Rect::from_center_size(pos2((x + text_w + 12.0).min(name_clip.right() - 8.0), cy), vec2(12.0, 12.0));
+            egui::Spinner::new().size(12.0).paint_at(ui, sr);
+        }
+
+        // Fixed columns, right-aligned.
+        let mut cx = rect.left() + name_w;
+        for (_, title, w) in &cols[1..] {
+            let cell = Rect::from_min_size(pos2(cx, rect.top()), vec2(*w, ROW_H));
+            let right = pos2(cell.right() - 8.0, cy);
+            match *title {
+                "Size" => {
+                    p.text(right, Align2::RIGHT_CENTER, scan::human(line.size), font.clone(), text_color);
+                }
+                "% of parent" => {
+                    let frac = if line.parent_size > 0 { line.size as f32 / line.parent_size as f32 } else { 0.0 };
+                    let bar = Rect::from_min_size(pos2(cell.left() + 6.0, cy - 5.0), vec2(56.0, 10.0));
+                    p.rect_filled(bar, 2.0, vis.extreme_bg_color);
+                    let mut fill = bar;
+                    fill.set_width(bar.width() * frac.clamp(0.0, 1.0));
+                    let c = if line.is_dir { Color32::from_rgb(90, 140, 220) } else { line.color };
+                    p.rect_filled(fill, 2.0, c);
+                    p.text(right, Align2::RIGHT_CENTER, format!("{:.1}%", frac * 100.0), font.clone(), weak);
+                }
+                "Files" => {
+                    if line.is_dir {
+                        p.text(right, Align2::RIGHT_CENTER, group(line.files), font.clone(), weak);
+                    }
+                }
+                "Last change" => {
+                    if line.modified > 0 {
+                        p.text(right, Align2::RIGHT_CENTER, fmt_time(line.modified), font.clone(), weak);
+                    }
+                }
+                _ => {}
+            }
+            cx += w;
+        }
+        arrow
+    }
+
+    // ---------- finished tree ----------
+
+    fn tree_panel(&mut self, ui: &mut egui::Ui) {
+        self.header(ui, true);
         let Some(tree) = self.tree.take() else { return };
         if self.rows.is_none() {
             self.rows = Some(self.flatten(&tree));
@@ -301,34 +508,41 @@ impl App {
         let rows = self.rows.take().unwrap();
 
         // Only the rows inside the viewport are laid out, so huge folders stay fast.
-        let row_h = ui.text_style_height(&egui::TextStyle::Body).max(16.0);
-        let mut area = egui::ScrollArea::both().auto_shrink(false);
+        let mut area = egui::ScrollArea::vertical().auto_shrink(false);
         if self.reveal {
             if let Some(i) = self.selected.as_ref().and_then(|s| rows.iter().position(|r| *r.path == **s)) {
-                let step = row_h + ui.spacing().item_spacing.y;
-                area = area.vertical_scroll_offset((i as f32 * step - ui.available_height() / 2.0).max(0.0));
+                area = area.vertical_scroll_offset((i as f32 * ROW_H - ui.available_height() / 2.0).max(0.0));
             }
             self.reveal = false;
         }
         let mut clicked = None;
         let mut toggled = None;
-        area.show_rows(ui, row_h, rows.len(), |ui, range| {
-            for row in &rows[range] {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        area.show_rows(ui, ROW_H, rows.len(), |ui, range| {
+            for (k, row) in rows[range.clone()].iter().enumerate() {
                 let n = tree.at(&row.path).unwrap();
                 let parent_size = if row.path.is_empty() { n.size } else { tree.at(&row.path[..row.path.len() - 1]).unwrap().size };
-                ui.horizontal(|ui| {
-                    ui.set_height(row_h);
-                    ui.add_space(row.depth as f32 * 14.0);
-                    if n.is_dir {
-                        let icon = if self.expanded.contains(&row.path) { "⏷" } else { "⏵" };
-                        if ui.add(egui::Label::new(icon).sense(Sense::click())).clicked() {
-                            toggled = Some(row.path.clone());
-                        }
-                    } else {
-                        ui.add_space(ui.spacing().icon_width);
-                    }
-                    self.tree_row(ui, n, parent_size, &row.path, &mut clicked, &mut toggled);
-                });
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
+                let line = LineView {
+                    depth: row.depth,
+                    is_dir: n.is_dir,
+                    open: self.expanded.contains(&row.path),
+                    name: &n.name,
+                    size: n.size,
+                    parent_size,
+                    files: n.files,
+                    modified: n.modified,
+                    busy: false,
+                    color: self.color_of(n),
+                };
+                let selected = self.selected.as_deref() == Some(&row.path[..]);
+                let arrow = self.paint_line(ui, rect, &line, selected, resp.hovered(), (range.start + k) % 2 == 1);
+                let on_arrow = resp.interact_pointer_pos().is_some_and(|p| arrow.expand2(vec2(4.0, 0.0)).contains(p));
+                if n.is_dir && ((resp.clicked() && on_arrow) || resp.double_clicked()) {
+                    toggled = Some(row.path.clone());
+                } else if resp.clicked() {
+                    clicked = Some(row.path.to_vec());
+                }
             }
         });
         self.rows = Some(rows);
@@ -341,27 +555,6 @@ impl App {
         }
         if let Some(p) = clicked {
             self.selected = Some(p);
-        }
-    }
-
-    fn tree_row(&self, ui: &mut egui::Ui, n: &Node, parent_size: u64, path: &[u32], clicked: &mut Option<Vec<u32>>, toggled: &mut Option<Box<[u32]>>) {
-        let frac = if parent_size > 0 { n.size as f32 / parent_size as f32 } else { 0.0 };
-        let (r, _) = ui.allocate_exact_size(vec2(50.0, 12.0), Sense::hover());
-        ui.painter().rect_filled(r, 2.0, ui.visuals().extreme_bg_color);
-        let mut fill = r;
-        fill.set_width(r.width() * frac);
-        let c = if n.is_dir { Color32::from_rgb(90, 140, 220) } else { self.color_of(n) };
-        ui.painter().rect_filled(fill, 2.0, c);
-        ui.add_sized([72.0, 16.0], egui::Label::new(scan::human(n.size)));
-        ui.add_sized([44.0, 16.0], egui::Label::new(egui::RichText::new(format!("{:.1}%", frac * 100.0)).weak()));
-        let label = if n.is_dir { format!("{}/  ({} files)", n.name, n.files) } else { n.name.to_string() };
-        let is_sel = self.selected.as_deref() == Some(path);
-        let resp = ui.selectable_label(is_sel, label);
-        if resp.clicked() {
-            *clicked = Some(path.to_vec());
-        }
-        if resp.double_clicked() && n.is_dir {
-            *toggled = Some(path.into());
         }
     }
 
@@ -379,15 +572,139 @@ impl App {
             return;
         }
         let mut order: Vec<usize> = (0..n.children.len()).collect();
+        let c = &n.children;
         match self.sort {
             SortBy::Size => {}
-            SortBy::Name => order.sort_by_cached_key(|&i| n.children[i].name.to_lowercase()),
-            SortBy::Files => order.sort_by(|&a, &b| n.children[b].files.cmp(&n.children[a].files)),
+            SortBy::Name => order.sort_by_cached_key(|&i| c[i].name.to_lowercase()),
+            SortBy::Files => order.sort_by(|&a, &b| c[b].files.cmp(&c[a].files)),
+            SortBy::Modified => order.sort_by(|&a, &b| c[b].modified.cmp(&c[a].modified)),
+        }
+        // Name sorts A→Z; every other key above sorts high-to-low.
+        let natural_desc = self.sort != SortBy::Name;
+        if self.sort_desc != natural_desc {
+            order.reverse();
         }
         for i in order {
             path.push(i as u32);
-            self.flatten_into(&n.children[i], path, rows);
+            self.flatten_into(&c[i], path, rows);
             path.pop();
+        }
+    }
+
+    // ---------- live tree (during a scan) ----------
+
+    fn live_rows(&mut self, root: &Arc<LiveDir>, hold: bool) -> Vec<LiveRow> {
+        let mut rows = Vec::new();
+        let size = root.size.load(Ordering::Relaxed);
+        self.live_into(root, 0, size, hold, &mut rows);
+        rows
+    }
+
+    fn live_into(&mut self, d: &Arc<LiveDir>, depth: u16, parent_size: u64, hold: bool, rows: &mut Vec<LiveRow>) {
+        rows.push(LiveRow::Dir { dir: d.clone(), depth, parent_size });
+        if !self.live_open.contains(&(Arc::as_ptr(d) as usize)) {
+            return;
+        }
+        // Show the largest files of each open folder; listing 100k files every frame isn't useful.
+        const MAX_FILES: usize = 200;
+        let size = d.size.load(Ordering::Relaxed);
+        let (mut dirs, mut files, total_files) = {
+            let k = d.kids.lock().unwrap();
+            let mut idx: Vec<usize> = (0..k.files.len()).collect();
+            if idx.len() > MAX_FILES {
+                idx.select_nth_unstable_by(MAX_FILES, |&a, &b| k.files[b].size.cmp(&k.files[a].size));
+                idx.truncate(MAX_FILES);
+            }
+            let files: Vec<(Box<str>, u64, i64)> =
+                idx.iter().map(|&i| (k.files[i].name.clone(), k.files[i].size, k.files[i].modified)).collect();
+            (k.dirs.clone(), files, k.files.len())
+        };
+        let key = Arc::as_ptr(d) as usize;
+        match self.live_order.get(&key).filter(|_| hold) {
+            // Keep the previous order; anything new goes at the end.
+            Some(prev) => {
+                let known: HashSet<usize> = prev.iter().map(|c| Arc::as_ptr(c) as usize).collect();
+                let mut ordered = prev.clone();
+                ordered.extend(dirs.into_iter().filter(|c| !known.contains(&(Arc::as_ptr(c) as usize))));
+                dirs = ordered;
+            }
+            None => dirs.sort_by_cached_key(|c| std::cmp::Reverse(c.size.load(Ordering::Relaxed))),
+        }
+        self.live_order.insert(key, dirs.clone());
+        files.sort_by(|a, b| b.1.cmp(&a.1));
+        for c in &dirs {
+            self.live_into(c, depth + 1, size, hold, rows);
+        }
+        for (name, fsize, modified) in files {
+            rows.push(LiveRow::File { name, size: fsize, modified, depth: depth + 1, parent_size: size });
+        }
+        if total_files > MAX_FILES {
+            rows.push(LiveRow::More { count: total_files - MAX_FILES, depth: depth + 1 });
+        }
+    }
+
+    fn live_panel(&mut self, ui: &mut egui::Ui, live: Arc<LiveDir>) {
+        self.header(ui, false);
+        let hold = ui.rect_contains_pointer(ui.available_rect_before_wrap());
+        let rows = self.live_rows(&live, hold);
+        let mut toggled = None;
+        ui.spacing_mut().item_spacing.y = 0.0;
+        egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW_H, rows.len(), |ui, range| {
+            for (k, row) in rows[range.clone()].iter().enumerate() {
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
+                let stripe = (range.start + k) % 2 == 1;
+                match row {
+                    LiveRow::Dir { dir, depth, parent_size } => {
+                        let key = Arc::as_ptr(dir) as usize;
+                        let line = LineView {
+                            depth: *depth,
+                            is_dir: true,
+                            open: self.live_open.contains(&key),
+                            name: &dir.name,
+                            size: dir.size.load(Ordering::Relaxed),
+                            parent_size: *parent_size,
+                            files: dir.files.load(Ordering::Relaxed),
+                            modified: dir.modified.load(Ordering::Relaxed),
+                            busy: !dir.done.load(Ordering::Acquire),
+                            color: Color32::GRAY,
+                        };
+                        self.paint_line(ui, rect, &line, false, resp.hovered(), stripe);
+                        if resp.clicked() {
+                            toggled = Some(key);
+                        }
+                    }
+                    LiveRow::File { name, size, modified, depth, parent_size } => {
+                        let line = LineView {
+                            depth: *depth,
+                            is_dir: false,
+                            open: false,
+                            name,
+                            size: *size,
+                            parent_size: *parent_size,
+                            files: 1,
+                            modified: *modified,
+                            busy: false,
+                            color: ext_color(&scan::ext_of(name).to_lowercase(), usize::MAX),
+                        };
+                        self.paint_line(ui, rect, &line, false, resp.hovered(), stripe);
+                    }
+                    LiveRow::More { count, depth } => {
+                        let x = rect.left() + 4.0 + *depth as f32 * INDENT + 35.0;
+                        ui.painter().text(
+                            pos2(x, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            format!("… and {} smaller files", group(*count as u64)),
+                            FontId::proportional(13.0),
+                            ui.visuals().weak_text_color(),
+                        );
+                    }
+                }
+            }
+        });
+        if let Some(k) = toggled {
+            if !self.live_open.remove(&k) {
+                self.live_open.insert(k);
+            }
         }
     }
 
@@ -395,36 +712,61 @@ impl App {
 
     fn ext_panel(&mut self, ui: &mut egui::Ui) {
         let total: u64 = self.tree.as_ref().map(|t| t.size).unwrap_or(0).max(1);
-        ui.heading("Extensions");
-        if self.highlight_ext.is_some() && ui.small_button("Clear highlight").clicked() {
-            self.highlight_ext = None;
-        }
-        let mut toggle = None;
         ui.horizontal(|ui| {
-            ui.add_sized([110.0, 16.0], egui::Label::new(egui::RichText::new("Ext").strong()));
-            ui.add_sized([70.0, 16.0], egui::Label::new(egui::RichText::new("Size").strong()));
-            ui.add_sized([40.0, 16.0], egui::Label::new(egui::RichText::new("%").strong()));
-            ui.label(egui::RichText::new("Files").strong());
-        });
-        let row_h = ui.text_style_height(&egui::TextStyle::Body).max(16.0);
-        egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, row_h, self.exts.len(), |ui, range| {
-            for e in &self.exts[range] {
-                ui.horizontal(|ui| {
-                    ui.set_height(row_h);
-                    let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
-                    ui.painter().rect_filled(r, 2.0, self.colors[&e.ext]);
-                    let name = if e.ext.is_empty() { "(none)".to_string() } else { format!(".{}", e.ext) };
-                    let on = self.highlight_ext.as_deref() == Some(e.ext.as_str());
-                    let resp = ui.add_sized([92.0, 16.0], egui::Button::selectable(on, name).truncate());
-                    if resp.on_hover_text("Click to highlight in treemap").clicked() {
-                        toggle = Some(e.ext.clone());
-                    }
-                    ui.add_sized([70.0, 16.0], egui::Label::new(scan::human(e.bytes)));
-                    ui.add_sized([40.0, 16.0], egui::Label::new(format!("{:.1}", e.bytes as f64 * 100.0 / total as f64)));
-                    ui.label(e.files.to_string());
-                });
+            ui.heading("File types");
+            if self.highlight_ext.is_some() && ui.small_button("Clear highlight").clicked() {
+                self.highlight_ext = None;
             }
         });
+        let mut toggle = None;
+        let font = FontId::proportional(13.0);
+        let (hdr, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
+        let w = hdr.width();
+        let strong = ui.visuals().strong_text_color();
+        for (x, align, t) in [
+            (hdr.left() + 30.0, Align2::LEFT_CENTER, "Type"),
+            (hdr.left() + w - 110.0, Align2::RIGHT_CENTER, "Size"),
+            (hdr.left() + w - 60.0, Align2::RIGHT_CENTER, "%"),
+            (hdr.right() - 4.0, Align2::RIGHT_CENTER, "Files"),
+        ] {
+            ui.painter().text(pos2(x, hdr.center().y), align, t, font.clone(), strong);
+        }
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let exts = std::mem::take(&mut self.exts);
+        egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW_H, exts.len(), |ui, range| {
+            for (k, e) in exts[range.clone()].iter().enumerate() {
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
+                let on = self.highlight_ext.as_deref() == Some(e.ext.as_str());
+                let vis = ui.visuals().clone();
+                if on {
+                    ui.painter().rect_filled(rect, 2.0, vis.selection.bg_fill);
+                } else if resp.hovered() {
+                    ui.painter().rect_filled(rect, 2.0, vis.widgets.hovered.weak_bg_fill);
+                } else if (range.start + k) % 2 == 1 && self.view().stripes {
+                    ui.painter().rect_filled(rect, 0.0, vis.faint_bg_color);
+                }
+                let c = self.colors[&e.ext];
+                let sw = Rect::from_min_size(pos2(rect.left() + 4.0, rect.center().y - 6.0), vec2(4.0, 12.0));
+                ui.painter().rect_filled(sw, 1.0, c);
+                let icon = Rect::from_min_size(pos2(rect.left() + 11.0, rect.center().y - 8.0), vec2(16.0, 16.0));
+                self.icons.paint(ui, icon, false, &e.ext, c);
+                let name = if e.ext.is_empty() { "(none)".to_string() } else { format!(".{}", e.ext) };
+                let tc = if on { vis.selection.stroke.color } else { vis.text_color() };
+                let clip = Rect::from_min_max(pos2(rect.left() + 30.0, rect.top()), pos2(rect.right() - 175.0, rect.bottom()));
+                ui.painter()
+                    .with_clip_rect(clip.intersect(ui.clip_rect()))
+                    .text(pos2(clip.left(), rect.center().y), Align2::LEFT_CENTER, name, font.clone(), tc);
+                let cy = rect.center().y;
+                ui.painter().text(pos2(rect.right() - 110.0, cy), Align2::RIGHT_CENTER, scan::human(e.bytes), font.clone(), tc);
+                let pct = format!("{:.1}", e.bytes as f64 * 100.0 / total as f64);
+                ui.painter().text(pos2(rect.right() - 60.0, cy), Align2::RIGHT_CENTER, pct, font.clone(), vis.weak_text_color());
+                ui.painter().text(pos2(rect.right() - 4.0, cy), Align2::RIGHT_CENTER, group(e.files), font.clone(), vis.weak_text_color());
+                if resp.on_hover_text("Click to highlight in the treemap").clicked() {
+                    toggle = Some(e.ext.clone());
+                }
+            }
+        });
+        self.exts = exts;
         if let Some(t) = toggle {
             self.highlight_ext = if self.highlight_ext.as_ref() == Some(&t) { None } else { Some(t) };
         }
@@ -441,9 +783,10 @@ impl App {
         if tree.at(&self.zoom).is_none() {
             self.zoom.clear();
         }
+        let look = self.view().treemap_key();
 
         let (content_changed, size_changed) = match &self.cache {
-            Some(c) => (c.zoom != self.zoom || c.highlight != self.highlight_ext, c.px != px),
+            Some(c) => (c.zoom != self.zoom || c.highlight != self.highlight_ext || c.look != look, c.px != px),
             None => (true, false),
         };
         // While the window is being resized or moved to a monitor with a different scale,
@@ -459,7 +802,7 @@ impl App {
         }
         if rebuild {
             self.resize_since = None;
-            self.render_treemap(ui.ctx(), px);
+            self.render_treemap(ui.ctx(), px, look);
         }
         let Some(cache) = self.cache.as_ref() else { return };
         let tree = self.tree.as_ref().unwrap();
@@ -467,17 +810,20 @@ impl App {
 
         // Tile rects are in the cached image's pixels; map them onto the current bounds.
         let (sx, sy) = (bounds.width() / cache.px[0] as f32, bounds.height() / cache.px[1] as f32);
-        let to_screen = |r: Rect| Rect::from_min_max(
-            pos2(bounds.min.x + r.min.x * sx, bounds.min.y + r.min.y * sy),
-            pos2(bounds.min.x + r.max.x * sx, bounds.min.y + r.max.y * sy),
-        );
+        let to_screen = |r: Rect| {
+            Rect::from_min_max(
+                pos2(bounds.min.x + r.min.x * sx, bounds.min.y + r.min.y * sy),
+                pos2(bounds.min.x + r.max.x * sx, bounds.min.y + r.max.y * sy),
+            )
+        };
         let zl = self.zoom.len();
 
         // Outline the selection (or the nearest visible ancestor of it).
         if let Some(sel) = self.selected.as_ref().filter(|s| s.starts_with(&self.zoom)) {
             let rel = &sel[zl..];
             if let Some(t) = cache.tiles.iter().filter(|t| rel.starts_with(&t.path)).max_by_key(|t| t.path.len()) {
-                painter.rect_stroke(to_screen(t.rect), 0.0, Stroke::new(2.0, Color32::WHITE), egui::StrokeKind::Inside);
+                let stroke = Stroke::new(2.0, self.view().selection_color);
+                painter.rect_stroke(to_screen(t.rect), 0.0, stroke, egui::StrokeKind::Inside);
             }
         }
 
@@ -487,8 +833,10 @@ impl App {
         });
         let mut action = None;
         if let Some(t) = hover {
-            if let Some(parent) = cache.tiles.iter().find(|p| p.is_dir && p.path.len() + 1 == t.path.len() && t.path.starts_with(&p.path)) {
-                painter.rect_stroke(to_screen(parent.rect), 0.0, Stroke::new(1.0, Color32::from_white_alpha(140)), egui::StrokeKind::Inside);
+            let parent = cache.tiles.iter().find(|p| p.is_dir && p.path.len() + 1 == t.path.len() && t.path.starts_with(&p.path));
+            if let Some(parent) = parent {
+                let stroke = Stroke::new(1.0, Color32::from_white_alpha(140));
+                painter.rect_stroke(to_screen(parent.rect), 0.0, stroke, egui::StrokeKind::Inside);
             }
             let mut abs = self.zoom.clone();
             abs.extend_from_slice(&t.path);
@@ -516,13 +864,15 @@ impl App {
         }
     }
 
-    fn render_treemap(&mut self, ctx: &egui::Context, px: [usize; 2]) {
+    fn render_treemap(&mut self, ctx: &egui::Context, px: [usize; 2], look: [u32; 9]) {
+        let v = self.view().clone();
         let tree = self.tree.as_ref().unwrap();
         let zroot = tree.at(&self.zoom).unwrap();
         let bounds = Rect::from_min_max(pos2(0.0, 0.0), pos2(px[0] as f32, px[1] as f32));
-        let tiles = treemap::layout(zroot, bounds);
+        let tiles = treemap::layout(zroot, bounds, v.height, v.scale);
         let mut pixels = vec![Color32::from_gray(45); px[0] * px[1]];
         let hl = self.highlight_ext.as_deref();
+        let shade = Shading::new(&v);
         for (i, t) in tiles.iter().enumerate() {
             // Tiles come parents-first; only paint the ones nothing else is drawn on top of.
             let has_children = tiles.get(i + 1).is_some_and(|nx| nx.path.len() > t.path.len());
@@ -539,7 +889,7 @@ impl App {
                     c = c.gamma_multiply(0.15);
                 }
             }
-            paint_cushion(&mut pixels, px[0], t.rect, c);
+            shade.paint(&mut pixels, px[0], t, c);
         }
         let img = ColorImage::new(px, pixels);
         match &mut self.cache {
@@ -548,52 +898,113 @@ impl App {
                 cache.px = px;
                 cache.zoom = self.zoom.clone();
                 cache.highlight = self.highlight_ext.clone();
+                cache.look = look;
                 cache.tiles = tiles;
             }
             None => {
                 let texture = ctx.load_texture("treemap", img, TextureOptions::LINEAR);
-                self.cache = Some(LayoutCache { px, zoom: self.zoom.clone(), highlight: self.highlight_ext.clone(), tiles, texture });
+                let (zoom, highlight) = (self.zoom.clone(), self.highlight_ext.clone());
+                self.cache = Some(LayoutCache { px, zoom, highlight, look, tiles, texture });
             }
+        }
+    }
+
+    // ---------- scan screen ----------
+
+    fn scan_screen(&mut self, ui: &mut egui::Ui) {
+        let job = self.job.as_ref().unwrap();
+        let live = job.live.clone();
+        let finishing = job.progress.finishing.load(Ordering::Relaxed);
+        let show_tree = self.view().live_tree;
+        scan_progress(ui, job, show_tree);
+        if show_tree && !finishing {
+            ui.add_space(6.0);
+            self.live_panel(ui, live);
         }
     }
 }
 
-/// Fill a tile with a "cushion": a gently domed surface lit from the top-left, like WinDirStat.
-fn paint_cushion(pixels: &mut [Color32], stride: usize, r: Rect, c: Color32) {
-    let height = pixels.len() / stride;
-    let (x0, x1) = (r.min.x.round().max(0.0) as usize, (r.max.x.round() as usize).min(stride));
-    let (y0, y1) = (r.min.y.round().max(0.0) as usize, (r.max.y.round() as usize).min(height));
-    if x0 >= x1 || y0 >= y1 {
-        return;
+/// Per-pixel cushion shading (van Wijk & van de Wetering), with WinDirStat's knobs.
+struct Shading {
+    ambient: f32,
+    diffuse: f32,
+    gain: f32,
+    light: [f32; 3],
+    grid: Option<Color32>,
+}
+
+impl Shading {
+    fn new(s: &Settings) -> Self {
+        let (lx, ly, lz) = (s.light_x, s.light_y, 10.0f32);
+        let len = (lx * lx + ly * ly + lz * lz).sqrt();
+        let ambient = 1.0 - s.cushion.clamp(0.0, 1.0);
+        Self {
+            ambient,
+            diffuse: 1.0 - ambient,
+            // Normalise so the average tile keeps the same brightness however strong the
+            // shading is (0.826 is the average light at the default cushion setting).
+            gain: s.brightness / 0.6 * 0.826 / (ambient + (1.0 - ambient) * 0.8),
+            light: [lx / len, ly / len, lz / len],
+            grid: s.show_grid.then_some(s.grid_color),
+        }
     }
-    let (w, h) = ((x1 - x0) as f32, (y1 - y0) as f32);
-    let (cr, cg, cb) = (c.r() as f32, c.g() as f32, c.b() as f32);
-    // Light direction (-1, -1, 2) normalised.
-    const L: [f32; 3] = [-0.408, -0.408, 0.816];
-    for y in y0..y1 {
-        let v = (y - y0) as f32 / h + 0.5 / h;
-        let ny = -(1.0 - 2.0 * v);
-        let row = &mut pixels[y * stride + x0..y * stride + x1];
-        for (k, p) in row.iter_mut().enumerate() {
-            let u = k as f32 / w + 0.5 / w;
-            let nx = -(1.0 - 2.0 * u);
-            let len = (nx * nx + ny * ny + 1.0).sqrt();
-            let lit = ((nx * L[0] + ny * L[1] + L[2]) / len).max(0.0);
-            let f = 0.25 + 0.95 * lit;
-            *p = Color32::from_rgb((cr * f).min(255.0) as u8, (cg * f).min(255.0) as u8, (cb * f).min(255.0) as u8);
+
+    fn paint(&self, pixels: &mut [Color32], stride: usize, t: &Tile, c: Color32) {
+        let height = pixels.len() / stride;
+        let r = t.rect;
+        let (x0, x1) = (r.min.x.round().max(0.0) as usize, (r.max.x.round() as usize).min(stride));
+        let (y0, y1) = (r.min.y.round().max(0.0) as usize, (r.max.y.round() as usize).min(height));
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        let [s0, s1, s2, s3] = t.surface;
+        let (cr, cg, cb) = (c.r() as f32 * self.gain, c.g() as f32 * self.gain, c.b() as f32 * self.gain);
+        let [lx, ly, lz] = self.light;
+        for y in y0..y1 {
+            let ny = -(2.0 * s1 * (y as f32 + 0.5) + s3);
+            let row = &mut pixels[y * stride + x0..y * stride + x1];
+            for (k, p) in row.iter_mut().enumerate() {
+                let nx = -(2.0 * s0 * ((x0 + k) as f32 + 0.5) + s2);
+                let cosa = ((nx * lx + ny * ly + lz) / (nx * nx + ny * ny + 1.0).sqrt()).clamp(0.0, 1.0);
+                let f = self.ambient + self.diffuse * cosa;
+                *p = Color32::from_rgb((cr * f).min(255.0) as u8, (cg * f).min(255.0) as u8, (cb * f).min(255.0) as u8);
+            }
+        }
+        if let Some(g) = self.grid {
+            pixels[y0 * stride + x0..y0 * stride + x1].fill(g);
+            for y in y0..y1 {
+                pixels[y * stride + x0] = g;
+            }
         }
     }
 }
 
 impl eframe::App for App {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "settings", &self.settings);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        let view_theme = self.view().theme;
+        if self.applied_theme != Some(view_theme) {
+            self.view().apply_theme(&ctx);
+            self.applied_theme = Some(view_theme);
+        }
+        scan::set_decimal_units(self.view().units == settings::SizeUnits::Decimal);
+
+        if let settings::Outcome::Apply = self.dialog.show(&ctx) {
+            self.settings = self.dialog.draft.clone();
+            self.rows = None;
+        }
+
         if let Some(rx) = &self.drives_rx {
             match rx.try_recv() {
                 Ok(d) => {
                     self.drives = d;
                     self.drives_rx = None;
                 }
-                Err(_) => ui.ctx().request_repaint_after(Duration::from_millis(100)),
+                Err(_) => ctx.request_repaint_after(Duration::from_millis(100)),
             }
         }
         // Scanning a whole drive: its used space gives an estimate of how far along we are.
@@ -612,16 +1023,20 @@ impl eframe::App for App {
                     std::thread::spawn(move || drop(tree));
                 }
             } else {
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                ctx.request_repaint_after(Duration::from_millis(100));
             }
         }
 
-        egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
+        egui::Panel::top("toolbar").show(ui, |ui| {
+            ui.add_space(2.0);
+            self.toolbar(ui);
+            ui.add_space(2.0);
+        });
 
         if self.show_drives && self.tree.is_some() {
             let mut open = true;
             let mut picked = None;
-            egui::Window::new("Select drive").open(&mut open).collapsible(false).show(ui.ctx(), |ui| {
+            egui::Window::new("Select drive").open(&mut open).collapsible(false).show(&ctx, |ui| {
                 picked = self.drive_table(ui);
             });
             self.show_drives = open;
@@ -630,6 +1045,7 @@ impl eframe::App for App {
             }
         }
 
+        let mut rescan = false;
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
                 if let Some(job) = &self.job {
@@ -640,21 +1056,31 @@ impl eframe::App for App {
                         "{}: {} in {} files, scanned in {:.1}s. Click a tile to select, double-click to zoom in, right-click to zoom out.",
                         self.scanned_path.display(),
                         scan::human(t.size),
-                        t.files,
+                        group(t.files),
                         self.scan_secs
                     ));
+                    let stale = self.scanned_with.as_ref().is_some_and(|s| s.scan_key() != self.settings.scan_key());
+                    if stale {
+                        ui.separator();
+                        ui.colored_label(ui.visuals().warn_fg_color, "Scan settings changed.");
+                        rescan = ui.small_button("Rescan").clicked();
+                    }
                 } else {
                     ui.label("Pick a folder and press Scan.");
                 }
-                if let Some(sel) = &self.selected {
+                if let Some(sel) = self.selected.as_ref().filter(|_| self.job.is_none()) {
                     ui.separator();
                     ui.label(self.full_path(sel).display().to_string());
                 }
             });
         });
+        if rescan {
+            self.path_input = self.scanned_path.display().to_string();
+            self.start_scan();
+        }
 
-        if let Some(job) = &self.job {
-            egui::CentralPanel::default().show(ui, |ui| scan_progress(ui, job));
+        if self.job.is_some() {
+            egui::CentralPanel::default().show(ui, |ui| self.scan_screen(ui));
             return;
         }
 
@@ -669,27 +1095,16 @@ impl eframe::App for App {
             return;
         }
 
-        egui::Panel::right("exts").default_size(260.0).resizable(true).show(ui, |ui| self.ext_panel(ui));
+        egui::Panel::right("exts").default_size(300.0).resizable(true).show(ui, |ui| self.ext_panel(ui));
         egui::Panel::top("tree").default_size(320.0).resizable(true).show(ui, |ui| self.tree_panel(ui));
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| self.treemap_panel(ui));
     }
 }
 
-
-/// The biggest extensions get bright, well-separated hues; the long tail gets muted ones.
-fn ext_color(ext: &str, rank: usize) -> Color32 {
-    if rank < 16 {
-        let hue = (rank as f32 * 0.618_034).fract();
-        Hsva::new(hue, 0.75, 0.95, 1.0).into()
-    } else {
-        let h = ext.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
-        Hsva::new((h % 360) as f32 / 360.0, 0.3, 0.65, 1.0).into()
-    }
-}
-
 /// Live progress for a running scan: counts, an estimated percentage for whole drives, and
-/// the folder being read right now, so a long scan never looks frozen.
-fn scan_progress(ui: &mut egui::Ui, job: &Job) {
+/// the folder being read right now, so a long scan never looks frozen. Compact when the live
+/// tree is shown below it.
+fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
     let p = &job.progress;
     let files = p.files.load(Ordering::Relaxed);
     let dirs = p.dirs.load(Ordering::Relaxed);
@@ -697,49 +1112,62 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job) {
     let errors = p.errors.load(Ordering::Relaxed);
     let secs = job.started.elapsed().as_secs_f32();
     let cancelling = p.cancel.load(Ordering::Relaxed);
+    let finishing = p.finishing.load(Ordering::Relaxed);
 
-    ui.vertical_centered(|ui| {
-        ui.add_space((ui.available_height() / 2.0 - 120.0).max(16.0));
-        ui.set_max_width(640.0);
-        ui.heading(format!("Scanning {}", job.root.display()));
-        ui.add_space(12.0);
-
-        let bar = match job.expected {
+    let bar = if finishing {
+        egui::ProgressBar::new(1.0).text("Sorting and building the map…").animate(true)
+    } else {
+        match job.expected {
             // Logical file sizes don't exactly match used disk space, so cap below 100%.
             Some(total) => {
                 let frac = (bytes as f32 / total as f32).min(0.99);
-                egui::ProgressBar::new(frac).text(format!("about {:.0}%  ({} of {})", frac * 100.0, scan::human(bytes), scan::human(total)))
+                let text = format!("about {:.0}%  ({} of {})", frac * 100.0, scan::human(bytes), scan::human(total));
+                egui::ProgressBar::new(frac).text(text)
             }
             None => egui::ProgressBar::new(0.0).animate(true).text(scan::human(bytes)),
-        };
-        ui.add(bar.desired_height(22.0));
-        ui.add_space(12.0);
+        }
+    };
+    let rate = if secs > 0.5 { files as f32 / secs } else { 0.0 };
+    let unreadable = if errors > 0 { format!(" · {} unreadable", group(errors)) } else { String::new() };
+    let stats = format!(
+        "{} files · {} folders · {} · {:.0} files/s · {}:{:02}{unreadable}",
+        group(files),
+        group(dirs),
+        scan::human(bytes),
+        rate,
+        secs as u64 / 60,
+        secs as u64 % 60,
+    );
+    let current = p.current.lock().map(|c| c.display().to_string()).unwrap_or_default();
 
-        let rate = if secs > 0.5 { files as f32 / secs } else { 0.0 };
-        egui::Grid::new("scan-stats").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
-            ui.label("Files");
-            ui.strong(format!("{files}"));
-            ui.end_row();
-            ui.label("Folders");
-            ui.strong(format!("{dirs}"));
-            ui.end_row();
-            ui.label("Size so far");
-            ui.strong(scan::human(bytes));
-            ui.end_row();
-            ui.label("Speed");
-            ui.strong(format!("{rate:.0} files/s"));
-            ui.end_row();
-            ui.label("Elapsed");
-            ui.strong(format!("{}:{:02}", secs as u64 / 60, secs as u64 % 60));
-            ui.end_row();
-            if errors > 0 {
-                ui.label("Unreadable");
-                ui.strong(format!("{errors}"));
-                ui.end_row();
-            }
+    if compact {
+        ui.horizontal(|ui| {
+            ui.heading(format!("Scanning {}", job.root.display()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if cancelling {
+                    ui.label("Cancelling…");
+                } else if ui.button("Cancel").clicked() {
+                    p.cancel.store(true, Ordering::Relaxed);
+                }
+            });
         });
+        ui.add(bar.desired_height(18.0));
+        ui.horizontal(|ui| {
+            ui.strong(stats);
+            ui.add(egui::Label::new(egui::RichText::new(current).weak().monospace()).truncate());
+        });
+        return;
+    }
+
+    ui.vertical_centered(|ui| {
+        ui.add_space((ui.available_height() / 2.0 - 100.0).max(16.0));
+        ui.set_max_width(640.0);
+        ui.heading(format!("Scanning {}", job.root.display()));
+        ui.add_space(12.0);
+        ui.add(bar.desired_height(22.0));
         ui.add_space(10.0);
-        let current = p.current.lock().map(|c| c.display().to_string()).unwrap_or_default();
+        ui.strong(stats);
+        ui.add_space(8.0);
         ui.add(egui::Label::new(egui::RichText::new(current).weak().monospace()).truncate());
         ui.add_space(12.0);
         if cancelling {
@@ -758,4 +1186,34 @@ fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
         if cfg!(windows) { s.to_lowercase() } else { s.to_string() }
     };
     norm(a) == norm(b)
+}
+
+/// 1234567 -> "1,234,567"
+fn group(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn fmt_time(secs: i64) -> String {
+    chrono::DateTime::from_timestamp(secs, 0)
+        .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// The biggest extensions get bright, well-separated hues; the long tail gets muted ones.
+fn ext_color(ext: &str, rank: usize) -> Color32 {
+    if rank < 16 {
+        let hue = (rank as f32 * 0.618_034).fract();
+        Hsva::new(hue, 0.75, 0.95, 1.0).into()
+    } else {
+        let h = ext.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
+        Hsva::new((h % 360) as f32 / 360.0, 0.3, 0.65, 1.0).into()
+    }
 }

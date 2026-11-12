@@ -6,6 +6,8 @@
 
 mod app;
 mod drives;
+mod icons;
+mod settings;
 mod scan;
 mod treemap;
 
@@ -17,7 +19,7 @@ fn main() -> eframe::Result {
     let mut cli = false;
     let mut top = 15usize;
     let mut path = None;
-    let mut opts = scan::Options::default();
+    let mut opts = scan::Options { one_file_system: true, ..Default::default() };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -46,7 +48,8 @@ fn main() -> eframe::Result {
             renderer,
             ..Default::default()
         };
-        eframe::run_native("dirmap", native, Box::new(move |_cc| Ok(Box::new(app::App::new(path, opts)))))
+        let all_fs = !opts.one_file_system;
+        eframe::run_native("dirmap", native, Box::new(move |cc| Ok(Box::new(app::App::new(cc, path, all_fs)))))
     };
     match run(eframe::Renderer::Wgpu, path.clone()) {
         Err(eframe::Error::Wgpu(e)) => {
@@ -60,7 +63,7 @@ fn main() -> eframe::Result {
 fn report(root: &std::path::Path, opts: scan::Options, top: usize) {
     let progress = Arc::new(scan::Progress::default());
     let t = std::time::Instant::now();
-    let tree = scan::scan(root, opts, &progress);
+    let tree = scan::scan(root, &opts, &progress, &scan::new_live(root));
     println!(
         "{}: {} in {} files, {} folders ({:.2}s, {} unreadable)",
         root.display(),
