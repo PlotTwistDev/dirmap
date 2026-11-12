@@ -52,6 +52,8 @@ pub struct Settings {
     pub light_x: f32,
     pub light_y: f32,
     pub show_grid: bool,
+    /// Write file names on treemap tiles big enough to hold them.
+    pub show_labels: bool,
     pub grid_color: Color32,
     pub selection_color: Color32,
 
@@ -84,6 +86,7 @@ impl Default for Settings {
             light_x: -1.0,
             light_y: -1.0,
             show_grid: false,
+            show_labels: true,
             grid_color: Color32::BLACK,
             selection_color: Color32::WHITE,
             one_file_system: true,
@@ -315,6 +318,9 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
             ui.checkbox(&mut d.show_grid, "Show");
             ui.color_edit_button_srgba(&mut d.grid_color);
         });
+        ui.end_row();
+        ui.label("Labels");
+        ui.checkbox(&mut d.show_labels, "Show file names on tiles with room for them");
         ui.end_row();
         ui.label("Selection border");
         ui.color_edit_button_srgba(&mut d.selection_color);

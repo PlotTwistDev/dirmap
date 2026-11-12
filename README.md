@@ -12,8 +12,13 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
 - **Directory tree** with Explorer's own file icons on Windows, sortable Name / Size / Files / Last change
   columns and percentage bars. Only visible rows are drawn, so huge folders stay fast.
 - **File types list** with totals per extension. Click one to highlight those files in the treemap.
-- **Cushion treemap** (van Wijk & van de Wetering, like WinDirStat) colored by file type. Hover for the
-  path and size, click to select (the tree jumps to it), double-click to zoom into a folder, right-click to zoom out.
+- **Cushion treemap** (van Wijk & van de Wetering, like WinDirStat) colored by file type. Hovering shows the
+  path, size and date in the status bar; click to select (the tree jumps to it), double-click or wheel up to zoom
+  into a folder, right-click or wheel down to zoom out, and use the breadcrumbs to jump back up.
+  File names and sizes are drawn on tiles that have room for them (can be turned off).
+- **Treemap filters** that blank out everything else: by kind (audio, video, images, AI model weights such as
+  gguf / safetensors / pt / onnx, archives, documents, code, programs, disk images) and by size
+  (larger than / smaller than N MB), with a count of how many files and bytes match.
 - **Settings** (saved between runs): theme, size units, filters (folders and file patterns to skip or include,
   minimum size, maximum age), tree columns, treemap look with live preview, hidden files, scanner threads.
 
