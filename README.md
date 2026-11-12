@@ -33,9 +33,41 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
   - File names and sizes fade in on tiles that have room for them (can be turned off).
   - Only the tiles in view are generated, down to about a pixel, on a background thread, so it stays smooth with
     millions of files.
-- **Treemap filters** that blank out everything else: by kind (audio, video, images, AI model weights such as
-  gguf / safetensors / pt / onnx, archives, documents, code, programs, disk images) and by size
-  (larger than / smaller than a size such as `500 MB` or `2 GB`), with a count of how many files and bytes match.
+- **Filters** by kind (audio, video, images, AI model weights such as gguf / safetensors / pt / onnx,
+  archives, documents, code, programs, disk images), by size (larger than / smaller than a size such as
+  `500 MB` or `2 GB`) and by name (**Custom**, below), with a count of how many files and bytes match. Two modes:
+  - **Highlight** (default) keeps the layout and dims everything that doesn't match, on the treemap, the
+    sunburst and the folder list, so you can see where the matches are.
+  - **Show matches only** rebuilds the treemap, sunburst, folder list and File types tab from the matching
+    files and the folders holding them. Switching back keeps your place.
+- **Custom filter** (Show: **Custom**, or Ctrl+F / ⌘F): type a pattern and the maps update as you type.
+  The ⏷ menu has examples, recent filters, saved presets, case-sensitive and match-all options, and the full
+  syntax; extensions found in the scan autocomplete (Tab).
+
+  | Pattern | Matches |
+  |---|---|
+  | `exr`, `.exr`, `*.exr` | files ending in .exr |
+  | `*.exr, *.tx, *.tif` | any of several patterns (comma-separated) |
+  | `*.exr, !*preview*` | EXR files, leaving out names containing preview |
+  | `render_*`, `*diffuse*` | `*` is any run of characters |
+  | `shot_????.exr` | `?` is exactly one character |
+  | `shot_####.exr` | `#` is one digit: exactly four digits here |
+  | `render.{frame}.exr` | a frame number of any length |
+  | `render.{frame:04}.exr` | exactly four digits |
+  | `render.{frame:1001-1100}.exr` | frames 1001–1100 at any padding (`1050`, `001050`) |
+  | `render.{frame:1001-1100:04}.exr` | frames 1001–1100 written with four digits |
+  | `shot_[1001-1100].exr` | short for `shot_{frame:1001-1100}.exr` |
+
+  A frame number always covers a whole run of digits, so `render.####.exr` doesn't match `render.00001.exr`.
+  Brackets are a range only around two whole numbers (`[1001-1100]`) and braces are special only as
+  `{frame…}`, so names like `[draft] notes.txt` or `[2024-05-01].txt` need no escaping; put `\` before any
+  other special character to match it literally (`\#`, `\*`, `\,`). Mistakes such as `[1100-1001]` are
+  explained under the box. Filtering runs on the scan already in memory, in the background, so changing it
+  never rescans.
+- **Image sequences** (Sequences tab): finds numbered file sequences such as `shot010_comp.1001.exr …
+  shot010_comp.1100.exr` and lists each once (`shot010_comp.####.exr`) with its frame count, range, missing
+  frames, total and average size. Click one to filter the map to it. Only files in the same folder with the
+  number right before the extension and everything else identical are grouped.
 - **Sunburst view**: a ring chart of the same data, each ring one folder level deeper. Click to select,
   double-click or wheel to zoom, click the middle to go up.
 - **Color by type, age or change**: age runs from red (changed today) to blue (10+ years old); change shows

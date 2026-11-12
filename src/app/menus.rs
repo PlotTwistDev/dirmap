@@ -181,7 +181,9 @@ impl App {
     }
 
     pub(super) fn item_info(&self, path: &[u32]) -> Option<ItemInfo> {
-        let n = self.tree.as_ref()?.at(path)?;
+        // Paths from the tree panel and the maps are in the tree on screen (matches only, or all).
+        let tree = self.shown_tree()?;
+        let n = tree.at(path)?;
         Some(ItemInfo {
             is_dir: n.is_dir,
             open: self.expanded.contains(path),
@@ -236,7 +238,7 @@ impl App {
     }
 
     pub(super) fn tree_action(&mut self, a: TreeAction, path: Vec<u32>) {
-        let Some(tree) = self.tree.clone() else { return };
+        let Some(tree) = self.shown_tree() else { return };
         let Some(n) = tree.at(&path) else { return };
         let disk = self.full_path(&path);
         self.selected = Some(path.clone());
@@ -503,7 +505,7 @@ impl App {
 
     fn props_window(&mut self, ctx: &egui::Context) {
         let Some(path) = self.ops.props.clone() else { return };
-        let node = self.tree_path_of(&path).and_then(|p| self.tree.as_ref()?.at(&p).map(|n| (n.size, n.files, n.modified, n.is_dir)));
+        let node = self.tree_path_of(&path).and_then(|p| self.shown_tree()?.at(&p).map(|n| (n.size, n.files, n.modified, n.is_dir)));
         let md = std::fs::symlink_metadata(&path).ok();
         let mut open = true;
         egui::Window::new("Properties").open(&mut open).pivot(Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).collapsible(false).resizable(false).show(ctx, |ui| {
@@ -585,7 +587,8 @@ impl App {
                 for (path, size) in &tf.files[range] {
                     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
                     let vis = ui.visuals().clone();
-                    let selected = self.selected.as_deref() == Some(&path[..]);
+                    // These paths are in the whole scan; the selection is in the tree on screen.
+                    let selected = self.selected.as_deref().is_some_and(|s| self.full_of(s) == path[..]);
                     if selected {
                         ui.painter().rect_filled(rect, 2.0, vis.selection.bg_fill);
                     } else if resp.hovered() {
@@ -613,7 +616,7 @@ impl App {
             });
         });
         if let Some(p) = pick {
-            self.select(p);
+            self.select_full(p);
         }
         if !open {
             self.ops.type_files = None;
@@ -623,7 +626,8 @@ impl App {
     /// Where a path on disk is in the tree, if it's there.
     pub(super) fn tree_path_of(&self, disk: &Path) -> Option<Vec<u32>> {
         let rel = disk.strip_prefix(&self.scanned_path).ok()?;
-        let mut n: &Node = self.tree.as_ref()?;
+        let tree = self.shown_tree()?;
+        let mut n: &Node = &tree;
         let mut out = Vec::new();
         for c in rel.components() {
             let name = c.as_os_str().to_string_lossy();
@@ -640,6 +644,8 @@ impl App {
         if updates.is_empty() || self.tree.is_none() {
             return;
         }
+        // Work in whole-scan positions; "Show matches only" is rebuilt from the new tree.
+        self.drop_filtered_view();
         // Tree positions change when sizes do, so remember things by their paths on disk.
         let selected = self.selected.as_ref().map(|p| self.full_path(p));
         let zoom = self.full_path(&self.zoom);
