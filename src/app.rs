@@ -15,6 +15,7 @@ use crate::tilegpu::Backend;
 use crate::treemap::{self, Cushion};
 #[cfg(test)]
 use crate::treemap::Tile;
+use custom::{CustomUi, FilterJob, SeqState, Shown};
 use eframe::egui::{
     self, ecolor::Hsva, pos2, vec2, Align2, Color32, FontId, Rect, Sense, Stroke,
 };
@@ -23,6 +24,8 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
+
+mod custom;
 
 #[derive(PartialEq, Clone, Copy)]
 enum SortBy {
@@ -51,17 +54,20 @@ struct ViewFilter {
     smaller: u64,
     /// Bitmask of `Category::bit()`; 0 = every kind.
     kinds: u16,
+    /// The Custom pattern, compiled; None when the box is empty.
+    custom: Option<Arc<crate::pattern::Filter>>,
 }
 
 impl ViewFilter {
     fn active(&self) -> bool {
-        self.larger > 0 || self.smaller > 0 || self.kinds != 0
+        self.larger > 0 || self.smaller > 0 || self.kinds != 0 || self.custom.is_some()
     }
 
     fn matches(&self, name: &str, size: u64) -> bool {
         (self.larger == 0 || size >= self.larger)
             && (self.smaller == 0 || size < self.smaller)
             && (self.kinds == 0 || self.kinds & categories::of(name).bit() != 0)
+            && self.custom.as_ref().is_none_or(|f| f.matches(name))
     }
 }
 
@@ -86,6 +92,7 @@ enum SideTab {
     Sizes,
     Changes,
     Duplicates,
+    Sequences,
 }
 
 /// Size ranges for the histogram: (lower bound, upper bound or 0 for none, label).
@@ -148,6 +155,8 @@ struct LineView<'a> {
     modified: i64,
     busy: bool,
     color: Color32,
+    /// Doesn't match the filter (Highlight mode): drawn faintly.
+    dim: bool,
 }
 
 const ROW_H: f32 = 20.0;
@@ -192,6 +201,13 @@ pub struct App {
     filter: ViewFilter,
     /// (filter, matching files, matching bytes) for the filter summary.
     filter_stats: Option<(ViewFilter, u64, u64)>,
+    /// The Custom filter's input, history and presets.
+    custom: CustomUi,
+    /// In "Show matches only": the filtered tree the maps and folder list show instead of `tree`.
+    /// Paths in `zoom`, `selected` and `expanded` are paths in this tree while it's set.
+    shown: Option<Shown>,
+    filter_job: Option<FilterJob>,
+    seq: SeqState,
     /// Path and size of the treemap tile under the mouse, for the status bar.
     hover_status: Option<String>,
     wheel: f32,
@@ -264,6 +280,13 @@ impl App {
             show_drives: false,
             filter: ViewFilter::default(),
             filter_stats: None,
+            custom: CustomUi {
+                prefs: cc.storage.and_then(|s| eframe::get_value(s, "custom_filter")).unwrap_or_default(),
+                ..Default::default()
+            },
+            shown: None,
+            filter_job: None,
+            seq: SeqState::default(),
             hover_status: None,
             wheel: 0.0,
             color_mode: ColorMode::Type,
@@ -292,6 +315,13 @@ impl App {
             let exts = scan::ext_stats(&tree);
             app.finish_scan(PathBuf::from("synthetic"), tree, exts, 0.0);
             return app;
+        }
+        // DIRMAP_FILTER=pattern starts with the Custom filter set, e.g. for screenshots.
+        if let Ok(f) = std::env::var("DIRMAP_FILTER") {
+            app.set_custom(&f);
+        }
+        if std::env::var("DIRMAP_FILTER_ONLY").is_ok() {
+            app.custom.prefs.mode = custom::FilterMode::Only;
         }
         if let Some(f) = compare {
             app.load_snapshot_from(f);
@@ -368,6 +398,7 @@ impl App {
         self.expanded.clear();
         self.expanded.insert(Box::new([]));
         self.rows = None;
+        self.reset_custom_for_new_tree();
         self.filter_stats = None;
         self.hist = None;
         self.sun = None;
@@ -480,7 +511,7 @@ impl App {
 
     /// Status bar text for an entry on a map.
     fn hover_text(&self, abs: &[u32]) -> String {
-        let tree = self.tree.as_ref().unwrap();
+        let tree = self.shown_tree().unwrap();
         let n = tree.at(abs).unwrap();
         let full = self.full_path(abs);
         let what = match (n.is_dir, n.files) {
@@ -489,7 +520,7 @@ impl App {
             (false, _) => fmt_time(n.modified),
         };
         let mut s = format!("{}  ·  {}  ·  {}", full.display(), scan::human(n.size), what);
-        if let Some(d) = self.diff.as_deref().and_then(|(d, _)| d.at(abs)) {
+        if let Some(d) = self.diff.as_deref().and_then(|(d, _)| d.at(&self.full_of(abs))) {
             if d.old == snapshot::NEW {
                 s.push_str("  ·  new since the snapshot");
             } else if d.old != n.size {
@@ -512,7 +543,8 @@ impl App {
 
     fn full_path(&self, path: &[u32]) -> PathBuf {
         let mut p = self.scanned_path.clone();
-        let mut n: &Node = self.tree.as_ref().unwrap();
+        let tree = self.shown_tree().unwrap();
+        let mut n: &Node = &tree;
         for &i in path {
             n = &n.children[i as usize];
             p.push(&*n.name);
@@ -626,7 +658,7 @@ impl App {
                 }
                 let zoom_sel = ui.add_enabled(self.selected.is_some(), egui::Button::new("Zoom to selection"));
                 if zoom_sel.on_hover_text("Bring the selected file or folder into view").clicked() {
-                    if let (Some(sel), Some(tree)) = (self.selected.clone(), self.tree.clone()) {
+                    if let (Some(sel), Some(tree)) = (self.selected.clone(), self.shown_tree()) {
                         if treemap {
                             self.map.frame_path(&tree, &sel, &feel);
                         } else {
@@ -639,7 +671,7 @@ impl App {
                     }
                 }
                 if ui.button("Zoom out").on_hover_text("Up one level (right-click on the map)").clicked() {
-                    if let (true, Some(tree)) = (treemap, self.tree.clone()) {
+                    if let (true, Some(tree)) = (treemap, self.shown_tree()) {
                         self.map.zoom_out(&tree, &feel);
                     } else {
                         self.zoom.pop();
@@ -728,8 +760,14 @@ impl App {
         } else if stripe && self.view().stripes {
             p.rect_filled(rect, 0.0, vis.faint_bg_color);
         }
-        let text_color = if selected { vis.selection.stroke.color } else { vis.text_color() };
-        let weak = if selected { text_color } else { vis.weak_text_color() };
+        let text_color = if selected {
+            vis.selection.stroke.color
+        } else if line.dim {
+            vis.weak_text_color().gamma_multiply(0.6)
+        } else {
+            vis.text_color()
+        };
+        let weak = if selected || line.dim { text_color } else { vis.weak_text_color() };
         let font = FontId::proportional(13.0);
         let cols = self.columns(rect.width());
         let cy = rect.center().y;
@@ -749,7 +787,8 @@ impl App {
         }
         x += 14.0;
         let icon = Rect::from_min_size(pos2(x, cy - 8.0), vec2(16.0, 16.0));
-        self.icons.paint(ui, icon, line.is_dir, scan::ext_of(line.name), line.color);
+        let color = if line.dim { custom::dim(line.color) } else { line.color };
+        self.icons.paint(ui, icon, line.is_dir, scan::ext_of(line.name), color);
         x += 21.0;
         let name_clip = Rect::from_min_max(pos2(x, rect.top()), pos2(rect.left() + name_w - 6.0, rect.bottom()));
         let np = p.with_clip_rect(name_clip.intersect(p.clip_rect()));
@@ -776,7 +815,7 @@ impl App {
                     p.rect_filled(bar, 2.0, vis.extreme_bg_color);
                     let mut fill = bar;
                     fill.set_width(bar.width() * frac.clamp(0.0, 1.0));
-                    let c = if line.is_dir { Color32::from_rgb(90, 140, 220) } else { line.color };
+                    let c = if line.is_dir { Color32::from_rgb(90, 140, 220) } else { color };
                     p.rect_filled(fill, 2.0, c);
                     p.text(right, Align2::RIGHT_CENTER, format!("{:.1}%", frac * 100.0), font.clone(), weak);
                 }
@@ -801,7 +840,9 @@ impl App {
 
     fn tree_panel(&mut self, ui: &mut egui::Ui) {
         self.header(ui, true);
-        let Some(tree) = self.tree.take() else { return };
+        let Some(tree) = self.shown_tree() else { return };
+        // In Highlight mode, files that don't pass the filter are dimmed here like on the maps.
+        let dim_filter = (self.filter.active() && self.shown.is_none()).then(|| self.filter.clone());
         if self.rows.is_none() {
             self.rows = Some(self.flatten(&tree));
         }
@@ -834,6 +875,7 @@ impl App {
                     modified: n.modified,
                     busy: false,
                     color: self.color_of(n),
+                    dim: !n.is_dir && dim_filter.as_ref().is_some_and(|f| !f.matches(&n.name, n.size)),
                 };
                 let selected = self.selected.as_deref() == Some(&row.path[..]);
                 let arrow = self.paint_line(ui, rect, &line, selected, resp.hovered(), (range.start + k) % 2 == 1);
@@ -846,7 +888,6 @@ impl App {
             }
         });
         self.rows = Some(rows);
-        self.tree = Some(tree);
         if let Some(p) = toggled {
             if !self.expanded.remove(&p) {
                 self.expanded.insert(p);
@@ -967,6 +1008,7 @@ impl App {
                             modified: dir.modified.load(Ordering::Relaxed),
                             busy: !dir.done.load(Ordering::Acquire),
                             color: Color32::GRAY,
+                            dim: false,
                         };
                         self.paint_line(ui, rect, &line, false, resp.hovered(), stripe);
                         if resp.clicked() {
@@ -985,6 +1027,7 @@ impl App {
                             modified: *modified,
                             busy: false,
                             color: ext_color(&scan::ext_of(name).to_lowercase(), usize::MAX),
+                            dim: false,
                         };
                         self.paint_line(ui, rect, &line, false, resp.hovered(), stripe);
                     }
@@ -1011,7 +1054,10 @@ impl App {
     // ---------- extension list ----------
 
     fn ext_panel(&mut self, ui: &mut egui::Ui) {
-        let total: u64 = self.tree.as_ref().map(|t| t.size).unwrap_or(0).max(1);
+        let total: u64 = self.shown_tree().map(|t| t.size).unwrap_or(0).max(1);
+        if self.shown.is_some() {
+            ui.weak("Matching files only");
+        }
         if self.highlight_ext.is_some() && ui.small_button("Clear highlight").clicked() {
             self.highlight_ext = None;
         }
@@ -1029,7 +1075,11 @@ impl App {
             ui.painter().text(pos2(x, hdr.center().y), align, t, font.clone(), strong);
         }
         ui.spacing_mut().item_spacing.y = 0.0;
-        let exts = std::mem::take(&mut self.exts);
+        // In "Show matches only" the list covers just the matches, like the maps.
+        let exts = match &mut self.shown {
+            Some(s) => std::mem::take(&mut s.exts),
+            None => std::mem::take(&mut self.exts),
+        };
         egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW_H, exts.len(), |ui, range| {
             for (k, e) in exts[range.clone()].iter().enumerate() {
                 let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
@@ -1063,7 +1113,10 @@ impl App {
                 }
             }
         });
-        self.exts = exts;
+        match &mut self.shown {
+            Some(s) => s.exts = exts,
+            None => self.exts = exts,
+        }
         if let Some(t) = toggle {
             self.highlight_ext = if self.highlight_ext.as_ref() == Some(&t) { None } else { Some(t) };
         }
@@ -1075,7 +1128,7 @@ impl App {
     fn side_panel(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             for (tab, label) in
-                [(SideTab::Types, "File types"), (SideTab::Sizes, "Sizes"), (SideTab::Changes, "Changes"), (SideTab::Duplicates, "Duplicates")]
+                [(SideTab::Types, "File types"), (SideTab::Sizes, "Sizes"), (SideTab::Changes, "Changes"), (SideTab::Duplicates, "Duplicates"), (SideTab::Sequences, "Sequences")]
             {
                 ui.selectable_value(&mut self.side_tab, tab, label);
             }
@@ -1086,12 +1139,13 @@ impl App {
             SideTab::Sizes => self.sizes_panel(ui),
             SideTab::Changes => self.changes_panel(ui),
             SideTab::Duplicates => self.dupes_panel(ui),
+            SideTab::Sequences => self.sequences_panel(ui),
         }
     }
 
     /// Histogram of file sizes in the zoomed folder; clicking a bar filters the map to that range.
     fn sizes_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(tree) = self.tree.as_ref() else { return };
+        let Some(tree) = self.shown_tree() else { return };
         let kinds = self.filter.kinds;
         let Some(zroot) = tree.at(&self.zoom) else { return };
         if self.hist.as_ref().is_none_or(|h| h.0 != self.zoom || h.1 != kinds) {
@@ -1284,7 +1338,7 @@ impl App {
             }
         });
         if let Some(p) = clicked {
-            self.select(p);
+            self.select_full(p);
         }
     }
 
@@ -1398,7 +1452,7 @@ impl App {
         self.dup_groups = groups;
         self.dup_rows = rows;
         if let Some(p) = clicked {
-            self.select(p);
+            self.select_full(p);
         }
     }
 
@@ -1406,7 +1460,8 @@ impl App {
 
     fn sunburst_panel(&mut self, ui: &mut egui::Ui) {
         let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click());
-        let Some(tree) = self.tree.as_ref() else { return };
+        let Some(tree) = self.shown_tree() else { return };
+        let back = self.shown_back();
         if tree.at(&self.zoom).is_none() {
             self.zoom.clear();
         }
@@ -1440,6 +1495,7 @@ impl App {
         });
 
         let filtering = self.filter.active() || self.dupes_only;
+        let need_full = self.dupes_only || self.color_mode == ColorMode::Change;
         let mut mesh = egui::Mesh::default();
         let mut abs = self.zoom.clone();
         let zl = abs.len();
@@ -1448,6 +1504,11 @@ impl App {
             let n = zroot.at(&s.path).unwrap();
             abs.truncate(zl);
             abs.extend_from_slice(&s.path);
+            // Duplicates and changes are recorded against the whole scan.
+            let full = match (&back, need_full) {
+                (Some(b), true) => b.to_full(&abs),
+                _ => abs.clone(),
+            };
             let mut c = match (n.is_dir, self.color_mode) {
                 // Folders take the hue of the top-level folder they're in, darker further out.
                 (true, ColorMode::Type) => {
@@ -1458,15 +1519,17 @@ impl App {
                 }
                 // A folder's newest file says little about the folder; keep folders neutral so files stand out.
                 (true, ColorMode::Age) => Color32::from_gray((110.0 - 8.0 * (s.ring - 1) as f32).max(60.0) as u8),
-                (true, ColorMode::Change) => self.node_color(n, &abs).gamma_multiply(0.75),
-                (false, _) => self.node_color(n, &abs),
+                (true, ColorMode::Change) => self.node_color(n, &full).gamma_multiply(0.75),
+                (false, _) => self.node_color(n, &full),
             };
             if n.is_dir {
-                if filtering {
+                if filtering && self.shown.is_none() {
                     c = c.gamma_multiply(0.4);
                 }
-            } else if filtering && !(self.filter.matches(&n.name, n.size) && (!self.dupes_only || self.dup_set.contains(&abs))) {
+            } else if self.dupes_only && !self.dup_set.contains(&full) {
                 c = Color32::from_gray(45);
+            } else if self.filter.active() && !self.filter.matches(&n.name, n.size) {
+                c = custom::dim(c);
             } else if let Some(h) = &self.highlight_ext {
                 if !n.ext().eq_ignore_ascii_case(h) {
                     c = c.gamma_multiply(0.2);
@@ -1531,7 +1594,7 @@ impl App {
 
         let prev_status = self.hover_status.take();
         let child = hover.map(|i| segs[i].path[0]);
-        let mut zoom_to = wheel_zoom(&mut self.wheel, ui, resp.hovered(), tree, &self.zoom, child);
+        let mut zoom_to = wheel_zoom(&mut self.wheel, ui, resp.hovered(), &tree, &self.zoom, child);
         let mut select = None;
         if let Some(i) = hover {
             let mut abs = self.zoom.clone();
@@ -1597,13 +1660,17 @@ impl App {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key()).hash(&mut h);
+        self.shown.as_ref().map(|s| Arc::as_ptr(&s.tree) as usize).hash(&mut h);
         let key = h.finish();
         if self.map_paint == Some(key) {
             return;
         }
         self.map_paint = Some(key);
-        let filtering = self.filter.active() || self.dupes_only;
+        let filtering = self.filter.active();
         let mode = self.color_mode;
+        // In "Show matches only" tiles have paths in the filtered tree; duplicates and changes
+        // are recorded against the whole scan.
+        let back = self.shown_back().filter(|_| self.dupes_only || mode == ColorMode::Change);
         let colors: Arc<HashMap<String, Color32>> = Arc::new(self.colors.clone());
         let diff = self.diff.clone();
         let filter = self.filter.clone();
@@ -1611,7 +1678,15 @@ impl App {
         let dup_set = self.dup_set.clone();
         let highlight = self.highlight_ext.clone();
         let colorize: mapview::Colorizer = Arc::new(move |n: &Node, abs: &[u32]| {
-            if filtering && !(filter.matches(&n.name, n.size) && (!dupes_only || dup_set.contains(abs))) {
+            let full;
+            let abs = match &back {
+                Some(b) => {
+                    full = b.to_full(abs);
+                    &full[..]
+                }
+                None => abs,
+            };
+            if dupes_only && !dup_set.contains(abs) {
                 return None;
             }
             let c = match mode {
@@ -1628,13 +1703,18 @@ impl App {
                     None => Color32::from_gray(95),
                 },
             };
+            // Highlight mode: what doesn't match stays in place, dimmed.
+            if filtering && !filter.matches(&n.name, n.size) {
+                let d = custom::dim(c);
+                return Some((d, d));
+            }
             let fill = match &highlight {
                 Some(h) if !n.ext().eq_ignore_ascii_case(h) => c.gamma_multiply(0.15),
                 _ => c,
             };
             Some((fill, c))
         });
-        let background = if filtering { Color32::from_gray(24) } else { Color32::from_gray(45) };
+        let background = if dupes_only { Color32::from_gray(24) } else { Color32::from_gray(45) };
         let v = self.view();
         let cushion = Cushion { height: v.height as f64, scale: v.scale as f64 };
         let look = self.look();
@@ -1644,7 +1724,7 @@ impl App {
     fn treemap_panel(&mut self, ui: &mut egui::Ui) {
         let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let bounds = resp.rect;
-        let Some(tree) = self.tree.clone() else { return };
+        let Some(tree) = self.shown_tree() else { return };
         if tree.at(&self.zoom).is_none() {
             self.zoom.clear();
         }
@@ -1832,14 +1912,15 @@ impl App {
 
     /// Breadcrumbs for the zoomed folder, plus the "show only" filters for the treemap.
     fn filter_bar(&mut self, ui: &mut egui::Ui) {
-        let Some(tree) = self.tree.as_ref() else { return };
+        let Some(tree) = self.shown_tree() else { return };
+        let total = self.tree.as_ref().map_or(0, |t| t.size);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let mut go = None;
             if ui.small_button(format!("🏠 {}", tree.name)).clicked() {
                 go = Some(0);
             }
-            let mut n: &Node = tree;
+            let mut n: &Node = &tree;
             for (k, &i) in self.zoom.iter().enumerate() {
                 n = &n.children[i as usize];
                 ui.weak("›");
@@ -1904,26 +1985,20 @@ impl App {
                     self.filter.kinds ^= c.bit();
                 }
             }
+            self.custom_button(ui);
         });
+        self.custom_row(ui);
         ui.horizontal_wrapped(|ui| {
             ui.label("Larger than");
             size_edit(ui, &mut self.filter.larger);
             ui.label("Smaller than");
             size_edit(ui, &mut self.filter.smaller);
+            if (self.filter.active() || self.custom.error.is_some()) && ui.button("Clear filters").clicked() {
+                self.filter = ViewFilter::default();
+                self.clear_custom();
+            }
             if self.filter.active() {
-                if ui.button("Clear filters").clicked() {
-                    self.filter = ViewFilter::default();
-                }
-                let stale = self.filter_stats.as_ref().is_none_or(|(f, _, _)| *f != self.filter);
-                if stale {
-                    let (files, bytes) = count_matches(tree, &self.filter);
-                    self.filter_stats = Some((self.filter.clone(), files, bytes));
-                }
-                if let Some((_, files, bytes)) = &self.filter_stats {
-                    let pct = *bytes as f64 * 100.0 / tree.size.max(1) as f64;
-                    ui.separator();
-                    ui.strong(format!("{} files match · {} ({pct:.1}% of the scan)", group(*files), scan::human(*bytes)));
-                }
+                self.filter_summary(ui, total);
             }
             ui.separator();
             let mut labels = self.settings.show_labels;
@@ -2009,6 +2084,7 @@ impl Shading {
 impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "settings", &self.settings);
+        eframe::set_value(storage, "custom_filter", &self.custom.prefs);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -2099,6 +2175,10 @@ impl eframe::App for App {
             }
         }
 
+        self.custom_shortcut(&ctx);
+        self.drive_filter(&ctx);
+        self.poll_sequences(&ctx);
+
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(2.0);
             self.toolbar(ui);
@@ -2133,6 +2213,10 @@ impl eframe::App for App {
                         group(t.files),
                         self.scan_secs
                     ));
+                    if let Some(s) = &self.shown {
+                        ui.separator();
+                        ui.label(format!("Showing {} matching files ({})", group(s.tree.files), scan::human(s.tree.size)));
+                    }
                     let stale = self.scanned_with.as_ref().is_some_and(|s| s.scan_key() != self.settings.scan_key());
                     if stale {
                         ui.separator();
@@ -2178,9 +2262,14 @@ impl eframe::App for App {
             ui.add_space(2.0);
         });
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+            let rect = ui.max_rect();
             match self.map_kind {
                 MapKind::Treemap => self.treemap_panel(ui),
                 MapKind::Sunburst => self.sunburst_panel(ui),
+            }
+            if self.shown.as_ref().is_some_and(|s| s.tree.files == 0) {
+                let msg = "No files match the filter";
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, msg, FontId::proportional(16.0), Color32::GRAY);
             }
         });
     }
@@ -2424,17 +2513,6 @@ fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
 }
 
 
-/// Files (and their total size) anywhere in the tree that pass the filter.
-fn count_matches(n: &Node, f: &ViewFilter) -> (u64, u64) {
-    if !n.is_dir {
-        return if f.matches(&n.name, n.size) { (1, n.size) } else { (0, 0) };
-    }
-    n.children.iter().fold((0, 0), |(a, b), c| {
-        let (x, y) = count_matches(c, f);
-        (a + x, b + y)
-    })
-}
-
 /// 1234567 -> "1,234,567"
 fn group(n: u64) -> String {
     let s = n.to_string();
@@ -2462,5 +2540,41 @@ fn ext_color(ext: &str, rank: usize) -> Color32 {
     } else {
         let h = ext.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
         Hsva::new((h % 360) as f32 / 360.0, 0.3, 0.65, 1.0).into()
+    }
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+    use crate::pattern::{Filter, Options};
+
+    fn custom(p: &str) -> Option<Arc<Filter>> {
+        Some(Arc::new(Filter::compile(p, Options::default()).unwrap()))
+    }
+
+    #[test]
+    fn categories_still_work_alone() {
+        let f = ViewFilter { kinds: Category::Images.bit(), ..Default::default() };
+        assert!(f.active());
+        assert!(f.matches("a.PNG", 10));
+        assert!(!f.matches("a.mp3", 10));
+        assert!(!ViewFilter::default().active());
+        assert!(ViewFilter::default().matches("anything", 0));
+    }
+
+    #[test]
+    fn custom_combines_with_categories_and_sizes() {
+        let f = ViewFilter { custom: custom("*beauty*"), ..Default::default() };
+        assert!(f.active());
+        assert!(f.matches("sh010_beauty.1001.exr", 1));
+        assert!(!f.matches("sh010_depth.1001.exr", 1));
+        // Every part has to agree.
+        let f = ViewFilter { custom: custom("*beauty*"), kinds: Category::Audio.bit(), larger: 100, ..Default::default() };
+        assert!(!f.matches("sh010_beauty.1001.exr", 1000), "not audio");
+        assert!(f.matches("beauty.wav", 1000));
+        assert!(!f.matches("beauty.wav", 10), "too small");
+        // Equal patterns give equal filters (so results are reused), different ones don't.
+        assert!(ViewFilter { custom: custom("*.exr"), ..Default::default() } == ViewFilter { custom: custom("*.exr"), ..Default::default() });
+        assert!(ViewFilter { custom: custom("*.exr"), ..Default::default() } != ViewFilter { custom: custom("*.png"), ..Default::default() });
     }
 }
