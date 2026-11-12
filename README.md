@@ -12,10 +12,20 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
 - **Directory tree** with Explorer's own file icons on Windows, sortable Name / Size / Files / Last change
   columns and percentage bars. Only visible rows are drawn, so huge folders stay fast.
 - **File types list** with totals per extension. Click one to highlight those files in the treemap.
-- **Cushion treemap** (van Wijk & van de Wetering, like WinDirStat) colored by file type. Hovering shows the
-  path, size and date in the status bar; click to select (the tree jumps to it), double-click or wheel up to zoom
-  into a folder, right-click or wheel down to zoom out, and use the breadcrumbs to jump back up.
-  File names and sizes are drawn on tiles that have room for them (can be turned off).
+- **Cushion treemap** (van Wijk & van de Wetering, like WinDirStat) colored by file type, drawn on the GPU.
+  Hovering shows the path, size and date in the status bar; click to select (the tree jumps to it).
+  - **Smooth zoom towards the pointer**: the wheel (or trackpad pinch) zooms continuously and the spot under the
+    pointer stays under it, so you can point at a tiny file and keep zooming until it fills the window.
+    Drag to pan. `+` / `-` zoom too.
+  - **Double-click** a tile to open its folder: the folder grows from its place to fill the map.
+    **Right-click** (or Zoom out) goes up one level, animated. **Zoom to selection** frames the selected
+    file or folder. **Back / Forward** (◀ ▶, Alt+Left / Alt+Right or the mouse's side buttons) step through
+    places you've looked at; **Whole map** (Home) returns to the full scan.
+  - A soft light follows the pointer across the tiles, the hovered tile lifts slightly, and a faint bevel
+    separates neighbours. Settings > Treemap turns these on or off and sets zoom sensitivity and animation speed.
+  - File names and sizes fade in on tiles that have room for them (can be turned off).
+  - Only the tiles in view are generated, down to about a pixel, on a background thread, so it stays smooth with
+    millions of files.
 - **Treemap filters** that blank out everything else: by kind (audio, video, images, AI model weights such as
   gguf / safetensors / pt / onnx, archives, documents, code, programs, disk images) and by size
   (larger than / smaller than a size such as `500 MB` or `2 GB`), with a count of how many files and bytes match.

@@ -375,6 +375,21 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
         ui.end_row();
     });
     ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label("Presets:");
+        if ui.button("Classic").clicked() {
+            let def = Settings::default();
+            (d.brightness, d.cushion, d.height, d.scale, d.light_x, d.light_y) =
+                (def.brightness, def.cushion, def.height, def.scale, def.light_x, def.light_y);
+        }
+        if ui.button("Soft").clicked() {
+            (d.brightness, d.cushion, d.height, d.scale) = (0.9, 0.5, 0.25, 0.85);
+        }
+        if ui.button("Flat").clicked() {
+            (d.brightness, d.cushion, d.height, d.scale, d.show_grid) = (0.75, 0.0, 0.0, 0.0, true);
+        }
+    });
+    ui.add_space(6.0);
     ui.columns(2, |cols| {
         let ui = &mut cols[0];
         ui.strong("Navigation");
@@ -405,21 +420,6 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
             });
         });
         ui.checkbox(&mut d.depth_effect, "Block depth effect").on_hover_text("A very slight bevel so neighbouring tiles stand apart");
-    });
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        ui.label("Presets:");
-        if ui.button("Classic").clicked() {
-            let def = Settings::default();
-            (d.brightness, d.cushion, d.height, d.scale, d.light_x, d.light_y) =
-                (def.brightness, def.cushion, def.height, def.scale, def.light_x, def.light_y);
-        }
-        if ui.button("Soft").clicked() {
-            (d.brightness, d.cushion, d.height, d.scale) = (0.9, 0.5, 0.25, 0.85);
-        }
-        if ui.button("Flat").clicked() {
-            (d.brightness, d.cushion, d.height, d.scale, d.show_grid) = (0.75, 0.0, 0.0, 0.0, true);
-        }
     });
 }
 
