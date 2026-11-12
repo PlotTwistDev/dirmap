@@ -254,6 +254,10 @@ pub struct Leaf<'a> {
     pub surface: Surface,
     /// Child-index path from the layout root.
     pub path: &'a [u32],
+    /// For a folder: its children from this index on are too small to draw. Reported before
+    /// the children that are drawn (so it lies underneath them), letting the gap they leave be
+    /// filled with something representative instead of empty background.
+    pub hidden_from: usize,
 }
 
 /// Child rectangles of a folder: a prefix of its full squarified layout (see `child_rects`).
@@ -357,12 +361,16 @@ struct Walk<'a> {
 fn build_into(w: &mut Walk<'_>, node: &Node, rect: DRect, surface: Surface, h: f64, path: &mut Vec<u32>) -> bool {
     let surface = with_ridges(surface, &rect, h);
     if !node.is_dir || !w.detail.subdivide(&rect) {
-        return (w.leaf)(Leaf { node, rect, surface, path: path });
+        return (w.leaf)(Leaf { node, rect, surface, path, hidden_from: 0 });
     }
     let unit = w.detail.unit;
     let rects = child_rects(node, &rect, unit * unit, w.memo);
     if rects.is_empty() {
-        return (w.leaf)(Leaf { node, rect, surface, path: path });
+        return (w.leaf)(Leaf { node, rect, surface, path, hidden_from: 0 });
+    }
+    let nonzero = node.children.partition_point(|c| c.size > 0);
+    if rects.len() < nonzero && !(w.leaf)(Leaf { node, rect, surface, path, hidden_from: rects.len() }) {
+        return false;
     }
     for (i, r) in rects.iter().enumerate() {
         if !r.intersects(w.cull) {
@@ -599,6 +607,7 @@ mod tests {
         let detail = Detail { unit: 1.0 };
         let cushion = Cushion { height: 0.38, scale: 0.91 };
         build(&tree, world, &world, detail, cushion, None, &mut |l| {
+            if l.hidden_from > 0 { return true; }
             new.push((l.path.to_vec(), l.rect, l.surface));
             true
         });
@@ -644,6 +653,7 @@ mod tests {
         let detail = Detail { unit: 0.05 };
         let mut tiles = Vec::new();
         build(&tree, world, &world, detail, cushion, None, &mut |l| {
+            if l.hidden_from > 0 { return true; }
             tiles.push((l.path.to_vec(), l.rect));
             true
         });
