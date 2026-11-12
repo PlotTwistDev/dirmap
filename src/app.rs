@@ -1323,7 +1323,8 @@ impl App {
         let hole = radius * 0.17;
         let ring_w = (radius - hole) / rings as f32;
         let r_in = |ring: u16| hole + (ring - 1) as f32 * ring_w;
-        painter.rect_filled(rect, 0.0, Color32::from_gray(30));
+        let backdrop = if ui.visuals().dark_mode { Color32::from_gray(30) } else { Color32::from_gray(236) };
+        painter.rect_filled(rect, 0.0, backdrop);
 
         let pointer = resp.hover_pos();
         let in_hole = pointer.is_some_and(|p| (p - center).length() < hole);
@@ -1350,7 +1351,9 @@ impl App {
             let mut c = match (n.is_dir, self.color_mode) {
                 // Folders take the hue of the top-level folder they're in, darker further out.
                 (true, ColorMode::Type) => {
-                    let hue = (s.path[0] as f32 * 0.618_034 + 0.08).fract();
+                    // (shifted a little by the second level, so a view dominated by one folder isn't one color)
+                    let second = s.path.get(1).map_or(0.0, |&i| (i % 7) as f32 * 0.045);
+                    let hue = (s.path[0] as f32 * 0.618_034 + 0.08 + second).fract();
                     Hsva::new(hue, 0.4, (0.82 - 0.07 * (s.ring - 1) as f32).max(0.4), 1.0).into()
                 }
                 // A folder's newest file says little about the folder; keep folders neutral so files stand out.
@@ -1403,9 +1406,19 @@ impl App {
         // Middle: the folder being shown; click it to go up a level.
         let mid = if in_hole && !self.zoom.is_empty() { Color32::from_gray(80) } else { Color32::from_gray(55) };
         painter.circle_filled(center, hole - 1.0, mid);
-        let clip = painter.with_clip_rect(Rect::from_center_size(center, vec2(hole * 1.8, hole * 2.0)));
-        clip.text(center - vec2(0.0, 8.0), Align2::CENTER_CENTER, &*zroot.name, FontId::proportional(13.0), Color32::WHITE);
-        clip.text(center + vec2(0.0, 9.0), Align2::CENTER_CENTER, scan::human(zroot.size), FontId::proportional(12.0), Color32::LIGHT_GRAY);
+        // Shorten the name until it fits inside the circle.
+        let font = FontId::proportional(13.0);
+        let mut name = zroot.name.to_string();
+        let fits = |t: &str| painter.layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x <= hole * 1.7;
+        if !fits(&name) {
+            let mut chars: Vec<char> = name.chars().collect();
+            while chars.len() > 1 && !fits(&format!("{}…", chars.iter().collect::<String>())) {
+                chars.pop();
+            }
+            name = format!("{}…", chars.iter().collect::<String>());
+        }
+        painter.text(center - vec2(0.0, 8.0), Align2::CENTER_CENTER, name, font, Color32::WHITE);
+        painter.text(center + vec2(0.0, 9.0), Align2::CENTER_CENTER, scan::human(zroot.size), FontId::proportional(12.0), Color32::LIGHT_GRAY);
 
         // Outline the selection (or its nearest shown ancestor).
         if let Some(sel) = self.selected.as_ref().filter(|s| s.starts_with(&self.zoom)) {
@@ -1976,8 +1989,13 @@ impl eframe::App for App {
 
         egui::Panel::right("exts").default_size(330.0).resizable(true).show(ui, |ui| self.side_panel(ui));
         egui::Panel::top("tree").default_size(320.0).resizable(true).show(ui, |ui| self.tree_panel(ui));
+        // Its own panel, so it gets the theme's background (readable in light and dark themes).
+        egui::Panel::top("filters").show(ui, |ui| {
+            ui.add_space(2.0);
+            self.filter_bar(ui);
+            ui.add_space(2.0);
+        });
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
-            egui::Frame::new().inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| self.filter_bar(ui));
             match self.map_kind {
                 MapKind::Treemap => self.treemap_panel(ui),
                 MapKind::Sunburst => self.sunburst_panel(ui),
