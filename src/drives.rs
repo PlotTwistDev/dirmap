@@ -87,21 +87,26 @@ pub fn list() -> Vec<Drive> {
             mounts.push((PathBuf::from(dir.replace("\\040", " ")), fs.to_string()));
         }
     } else {
+        // macOS: every volume shows up in /Volumes, the startup disk as a link to /.
         mounts.push(("/".into(), String::new()));
         if let Ok(rd) = std::fs::read_dir("/Volumes") {
             for e in rd.flatten() {
-                mounts.push((e.path(), String::new()));
+                let name = e.file_name().to_string_lossy().to_string();
+                match std::fs::canonicalize(e.path()) {
+                    Ok(p) if p == std::path::Path::new("/") => mounts[0].1 = name,
+                    _ => mounts.push((e.path(), name)),
+                }
             }
         }
     }
     let mut out: Vec<Drive> = Vec::new();
-    for (root, fs) in mounts {
+    for (root, label) in mounts {
         let Some((total, free)) = statvfs(&root) else { continue };
         if total == 0 || out.iter().any(|d| d.root == root) {
             continue;
         }
-        let network = matches!(fs.as_str(), "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "fuse.sshfs" | "9p");
-        out.push(Drive { root, label: fs, total, free, network });
+        let network = matches!(label.as_str(), "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "fuse.sshfs" | "9p");
+        out.push(Drive { root, label, total, free, network });
     }
     out
 }

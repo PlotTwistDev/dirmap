@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=dirmap
+GenericName=Disk Usage Analyzer
+Comment=See what is taking up space on your drives
+Exec=dirmap %f
+Icon=drive-harddisk
+Terminal=false
+Categories=Utility;System;Filesystem;

@@ -1,0 +1,80 @@
+name: build
+
+# Builds dirmap for Windows, Linux and macOS on every push. Pushing a tag like v0.2.0 also
+# publishes the three downloads as a GitHub release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-x64
+          - os: ubuntu-22.04
+            name: linux-x64
+          - os: macos-latest
+            name: macos-universal
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --release
+          New-Item -ItemType Directory dist | Out-Null
+          Compress-Archive -Path target/release/dirmap.exe, README.md -DestinationPath dist/dirmap-${{ matrix.name }}.zip
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release
+          mkdir -p dist/dirmap
+          cp target/release/dirmap README.md packaging/dirmap.desktop dist/dirmap/
+          tar -C dist -czf dist/dirmap-${{ matrix.name }}.tar.gz dirmap
+
+      - name: Build (macOS app bundle, Apple silicon + Intel)
+        if: runner.os == 'macOS'
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          app=dist/dirmap.app/Contents
+          mkdir -p "$app/MacOS"
+          lipo -create -output "$app/MacOS/dirmap" \
+            target/aarch64-apple-darwin/release/dirmap target/x86_64-apple-darwin/release/dirmap
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          sed "s/VERSION/$version/" packaging/Info.plist > "$app/Info.plist"
+          # Ad-hoc signature: required to run on Apple silicon at all. Not notarized.
+          codesign --force --deep --sign - dist/dirmap.app
+          ditto -c -k --keepParent dist/dirmap.app dist/dirmap-${{ matrix.name }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dirmap-${{ matrix.name }}
+          path: dist/dirmap-${{ matrix.name }}.*
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/dirmap-${{ matrix.name }}.*

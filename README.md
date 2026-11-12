@@ -33,14 +33,38 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
 - **Settings** (saved between runs): theme, size units, filters (folders and file patterns to skip or include,
   minimum size, maximum age), tree columns, treemap look with live preview, hidden files, scanner threads.
 
-## Run
+## Download
+
+Every push to `main` builds Windows, Linux and macOS versions on GitHub Actions (the **build**
+workflow; open a run and download from *Artifacts*). Pushing a tag such as `v0.2.0` also attaches them
+to a GitHub release.
+
+- **Windows**: `dirmap-windows-x64.zip` contains `dirmap.exe`. No install needed.
+- **Linux**: `dirmap-linux-x64.tar.gz` contains the `dirmap` binary and a `dirmap.desktop` launcher
+  (copy it to `~/.local/share/applications/`). Needs X11 or Wayland plus `libxkbcommon-x11`, which
+  desktop installs already have.
+- **macOS** (11 Big Sur or later, Apple silicon and Intel): `dirmap-macos-universal.zip` contains
+  `dirmap.app`. It isn't notarized, so the first time, right-click it and choose **Open**, or run
+  `xattr -dr com.apple.quarantine dirmap.app`. To scan your whole disk including other apps' data,
+  give it **Full Disk Access** in System Settings > Privacy & Security; without it those folders are
+  counted as unreadable.
+
+## Build from source
+
+Install Rust from https://rustup.rs (1.95 or newer), then:
 
 ```sh
+git clone https://github.com/PlotTwistDev/dirmap
+cd dirmap
 cargo run --release -- /path/to/scan        # GUI
 cargo run --release -- --cli --top 20 ~/    # text report, no window
 ```
 
-Flags: `--all-fs` descends into other mounted filesystems, `--top N` sets the CLI row count.
+The binary ends up in `target/release/`. The same commands work on Windows, Linux and macOS.
 
-On Linux the GUI needs X11 or Wayland plus `libxkbcommon-x11`. It uses the GPU (wgpu) and falls back
-to OpenGL automatically.
+Flags: `--all-fs` descends into other mounted filesystems, `--top N` sets the CLI row count,
+`--save-snapshot FILE` (with `--cli`) saves the scan for comparing later, `--compare FILE` opens the GUI
+comparing against a saved snapshot.
+
+The GUI uses the GPU (wgpu) and falls back to OpenGL automatically. On macOS, scanning `/` covers the
+system and data volumes together (they are one disk in Finder) without counting anything twice.

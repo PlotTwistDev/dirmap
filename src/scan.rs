@@ -183,8 +183,8 @@ impl Chain<'_> {
 
 /// Scan `root`, filling in `live` as it goes, and return the finished tree.
 pub fn scan(root: &Path, opts: &Options, progress: &Progress, live: &LiveDir) -> Node {
-    let dev = device_of(root);
-    let run = || scan_dir(root.to_path_buf(), live, None, opts, dev, progress);
+    let fs = SameFs::of(root);
+    let run = || scan_dir(root.to_path_buf(), live, None, opts, &fs, progress);
     match (opts.threads > 0).then(|| rayon::ThreadPoolBuilder::new().num_threads(opts.threads).build()) {
         Some(Ok(pool)) => pool.install(run),
         _ => run(),
@@ -209,7 +209,7 @@ enum Entry {
     File(LiveFile),
 }
 
-fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, dev: Option<u64>, p: &Progress) {
+fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, sfs: &SameFs, p: &Progress) {
     if p.cancel.load(Ordering::Relaxed) {
         dir.done.store(true, Ordering::Release);
         return;
@@ -248,11 +248,11 @@ fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, de
                 return None;
             }
             if md.is_dir() {
-                if opts.one_file_system && dev.is_some() && dev_of_md(&md) != dev {
+                if opts.one_file_system && !sfs.contains(&md) {
                     return None;
                 }
                 let child = e.path();
-                if opts.folder_excluded(&child) {
+                if sfs.skip.as_deref() == Some(child.as_path()) || opts.folder_excluded(&child) {
                     return None;
                 }
                 Some(Entry::Dir(child, name))
@@ -291,7 +291,7 @@ fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, de
     chain.add(bytes, count, newest);
 
     subdirs.into_par_iter().for_each(|(path, d)| {
-        scan_dir(path, &d, Some(&chain), opts, dev, p);
+        scan_dir(path, &d, Some(&chain), opts, sfs, p);
     });
     dir.done.store(true, Ordering::Release);
 }
@@ -335,6 +335,38 @@ fn is_hidden(_name: &str, md: &fs::Metadata) -> bool {
 #[cfg(not(windows))]
 fn is_hidden(name: &str, _md: &fs::Metadata) -> bool {
     name.starts_with('.')
+}
+
+/// Which filesystems count as "the scanned drive" when staying on one drive.
+struct SameFs {
+    /// Device ids; empty when the platform doesn't have them (then nothing is skipped).
+    devs: Vec<u64>,
+    /// A folder never to walk into, because its contents are already reached another way.
+    skip: Option<PathBuf>,
+}
+
+impl SameFs {
+    fn of(root: &Path) -> Self {
+        #[allow(unused_mut)]
+        let mut s = SameFs { devs: device_of(root).into_iter().collect(), skip: None };
+        // On macOS the read-only system volume (/) and the data volume (/System/Volumes/Data)
+        // are joined by firmlinks: /Users, /Applications and so on really live on the data
+        // volume. Count both as the startup drive, and don't walk the data volume a second time
+        // through its own mount point.
+        #[cfg(target_os = "macos")]
+        {
+            let data = Path::new("/System/Volumes/Data");
+            if s.devs.first().is_some_and(|&d| Some(d) == device_of(Path::new("/"))) {
+                s.devs.extend(device_of(data));
+                s.skip = Some(data.to_path_buf());
+            }
+        }
+        s
+    }
+
+    fn contains(&self, md: &fs::Metadata) -> bool {
+        self.devs.is_empty() || dev_of_md(md).is_some_and(|d| self.devs.contains(&d))
+    }
 }
 
 fn device_of(path: &Path) -> Option<u64> {
