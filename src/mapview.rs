@@ -1187,12 +1187,24 @@ fn build_set(req: &Req) -> Option<TileSet> {
             cancelled = true;
             return false;
         }
-        if l.node.is_dir {
-            return true; // contents too small to draw: the background shows
-        }
         abs.truncate(rl);
         abs.extend_from_slice(l.path);
         let rect = set.local_rect(&l.rect);
+        if l.node.is_dir {
+            // Files too small to draw at this zoom: fill their area with the colour they
+            // would add up to, shaded as part of the folder, rather than leaving dark holes.
+            let mut budget = 48;
+            let Some(fill) = blend_of(l.node, l.hidden_from, &mut abs, &*req.paint.colorize, 0, &mut budget) else {
+                return true; // nothing in there passes the filter: background
+            };
+            let [s0, s1, s2, s3] = l.surface;
+            let grad = [(2.0 * s0 / ppu) as f32, (2.0 * s0 * ox + s2) as f32, (2.0 * s1 / ppu) as f32, (2.0 * s1 * oy + s3) as f32];
+            inst.push(Instance { rect, grad, color: fill.to_array(), flags: 0 });
+            if req.raster {
+                raster.push(RasterTile { rect: l.rect, surface: l.surface, color: fill, flat: false });
+            }
+            return true;
+        }
         match (req.paint.colorize)(l.node, &abs) {
             None => {
                 inst.push(Instance { rect, grad: [0.0; 4], color: dark.to_array(), flags: tilegpu::FLAT });
@@ -1224,6 +1236,36 @@ fn build_set(req: &Req) -> Option<TileSet> {
         set.image = Some(rasterize(&req.cover, ppu, bg, &raster, &req.paint));
     }
     Some(set)
+}
+
+/// Size-weighted average colour of a folder's children from index `from` on, looking at the
+/// largest few at each level (`budget` limits the total work). `abs` is the folder's path from
+/// the scan root; it's restored before returning. None if nothing in there has a colour (all
+/// filtered out).
+fn blend_of(node: &Node, from: usize, abs: &mut Vec<u32>, colorize: &(dyn Fn(&Node, &[u32]) -> Option<(Color32, Color32)> + Send + Sync), depth: u32, budget: &mut i32) -> Option<Color32> {
+    let mut acc = [0.0f64; 3];
+    let mut weight = 0.0;
+    for (i, c) in node.children.iter().enumerate().skip(from).take(8) {
+        if *budget <= 0 || c.size == 0 {
+            break;
+        }
+        *budget -= 1;
+        abs.push(i as u32);
+        let col = if c.is_dir {
+            if depth < 4 { blend_of(c, 0, abs, colorize, depth + 1, budget) } else { None }
+        } else {
+            colorize(c, abs).map(|p| p.0)
+        };
+        abs.pop();
+        if let Some(col) = col {
+            let w = c.size as f64;
+            acc[0] += col.r() as f64 * w;
+            acc[1] += col.g() as f64 * w;
+            acc[2] += col.b() as f64 * w;
+            weight += w;
+        }
+    }
+    (weight > 0.0).then(|| Color32::from_rgb((acc[0] / weight) as u8, (acc[1] / weight) as u8, (acc[2] / weight) as u8))
 }
 
 /// CPU fallback: render tiles into an image covering `cover` (the original per-pixel cushion
