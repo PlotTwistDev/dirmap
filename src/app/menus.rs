@@ -692,6 +692,7 @@ impl App {
         }
         self.rows = None;
         self.filter_stats = None;
+        self.hits = None;
         self.hist = None;
         self.sun = None;
         // Duplicate results point at old tree positions.
