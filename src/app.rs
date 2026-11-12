@@ -204,6 +204,8 @@ pub struct App {
     filter: ViewFilter,
     /// (filter, matching files, matching bytes) for the filter summary.
     filter_stats: Option<(ViewFilter, u64, u64)>,
+    /// Highlight mode: which folders hold matches, for the filter it was worked out for.
+    hits: Option<(ViewFilter, Arc<crate::subset::Hits>)>,
     /// The Custom filter's input, history and presets.
     custom: CustomUi,
     /// In "Show matches only": the filtered tree the maps and folder list show instead of `tree`.
@@ -295,6 +297,7 @@ impl App {
             show_drives: false,
             filter: ViewFilter::default(),
             filter_stats: None,
+            hits: None,
             custom: CustomUi {
                 prefs: cc.storage.and_then(|s| eframe::get_value(s, "custom_filter")).unwrap_or_default(),
                 ..Default::default()
@@ -430,6 +433,7 @@ impl App {
         self.rows = None;
         self.reset_custom_for_new_tree();
         self.filter_stats = None;
+        self.hits = None;
         self.hist = None;
         self.sun = None;
         // Duplicates refer to the old tree; a loaded snapshot is compared with the new one.
@@ -947,6 +951,7 @@ impl App {
         let Some(tree) = self.shown_tree() else { return };
         // In Highlight mode, files that don't pass the filter are dimmed here like on the maps.
         let dim_filter = (self.filter.active() && self.shown.is_none()).then(|| self.filter.clone());
+        let hits = self.current_hits();
         if self.rows.is_none() {
             self.rows = Some(self.flatten(&tree));
         }
@@ -980,7 +985,12 @@ impl App {
                     modified: n.modified,
                     busy: false,
                     color: self.color_of(n),
-                    dim: !n.is_dir && dim_filter.as_ref().is_some_and(|f| !f.matches(&n.name, n.size)),
+                    // Files that don't match, and folders with no matches inside.
+                    dim: if n.is_dir {
+                        hits.as_ref().is_some_and(|h| h.at(&row.path).is_none())
+                    } else {
+                        dim_filter.as_ref().is_some_and(|f| !f.matches(&n.name, n.size))
+                    },
                 };
                 let selected = self.selected.as_deref() == Some(&row.path[..]);
                 let arrow = self.paint_line(ui, rect, &line, selected, resp.hovered(), (range.start + k) % 2 == 1);
@@ -1640,6 +1650,7 @@ impl App {
 
         let filtering = self.filter.active() || self.dupes_only;
         let need_full = self.dupes_only || self.color_mode == ColorMode::Change;
+        let hits = self.current_hits();
         let mut mesh = egui::Mesh::default();
         let mut abs = self.zoom.clone();
         let zl = abs.len();
@@ -1667,8 +1678,10 @@ impl App {
                 (false, _) => self.node_color(n, &full),
             };
             if n.is_dir {
+                // Highlight: folders holding matches keep their colour, the rest fade.
                 if filtering && self.shown.is_none() {
-                    c = c.gamma_multiply(0.4);
+                    let has = hits.as_ref().is_none_or(|h| h.at(&full).is_some());
+                    c = c.gamma_multiply(if has { 0.85 } else { 0.3 });
                 }
             } else if self.dupes_only && !self.dup_set.contains(&full) {
                 c = Color32::from_gray(45);
@@ -1805,6 +1818,8 @@ impl App {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key()).hash(&mut h);
         self.shown.as_ref().map(|s| Arc::as_ptr(&s.tree) as usize).hash(&mut h);
+        let hits = self.current_hits();
+        hits.as_ref().map(|h| Arc::as_ptr(h) as usize).hash(&mut h);
         let key = h.finish();
         if self.map_paint == Some(key) {
             return;
@@ -1858,11 +1873,23 @@ impl App {
             };
             Some((fill, c))
         });
+        // Matches too small to draw would vanish into their folder's blended patch; light the
+        // patch up instead, in the colour of the most common matching type.
+        let hidden: Option<mapview::HiddenFill> = hits.filter(|_| !dupes_only).map(|hits| {
+            let mark = match (mode, hits.main_ext().and_then(|e| self.colors.get(e))) {
+                (ColorMode::Type, Some(&c)) => lighten(c, 0.12),
+                _ => Color32::from_rgb(255, 214, 90),
+            };
+            let f: mapview::HiddenFill = Arc::new(move |_: &Node, abs: &[u32], from: usize| {
+                hits.at(abs).filter(|h| h.any_from(from)).map(|_| mark)
+            });
+            f
+        });
         let background = if dupes_only { Color32::from_gray(24) } else { Color32::from_gray(45) };
         let v = self.view();
         let cushion = Cushion { height: v.height as f64, scale: v.scale as f64 };
         let look = self.look();
-        self.map.set_paint(Paint { key, colorize, cushion, background, look });
+        self.map.set_paint(Paint { key, colorize, hidden, cushion, background, look });
     }
 
     fn treemap_panel(&mut self, ui: &mut egui::Ui) {

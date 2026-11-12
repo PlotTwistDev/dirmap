@@ -91,7 +91,7 @@ pub(super) struct FilterJob {
 }
 
 enum FilterDone {
-    Count(u64, u64),
+    Hits(subset::Hits),
     Subset(Node, Back, Vec<ExtStat>),
 }
 
@@ -173,6 +173,7 @@ impl App {
             j.cancel.store(true, Ordering::Relaxed);
         }
         self.filter_stats = None;
+        self.hits = None;
         if let Some((c, _)) = self.seq.job.take() {
             c.store(true, Ordering::Relaxed);
         }
@@ -215,7 +216,10 @@ impl App {
                 Ok(done) => {
                     let job = self.filter_job.take().unwrap();
                     match done {
-                        FilterDone::Count(files, bytes) => self.filter_stats = Some((job.filter, files, bytes)),
+                        FilterDone::Hits(h) => {
+                            self.filter_stats = Some((job.filter.clone(), h.files, h.bytes));
+                            self.hits = Some((job.filter, Arc::new(h)));
+                        }
                         FilterDone::Subset(node, back, exts) => {
                             self.filter_stats = Some((job.filter.clone(), node.files, node.size));
                             if only && job.filter == self.filter {
@@ -239,7 +243,12 @@ impl App {
             }
             return;
         }
-        let have_stats = self.filter_stats.as_ref().is_some_and(|(f, _, _)| *f == self.filter);
+        // Highlight needs to know where the matches are; Show matches only just the totals.
+        let have_stats = if only {
+            self.filter_stats.as_ref().is_some_and(|(f, _, _)| *f == self.filter)
+        } else {
+            self.hits.as_ref().is_some_and(|(f, _)| *f == self.filter)
+        };
         let have_tree = !only || self.shown.as_ref().is_some_and(|s| s.filter == self.filter);
         if have_stats && have_tree {
             return;
@@ -263,7 +272,7 @@ impl App {
                     FilterDone::Subset(node, back, exts)
                 })
             } else {
-                subset::count(&tree, &keep, &c).map(|(files, bytes)| FilterDone::Count(files, bytes))
+                subset::hits(&tree, &keep, &c).map(FilterDone::Hits)
             };
             if let Some(d) = done.filter(|_| !c.load(Ordering::Relaxed)) {
                 let _ = tx.send(d);
@@ -271,6 +280,14 @@ impl App {
         });
         self.filter_job = Some(FilterJob { filter, only: want_tree, cancel, rx });
         ctx.request_repaint_after(Duration::from_millis(50));
+    }
+
+    /// Highlight mode: where the current filter's matches are, once worked out.
+    pub(super) fn current_hits(&self) -> Option<Arc<subset::Hits>> {
+        if self.shown.is_some() || !self.filter.active() {
+            return None;
+        }
+        self.hits.as_ref().filter(|(f, _)| *f == self.filter).map(|(_, h)| h.clone())
     }
 
     /// The match count is being worked out, or the filtered view is being built.

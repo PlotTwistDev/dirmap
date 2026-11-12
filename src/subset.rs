@@ -113,7 +113,106 @@ where
     }
 }
 
+/// Where the matches are, for Highlight mode: per folder that holds any, how many and how
+/// big, and the last child index holding one (children are sorted largest first, so "any match
+/// among children `from..`" is just `last >= from`). Folders without matches have no entry.
+#[derive(Debug, Default)]
+pub struct Hits {
+    pub files: u64,
+    pub bytes: u64,
+    /// Highest child index that is a match or holds one (meaningless when `files` is 0).
+    pub last: u32,
+    /// (child index, its hits) for child folders holding matches, by index.
+    pub dirs: Vec<(u32, Hits)>,
+    /// Matching bytes per lowercased extension (only on the root: the whole result).
+    pub exts: Vec<(String, u64)>,
+}
+
+impl Hits {
+    /// The entry for a folder by its path, None if nothing under it matches.
+    pub fn at(&self, path: &[u32]) -> Option<&Hits> {
+        let mut h = self;
+        for &i in path {
+            h = h.dirs.binary_search_by_key(&i, |d| d.0).ok().map(|k| &h.dirs[k].1)?;
+        }
+        (h.files > 0).then_some(h)
+    }
+
+    /// Does any child from index `from` on match or hold a match?
+    pub fn any_from(&self, from: usize) -> bool {
+        self.files > 0 && self.last as usize >= from
+    }
+
+    /// The extension with the most matching bytes.
+    pub fn main_ext(&self) -> Option<&str> {
+        self.exts.iter().max_by_key(|e| e.1).map(|e| e.0.as_str())
+    }
+}
+
+/// Find where the files `keep` accepts are. None if cancelled.
+pub fn hits<F>(root: &Node, keep: &F, cancel: &AtomicBool) -> Option<Hits>
+where
+    F: Fn(&Node) -> bool + Sync,
+{
+    let mut exts = Vec::new();
+    let mut h = hits_in(root, keep, cancel, &mut exts)?;
+    h.exts = exts;
+    Some(h)
+}
+
+fn tally(exts: &mut Vec<(String, u64)>, ext: &str, bytes: u64) {
+    match exts.iter_mut().find(|e| e.0.eq_ignore_ascii_case(ext)) {
+        Some(e) => e.1 += bytes,
+        None => exts.push((ext.to_ascii_lowercase(), bytes)),
+    }
+}
+
+fn hits_in<F>(dir: &Node, keep: &F, cancel: &AtomicBool, exts: &mut Vec<(String, u64)>) -> Option<Hits>
+where
+    F: Fn(&Node) -> bool + Sync,
+{
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+    let mut h = Hits::default();
+    // Files here, on this thread.
+    for (i, c) in dir.children.iter().enumerate() {
+        if !c.is_dir && keep(c) {
+            h.files += 1;
+            h.bytes += c.size;
+            h.last = h.last.max(i as u32);
+            tally(exts, c.ext(), c.size);
+        }
+    }
+    // Subfolders in parallel.
+    let subs: Vec<(u32, &Node)> = dir.children.iter().enumerate().filter(|(_, c)| c.is_dir).map(|(i, c)| (i as u32, c)).collect();
+    if subs.is_empty() {
+        return Some(h);
+    }
+    let found: Vec<(u32, Hits, Vec<(String, u64)>)> = subs
+        .par_iter()
+        .map(|&(i, c)| {
+            let mut e = Vec::new();
+            hits_in(c, keep, cancel, &mut e).map(|sub| (i, sub, e))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    for (i, sub, e) in found {
+        for (ext, b) in e {
+            tally(exts, &ext, b);
+        }
+        if sub.files > 0 {
+            h.files += sub.files;
+            h.bytes += sub.bytes;
+            h.last = h.last.max(i);
+            h.dirs.push((i, sub));
+        }
+    }
+    h.dirs.sort_unstable_by_key(|d| d.0);
+    Some(h)
+}
+
 /// Number and total size of the files under `root` that `keep` accepts. None if cancelled.
+#[cfg(test)]
 pub fn count<F>(root: &Node, keep: &F, cancel: &AtomicBool) -> Option<(u64, u64)>
 where
     F: Fn(&Node) -> bool + Sync,
@@ -286,11 +385,47 @@ mod tests {
     }
 
     #[test]
+    fn hits_point_at_hidden_matches() {
+        let t = sample();
+        let never = AtomicBool::new(false);
+        for p in ["*.exr", "*.txt", "!*.exr", "*.png, *.iso", "*nothing*"] {
+            let f = Filter::compile(p, Options::default()).unwrap();
+            let keep = |n: &Node| f.matches(&n.name);
+            let h = hits(&t, &keep, &never).unwrap();
+            assert_eq!((h.files, h.bytes), count(&t, &keep, &never).unwrap(), "{p}");
+            // For every folder: `at` agrees with a direct count, and `any_from` with a scan
+            // of the children from each index on.
+            fn check(n: &Node, path: &mut Vec<u32>, h: &Hits, keep: &(dyn Fn(&Node) -> bool + Sync)) {
+                let never = AtomicBool::new(false);
+                let direct = count(n, &|c: &Node| keep(c), &never).unwrap();
+                match h.at(path) {
+                    Some(x) => assert_eq!((x.files, x.bytes), direct),
+                    None => assert_eq!(direct.0, 0),
+                }
+                for from in 0..=n.children.len() {
+                    let any = n.children[from..].iter().any(|c| count(c, &|c: &Node| keep(c), &never).unwrap().0 > 0);
+                    assert_eq!(h.at(path).is_some_and(|x| x.any_from(from)), any);
+                }
+                for (i, c) in n.children.iter().enumerate().filter(|(_, c)| c.is_dir) {
+                    path.push(i as u32);
+                    check(c, path, h, keep);
+                    path.pop();
+                }
+            }
+            check(&t, &mut Vec::new(), &h, &keep);
+        }
+        let f = Filter::compile("*.exr, *.png", Options::default()).unwrap();
+        let h = hits(&t, &|n: &Node| f.matches(&n.name), &never).unwrap();
+        assert_eq!(h.main_ext(), Some("png"), "comp.1001.png (5000 B) outweighs the exr frames");
+    }
+
+    #[test]
     fn cancel_stops_work() {
         let t = sample();
         let stop = AtomicBool::new(true);
         assert!(subset(&t, &|_: &Node| true, &stop).is_none());
         assert!(count(&t, &|_: &Node| true, &stop).is_none());
+        assert!(hits(&t, &|_: &Node| true, &stop).is_none());
     }
 
     #[test]
@@ -324,6 +459,9 @@ mod bench {
             let s = Instant::now();
             let (files, _) = count(&t, &keep, &never).unwrap();
             let c = s.elapsed();
+            let s = Instant::now();
+            assert_eq!(hits(&t, &keep, &never).unwrap().files, files);
+            println!("  hits {:.1?}", s.elapsed());
             let s = Instant::now();
             let (sub, back) = subset(&t, &keep, &never).unwrap();
             let b = s.elapsed();

@@ -23,12 +23,19 @@ use std::time::Instant;
 /// out. Gets the node and its path from the scan root. Runs on builder threads.
 pub type Colorizer = Arc<dyn Fn(&Node, &[u32]) -> Option<(Color32, Color32)> + Send + Sync>;
 
+/// For a folder whose children from index `from` on are too small to draw (they are shown as one
+/// blended patch): a colour for that patch instead of the blend, e.g. to point out filter
+/// matches that are too small to see on their own. Gets the folder, its path from the scan root
+/// and `from`. Runs on builder threads.
+pub type HiddenFill = Arc<dyn Fn(&Node, &[u32], usize) -> Option<Color32> + Send + Sync>;
+
 /// What decides how tiles are built, apart from the camera.
 #[derive(Clone)]
 pub struct Paint {
     /// Changes whenever anything that affects the tiles changes.
     pub key: u64,
     pub colorize: Colorizer,
+    pub hidden: Option<HiddenFill>,
     pub cushion: Cushion,
     pub background: Color32,
     /// Shading for the CPU fallback's images.
@@ -1147,6 +1154,9 @@ fn run(req: Req) -> Option<Built> {
     Some(Built { scene: req.scene, kind: req.kind, set, millis: t0.elapsed().as_secs_f64() * 1000.0 })
 }
 
+/// Smallest size, in points, of the marker over a patch of hidden matches (`Paint::hidden`).
+const MARK_PT: f64 = 5.0;
+
 /// Build the tiles for a request. None if it was cancelled.
 fn build_set(req: &Req) -> Option<TileSet> {
     let root = req.tree.at(&req.root)?;
@@ -1174,6 +1184,9 @@ fn build_set(req: &Req) -> Option<TileSet> {
     inst.push(Instance { rect: set.local_rect(&req.cover), grad: [0.0; 4], color: bg.to_array(), flags: tilegpu::FLAT });
     let mut raster = Vec::new();
     let mut labels = Vec::new();
+    // Drawn last, over their neighbours.
+    let mut markers = Vec::new();
+    let mut raster_markers = Vec::new();
     let mut abs = req.root.clone();
     let rl = abs.len();
     let pt_per_unit = ppu / req.ppp;
@@ -1194,7 +1207,23 @@ fn build_set(req: &Req) -> Option<TileSet> {
             // Files too small to draw at this zoom: fill their area with the colour they
             // would add up to, shaded as part of the folder, rather than leaving dark holes.
             let mut budget = 48;
-            let Some(fill) = blend_of(l.node, l.hidden_from, &mut abs, &*req.paint.colorize, 0, &mut budget) else {
+            let marked = req.paint.hidden.as_ref().and_then(|h| h(l.node, &abs, l.hidden_from));
+            if let Some(c) = marked {
+                // A sliver of a pixel is easy to miss: also drop a small square marker on top,
+                // MARK_PT across, centred on the patch.
+                let min = MARK_PT * req.ppp / ppu;
+                let (cx, cy) = l.rect.center();
+                let (w, h) = (l.rect.w(), l.rect.h());
+                if w.min(h) < min {
+                    let (hw, hh) = (min / 2.0, min / 2.0);
+                    let r = DRect { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh };
+                    markers.push(Instance { rect: set.local_rect(&r), grad: [0.0; 4], color: c.to_array(), flags: tilegpu::FLAT });
+                    if req.raster {
+                        raster_markers.push(RasterTile { rect: r, surface: l.surface, color: c, flat: true });
+                    }
+                }
+            }
+            let Some(fill) = marked.or_else(|| blend_of(l.node, l.hidden_from, &mut abs, &*req.paint.colorize, 0, &mut budget)) else {
                 return true; // nothing in there passes the filter: background
             };
             let [s0, s1, s2, s3] = l.surface;
@@ -1230,6 +1259,8 @@ fn build_set(req: &Req) -> Option<TileSet> {
     if cancelled || req.cancel.load(Ordering::Relaxed) {
         return None;
     }
+    inst.extend(markers);
+    raster.extend(raster_markers);
     set.instances = Arc::new(inst);
     set.labels = labels;
     if req.raster {
@@ -1328,10 +1359,36 @@ mod tests {
         Paint {
             key: 1,
             colorize: Arc::new(|_, _| Some((Color32::from_rgb(90, 140, 220), Color32::from_rgb(90, 140, 220)))),
+            hidden: None,
             cushion: Cushion { height: 0.38, scale: 0.91 },
             background: Color32::from_gray(45),
             look: Look { ambient: 0.1, diffuse: 0.9, gain: 1.0, sun: [0.0, 0.0, 1.0], grid: None, lighting: false, light_level: 1.0, bevel: false },
         }
+    }
+
+    #[test]
+    fn hidden_matches_are_marked() {
+        // A big tree seen whole: most files are too small to draw. With a `hidden` hook every
+        // blended patch takes its colour, and slivers get a marker at least MARK_PT across.
+        let tree = Arc::new(treemap::synthetic(50_000, 4));
+        let world = DRect { x0: 0.0, y0: 0.0, x1: 400.0, y1: 300.0 };
+        let mark = Color32::from_rgb(250, 10, 10);
+        let plain = build_set(&req(&tree, world, world, 1.0)).unwrap();
+        assert!(!plain.instances.iter().any(|i| i.color == mark.to_array()));
+        let mut r = req(&tree, world, world, 1.0);
+        r.paint.hidden = Some(Arc::new(move |_: &Node, _: &[u32], _: usize| Some(mark)));
+        let set = build_set(&r).unwrap();
+        let marked: Vec<_> = set.instances.iter().filter(|i| i.color == mark.to_array()).collect();
+        assert!(!marked.is_empty(), "patches of hidden files take the mark colour");
+        let dots = marked.iter().filter(|i| i.flags == tilegpu::FLAT).count();
+        assert!(dots > 0, "slivers get markers");
+        for d in marked.iter().filter(|i| i.flags == tilegpu::FLAT) {
+            let [x0, y0, x1, y1] = d.rect;
+            assert!((x1 - x0).min(y1 - y0) >= MARK_PT as f32 - 0.01, "{:?}", d.rect);
+        }
+        // Markers come after every tile, so they're drawn on top.
+        let first_dot = set.instances.iter().position(|i| i.color == mark.to_array() && i.flags == tilegpu::FLAT).unwrap();
+        assert!(set.instances[first_dot..].iter().all(|i| i.color == mark.to_array()));
     }
 
     fn req(tree: &Arc<Node>, world: DRect, cover: DRect, ppu: f64) -> Req {
@@ -1499,6 +1556,7 @@ mod bench {
         let paint = Paint {
             key: 1,
             colorize: Arc::new(|_, _| Some((Color32::from_rgb(90, 140, 220), Color32::from_rgb(90, 140, 220)))),
+            hidden: None,
             cushion: Cushion { height: 0.38, scale: 0.91 },
             background: Color32::from_gray(45),
             look: Look { ambient: 0.13, diffuse: 0.87, gain: 1.0, sun: [0.0, 0.0, 1.0], grid: None, lighting: true, light_level: 1.0, bevel: true },
