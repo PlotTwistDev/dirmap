@@ -18,9 +18,12 @@ enum SortBy {
 }
 
 struct Job {
+    root: PathBuf,
     progress: Arc<Progress>,
-    rx: mpsc::Receiver<Node>,
+    rx: mpsc::Receiver<(Node, Vec<ExtStat>)>,
     started: Instant,
+    /// Used space on the drive when scanning a whole drive, to estimate percent complete.
+    expected: Option<u64>,
 }
 
 /// The treemap is rendered once into a texture at physical-pixel resolution and then drawn as a
@@ -115,21 +118,27 @@ impl App {
         let (tx, rx) = mpsc::channel();
         let (p, opts, root) = (progress.clone(), self.opts, path.clone());
         std::thread::spawn(move || {
-            let _ = tx.send(scan::scan(&root, opts, &p));
+            let tree = scan::scan(&root, opts, &p);
+            // Summarise here too, so the window doesn't stall when a big scan lands.
+            let exts = scan::ext_stats(&tree);
+            let _ = tx.send((tree, exts));
         });
-        self.scanned_path = path;
-        self.job = Some(Job { progress, rx, started: Instant::now() });
+        self.job = Some(Job { root: path, progress, rx, started: Instant::now(), expected: None });
     }
 
-    fn finish_scan(&mut self, tree: Node, secs: f32) {
-        self.exts = scan::ext_stats(&tree);
+    fn finish_scan(&mut self, root: PathBuf, tree: Node, exts: Vec<ExtStat>, secs: f32) {
+        self.scanned_path = root;
+        self.exts = exts;
         self.colors = self
             .exts
             .iter()
             .enumerate()
             .map(|(i, e)| (e.ext.clone(), ext_color(&e.ext, i)))
             .collect();
-        self.tree = Some(tree);
+        // Freeing millions of nodes can take a while; do it off the UI thread.
+        if let Some(old) = self.tree.replace(tree) {
+            std::thread::spawn(move || drop(old));
+        }
         self.scan_secs = secs;
         self.selected = None;
         self.zoom.clear();
@@ -180,20 +189,11 @@ impl App {
 
     /// Table of drives like WinDirStat's "Select Drives" dialog. Returns the root to scan if one was picked.
     fn drive_table(&mut self, ui: &mut egui::Ui) -> Option<PathBuf> {
-        if let Some(rx) = &self.drives_rx {
-            match rx.try_recv() {
-                Ok(d) => {
-                    self.drives = d;
-                    self.drives_rx = None;
-                }
-                Err(_) => {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Looking for drives…");
-                    });
-                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
-                }
-            }
+        if self.drives_rx.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Looking for drives…");
+            });
         }
         let mut picked = None;
         egui::Grid::new("drives").striped(true).num_columns(6).spacing([14.0, 6.0]).show(ui, |ui| {
@@ -587,14 +587,29 @@ fn paint_cushion(pixels: &mut [Color32], stride: usize, r: Rect, c: Color32) {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(rx) = &self.drives_rx {
+            match rx.try_recv() {
+                Ok(d) => {
+                    self.drives = d;
+                    self.drives_rx = None;
+                }
+                Err(_) => ui.ctx().request_repaint_after(Duration::from_millis(100)),
+            }
+        }
+        // Scanning a whole drive: its used space gives an estimate of how far along we are.
+        // Checked every frame because the drive list may arrive after the scan starts.
+        if let Some(job) = self.job.as_mut().filter(|j| j.expected.is_none()) {
+            job.expected = self.drives.iter().find(|d| same_path(&d.root, &job.root)).map(|d| d.used()).filter(|&u| u > 0);
+        }
+
         // Collect a finished scan.
         if let Some(job) = &self.job {
-            if let Ok(tree) = job.rx.try_recv() {
-                let secs = job.started.elapsed().as_secs_f32();
-                let cancelled = job.progress.cancel.load(Ordering::Relaxed);
-                self.job = None;
-                if !cancelled {
-                    self.finish_scan(tree, secs);
+            if let Ok((tree, exts)) = job.rx.try_recv() {
+                let job = self.job.take().unwrap();
+                if !job.progress.cancel.load(Ordering::Relaxed) {
+                    self.finish_scan(job.root, tree, exts, job.started.elapsed().as_secs_f32());
+                } else {
+                    std::thread::spawn(move || drop(tree));
                 }
             } else {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
@@ -619,17 +634,7 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 if let Some(job) = &self.job {
                     ui.spinner();
-                    let p = &job.progress;
-                    ui.label(format!(
-                        "Scanning… {} files, {} folders, {} ({:.1}s)",
-                        p.files.load(Ordering::Relaxed),
-                        p.dirs.load(Ordering::Relaxed),
-                        scan::human(p.bytes.load(Ordering::Relaxed)),
-                        job.started.elapsed().as_secs_f32()
-                    ));
-                    if ui.button("Cancel").clicked() {
-                        p.cancel.store(true, Ordering::Relaxed);
-                    }
+                    ui.label(format!("Scanning {}…", job.root.display()));
                 } else if let Some(t) = &self.tree {
                     ui.label(format!(
                         "{}: {} in {} files, scanned in {:.1}s. Click a tile to select, double-click to zoom in, right-click to zoom out.",
@@ -648,16 +653,17 @@ impl eframe::App for App {
             });
         });
 
+        if let Some(job) = &self.job {
+            egui::CentralPanel::default().show(ui, |ui| scan_progress(ui, job));
+            return;
+        }
+
         if self.tree.is_none() {
             egui::CentralPanel::default().show(ui, |ui| {
-                if self.job.is_some() {
-                    ui.centered_and_justified(|ui| ui.heading("Scanning…"));
-                } else {
-                    ui.heading("Pick a drive to scan, or type a folder above");
-                    ui.add_space(8.0);
-                    if let Some(root) = self.drive_table(ui) {
-                        self.scan_root(root);
-                    }
+                ui.heading("Pick a drive to scan, or type a folder above");
+                ui.add_space(8.0);
+                if let Some(root) = self.drive_table(ui) {
+                    self.scan_root(root);
                 }
             });
             return;
@@ -679,4 +685,77 @@ fn ext_color(ext: &str, rank: usize) -> Color32 {
         let h = ext.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
         Hsva::new((h % 360) as f32 / 360.0, 0.3, 0.65, 1.0).into()
     }
+}
+
+/// Live progress for a running scan: counts, an estimated percentage for whole drives, and
+/// the folder being read right now, so a long scan never looks frozen.
+fn scan_progress(ui: &mut egui::Ui, job: &Job) {
+    let p = &job.progress;
+    let files = p.files.load(Ordering::Relaxed);
+    let dirs = p.dirs.load(Ordering::Relaxed);
+    let bytes = p.bytes.load(Ordering::Relaxed);
+    let errors = p.errors.load(Ordering::Relaxed);
+    let secs = job.started.elapsed().as_secs_f32();
+    let cancelling = p.cancel.load(Ordering::Relaxed);
+
+    ui.vertical_centered(|ui| {
+        ui.add_space((ui.available_height() / 2.0 - 120.0).max(16.0));
+        ui.set_max_width(640.0);
+        ui.heading(format!("Scanning {}", job.root.display()));
+        ui.add_space(12.0);
+
+        let bar = match job.expected {
+            // Logical file sizes don't exactly match used disk space, so cap below 100%.
+            Some(total) => {
+                let frac = (bytes as f32 / total as f32).min(0.99);
+                egui::ProgressBar::new(frac).text(format!("about {:.0}%  ({} of {})", frac * 100.0, scan::human(bytes), scan::human(total)))
+            }
+            None => egui::ProgressBar::new(0.0).animate(true).text(scan::human(bytes)),
+        };
+        ui.add(bar.desired_height(22.0));
+        ui.add_space(12.0);
+
+        let rate = if secs > 0.5 { files as f32 / secs } else { 0.0 };
+        egui::Grid::new("scan-stats").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
+            ui.label("Files");
+            ui.strong(format!("{files}"));
+            ui.end_row();
+            ui.label("Folders");
+            ui.strong(format!("{dirs}"));
+            ui.end_row();
+            ui.label("Size so far");
+            ui.strong(scan::human(bytes));
+            ui.end_row();
+            ui.label("Speed");
+            ui.strong(format!("{rate:.0} files/s"));
+            ui.end_row();
+            ui.label("Elapsed");
+            ui.strong(format!("{}:{:02}", secs as u64 / 60, secs as u64 % 60));
+            ui.end_row();
+            if errors > 0 {
+                ui.label("Unreadable");
+                ui.strong(format!("{errors}"));
+                ui.end_row();
+            }
+        });
+        ui.add_space(10.0);
+        let current = p.current.lock().map(|c| c.display().to_string()).unwrap_or_default();
+        ui.add(egui::Label::new(egui::RichText::new(current).weak().monospace()).truncate());
+        ui.add_space(12.0);
+        if cancelling {
+            ui.label("Cancelling…");
+        } else if ui.button("Cancel").clicked() {
+            p.cancel.store(true, Ordering::Relaxed);
+        }
+    });
+}
+
+/// Compare paths ignoring a trailing separator and, on Windows, case (`d:\` vs `D:\`).
+fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    let norm = |p: &std::path::Path| {
+        let s = p.to_string_lossy();
+        let s = s.trim_end_matches(['/', '\\']);
+        if cfg!(windows) { s.to_lowercase() } else { s.to_string() }
+    };
+    norm(a) == norm(b)
 }

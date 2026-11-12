@@ -4,7 +4,7 @@ use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// One file or directory in the scanned tree. Children are sorted by size, largest first.
 #[derive(Debug)]
@@ -47,6 +47,8 @@ pub struct Progress {
     pub bytes: AtomicU64,
     pub errors: AtomicU64,
     pub cancel: AtomicBool,
+    /// A folder currently being read, for display only.
+    pub current: Mutex<PathBuf>,
 }
 
 #[derive(Clone, Copy)]
@@ -72,6 +74,10 @@ pub fn scan(root: &Path, opts: Options, progress: &Arc<Progress>) -> Node {
 
 fn scan_dir(path: PathBuf, name: Box<str>, opts: Options, dev: Option<u64>, p: &Progress) -> Node {
     p.dirs.fetch_add(1, Ordering::Relaxed);
+    // try_lock: never make scanner threads wait on each other just to update a label.
+    if let Ok(mut cur) = p.current.try_lock() {
+        cur.clone_from(&path);
+    }
     let entries: Vec<fs::DirEntry> = match fs::read_dir(&path) {
         Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
         Err(_) => {
