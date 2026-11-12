@@ -4,14 +4,19 @@ use crate::categories::{self, Category};
 use crate::drives::{self, Drive};
 use crate::dupes;
 use crate::elevate::{self, AdminMode};
+use crate::camera::{self, Feel};
 use crate::icons::Icons;
+use crate::mapview::{self, Look, MapView, Paint};
 use crate::scan::{self, ExtStat, LiveDir, Node, Options, Progress};
 use crate::settings::{self, Settings};
 use crate::snapshot::{self, Change, DiffNode, Snapshot};
 use crate::sunburst;
-use crate::treemap::{self, Tile};
+use crate::tilegpu::Backend;
+use crate::treemap::{self, Cushion};
+#[cfg(test)]
+use crate::treemap::Tile;
 use eframe::egui::{
-    self, ecolor::Hsva, pos2, vec2, Align2, Color32, ColorImage, FontId, Rect, Sense, Stroke, TextureHandle, TextureOptions,
+    self, ecolor::Hsva, pos2, vec2, Align2, Color32, FontId, Rect, Sense, Stroke,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -37,27 +42,8 @@ struct Job {
     expected: Option<u64>,
 }
 
-/// The treemap is rendered once into a texture at physical-pixel resolution and then drawn as a
-/// single image, so ordinary repaints (hover, scrolling, moving the window) cost almost nothing.
-struct LayoutCache {
-    /// Size in physical pixels.
-    px: [usize; 2],
-    zoom: Vec<u32>,
-    highlight: Option<String>,
-    look: [u32; 9],
-    filter: ViewFilter,
-    /// `App::paint_gen` when rendered: bumps when the color mode, comparison or duplicates change.
-    paint_gen: u32,
-    /// Tiles in pixel coordinates relative to the treemap's top-left corner.
-    tiles: Vec<Tile>,
-    /// Base color of each painted file tile (transparent for folders and blanked-out tiles),
-    /// used to pick a readable label color.
-    colors: Vec<Color32>,
-    texture: TextureHandle,
-}
-
 /// Which files the maps show; everything else is blanked out. Doesn't need a rescan.
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Default, Hash)]
 struct ViewFilter {
     /// Only files at least this many bytes (0 = off).
     larger: u64,
@@ -80,7 +66,7 @@ impl ViewFilter {
 }
 
 /// What the colors on the maps mean.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Hash)]
 enum ColorMode {
     Type,
     Age,
@@ -184,7 +170,7 @@ pub struct App {
     /// Last order shown for each live folder's subfolders, reused while the mouse is over the
     /// list so rows don't jump around as sizes change.
     live_order: HashMap<usize, Vec<Arc<LiveDir>>>,
-    tree: Option<Node>,
+    tree: Option<Arc<Node>>,
     scan_secs: f32,
     exts: Vec<ExtStat>,
     colors: HashMap<String, Color32>,
@@ -194,9 +180,10 @@ pub struct App {
     sort: SortBy,
     sort_desc: bool,
     highlight_ext: Option<String>,
-    cache: Option<LayoutCache>,
-    /// When the treemap's size last changed; it is re-rendered once the size settles.
-    resize_since: Option<Instant>,
+    /// The treemap: camera, tiles and navigation.
+    map: MapView,
+    /// Paint inputs the map was last given (`paint_key`).
+    map_paint: Option<u64>,
     expanded: HashSet<Box<[u32]>>,
     rows: Option<Vec<Row>>,
     drives: Vec<Drive>,
@@ -220,14 +207,14 @@ pub struct App {
     /// The snapshot being compared against, its comparison with the current scan, and status text.
     snapshot: Option<Snapshot>,
     snap_rx: Option<mpsc::Receiver<Result<Snapshot, String>>>,
-    diff: Option<(DiffNode, Vec<Change>)>,
+    diff: Option<Arc<(DiffNode, Vec<Change>)>>,
     snap_msg: Option<String>,
     dup_min: u64,
     dup_job: Option<DupJob>,
     dup_groups: Vec<dupes::Group>,
     /// Flattened duplicate list: (group, file index or None for the group's header line).
     dup_rows: Vec<(usize, Option<usize>)>,
-    dup_set: HashSet<Vec<u32>>,
+    dup_set: Arc<HashSet<Vec<u32>>>,
     dupes_only: bool,
     /// A duplicate search has finished for the current scan.
     dup_done: bool,
@@ -268,8 +255,8 @@ impl App {
             sort: SortBy::Size,
             sort_desc: true,
             highlight_ext: None,
-            cache: None,
-            resize_since: None,
+            map: MapView::new(Backend::new(cc)),
+            map_paint: None,
             expanded: HashSet::new(),
             rows: None,
             drives: Vec::new(),
@@ -293,13 +280,19 @@ impl App {
             dup_job: None,
             dup_groups: Vec::new(),
             dup_rows: Vec::new(),
-            dup_set: HashSet::new(),
+            dup_set: Arc::new(HashSet::new()),
             dupes_only: false,
             dup_done: false,
             admin_prompt,
             admin_declined: false,
         };
         app.refresh_drives();
+        if let Some(n) = std::env::var("DIRMAP_SYNTHETIC").ok().and_then(|s| s.parse::<usize>().ok()) {
+            let tree = treemap::synthetic(n, 5);
+            let exts = scan::ext_stats(&tree);
+            app.finish_scan(PathBuf::from("synthetic"), tree, exts, 0.0);
+            return app;
+        }
         if let Some(f) = compare {
             app.load_snapshot_from(f);
         }
@@ -364,14 +357,14 @@ impl App {
         self.exts = exts;
         self.colors = self.exts.iter().enumerate().map(|(i, e)| (e.ext.clone(), ext_color(&e.ext, i))).collect();
         // Freeing millions of nodes can take a while; do it off the UI thread.
-        if let Some(old) = self.tree.replace(tree) {
+        if let Some(old) = self.tree.replace(Arc::new(tree)) {
             std::thread::spawn(move || drop(old));
         }
         self.scan_secs = secs;
         self.selected = None;
         self.zoom.clear();
         self.highlight_ext = None;
-        self.cache = None;
+        self.map.clear();
         self.expanded.clear();
         self.expanded.insert(Box::new([]));
         self.rows = None;
@@ -384,7 +377,7 @@ impl App {
         }
         self.dup_groups.clear();
         self.dup_rows.clear();
-        self.dup_set.clear();
+        self.dup_set = Arc::new(HashSet::new());
         self.dupes_only = false;
         self.dup_done = false;
         self.compare();
@@ -467,7 +460,7 @@ impl App {
     /// Compare the current scan with the loaded snapshot.
     fn compare(&mut self) {
         self.diff = match (&self.tree, &self.snapshot) {
-            (Some(t), Some(s)) => Some(snapshot::diff(t, &s.tree)),
+            (Some(t), Some(s)) => Some(Arc::new(snapshot::diff(t, &s.tree))),
             _ => None,
         };
         self.paint_gen += 1;
@@ -478,7 +471,7 @@ impl App {
         match self.color_mode {
             ColorMode::Type => self.color_of(n),
             ColorMode::Age => age_color(n.modified),
-            ColorMode::Change => match self.diff.as_ref().and_then(|(d, _)| d.at(abs)) {
+            ColorMode::Change => match self.diff.as_deref().and_then(|(d, _)| d.at(abs)) {
                 Some(d) => change_color(d.old, n.size),
                 None => Color32::from_gray(95),
             },
@@ -496,7 +489,7 @@ impl App {
             (false, _) => fmt_time(n.modified),
         };
         let mut s = format!("{}  ·  {}  ·  {}", full.display(), scan::human(n.size), what);
-        if let Some(d) = self.diff.as_ref().and_then(|(d, _)| d.at(abs)) {
+        if let Some(d) = self.diff.as_deref().and_then(|(d, _)| d.at(abs)) {
             if d.old == snapshot::NEW {
                 s.push_str("  ·  new since the snapshot");
             } else if d.old != n.size {
@@ -519,7 +512,7 @@ impl App {
 
     fn full_path(&self, path: &[u32]) -> PathBuf {
         let mut p = self.scanned_path.clone();
-        let mut n = self.tree.as_ref().unwrap();
+        let mut n: &Node = self.tree.as_ref().unwrap();
         for &i in path {
             n = &n.children[i as usize];
             p.push(&*n.name);
@@ -621,18 +614,43 @@ impl App {
             }
             ui.separator();
             ui.add_enabled_ui(self.tree.is_some() && self.job.is_none(), |ui| {
-                if ui.button("Zoom to selection").clicked() {
-                    if let Some(sel) = &self.selected {
-                        let n = self.tree.as_ref().unwrap();
-                        let mut z = sel.clone();
-                        if !n.at(&z).map(|n| n.is_dir).unwrap_or(false) {
-                            z.pop();
+                let feel = self.feel();
+                let treemap = self.map_kind == MapKind::Treemap;
+                let back = ui.add_enabled(treemap && self.map.can_go_back(), egui::Button::new("◀")).on_hover_text("Back (Alt+Left, or the mouse's back button)");
+                if back.clicked() {
+                    self.map.back(&feel);
+                }
+                let fwd = ui.add_enabled(treemap && self.map.can_go_forward(), egui::Button::new("▶")).on_hover_text("Forward (Alt+Right)");
+                if fwd.clicked() {
+                    self.map.forward(&feel);
+                }
+                let zoom_sel = ui.add_enabled(self.selected.is_some(), egui::Button::new("Zoom to selection"));
+                if zoom_sel.on_hover_text("Bring the selected file or folder into view").clicked() {
+                    if let (Some(sel), Some(tree)) = (self.selected.clone(), self.tree.clone()) {
+                        if treemap {
+                            self.map.frame_path(&tree, &sel, &feel);
+                        } else {
+                            let mut z = sel;
+                            if !tree.at(&z).is_some_and(|n| n.is_dir) {
+                                z.pop();
+                            }
+                            self.zoom = z;
                         }
-                        self.zoom = z;
                     }
                 }
-                if ui.button("Zoom out").clicked() {
-                    self.zoom.pop();
+                if ui.button("Zoom out").on_hover_text("Up one level (right-click on the map)").clicked() {
+                    if let (true, Some(tree)) = (treemap, self.tree.clone()) {
+                        self.map.zoom_out(&tree, &feel);
+                    } else {
+                        self.zoom.pop();
+                    }
+                }
+                if ui.button("⟲ Whole map").on_hover_text("Back to the whole scan (Home)").clicked() {
+                    if treemap {
+                        self.map.reset(&feel);
+                    } else {
+                        self.zoom.clear();
+                    }
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1211,7 +1229,8 @@ impl App {
         }
         let delta = tree.size as i64 - snap.tree.size as i64;
         ui.strong(format!("Then {}  ·  now {}  ·  {}", scan::human(snap.tree.size), scan::human(tree.size), signed(delta)));
-        let Some((droot, changes)) = self.diff.take() else { return };
+        let Some(diff) = self.diff.clone() else { return };
+        let changes = &diff.1;
         let count = |f: &dyn Fn(&Change) -> bool| changes.iter().filter(|c| f(c)).count() as u64;
         let (new, gone) = (count(&|c| c.old == 0 && c.path.is_some()), count(&|c| c.path.is_none()));
         let (grew, shrank) = (count(&|c| c.old > 0 && c.new > c.old), count(&|c| c.path.is_some() && c.new < c.old));
@@ -1264,7 +1283,6 @@ impl App {
                 }
             }
         });
-        self.diff = Some((droot, changes));
         if let Some(p) = clicked {
             self.select(p);
         }
@@ -1550,193 +1568,265 @@ impl App {
 
     // ---------- treemap ----------
 
-    fn treemap_panel(&mut self, ui: &mut egui::Ui) {
-        let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click());
-        let bounds = resp.rect;
-        let ppp = ui.ctx().pixels_per_point();
-        let px = [(bounds.width() * ppp).round().max(1.0) as usize, (bounds.height() * ppp).round().max(1.0) as usize];
-        let Some(tree) = &self.tree else { return };
-        if tree.at(&self.zoom).is_none() {
-            self.zoom.clear();
-        }
-        let look = self.view().treemap_key();
+    /// How navigation feels, from the settings.
+    fn feel(&self) -> Feel {
+        let v = self.view();
+        // DIRMAP_SLOWMO=N slows every animation N times, for checking them frame by frame.
+        let slow = std::env::var("DIRMAP_SLOWMO").ok().and_then(|s| s.parse::<f64>().ok()).unwrap_or(1.0).max(0.01);
+        Feel { smooth: v.smooth_zoom, sensitivity: v.zoom_sensitivity as f64, speed: v.anim_speed as f64 / slow }
+    }
 
-        let (content_changed, size_changed) = match &self.cache {
-            Some(c) => {
-                let changed = c.zoom != self.zoom
-                    || c.highlight != self.highlight_ext
-                    || c.look != look
-                    || c.filter != self.filter
-                    || c.paint_gen != self.paint_gen;
-                (changed, c.px != px)
-            }
-            None => (true, false),
-        };
-        // While the window is being resized or moved to a monitor with a different scale,
-        // stretch the old image and only re-render once the size has settled.
-        let mut rebuild = content_changed;
-        if size_changed {
-            let since = *self.resize_since.get_or_insert_with(Instant::now);
-            if since.elapsed() >= Duration::from_millis(150) {
-                rebuild = true;
-            } else {
-                ui.ctx().request_repaint_after(Duration::from_millis(160));
-            }
-        }
-        if rebuild {
-            self.resize_since = None;
-            self.render_treemap(ui.ctx(), px, look);
-        }
-        let Some(cache) = self.cache.as_ref() else { return };
-        let tree = self.tree.as_ref().unwrap();
-        painter.image(cache.texture.id(), bounds, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-
-        // Tile rects are in the cached image's pixels; map them onto the current bounds.
-        let (sx, sy) = (bounds.width() / cache.px[0] as f32, bounds.height() / cache.px[1] as f32);
-        let to_screen = |r: Rect| {
-            Rect::from_min_max(
-                pos2(bounds.min.x + r.min.x * sx, bounds.min.y + r.min.y * sy),
-                pos2(bounds.min.x + r.max.x * sx, bounds.min.y + r.max.y * sy),
-            )
-        };
-        let zl = self.zoom.len();
-        let zroot = tree.at(&self.zoom).unwrap();
-
-        // File names on tiles with room for them.
-        if self.view().show_labels {
-            let font = FontId::proportional(11.0);
-            for (t, &c) in cache.tiles.iter().zip(&cache.colors) {
-                if c == Color32::TRANSPARENT {
-                    continue;
-                }
-                let r = to_screen(t.rect);
-                if r.width() < 44.0 || r.height() < 15.0 {
-                    continue;
-                }
-                let n = zroot.at(&t.path).unwrap();
-                let tc = if luma(c) > 140.0 { Color32::from_black_alpha(220) } else { Color32::from_white_alpha(235) };
-                let p = painter.with_clip_rect(r.shrink(1.0).intersect(painter.clip_rect()));
-                p.text(r.min + vec2(3.0, 2.0), Align2::LEFT_TOP, &*n.name, font.clone(), tc);
-                if r.height() >= 30.0 {
-                    p.text(r.min + vec2(3.0, 15.0), Align2::LEFT_TOP, scan::human(n.size), font.clone(), tc.gamma_multiply(0.8));
-                }
-            }
-        }
-
-        // Outline the selection (or the nearest visible ancestor of it).
-        if let Some(sel) = self.selected.as_ref().filter(|s| s.starts_with(&self.zoom)) {
-            let rel = &sel[zl..];
-            if let Some(t) = cache.tiles.iter().filter(|t| rel.starts_with(&t.path)).max_by_key(|t| t.path.len()) {
-                let stroke = Stroke::new(2.0, self.view().selection_color);
-                painter.rect_stroke(to_screen(t.rect), 0.0, stroke, egui::StrokeKind::Inside);
-            }
-        }
-
-        let hover = resp.hover_pos().and_then(|p| {
-            let local = pos2((p.x - bounds.min.x) / sx, (p.y - bounds.min.y) / sy);
-            cache.tiles.iter().rev().find(|t| t.rect.contains(local))
-        });
-        let prev_status = self.hover_status.take();
-        let child = hover.and_then(|t| t.path.first().copied());
-        let mut action = wheel_zoom(&mut self.wheel, ui, resp.hovered(), tree, &self.zoom, child).map(|z| (true, z));
-        if let Some(t) = hover {
-            let parent = cache.tiles.iter().find(|p| p.is_dir && p.path.len() + 1 == t.path.len() && t.path.starts_with(&p.path));
-            if let Some(parent) = parent {
-                let stroke = Stroke::new(1.0, Color32::from_white_alpha(140));
-                painter.rect_stroke(to_screen(parent.rect), 0.0, stroke, egui::StrokeKind::Inside);
-            }
-            let mut abs = self.zoom.clone();
-            abs.extend_from_slice(&t.path);
-            let n = tree.at(&abs).unwrap();
-            self.hover_status = Some(self.hover_text(&abs));
-            if resp.double_clicked() {
-                // Zoom into the directory that holds the double-clicked tile.
-                let mut z = abs.clone();
-                if !n.is_dir {
-                    z.pop();
-                }
-                action = Some((true, z));
-            } else if resp.clicked() {
-                action = Some((false, abs));
-            }
-        }
-        // The status bar was drawn before this panel, so repaint when what it should say has changed.
-        if action.is_some() || self.hover_status != prev_status {
-            ui.ctx().request_repaint();
-        }
-        match action {
-            Some((true, z)) => self.zoom = z,
-            Some((false, p)) => self.select(p),
-            None => {}
-        }
-        if resp.secondary_clicked() {
-            self.zoom.pop();
+    /// Lighting and effects for the treemap shader, from the settings.
+    fn look(&self) -> Look {
+        let v = self.view();
+        let sh = Shading::new(v);
+        Look {
+            ambient: sh.ambient,
+            diffuse: sh.diffuse,
+            gain: sh.gain,
+            sun: sh.light,
+            grid: sh.grid,
+            lighting: v.lighting,
+            light_level: v.light_level.factor(),
+            bevel: v.depth_effect,
         }
     }
 
-    fn render_treemap(&mut self, ctx: &egui::Context, px: [usize; 2], look: [u32; 9]) {
-        let v = self.view().clone();
-        let tree = self.tree.as_ref().unwrap();
-        let zroot = tree.at(&self.zoom).unwrap();
-        let bounds = Rect::from_min_max(pos2(0.0, 0.0), pos2(px[0] as f32, px[1] as f32));
-        let tiles = treemap::layout(zroot, bounds, v.height, v.scale);
+    /// Give the map new colouring inputs when anything that changes tile colours has changed.
+    fn update_map_paint(&mut self) {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key()).hash(&mut h);
+        let key = h.finish();
+        if self.map_paint == Some(key) {
+            return;
+        }
+        self.map_paint = Some(key);
         let filtering = self.filter.active() || self.dupes_only;
-        let need_abs = filtering && self.dupes_only || self.color_mode == ColorMode::Change;
-        let mut abs = self.zoom.clone();
-        let zl = abs.len();
-        // With a filter on, everything that isn't a match (including folders too small to draw) is blanked.
+        let mode = self.color_mode;
+        let colors: Arc<HashMap<String, Color32>> = Arc::new(self.colors.clone());
+        let diff = self.diff.clone();
+        let filter = self.filter.clone();
+        let dupes_only = self.dupes_only;
+        let dup_set = self.dup_set.clone();
+        let highlight = self.highlight_ext.clone();
+        let colorize: mapview::Colorizer = Arc::new(move |n: &Node, abs: &[u32]| {
+            if filtering && !(filter.matches(&n.name, n.size) && (!dupes_only || dup_set.contains(abs))) {
+                return None;
+            }
+            let c = match mode {
+                ColorMode::Type => {
+                    let ext = n.ext();
+                    match colors.get(ext) {
+                        Some(&c) => c,
+                        None => colors.get(&ext.to_lowercase()).copied().unwrap_or(Color32::GRAY),
+                    }
+                }
+                ColorMode::Age => age_color(n.modified),
+                ColorMode::Change => match diff.as_deref().and_then(|(d, _)| d.at(abs)) {
+                    Some(d) => change_color(d.old, n.size),
+                    None => Color32::from_gray(95),
+                },
+            };
+            let fill = match &highlight {
+                Some(h) if !n.ext().eq_ignore_ascii_case(h) => c.gamma_multiply(0.15),
+                _ => c,
+            };
+            Some((fill, c))
+        });
         let background = if filtering { Color32::from_gray(24) } else { Color32::from_gray(45) };
-        let mut pixels = vec![background; px[0] * px[1]];
-        let mut colors = vec![Color32::TRANSPARENT; tiles.len()];
-        let hl = self.highlight_ext.as_deref();
-        let shade = Shading::new(&v);
-        for (i, t) in tiles.iter().enumerate() {
-            // Tiles come parents-first; only paint the ones nothing else is drawn on top of.
-            let has_children = tiles.get(i + 1).is_some_and(|nx| nx.path.len() > t.path.len());
-            if has_children {
-                continue;
-            }
-            let n = zroot.at(&t.path).unwrap();
-            if n.is_dir {
-                continue; // contents too small to draw: leave the background
-            }
-            if need_abs {
-                abs.truncate(zl);
-                abs.extend_from_slice(&t.path);
-            }
-            if filtering && !(self.filter.matches(&n.name, n.size) && (!self.dupes_only || self.dup_set.contains(&abs))) {
-                fill_rect(&mut pixels, px[0], t.rect, Color32::from_gray(24));
-                continue;
-            }
-            let mut c = self.node_color(n, &abs);
-            colors[i] = c;
-            if let Some(h) = hl {
-                if !n.ext().eq_ignore_ascii_case(h) {
-                    c = c.gamma_multiply(0.15);
+        let v = self.view();
+        let cushion = Cushion { height: v.height as f64, scale: v.scale as f64 };
+        let look = self.look();
+        self.map.set_paint(Paint { key, colorize, cushion, background, look });
+    }
+
+    fn treemap_panel(&mut self, ui: &mut egui::Ui) {
+        let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+        let bounds = resp.rect;
+        let Some(tree) = self.tree.clone() else { return };
+        if tree.at(&self.zoom).is_none() {
+            self.zoom.clear();
+        }
+        let ctx = ui.ctx().clone();
+        let feel = self.feel();
+        self.update_map_paint();
+        self.map.sync(&ctx, &tree, &self.zoom, bounds, &feel);
+
+        // ---- input: everything goes through the one camera ----
+        // egui may run a frame twice (a discarded sizing pass) with the same input; act on it once.
+        let first_pass = ctx.current_pass_index() == 0;
+        let pointer = resp.hover_pos();
+        let typing = ctx.egui_wants_keyboard_input();
+        let (wheel, pinch, back, forward, home, plus, minus) = ui.input(|i| {
+            let mut wheel = 0.0f64;
+            for e in &i.raw.events {
+                if let egui::Event::MouseWheel { delta, unit, modifiers, .. } = e {
+                    // Ctrl+wheel arrives as a pinch zoom below on most platforms; don't count it twice.
+                    if modifiers.ctrl || modifiers.command {
+                        continue;
+                    }
+                    wheel += match unit {
+                        egui::MouseWheelUnit::Point => delta.y as f64 / camera::NOTCH_POINTS,
+                        egui::MouseWheelUnit::Line => delta.y as f64,
+                        egui::MouseWheelUnit::Page => delta.y as f64 * 4.0,
+                    };
                 }
             }
-            shade.paint(&mut pixels, px[0], t, c);
+            let alt = i.modifiers.alt;
+            (
+                wheel,
+                i.zoom_delta() as f64,
+                i.pointer.button_pressed(egui::PointerButton::Extra1) || (!typing && alt && i.key_pressed(egui::Key::ArrowLeft)),
+                i.pointer.button_pressed(egui::PointerButton::Extra2) || (!typing && alt && i.key_pressed(egui::Key::ArrowRight)),
+                !typing && i.key_pressed(egui::Key::Home),
+                !typing && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals)),
+                !typing && i.key_pressed(egui::Key::Minus),
+            )
+        });
+        if let Some(p) = pointer.filter(|_| first_pass) {
+            let mut amount = wheel * camera::NOTCH * feel.sensitivity;
+            if (pinch - 1.0).abs() > 1e-6 {
+                amount += pinch.ln() * feel.sensitivity.sqrt();
+            }
+            if amount != 0.0 {
+                self.map.zoom_wheel(amount, p, bounds, &feel);
+            }
+            // Zooming while moving the pointer: the point under the pointer *now* stays put.
+            self.map.follow_pointer(p, bounds);
         }
-        let img = ColorImage::new(px, pixels);
-        match &mut self.cache {
-            Some(cache) => {
-                cache.texture.set(img, TextureOptions::LINEAR);
-                cache.px = px;
-                cache.zoom = self.zoom.clone();
-                cache.highlight = self.highlight_ext.clone();
-                cache.look = look;
-                cache.filter = self.filter.clone();
-                cache.paint_gen = self.paint_gen;
-                cache.tiles = tiles;
-                cache.colors = colors;
+        if first_pass && (plus || minus) {
+            let at = pointer.unwrap_or(bounds.center());
+            let dir = if plus { 1.0 } else { -1.0 };
+            self.map.zoom_wheel(dir * camera::NOTCH * 2.0 * feel.sensitivity, at, bounds, &feel);
+        }
+        // Drag to pan (left or middle button). A drag never selects.
+        if resp.dragged_by(egui::PointerButton::Primary) || resp.dragged_by(egui::PointerButton::Middle) {
+            self.map.dragging = true;
+            if first_pass {
+                self.map.pan(resp.drag_delta(), bounds);
             }
-            None => {
-                let texture = ctx.load_texture("treemap", img, TextureOptions::LINEAR);
-                let (zoom, highlight) = (self.zoom.clone(), self.highlight_ext.clone());
-                let filter = self.filter.clone();
-                let paint_gen = self.paint_gen;
-                self.cache = Some(LayoutCache { px, zoom, highlight, look, filter, paint_gen, tiles, colors, texture });
+            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if self.map.dragging {
+            self.map.dragging = false;
+            let v = ui.input(|i| i.pointer.velocity());
+            self.map.release(v, &feel);
+        } else if resp.hovered() && !self.map.camera.is_full() {
+            ctx.set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        let mut select = None;
+        if first_pass && (resp.clicked() || resp.double_clicked()) && !self.map.in_transition() {
+            if let Some(p) = resp.interact_pointer_pos() {
+                if let Some((rel, rect)) = self.map.hit(&tree, bounds, p) {
+                    let mut abs = self.map.root().unwrap_or(&[]).to_vec();
+                    abs.extend_from_slice(&rel);
+                    if resp.double_clicked() {
+                        // Into the folder that holds the tile (or the folder itself), animated. A
+                        // file directly in the folder on screen is framed instead.
+                        let n = tree.at(&abs).unwrap();
+                        let mut z = abs.clone();
+                        if !n.is_dir {
+                            z.pop();
+                        }
+                        if z.len() > self.zoom.len() {
+                            self.zoom = z;
+                        } else {
+                            let _ = rect;
+                            self.map.frame_path(&tree, &abs, &feel);
+                        }
+                    } else {
+                        select = Some(abs);
+                    }
+                }
             }
+        }
+        if first_pass {
+            if resp.secondary_clicked() {
+                self.map.zoom_out(&tree, &feel);
+            }
+            if back {
+                self.map.back(&feel);
+            }
+            if forward {
+                self.map.forward(&feel);
+            }
+            if home {
+                self.map.reset(&feel);
+            }
+        }
+        if let Some(z) = self.map.take_root_request() {
+            self.zoom = z;
+            self.map.sync(&ctx, &tree, &self.zoom, bounds, &feel);
+        }
+
+        // ---- draw ----
+        let look = self.look();
+        let frame = self.map.render(&painter, &tree, bounds, pointer, &look, &feel);
+        let root = self.map.root().unwrap_or(&[]).to_vec();
+        let zroot = tree.at(&root).unwrap_or(&tree);
+
+        // File names on tiles with room for them, fading in with size.
+        if self.view().show_labels {
+            let font = FontId::proportional(11.0);
+            let labels = self.map.labels(bounds);
+            for (r, l, a) in labels.into_iter().take(2500) {
+                let Some(n) = zroot.at(&l.path) else { continue };
+                let dark_text = luma(l.color) > 140.0;
+                let tc = if dark_text { Color32::from_black_alpha(220) } else { Color32::from_white_alpha(235) };
+                let shadow = if dark_text { Color32::from_white_alpha(60) } else { Color32::from_black_alpha(110) };
+                let p = painter.with_clip_rect(r.shrink(1.0).intersect(painter.clip_rect()));
+                let at = r.min + vec2(3.0, 2.0);
+                p.text(at + vec2(0.0, 1.0), Align2::LEFT_TOP, &*n.name, font.clone(), shadow.gamma_multiply(a));
+                p.text(at, Align2::LEFT_TOP, &*n.name, font.clone(), tc.gamma_multiply(a));
+                let sa = a * mapview_smooth(26.0, 32.0, r.height());
+                if sa > 0.02 {
+                    p.text(r.min + vec2(3.0, 15.0), Align2::LEFT_TOP, scan::human(n.size), font.clone(), tc.gamma_multiply(0.8 * sa));
+                }
+            }
+        }
+
+        // Outline the selection (or the nearest ancestor big enough to see), at any zoom.
+        if !self.map.in_transition() {
+            if let Some(sel) = self.selected.as_ref().filter(|s| s.starts_with(&root)) {
+                let rel = &sel[root.len()..];
+                let rects = treemap::ancestors(zroot, self.map.camera.world(), rel);
+                if let Some(r) = rects.iter().rev().map(|r| self.map.to_screen(bounds, r)).find(|r| r.width() >= 3.0 && r.height() >= 3.0) {
+                    let stroke = Stroke::new(2.0, self.view().selection_color);
+                    painter.with_clip_rect(bounds).rect_stroke(r, 0.0, stroke, egui::StrokeKind::Inside);
+                }
+            }
+        }
+
+        let prev_status = self.hover_status.take();
+        if let Some((rel, _)) = &frame.hover {
+            // The folder around the hovered tile, faintly.
+            if let Some((_, parent)) = rel.split_last() {
+                if let Some(pr) = self.map.locate(&tree, parent).filter(|_| !parent.is_empty()) {
+                    let stroke = Stroke::new(1.0, Color32::from_white_alpha(110));
+                    painter.with_clip_rect(bounds).rect_stroke(self.map.to_screen(bounds, &pr), 0.0, stroke, egui::StrokeKind::Inside);
+                }
+            }
+            let mut abs = root.clone();
+            abs.extend_from_slice(rel);
+            self.hover_status = Some(self.hover_text(&abs));
+        }
+        if std::env::var_os("DIRMAP_PROFILE").is_some() {
+            let text = format!(
+                "{} · zoom ×{:.1} · frame {:.2} ms CPU · last build {:.1} ms",
+                self.map.backend.name(),
+                self.map.camera.zoom(),
+                self.map.frame_cpu_ms,
+                self.map.last_build_ms
+            );
+            painter.text(bounds.right_bottom() - vec2(6.0, 6.0), Align2::RIGHT_BOTTOM, text, FontId::monospace(11.0), Color32::WHITE);
+        }
+        let selecting = select.is_some();
+        if let Some(p) = select {
+            self.select(p);
+        }
+        // The status bar was drawn before this panel, so repaint when what it should say has changed.
+        if frame.animating || selecting || self.map.labels_fading() || self.hover_status != prev_status {
+            ctx.request_repaint();
         }
     }
 
@@ -1749,7 +1839,7 @@ impl App {
             if ui.small_button(format!("🏠 {}", tree.name)).clicked() {
                 go = Some(0);
             }
-            let mut n = tree;
+            let mut n: &Node = tree;
             for (k, &i) in self.zoom.iter().enumerate() {
                 n = &n.children[i as usize];
                 ui.weak("›");
@@ -1761,7 +1851,7 @@ impl App {
                 self.zoom.truncate(k);
             }
             ui.add_space(12.0);
-            ui.weak("Wheel over the map to zoom.");
+            ui.weak("Wheel to zoom, drag to pan, right-click to zoom out.");
             ui.separator();
             ui.label("View:");
             ui.selectable_value(&mut self.map_kind, MapKind::Treemap, "Treemap");
@@ -1860,7 +1950,7 @@ impl App {
 }
 
 /// Per-pixel cushion shading (van Wijk & van de Wetering), with WinDirStat's knobs.
-struct Shading {
+pub(crate) struct Shading {
     ambient: f32,
     diffuse: f32,
     gain: f32,
@@ -1869,7 +1959,7 @@ struct Shading {
 }
 
 impl Shading {
-    fn new(s: &Settings) -> Self {
+    pub(crate) fn new(s: &Settings) -> Self {
         let (lx, ly, lz) = (s.light_x, s.light_y, 10.0f32);
         let len = (lx * lx + ly * ly + lz * lz).sqrt();
         let ambient = 1.0 - s.cushion.clamp(0.0, 1.0);
@@ -1884,7 +1974,9 @@ impl Shading {
         }
     }
 
-    fn paint(&self, pixels: &mut [Color32], stride: usize, t: &Tile, c: Color32) {
+    /// The original CPU renderer, kept for the before/after benchmark.
+    #[cfg(test)]
+    pub(crate) fn paint(&self, pixels: &mut [Color32], stride: usize, t: &Tile, c: Color32) {
         let height = pixels.len() / stride;
         let r = t.rect;
         let (x0, x1) = (r.min.x.round().max(0.0) as usize, (r.max.x.round() as usize).min(stride));
@@ -1997,7 +2089,7 @@ impl eframe::App for App {
                             .enumerate()
                             .flat_map(|(g, grp)| std::iter::once((g, None)).chain((0..grp.files.len()).map(move |f| (g, Some(f)))))
                             .collect();
-                        self.dup_set = groups.iter().flat_map(|g| g.files.iter().map(|f| f.tree_path.clone())).collect();
+                        self.dup_set = Arc::new(groups.iter().flat_map(|g| g.files.iter().map(|f| f.tree_path.clone())).collect());
                         self.dup_groups = groups;
                         self.dup_done = true;
                         self.paint_gen += 1;
@@ -2035,7 +2127,7 @@ impl eframe::App for App {
                     ui.label(format!("Scanning {}…", job.root.display()));
                 } else if let Some(t) = &self.tree {
                     ui.label(format!(
-                        "{}: {} in {} files, scanned in {:.1}s. Click a tile to select, double-click to zoom in, right-click to zoom out.",
+                        "{}: {} in {} files, scanned in {:.1}s. Click a tile to select, double-click to open a folder, right-click to zoom out.",
                         self.scanned_path.display(),
                         scan::human(t.size),
                         group(t.files),
@@ -2283,6 +2375,12 @@ fn lighten(c: Color32, f: f32) -> Color32 {
     Color32::from_rgb(m(c.r()), m(c.g()), m(c.b()))
 }
 
+/// 0 below `a`, 1 above `b`, smooth in between.
+fn mapview_smooth(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn luma(c: Color32) -> f32 {
     0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32
 }
@@ -2325,16 +2423,6 @@ fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
     norm(a) == norm(b)
 }
 
-fn fill_rect(pixels: &mut [Color32], stride: usize, r: Rect, c: Color32) {
-    let height = pixels.len() / stride;
-    let (x0, x1) = (r.min.x.round().max(0.0) as usize, (r.max.x.round() as usize).min(stride));
-    let (y0, y1) = (r.min.y.round().max(0.0) as usize, (r.max.y.round() as usize).min(height));
-    for y in y0..y1.max(y0) {
-        if x0 < x1 {
-            pixels[y * stride + x0..y * stride + x1].fill(c);
-        }
-    }
-}
 
 /// Files (and their total size) anywhere in the tree that pass the filter.
 fn count_matches(n: &Node, f: &ViewFilter) -> (u64, u64) {

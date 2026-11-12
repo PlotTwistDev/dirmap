@@ -10,15 +10,18 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod app;
+mod camera;
 mod categories;
 mod drives;
 mod dupes;
 mod elevate;
 mod icons;
+mod mapview;
 mod settings;
 mod scan;
 mod snapshot;
 mod sunburst;
+mod tilegpu;
 mod treemap;
 
 use std::path::PathBuf;
@@ -85,6 +88,10 @@ fn main() -> eframe::Result {
         let compare = compare.clone();
         eframe::run_native("dirmap", native, Box::new(move |cc| Ok(Box::new(app::App::new(cc, path, all_fs, compare)))))
     };
+    // DIRMAP_RENDERER=glow forces OpenGL (for testing that path).
+    if std::env::var("DIRMAP_RENDERER").is_ok_and(|r| r.eq_ignore_ascii_case("glow")) {
+        return run(eframe::Renderer::Glow, path);
+    }
     match run(eframe::Renderer::Wgpu, path.clone()) {
         Err(eframe::Error::Wgpu(e)) => {
             eprintln!("wgpu unavailable ({e}), falling back to OpenGL");
