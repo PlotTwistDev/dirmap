@@ -3,6 +3,8 @@
 //!   dirmap [PATH]                      open the GUI (and scan PATH if given)
 //!   dirmap --cli PATH [--top N]        print a text report instead
 //!   --all-fs                           descend into other mounted filesystems
+//!   --save-snapshot FILE               (with --cli) also save the scan for later comparison
+//!   --compare FILE                     open the GUI comparing against a saved snapshot
 
 // No console window behind the GUI on Windows; --cli attaches to the calling terminal instead.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -10,9 +12,12 @@
 mod app;
 mod categories;
 mod drives;
+mod dupes;
 mod icons;
 mod settings;
 mod scan;
+mod snapshot;
+mod sunburst;
 mod treemap;
 
 use std::path::PathBuf;
@@ -23,6 +28,8 @@ fn main() -> eframe::Result {
     let mut cli = false;
     let mut top = 15usize;
     let mut path = None;
+    let mut save_snapshot = None;
+    let mut compare = None;
     let mut opts = scan::Options { one_file_system: true, ..Default::default() };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -30,8 +37,10 @@ fn main() -> eframe::Result {
             "--cli" => cli = true,
             "--all-fs" => opts.one_file_system = false,
             "--top" => top = args.next().and_then(|s| s.parse().ok()).unwrap_or(top),
+            "--save-snapshot" => save_snapshot = args.next().map(PathBuf::from),
+            "--compare" => compare = args.next().map(PathBuf::from),
             "-h" | "--help" => {
-                println!("usage: dirmap [--cli] [--top N] [--all-fs] [PATH]");
+                println!("usage: dirmap [--cli [--top N] [--save-snapshot FILE]] [--compare FILE] [--all-fs] [PATH]");
                 return Ok(());
             }
             _ => path = Some(PathBuf::from(a)),
@@ -44,7 +53,7 @@ fn main() -> eframe::Result {
             use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
             AttachConsole(ATTACH_PARENT_PROCESS);
         }
-        report(&path.unwrap_or_else(|| PathBuf::from(".")), opts, top);
+        report(&path.unwrap_or_else(|| PathBuf::from(".")), opts, top, save_snapshot);
         return Ok(());
     }
 
@@ -58,7 +67,8 @@ fn main() -> eframe::Result {
             ..Default::default()
         };
         let all_fs = !opts.one_file_system;
-        eframe::run_native("dirmap", native, Box::new(move |cc| Ok(Box::new(app::App::new(cc, path, all_fs)))))
+        let compare = compare.clone();
+        eframe::run_native("dirmap", native, Box::new(move |cc| Ok(Box::new(app::App::new(cc, path, all_fs, compare)))))
     };
     match run(eframe::Renderer::Wgpu, path.clone()) {
         Err(eframe::Error::Wgpu(e)) => {
@@ -69,7 +79,7 @@ fn main() -> eframe::Result {
     }
 }
 
-fn report(root: &std::path::Path, opts: scan::Options, top: usize) {
+fn report(root: &std::path::Path, opts: scan::Options, top: usize, save_snapshot: Option<PathBuf>) {
     let progress = Arc::new(scan::Progress::default());
     let t = std::time::Instant::now();
     let tree = scan::scan(root, &opts, &progress, &scan::new_live(root));
@@ -94,5 +104,11 @@ fn report(root: &std::path::Path, opts: scan::Options, top: usize) {
     for e in scan::ext_stats(&tree).iter().take(top) {
         let name = if e.ext.is_empty() { "(none)".into() } else { format!(".{}", e.ext) };
         println!("  {:>10}  {:5.1}%  {:>8} files  {}", scan::human(e.bytes), pct(e.bytes), e.files, name);
+    }
+    if let Some(f) = save_snapshot {
+        match snapshot::save(&f, root, &tree) {
+            Ok(()) => println!("\nSnapshot saved to {}", f.display()),
+            Err(e) => eprintln!("\nCouldn't save the snapshot: {e}"),
+        }
     }
 }

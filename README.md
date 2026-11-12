@@ -18,7 +18,18 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
   File names and sizes are drawn on tiles that have room for them (can be turned off).
 - **Treemap filters** that blank out everything else: by kind (audio, video, images, AI model weights such as
   gguf / safetensors / pt / onnx, archives, documents, code, programs, disk images) and by size
-  (larger than / smaller than N MB), with a count of how many files and bytes match.
+  (larger than / smaller than a size such as `500 MB` or `2 GB`), with a count of how many files and bytes match.
+- **Sunburst view**: a ring chart of the same data, each ring one folder level deeper. Click to select,
+  double-click or wheel to zoom, click the middle to go up.
+- **Color by type, age or change**: age runs from red (changed today) to blue (10+ years old); change shows
+  new, grown and shrunk files since a snapshot.
+- **Size histogram** (Sizes tab): how many files and how much space fall in each size range. Click a bar to
+  show only that range on the map.
+- **Compare with a snapshot** (Changes tab): save a scan, scan again later, and see what is new, deleted, grew
+  or shrank. `dirmap --cli PATH --save-snapshot FILE` saves one from a script; `dirmap --compare FILE PATH`
+  opens the GUI comparing against it.
+- **Duplicate finder** (Duplicates tab): files with identical contents, matched by size, then the first 64 KB,
+  then the whole file, with how much space removing the extra copies would free.
 - **Settings** (saved between runs): theme, size units, filters (folders and file patterns to skip or include,
   minimum size, maximum age), tree columns, treemap look with live preview, hidden files, scanner threads.
 

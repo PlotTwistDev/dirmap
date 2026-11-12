@@ -418,9 +418,38 @@ pub fn human(bytes: u64) -> String {
     }
 }
 
+/// Parse a size typed by the user: "500" (MB), "1.5 GB", "200k", "10 MB". Units follow the
+/// binary/decimal setting.
+pub fn parse_size(s: &str) -> Option<u64> {
+    let s = s.trim().to_ascii_lowercase();
+    let split = s.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(s.len());
+    let num: f64 = s[..split].trim().parse().ok()?;
+    let base: f64 = if DECIMAL.load(Ordering::Relaxed) { 1000.0 } else { 1024.0 };
+    let unit = s[split..].trim().trim_end_matches("ib").trim_end_matches('b');
+    let mult = match unit {
+        "" if split == s.len() => base * base, // a bare number means MB
+        "" => 1.0,
+        "k" => base,
+        "m" => base * base,
+        "g" => base.powi(3),
+        "t" => base.powi(4),
+        _ => return None,
+    };
+    Some((num * mult) as u64)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::glob;
+    use super::{glob, parse_size};
+
+    #[test]
+    fn sizes() {
+        assert_eq!(parse_size("2"), Some(2 << 20));
+        assert_eq!(parse_size("1.5 GB"), Some(3 << 29));
+        assert_eq!(parse_size("200k"), Some(200 << 10));
+        assert_eq!(parse_size("10 B"), Some(10));
+        assert_eq!(parse_size("lots"), None);
+    }
 
     #[test]
     fn globs() {
