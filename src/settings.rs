@@ -19,6 +19,24 @@ pub enum SizeUnits {
     Decimal,
 }
 
+/// How strongly the treemap lights up under the pointer.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum LightLevel {
+    Subtle,
+    Normal,
+    Strong,
+}
+
+impl LightLevel {
+    pub fn factor(self) -> f32 {
+        match self {
+            LightLevel::Subtle => 0.55,
+            LightLevel::Normal => 1.0,
+            LightLevel::Strong => 1.6,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -58,6 +76,21 @@ pub struct Settings {
     pub grid_color: Color32,
     pub selection_color: Color32,
 
+    // Treemap navigation
+    /// Animate zooming and panning (off: changes apply at once).
+    pub smooth_zoom: bool,
+    /// Zoom per wheel notch or trackpad distance, relative to the default.
+    pub zoom_sensitivity: f32,
+    /// Animation speed, relative to the default (2 = twice as fast).
+    pub anim_speed: f32,
+
+    // Treemap effects
+    /// A soft light follows the pointer across the tiles.
+    pub lighting: bool,
+    pub light_level: LightLevel,
+    /// Very slight bevel on tile edges.
+    pub depth_effect: bool,
+
     // Advanced
     pub one_file_system: bool,
     pub skip_hidden: bool,
@@ -94,6 +127,12 @@ impl Default for Settings {
             show_labels: true,
             grid_color: Color32::BLACK,
             selection_color: Color32::WHITE,
+            smooth_zoom: true,
+            zoom_sensitivity: 1.0,
+            anim_speed: 1.0,
+            lighting: true,
+            light_level: LightLevel::Normal,
+            depth_effect: true,
             one_file_system: true,
             skip_hidden: false,
             threads: 0,
@@ -207,7 +246,7 @@ impl Dialog {
                 let restart = &mut self.restart_as_admin;
                 ui.vertical(|ui| {
                     // Same height on every tab, so the buttons don't jump around.
-                    ui.set_min_height(320.0);
+                    ui.set_min_height(390.0);
                     match self.tab {
                         Tab::General => general(ui, d),
                         Tab::Filtering => filtering(ui, d),
@@ -349,6 +388,38 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
         if ui.button("Flat").clicked() {
             (d.brightness, d.cushion, d.height, d.scale, d.show_grid) = (0.75, 0.0, 0.0, 0.0, true);
         }
+    });
+    ui.add_space(6.0);
+    ui.columns(2, |cols| {
+        let ui = &mut cols[0];
+        ui.strong("Navigation");
+        ui.checkbox(&mut d.smooth_zoom, "Smooth zoom").on_hover_text("Animate zooming and moving around the map");
+        ui.horizontal(|ui| {
+            ui.label("Zoom sensitivity");
+            ui.add(egui::Slider::new(&mut d.zoom_sensitivity, 0.25..=3.0).show_value(false));
+        });
+        ui.add_enabled_ui(d.smooth_zoom, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Animation speed");
+                ui.add(
+                    egui::Slider::new(&mut d.anim_speed, 0.5..=2.5)
+                        .show_value(false)
+                        .logarithmic(true),
+                );
+            });
+        });
+        let ui = &mut cols[1];
+        ui.strong("Visual effects");
+        ui.checkbox(&mut d.lighting, "Interactive lighting").on_hover_text("A soft light follows the pointer across the tiles");
+        ui.add_enabled_ui(d.lighting, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Intensity");
+                ui.selectable_value(&mut d.light_level, LightLevel::Subtle, "Subtle");
+                ui.selectable_value(&mut d.light_level, LightLevel::Normal, "Normal");
+                ui.selectable_value(&mut d.light_level, LightLevel::Strong, "Strong");
+            });
+        });
+        ui.checkbox(&mut d.depth_effect, "Block depth effect").on_hover_text("A very slight bevel so neighbouring tiles stand apart");
     });
 }
 
