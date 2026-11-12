@@ -409,6 +409,9 @@ impl App {
                 self.apply_custom();
             }
             self.custom_menu(ui);
+            if crate::help::link_button(ui, "Filter syntax: wildcards, frame numbers, ranges") {
+                self.help.show_topic(crate::help::topics::SYNTAX);
+            }
             if let Some(e) = &self.custom.error {
                 ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {e}"));
             }
@@ -565,6 +568,14 @@ impl App {
             ui.collapsing("Syntax", |ui| {
                 ui.label(egui::RichText::new(pattern::HELP).monospace().size(11.5));
             });
+            if ui.button("📖 Full syntax reference…").clicked() {
+                self.help.show_topic(crate::help::topics::SYNTAX);
+                ui.close();
+            }
+            if ui.button("📖 More examples…").clicked() {
+                self.help.show_topic(crate::help::topics::EXAMPLES);
+                ui.close();
+            }
             if pick.is_some() {
                 ui.close();
             }

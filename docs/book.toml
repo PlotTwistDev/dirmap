@@ -1,0 +1,16 @@
+# The dirmap user manual. The same Markdown is bundled into the app's Help Centre (F1), so
+# everything here must work offline and inside dirmap's own viewer. `cargo test` checks links,
+# images, settings coverage, shortcuts and filter examples; `mdbook build docs` makes the website.
+[book]
+title = "dirmap Help"
+authors = ["dirmap contributors"]
+language = "en"
+src = "src"
+
+[output.html]
+no-section-label = true
+default-theme = "light"
+preferred-dark-theme = "navy"
+
+[output.html.search]
+enable = true
