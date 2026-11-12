@@ -4,6 +4,9 @@
 //!   dirmap --cli PATH [--top N]        print a text report instead
 //!   --all-fs                           descend into other mounted filesystems
 
+// No console window behind the GUI on Windows; --cli attaches to the calling terminal instead.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod app;
 mod drives;
 mod icons;
@@ -35,6 +38,11 @@ fn main() -> eframe::Result {
     }
 
     if cli {
+        #[cfg(windows)]
+        unsafe {
+            use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
         report(&path.unwrap_or_else(|| PathBuf::from(".")), opts, top);
         return Ok(());
     }
