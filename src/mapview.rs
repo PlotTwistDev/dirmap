@@ -1212,14 +1212,23 @@ fn build_set(req: &Req) -> Option<TileSet> {
                 // A sliver of a pixel is easy to miss: also drop a small square marker on top,
                 // MARK_PT across, centred on the patch.
                 let min = MARK_PT * req.ppp / ppu;
-                let (cx, cy) = l.rect.center();
-                let (w, h) = (l.rect.w(), l.rect.h());
-                if w.min(h) < min {
-                    let (hw, hh) = (min / 2.0, min / 2.0);
-                    let r = DRect { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh };
+                let mut mark_at = |x: f64, y: f64| {
+                    let hw = min / 2.0;
+                    let r = DRect { x0: x - hw, y0: y - hw, x1: x + hw, y1: y + hw };
                     markers.push(Instance { rect: set.local_rect(&r), grad: [0.0; 4], color: c.to_array(), flags: tilegpu::FLAT });
                     if req.raster {
                         raster_markers.push(RasterTile { rect: r, surface: l.surface, color: c, flat: true });
+                    }
+                };
+                if l.rect.w().min(l.rect.h()) < min {
+                    let (cx, cy) = l.rect.center();
+                    mark_at(cx, cy);
+                } else {
+                    // A big folder whose small files hold matches: the patch is covered by the
+                    // files drawn on top, leaving only slivers, so mark where the matches are.
+                    let hidden = req.paint.hidden.as_ref().unwrap();
+                    for (x, y) in hidden_spots(l.node, &l.rect, l.hidden_from, &mut abs, &req.cover, min, &req.memo, &*req.paint.colorize, &**hidden) {
+                        mark_at(x, y);
                     }
                 }
             }
@@ -1267,6 +1276,51 @@ fn build_set(req: &Req) -> Option<TileSet> {
         set.image = Some(rasterize(&req.cover, ppu, bg, &raster, &req.paint));
     }
     Some(set)
+}
+
+/// Centres of a folder's children from index `from` on (those too small to draw) that are
+/// filter matches or hold some, as `colorize` (files) and `hidden` (folders) tell. Only children
+/// in `cover`, at most one per `cell`-sized square, and only so many, so a folder of a million
+/// files stays cheap. `abs` is the folder's path from the scan root; it's restored.
+#[allow(clippy::too_many_arguments)]
+fn hidden_spots(
+    node: &Node,
+    rect: &DRect,
+    from: usize,
+    abs: &mut Vec<u32>,
+    cover: &DRect,
+    cell: f64,
+    memo: &treemap::Memo,
+    colorize: &(dyn Fn(&Node, &[u32]) -> Option<(Color32, Color32)> + Send + Sync),
+    hidden: &(dyn Fn(&Node, &[u32], usize) -> Option<Color32> + Send + Sync),
+) -> Vec<(f64, f64)> {
+    const MAX_LOOK: usize = 200_000;
+    const MAX_SPOTS: usize = 4096;
+    let mut out = Vec::new();
+    let rects = treemap::child_rects(node, rect, 0.0, Some(memo));
+    let mut seen = std::collections::HashSet::new();
+    for (i, r) in rects.iter().enumerate().skip(from).take(MAX_LOOK) {
+        if !r.intersects(cover) {
+            continue;
+        }
+        let (x, y) = r.center();
+        let key = ((x / cell).floor() as i64, (y / cell).floor() as i64);
+        if seen.contains(&key) {
+            continue;
+        }
+        let c = &node.children[i];
+        abs.push(i as u32);
+        let hit = if c.is_dir { hidden(c, abs, 0).is_some() } else { colorize(c, abs).is_some() };
+        abs.pop();
+        if hit {
+            seen.insert(key);
+            out.push((x, y));
+            if out.len() >= MAX_SPOTS {
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// Size-weighted average colour of a folder's children from index `from` on, looking at the
@@ -1389,6 +1443,34 @@ mod tests {
         // Markers come after every tile, so they're drawn on top.
         let first_dot = set.instances.iter().position(|i| i.color == mark.to_array() && i.flags == tilegpu::FLAT).unwrap();
         assert!(set.instances[first_dot..].iter().all(|i| i.color == mark.to_array()));
+    }
+
+    #[test]
+    fn tiny_match_in_big_folder_keeps_its_marker() {
+        // A folder drawn large, holding big files that don't match and one tiny file that does:
+        // the tiny file can't be drawn, and its folder's patch is covered by the big files, so
+        // the marker must sit where the tiny file is (not only when the folder itself is small).
+        let file = |name: &str, size: u64| Node { name: name.into(), size, files: 1, modified: 0, is_dir: false, children: Vec::new() };
+        let mut kids: Vec<Node> = (0..6).map(|i| file(&format!("big{i}.bin"), 1 << 30)).collect();
+        kids.push(file("tiny.onnx", 10));
+        let size = kids.iter().map(|k| k.size).sum();
+        let dir = Node { name: "d".into(), size, files: kids.len() as u64, modified: 0, is_dir: true, children: kids };
+        let tree = Arc::new(Node { name: "root".into(), size, files: dir.files, modified: 0, is_dir: true, children: vec![dir] });
+        let world = DRect { x0: 0.0, y0: 0.0, x1: 400.0, y1: 300.0 };
+        let mark = Color32::from_rgb(250, 10, 10);
+        let mut r = req(&tree, world, world, 1.0);
+        r.paint.colorize = Arc::new(|n: &Node, _: &[u32]| n.name.ends_with(".onnx").then_some((Color32::WHITE, Color32::WHITE)));
+        r.paint.hidden = Some(Arc::new(move |n: &Node, _: &[u32], from: usize| n.children.iter().skip(from).any(|c| c.name.ends_with(".onnx")).then_some(mark)));
+        let set = build_set(&r).unwrap();
+        let dots: Vec<_> = set.instances.iter().filter(|i| i.color == mark.to_array() && i.flags == tilegpu::FLAT).collect();
+        assert_eq!(dots.len(), 1, "one marker for the one tiny match");
+        // It sits on the tiny file's place in the layout.
+        let rects = treemap::child_rects(&tree.children[0], &world, 0.0, None);
+        let (tx, ty) = rects[6].center();
+        let [x0, y0, x1, y1] = dots[0].rect;
+        let o = set.origin;
+        let (cx, cy) = (((x0 + x1) / 2.0) as f64 + o.0, ((y0 + y1) / 2.0) as f64 + o.1);
+        assert!((cx - tx).abs() < 1.0 && (cy - ty).abs() < 1.0, "marker at ({cx}, {cy}), file at ({tx}, {ty})");
     }
 
     fn req(tree: &Arc<Node>, world: DRect, cover: DRect, ppu: f64) -> Req {
@@ -1627,3 +1709,4 @@ mod bench {
         println!("  Mouse move (hit test, lighting is on the GPU): first {:.2} ms, then {:.1} µs average", cold, ms(t) * 1000.0 / moves as f64);
     }
 }
+
