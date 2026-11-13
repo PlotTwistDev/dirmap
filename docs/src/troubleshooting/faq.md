@@ -47,8 +47,8 @@ No; a scan is a picture of one moment. Refresh a folder with **F5**, or compare 
 
 ## Why are some rectangles grey?
 
-Grey tiles are files whose extension has no colour assigned (rare), files dimmed by a filter (dark
-grey), or, with **Color by: Change**, files that haven't changed.
+Grey tiles are files whose extension has no colour assigned (rare) or, with **Color by: Change**,
+files that haven't changed. Files hidden by a filter leave empty dark background instead.
 
 ## Where are my settings stored, and how do I reset them?
 

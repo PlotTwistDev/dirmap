@@ -35,7 +35,7 @@ When any filter is on, two buttons choose how the result is shown:
 
 | Mode | What you see |
 |---|---|
-| **Highlight** (default) | The map keeps its layout. Matching files keep their colours; everything else is drawn in dark grey. Matches too small to draw on their own still show: the patch they're in lights up in the matches' colour, with a small square marker on top. On the sunburst and in the folder list, folders without any matches are shown faintly too. Best for seeing **where** matches are. |
+| **Highlight** (default) | The map keeps its layout. Matching files keep their colours; everything else is hidden, leaving empty dark background in its place. Matches too small to draw on their own still show: the patch they're in lights up in the matches' colour, with a small square marker on top. On the sunburst and in the folder list, folders without any matches are shown faintly too. Best for seeing **where** matches are. |
 | **Show matches only** | The map, the folder list and the File types list are rebuilt from the matching files and the folders that hold them, so the matches fill the map. Best when matches are a small part of the scan. |
 
 ![The same filter with Show matches only](../images/filter-only.png)

@@ -36,8 +36,8 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
 - **Filters** by kind (audio, video, images, AI model weights such as gguf / safetensors / pt / onnx,
   archives, documents, code, programs, disk images), by size (larger than / smaller than a size such as
   `500 MB` or `2 GB`) and by name (**Custom**, below), with a count of how many files and bytes match. Two modes:
-  - **Highlight** (default) keeps the layout and dims everything that doesn't match, on the treemap, the
-    sunburst and the folder list, so you can see where the matches are. Matches too small to draw (a few
+  - **Highlight** (default) keeps the layout and hides everything that doesn't match (left as empty
+    background on the treemap and sunburst, shown faintly in the folder list), so you see where the matches are. Matches too small to draw (a few
     `.txt` files among large ones) still show: their patch lights up with a small marker on top, and
     folders without matches fade in the folder list and sunburst.
   - **Show matches only** rebuilds the treemap, sunburst, folder list and File types tab from the matching

@@ -1681,12 +1681,13 @@ impl App {
                 // Highlight: folders holding matches keep their colour, the rest fade.
                 if filtering && self.shown.is_none() {
                     let has = hits.as_ref().is_none_or(|h| h.at(&full).is_some());
-                    c = c.gamma_multiply(if has { 0.85 } else { 0.3 });
+                    c = c.gamma_multiply(if has { 0.85 } else { 0.15 });
                 }
             } else if self.dupes_only && !self.dup_set.contains(&full) {
                 c = Color32::from_gray(45);
             } else if self.filter.active() && !self.filter.matches(&n.name, n.size) {
-                c = custom::dim(c);
+                // Hidden, as on the treemap.
+                c = Color32::from_gray(45);
             } else if let Some(h) = &self.highlight_ext {
                 if !n.ext().eq_ignore_ascii_case(h) {
                     c = c.gamma_multiply(0.2);
@@ -1862,10 +1863,10 @@ impl App {
                     None => Color32::from_gray(95),
                 },
             };
-            // Highlight mode: what doesn't match stays in place, dimmed.
+            // Highlight mode: what doesn't match is hidden (left as empty background), so the
+            // matches stand out in their places.
             if filtering && !filter.matches(&n.name, n.size) {
-                let d = custom::dim(c);
-                return Some((d, d));
+                return None;
             }
             let fill = match &highlight {
                 Some(h) if !n.ext().eq_ignore_ascii_case(h) => c.gamma_multiply(0.15),
@@ -1885,7 +1886,7 @@ impl App {
             });
             f
         });
-        let background = if dupes_only { Color32::from_gray(24) } else { Color32::from_gray(45) };
+        let background = if filtering || dupes_only { Color32::from_gray(24) } else { Color32::from_gray(45) };
         let v = self.view();
         let cushion = Cushion { height: v.height as f64, scale: v.scale as f64 };
         let look = self.look();

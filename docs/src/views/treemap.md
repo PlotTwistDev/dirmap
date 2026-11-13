@@ -22,7 +22,7 @@ Empty folders and empty files take no space and so don't appear on the map.
 
 With **Color by: Type** (the default), the colour shows the file's extension, matching the
 swatches in the **File types** list. Other colour modes show age or change since a snapshot; see
-[Colour modes](color-modes.md). Darkened tiles are ones a filter has dimmed; see
+[Colour modes](color-modes.md). Empty dark areas are files a filter has hidden; see
 [Filtering overview](../filtering/overview.md).
 
 ## Finding out what something is
