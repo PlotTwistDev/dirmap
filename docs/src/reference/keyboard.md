@@ -20,7 +20,7 @@ In the main window, unless the cursor is in a text box.
 
 ### Treemap
 
-When the treemap is showing (not the sunburst) and the cursor isn't in a text box.
+When the treemap is showing (not the sunburst), the cursor isn't in a text box, and you last clicked the map (or the file manager is in its Tree layout).
 
 | Windows and Linux | macOS | Action |
 |---|---|---|
@@ -30,9 +30,9 @@ When the treemap is showing (not the sunburst) and the cursor isn't in a text bo
 | **Alt+←** | **⌥←** | Back to the previous place. |
 | **Alt+→** | **⌥→** | Forward again. |
 
-### Files view
+### File manager
 
-When the Files view is showing and the cursor isn't in a text box.
+After you've clicked in the file manager (not the map), in the List, Icons and Columns layouts, unless the cursor is in a text box.
 
 | Windows and Linux | macOS | Action |
 |---|---|---|
@@ -40,21 +40,30 @@ When the Files view is showing and the cursor isn't in a text box.
 | **← / →** | **← / →** | Icons: the previous or next item. Columns: up to the enclosing folder, or into the selected folder. |
 | **Home / End** | **Home / End** | Select the first or last item. |
 | **Page Up / Page Down** | **Page Up / Page Down** | Move 20 items (20 rows of icons). |
-| **Enter** | **Enter** | Open the selected folder in the Files view. A selected file opens with its usual app. |
+| **Enter** | **Enter** | Open the selected folder (the map follows). A selected file opens with its usual app. |
 | **Ctrl+↓** | **⌘↓** | Open the selected folder or file. |
 | **Backspace or Ctrl+↑** | **Backspace or ⌘↑** | Up to the enclosing folder, selecting the one you were in. |
 | **Alt+←** | **⌥←** | Back to the previous folder. |
 | **Alt+→** | **⌥→** | Forward again. |
+| **Ctrl+A** | **⌘A** | Select everything in the folder. |
 | **Type a name** | **Type a name** | Jump to the first item whose name starts with what you type. |
+| **Ctrl+T** | **⌘T** | New tab, showing the same folder. |
+| **Ctrl+W** | **⌘W** | Close the tab. |
+| **Ctrl+Tab / Ctrl+Shift+Tab** | **⌃Tab / ⌃⇧Tab** | Next or previous tab. |
+| **Ctrl+Shift+N** | **⌘⇧N** | New folder in the current folder, ready to name. |
+| **Ctrl+V** | **⌘V** | Paste: copy or move what you copied or cut into the current folder. Paths copied as text in another app are copied in too. |
 
 ### Selected file or folder
 
-Act on the selected item, wherever it was selected (folder list, map or a list), unless the cursor is in a text box. The same commands are in the folder list's right-click menu.
+Act on the selected item, wherever it was selected (file manager, map or a list), unless the cursor is in a text box. In the file manager they act on every selected item. The same commands are in the right-click menu.
 
 | Windows and Linux | macOS | Action |
 |---|---|---|
 | **Enter** | **Enter** | Open it with its usual app (a folder opens in the file manager). |
-| **Ctrl+C or Ctrl+Insert** | **⌘C** | Copy its full path. |
+| **Ctrl+C or Ctrl+Insert** | **⌘C** | Copy it, to paste in the file manager. Its path also goes on the clipboard as text. |
+| **Ctrl+X** | **⌘X** | Cut it, to move it with Paste in the file manager. |
+| **Ctrl+Shift+C** | **⌘⇧C** | Copy its full path. |
+| **F2** | **F2** | Rename it. |
 | **Ctrl+E** | **⌘E** | Show it in Explorer, Finder or the file manager. |
 | **Ctrl+P** | **⌘P** | Open Command Prompt (Windows) or a terminal (macOS, Linux) in its folder. |
 | **Ctrl+S** | **Ctrl+S** | Windows: open PowerShell in its folder. |

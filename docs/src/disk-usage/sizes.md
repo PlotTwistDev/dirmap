@@ -30,7 +30,7 @@ read aren't included.
 
 ## Percentages
 
-**% of parent** in the folder list is the item's size divided by the size of the folder that
+**% of parent** in the file manager is the item's size divided by the size of the folder that
 contains it. So a folder at 40% holds 40% of its parent folder, not 40% of the drive. The top
 item (what you scanned) is 100%.
 

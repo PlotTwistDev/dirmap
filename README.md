@@ -15,7 +15,7 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
   Explorer (Finder / file manager), Open in Command Prompt or PowerShell (Terminal elsewhere), Refresh Selected,
   Properties, Compute Hash (SHA-256), Add to Exclusion Filter, Delete Permanently, Delete to Recycle Bin (Trash),
   Remove Empty Folders, Empty Folder and Move to. Deleting always asks first. The same keys work on the
-  selection: Enter, Ctrl+C, Ctrl+E, Ctrl+P / Ctrl+S, F5, Alt+Enter, Ctrl+H, Del, Shift+Del, Ctrl+M.
+  selection: Enter, Ctrl+Shift+C (copy path), Ctrl+E, Ctrl+P / Ctrl+S, F5, Alt+Enter, Ctrl+H, Del, Shift+Del, Ctrl+M.
   After a change only that item is read again, so the tree and map update without a full rescan.
 - **File types list** with totals per extension. Click one to highlight those files in the treemap; right-click
   to list every file of that type, highlight it, copy the extension or add `*.ext` to the exclusion filter.
@@ -37,11 +37,11 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
   archives, documents, code, programs, disk images), by size (larger than / smaller than a size such as
   `500 MB` or `2 GB`) and by name (**Custom**, below), with a count of how many files and bytes match. Two modes:
   - **Highlight** (default) keeps the layout and hides everything that doesn't match (left as empty
-    background on the treemap and sunburst, shown faintly in the folder list), so you see where the matches are. Matches too small to draw (a few
+    background on the treemap and sunburst, shown faintly in the file manager), so you see where the matches are. Matches too small to draw (a few
     `.txt` files among large ones) still show as small square markers (one per small area, so dense clusters stay tidy) until you zoom in far
     enough to see them as tiles, and
-    folders without matches fade in the folder list and sunburst.
-  - **Show matches only** rebuilds the treemap, sunburst, folder list and File types tab from the matching
+    folders without matches fade in the file manager and sunburst.
+  - **Show matches only** rebuilds the treemap, sunburst, file manager and File types tab from the matching
     files and the folders holding them. Switching back keeps your place.
 - **Custom filter** (Show: **Custom**, or Ctrl+F / ⌘F): type a pattern and the maps update as you type.
   The ⏷ menu has examples, recent filters, saved presets, case-sensitive and match-all options, and the full
@@ -73,10 +73,11 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
   number right before the extension and everything else identical are grouped.
 - **Sunburst view**: a ring chart of the same data, each ring one folder level deeper. Click to select,
   double-click or wheel to zoom, click the middle to go up.
-- **Files view**: browse the scan like Finder or Windows Explorer, in List, Icons or Columns layout, with
-  sizes, share of folder, sorting (names in natural order), a clickable path, Back/Forward, keyboard
-  navigation and type-to-select, the filters and the right-click menu. It shares its folder and selection with
-  the treemap and sunburst.
+- **File manager** above the map: browse the scan like Finder or Windows Explorer, in List, Icons, Columns or
+  Tree layout, with tabs, sizes, share of folder, sorting (names in natural order), a clickable path,
+  Back/Forward, keyboard navigation and type-to-select. Select several items, rename (F2), make folders, copy,
+  cut and paste, and drag and drop (Alt copies). Opening a folder zooms the map there, and the map moves the
+  file manager.
 - **Color by type, age or change**: age runs from red (changed today) to blue (10+ years old); change shows
   new, grown and shrunk files since a snapshot.
 - **Size histogram** (Sizes tab): how many files and how much space fall in each size range. Click a bar to

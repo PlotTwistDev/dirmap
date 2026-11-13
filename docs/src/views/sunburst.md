@@ -23,7 +23,7 @@ Choose **View: Sunburst** in the filter bar to see the same scan as a ring chart
 | Action | What it does |
 |---|---|
 | Hover | Shows the item's path, size and date in the status bar. |
-| Click a segment | Selects it (the folder list opens to show it). |
+| Click a segment | Selects it (the file manager opens to show it). |
 | Double-click a segment | Makes that folder (or a file's folder) the centre. |
 | Wheel forward | Moves into the top-level folder under the pointer. |
 | Wheel back | Goes up one level. |
@@ -31,10 +31,10 @@ Choose **View: Sunburst** in the filter bar to see the same scan as a ring chart
 
 **Zoom to selection** makes the selected folder (or the folder of the selected file) the
 centre, **Zoom out** goes up one level and **⟲ Whole map** returns to the whole scan. Back and
-Forward work on the treemap and in the Files view only.
+Forward work on the treemap and in the file manager only.
 
-The treemap, the sunburst and the [Files view](file-browser.md) share the same position: the
-folder you open in one is the folder shown when you switch to another.
+The treemap and the sunburst share the same position: the folder you open in one is the folder
+shown when you switch to the other. The [file manager](file-browser.md) above follows it too.
 
 ## When to use which
 

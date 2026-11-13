@@ -34,7 +34,7 @@ Likely causes, most common first:
 
 ## 4. Find what's using the space
 
-1. Look at the largest folders in the folder list, and the largest tiles on the map.
+1. Look at the largest folders in the file manager, and the largest tiles on the map.
 2. Check the usual suspects:
    - Virtual disks: **Show: 💿 Disk images** (WSL, Docker, virtual machines). See
      [Investigate WSL virtual disks](wsl-disks.md).

@@ -23,6 +23,13 @@ pub(super) enum TreeAction {
     RemoveEmpty,
     Empty,
     MoveTo,
+    // File manager only:
+    Rename,
+    CopyItems,
+    CutItems,
+    Paste,
+    NewFolder,
+    NewTab,
 }
 
 /// Something to do with a row of the extension list.
@@ -44,8 +51,13 @@ pub(super) struct ItemInfo {
     pub is_drive: bool,
     /// Another file operation is still running.
     pub busy: bool,
-    /// Right-clicked in the Files view: folders open there rather than expanding in the list.
+    /// Right-clicked in the file manager: folders open there rather than expanding in the list,
+    /// and the file manager's own commands are offered.
     pub in_browser: bool,
+    /// How many items the menu acts on (several selected in the file manager).
+    pub count: usize,
+    /// Something has been copied or cut, ready to paste.
+    pub can_paste: bool,
 }
 
 /// A file operation running in the background.
@@ -59,15 +71,27 @@ struct OpDone {
     note: Option<String>,
     /// Fresh state of each affected path: `None` when it no longer exists.
     updates: Vec<(PathBuf, Option<Node>)>,
+    /// Items to select afterwards (copies whose names were only known once made).
+    select: Vec<PathBuf>,
 }
 
 /// A destructive action waiting for "are you sure?".
 pub(super) struct Confirm {
-    action: TreeAction,
-    path: PathBuf,
-    is_dir: bool,
-    size: u64,
-    files: u64,
+    pub action: TreeAction,
+    /// What it applies to (several when more than one item was selected).
+    pub paths: Vec<PathBuf>,
+    pub is_dir: bool,
+    pub size: u64,
+    pub files: u64,
+}
+
+/// The Rename box.
+pub(super) struct RenameBox {
+    pub path: PathBuf,
+    pub text: String,
+    /// Put the cursor in the box (and select the name) on the first frame.
+    pub fresh: bool,
+    pub error: Option<String>,
 }
 
 pub(super) struct HashJob {
@@ -89,7 +113,12 @@ pub(super) struct TypeFiles {
 #[derive(Default)]
 pub(super) struct Ops {
     pub job: Option<OpJob>,
-    confirm: Option<Confirm>,
+    pub confirm: Option<Confirm>,
+    pub rename: Option<RenameBox>,
+    /// Select this once the running operation has finished (a renamed item, a new folder…).
+    pub then_select: Option<PathBuf>,
+    /// …and open the Rename box on it (a new folder).
+    pub then_rename: bool,
     hash: Option<HashJob>,
     /// Item shown in dirmap's own Properties window (where the system has none).
     props: Option<PathBuf>,
@@ -101,7 +130,7 @@ pub(super) struct Ops {
 impl Ops {
     /// A window of ours is up and owns the keyboard.
     pub(super) fn modal(&self) -> bool {
-        self.confirm.is_some()
+        self.confirm.is_some() || self.rename.is_some()
     }
 }
 
@@ -138,7 +167,19 @@ impl App {
         let open = if info.is_dir { egui::RichText::new("Open…") } else { egui::RichText::new("Open…").strong() };
         let open_keys = if info.in_browser && info.is_dir { String::new() } else { k(M::NONE, Key::Enter) };
         set(item(ui, true, open, &open_keys), TreeAction::Open);
-        set(item(ui, true, "Copy Path", &k(M::COMMAND, Key::C)), TreeAction::CopyPath);
+        if info.in_browser {
+            let many = if info.count > 1 { format!(" {} Items", info.count) } else { String::new() };
+            set(item(ui, true, format!("Copy{many}"), &k(M::COMMAND, Key::C)), TreeAction::CopyItems);
+            set(item(ui, can_change && !info.is_root, format!("Cut{many}"), &k(M::COMMAND, Key::X)), TreeAction::CutItems);
+            if info.is_dir {
+                set(item(ui, can_change && info.can_paste, "Paste Into Folder", ""), TreeAction::Paste);
+                set(item(ui, true, "Open in New Tab", &k(M::COMMAND, Key::T)), TreeAction::NewTab);
+            }
+            set(item(ui, can_change && !info.is_root && info.count == 1, "Rename…", "F2"), TreeAction::Rename);
+            set(item(ui, can_change, "New Folder", &k(M::COMMAND | M::SHIFT, Key::N)), TreeAction::NewFolder);
+            ui.separator();
+        }
+        set(item(ui, true, "Copy Path", &k(M::COMMAND | M::SHIFT, Key::C)), TreeAction::CopyPath);
         let reveal = if cfg!(windows) { format!("Select in {}…", actions::FILE_MANAGER) } else { format!("Show in {}…", actions::FILE_MANAGER) };
         set(item(ui, true, reveal, &k(M::COMMAND, Key::E)), TreeAction::Reveal);
         for (i, (label, t)) in actions::terminals().iter().enumerate() {
@@ -196,6 +237,8 @@ impl App {
             is_drive: path.is_empty() && self.scanned_path.parent().is_none(),
             busy: self.ops.job.is_some(),
             in_browser: false,
+            count: 1,
+            can_paste: false,
         })
     }
 
@@ -207,14 +250,23 @@ impl App {
         }
         let Some(sel) = self.selected.clone() else { return };
         let Some(info) = self.item_info(&sel) else { return };
-        // In the Files view, Enter opens a folder there, like Explorer.
-        if self.map_kind == MapKind::Browser && info.is_dir && ctx.input_mut(|i| i.consume_key(M::NONE, Key::Enter)) {
+        // In the file manager, Enter opens a folder there, like Explorer.
+        if self.browser_has_keys() && info.is_dir && ctx.input_mut(|i| i.consume_key(M::NONE, Key::Enter)) {
             self.browse_into(sel);
             return;
         }
         let action = ctx.input_mut(|i| {
-            // Ctrl+C reaches egui as a Copy event rather than a key press.
+            // Ctrl+C, Ctrl+X and Ctrl+V reach egui as Copy, Cut and Paste events rather than key
+            // presses (and Paste only when the clipboard holds text). With Shift, Ctrl+C copies
+            // the path; on Windows Shift+Delete arrives as Cut.
             let copy = i.events.iter().any(|e| matches!(e, egui::Event::Copy)) || i.consume_key(M::CTRL, Key::Insert);
+            let cut = i.events.iter().any(|e| matches!(e, egui::Event::Cut));
+            if cut {
+                return Some(if i.modifiers.shift && !i.modifiers.command { TreeAction::Delete } else { TreeAction::CutItems });
+            }
+            if copy && i.modifiers.shift {
+                return Some(TreeAction::CopyPath);
+            }
             let terms = actions::terminals();
             let mut keys = vec![
                 (M::SHIFT, Key::Delete, TreeAction::Delete),
@@ -231,20 +283,23 @@ impl App {
                 keys.push((M::COMMAND, Key::S, TreeAction::Terminal(t.1)));
             }
             if copy {
-                return Some(TreeAction::CopyPath);
+                return Some(TreeAction::CopyItems);
+            }
+            if i.consume_key(M::NONE, Key::F2) {
+                return Some(TreeAction::Rename);
             }
             keys.into_iter().find(|&(m, k, _)| i.consume_key(m, k)).map(|(_, _, a)| a)
         });
         let Some(a) = action else { return };
         // The same rules as the menu, which greys these out.
         let allowed = match a {
-            TreeAction::Delete | TreeAction::Recycle | TreeAction::MoveTo => !info.busy && !info.is_root,
+            TreeAction::Delete | TreeAction::Recycle | TreeAction::MoveTo | TreeAction::CutItems | TreeAction::Rename => !info.busy && !info.is_root,
             TreeAction::Refresh => !info.busy,
             TreeAction::Hash => !info.is_dir,
             _ => true,
         };
         if allowed {
-            self.tree_action(a, sel);
+            self.browser_action(a, sel);
         }
     }
 
@@ -290,7 +345,7 @@ impl App {
                 Ok(())
             }
             TreeAction::Delete | TreeAction::Recycle | TreeAction::Empty => {
-                self.ops.confirm = Some(Confirm { action: a, path: disk, is_dir: n.is_dir, size: n.size, files: n.files });
+                self.ops.confirm = Some(Confirm { action: a, paths: vec![disk], is_dir: n.is_dir, size: n.size, files: n.files });
                 Ok(())
             }
             TreeAction::Refresh if path.is_empty() => {
@@ -311,6 +366,10 @@ impl App {
                     });
                     (r.map_err(|e| format!("Couldn't remove every empty folder: {e}")), vec![disk])
                 });
+                Ok(())
+            }
+            TreeAction::Rename | TreeAction::CopyItems | TreeAction::CutItems | TreeAction::Paste | TreeAction::NewFolder | TreeAction::NewTab => {
+                self.items_action(a, vec![path]);
                 Ok(())
             }
             TreeAction::MoveTo => {
@@ -373,14 +432,26 @@ impl App {
 
     /// Run a file operation on a background thread. `work` returns its outcome (an optional
     /// note on success) and the paths it touched, which are then re-read from disk.
-    fn run_op(&mut self, label: String, work: impl FnOnce() -> (Result<Option<String>, String>, Vec<PathBuf>) + Send + 'static) {
+    pub(super) fn run_op(&mut self, label: String, work: impl FnOnce() -> (Result<Option<String>, String>, Vec<PathBuf>) + Send + 'static) {
+        self.run_op_select(label, move || {
+            let (r, affected) = work();
+            (r, affected, Vec::new())
+        });
+    }
+
+    /// `run_op` for work that also names an item to select when it's done.
+    pub(super) fn run_op_select(
+        &mut self,
+        label: String,
+        work: impl FnOnce() -> (Result<Option<String>, String>, Vec<PathBuf>, Vec<PathBuf>) + Send + 'static,
+    ) {
         if self.ops.job.is_some() {
             return;
         }
         let opts = self.options_for(self.scanned_with.as_ref().unwrap_or(&self.settings));
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let (r, affected) = work();
+            let (r, affected, select) = work();
             let updates = affected.into_iter().map(|p| {
                 let n = reread(&p, &opts);
                 (p, n)
@@ -390,7 +461,7 @@ impl App {
                 Ok(note) => (None, note),
                 Err(e) => (Some(e), None),
             };
-            let _ = tx.send(OpDone { error, note, updates });
+            let _ = tx.send(OpDone { error, note, updates, select });
         });
         self.ops.notice = None;
         self.ops.job = Some(OpJob { label, rx });
@@ -420,12 +491,26 @@ impl App {
                     self.ops.job = None;
                     self.apply_updates(done.updates);
                     self.ops.notice = done.error.map(|e| (e, true)).or(done.note.map(|n| (n, false)));
+                    // A renamed item, a new folder or pasted items get selected.
+                    let mut then = done.select;
+                    then.extend(self.ops.then_select.take());
+                    let rename = std::mem::take(&mut self.ops.then_rename);
+                    if let Some(p) = then.last().cloned() {
+                        if let Some(tp) = self.tree_path_of(&p) {
+                            self.select(tp);
+                            if rename {
+                                self.start_rename(p);
+                            }
+                        }
+                    }
+                    self.browser_pick_later(then);
                 }
                 Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
                 Err(mpsc::TryRecvError::Disconnected) => self.ops.job = None,
             }
         }
         self.confirm_window(ctx);
+        self.rename_window(ctx);
         self.hash_window(ctx);
         self.props_window(ctx);
         self.type_files_window(ctx);
@@ -433,20 +518,27 @@ impl App {
 
     fn confirm_window(&mut self, ctx: &egui::Context) {
         let Some(c) = &self.ops.confirm else { return };
-        let what = if c.is_dir { "folder" } else { "file" };
+        let many = c.paths.len() > 1;
+        let what = if many { format!("{} items", c.paths.len()) } else if c.is_dir { "folder".to_string() } else { "file".to_string() };
         let (title, verb, warn) = match c.action {
             TreeAction::Delete => ("Delete permanently", "Delete", format!("This {what} will be deleted for good. It won't go to the {}.", actions::BIN)),
             TreeAction::Recycle => (if cfg!(windows) { "Delete to Recycle Bin" } else { "Move to Trash" }, "Delete", format!("This {what} will be moved to the {}.", actions::BIN)),
             _ => ("Empty folder", "Empty Folder", format!("Everything inside this folder will be deleted for good. It won't go to the {}.", actions::BIN)),
         };
-        let amount = if c.is_dir { format!("{} in {}", scan::human(c.size), files_text(c.files)) } else { scan::human(c.size) };
+        let warn = if many { warn.replacen("This ", "These ", 1) } else { warn };
+        let amount = if c.is_dir || many { format!("{} in {}", scan::human(c.size), files_text(c.files)) } else { scan::human(c.size) };
         let mut go = false;
         let mut cancel = false;
         egui::Modal::new(egui::Id::new("confirm-delete")).show(ctx, |ui| {
             ui.set_max_width(460.0);
             ui.heading(title);
             ui.add_space(6.0);
-            ui.label(egui::RichText::new(c.path.display().to_string()).strong());
+            for p in c.paths.iter().take(8) {
+                ui.label(egui::RichText::new(p.display().to_string()).strong());
+            }
+            if c.paths.len() > 8 {
+                ui.label(format!("and {} more", c.paths.len() - 8));
+            }
             ui.label(&amount);
             ui.add_space(6.0);
             ui.colored_label(if c.action == TreeAction::Recycle { ui.visuals().text_color() } else { ui.visuals().warn_fg_color }, warn);
@@ -460,17 +552,87 @@ impl App {
             self.ops.confirm = None;
         } else if go {
             let c = self.ops.confirm.take().unwrap();
-            let name = c.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            let p = c.path;
+            let name = match &c.paths[..] {
+                [one] => one.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+                many => format!("{} items", many.len()),
+            };
+            let paths = c.paths;
             match c.action {
                 TreeAction::Delete => self.run_op(format!("Deleting {name}"), move || {
-                    (actions::delete(&p).map(|_| None).map_err(|e| format!("Couldn't delete everything: {e}")), vec![p])
+                    let r = paths.iter().try_for_each(|p| actions::delete(p)).map(|_| None).map_err(|e| format!("Couldn't delete everything: {e}"));
+                    (r, paths)
                 }),
-                TreeAction::Recycle => self.run_op(format!("Moving {name} to the {}", actions::BIN), move || (actions::trash(&p).map(|_| None), vec![p])),
+                TreeAction::Recycle => self.run_op(format!("Moving {name} to the {}", actions::BIN), move || {
+                    let r = paths.iter().try_for_each(|p| actions::trash(p)).map(|_| None);
+                    (r, paths)
+                }),
                 _ => self.run_op(format!("Emptying {name}"), move || {
-                    (actions::empty_folder(&p).map(|_| None).map_err(|e| format!("Couldn't delete everything: {e}")), vec![p])
+                    let r = paths.iter().try_for_each(|p| actions::empty_folder(p)).map(|_| None).map_err(|e| format!("Couldn't delete everything: {e}"));
+                    (r, paths)
                 }),
             }
+        }
+    }
+
+    /// The Rename box: Enter renames, Escape cancels.
+    fn rename_window(&mut self, ctx: &egui::Context) {
+        let Some(r) = &mut self.ops.rename else { return };
+        let mut go = false;
+        let mut cancel = false;
+        egui::Modal::new(egui::Id::new("rename")).show(ctx, |ui| {
+            ui.set_min_width(380.0);
+            ui.heading("Rename");
+            ui.add_space(6.0);
+            ui.weak(r.path.parent().map(|p| p.display().to_string()).unwrap_or_default());
+            let resp = ui.add(egui::TextEdit::singleline(&mut r.text).desired_width(360.0).id(egui::Id::new("rename-box")));
+            if r.fresh {
+                r.fresh = false;
+                resp.request_focus();
+                // Select the name without its extension, as Finder and Explorer do.
+                let is_dir = r.path.is_dir();
+                let stem = match r.text.rfind('.') {
+                    Some(i) if i > 0 && !is_dir => i,
+                    _ => r.text.len(),
+                };
+                let chars = r.text[..stem].chars().count();
+                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), resp.id) {
+                    state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(chars))));
+                    state.store(ui.ctx(), resp.id);
+                }
+            }
+            go = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if let Some(e) = &r.error {
+                ui.colored_label(ui.visuals().error_fg_color, e);
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                go |= ui.button("Rename").clicked();
+                cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
+            });
+        });
+        if cancel {
+            self.ops.rename = None;
+        } else if go {
+            let r = self.ops.rename.as_ref().unwrap();
+            let (path, text) = (r.path.clone(), r.text.trim().to_string());
+            if path.file_name().is_some_and(|n| n.to_string_lossy() == text) {
+                self.ops.rename = None;
+                return;
+            }
+            // Check what we can before going to disk, so mistakes are shown in the box.
+            if text.is_empty() || text.contains('/') || (cfg!(windows) && text.contains(['\\', ':', '*', '?', '"', '<', '>', '|'])) {
+                self.ops.rename.as_mut().unwrap().error = Some(if cfg!(windows) { "A name can't be empty or contain \\ / : * ? \" < > |".into() } else { "A name can't be empty or contain /.".into() });
+                return;
+            }
+            self.ops.rename = None;
+            let dest = path.with_file_name(&text);
+            self.ops.then_select = Some(dest.clone());
+            self.run_op(format!("Renaming {}", path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()), move || {
+                match actions::rename(&path, &text) {
+                    Ok(new) => (Ok(None), vec![path, new]),
+                    Err(e) => (Err(e), vec![]),
+                }
+            });
         }
     }
 

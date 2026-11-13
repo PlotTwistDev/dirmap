@@ -11,7 +11,7 @@ you can compare their positions with what you already know.
 3. Make sure **Highlight** (the default) is chosen next to the match count, not **Show matches
    only**.
 4. The map keeps exactly the same layout. Matching files keep their colours; everything else is hidden,
-   leaving empty dark background. The folder list shows non-matching files faintly too.
+   leaving empty dark background. The file manager shows non-matching files faintly too.
 5. Zoom and navigate as usual. Change the filter as often as you like; the layout doesn't move.
 6. To compare with the rearranged view, click **Show matches only**; click **Highlight** to come
    back. Your place, selection and open folders are kept either way.

@@ -12,7 +12,7 @@ mostly video, images or caches.
 3. **Click an extension** in the File types tab to highlight it. You can now see, at a glance,
    which folders contain that type and how much of each folder it fills.
 4. For numbers, turn on a filter such as **Show: 🖼 Images** and choose **Show matches only**.
-   The folder list now shows, for every folder, the size, share and file count of just the
+   The file manager now shows, for every folder, the size, share and file count of just the
    matching files, so you can compare folders directly. (The File types tab and the match count
    cover the whole scan.)
 5. For the complete type breakdown of one folder, scan that folder on its own (type its path and

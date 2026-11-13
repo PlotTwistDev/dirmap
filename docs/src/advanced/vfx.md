@@ -7,7 +7,7 @@ render frames, simulation caches, textures and plates. dirmap has several featur
 
 1. **Scan the project or render share.** For network storage, raise **Scanner threads** first;
    see [External and network drives](network-drives.md).
-2. **Find the heavy shots.** The folder list shows each shot's or sequence's folder total;
+2. **Find the heavy shots.** The file manager shows each shot's or sequence's folder total;
    sorting by **Files** finds folders with the most frames.
 3. **List sequences.** In the **Sequences** tab press **Find sequences** to see every image
    sequence once, with frame count, range, average frame size and missing frames.

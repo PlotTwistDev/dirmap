@@ -108,7 +108,7 @@ See [Custom filter syntax](../filtering/syntax.md).
 - Shortcuts for files (**Delete**, **Enter**, **Ctrl+C**…) act on the **selected** item. Click
   something first.
 - They don't work while the cursor is in a text box (the folder box, the Custom filter, a size
-  box). Click on the map or the folder list first.
+  box). Click on the map or the file manager first.
 - Treemap keys (**+**, **−**, **Home**, **Alt+←**, **Alt+→**) only work when the treemap is shown.
 - See [Keyboard shortcuts](../reference/keyboard.md) for the full list.
 

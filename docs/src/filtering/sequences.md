@@ -58,7 +58,7 @@ You don't need the Sequences tab to filter by frame number: the Custom filter un
 
 - Sequences are found on request, not automatically, and the results are cleared when you scan
   again or change files with a right-click command.
-- The folder list and treemap still show each frame as its own file.
+- The file manager and treemap still show each frame as its own file.
 - Files whose frame number isn't the last number in the name (`shot_1001_beauty.exr`) aren't
   recognised as sequences, though the Custom filter can still match them (`shot_####_beauty.exr`).
 
