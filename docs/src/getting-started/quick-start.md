@@ -25,8 +25,8 @@ roughly how far along the scan is. You can press **Cancel** at any time.
 
 ![The main window after a scan](../images/main-window.png)
 
-- The **folder list** at the top is sorted largest first. Click the arrow next to a folder (or
-  double-click it) to open it.
+- The **file manager** at the top lists what's in the scanned folder, largest first.
+  Double-click a folder to open it; the map below zooms to it too.
 - The **treemap** below shows every file as a rectangle. The bigger the rectangle, the bigger
   the file. Colours show the file type.
 - The **File types** list on the right shows which extensions use the most space.
@@ -34,13 +34,13 @@ roughly how far along the scan is. You can press **Cancel** at any time.
 ## 4. Find the biggest things
 
 - Hover over a large rectangle: the status bar at the bottom shows its full path, size and date.
-- Click it to select it. The folder list jumps to it.
+- Click it to select it. The file manager shows it, in the folder that holds it.
 - Double-click to open the folder that holds it; right-click the map to go back up.
 - Turn the mouse wheel over the map to zoom towards the pointer; drag to move around.
 
 ## 5. Do something about it
 
-Right-click a file or folder in the folder list for **Open**, **Select in Explorer**,
+Right-click a file or folder in the file manager for **Open**, **Select in Explorer**,
 **Delete (to Recycle Bin)**, **Move to…** and more. Deleting always asks first. See
 [Right-click menus and file operations](../analysis/file-operations.md).
 

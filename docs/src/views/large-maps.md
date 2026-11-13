@@ -8,11 +8,11 @@ as smoothly as a scan of a thousand, because:
 - That work happens on background threads, so the window never stops responding. While new
   detail is on its way, the map keeps showing what it has at lower detail rather than going
   blank.
-- The folder list, the File types list and the other lists only draw the rows on screen.
+- The file manager, the File types list and the other lists only draw the rows on screen.
 
 ## Tips
 
-- **Start from the folder list.** It's sorted largest first, so opening the top folder at each
+- **Start from the file manager.** It's sorted largest first, so opening the top folder at each
   level leads straight to where the space is. Then use **Zoom to selection** to see it on the map.
 - **Use breadcrumbs and Back.** Double-click into a folder to work inside it; the breadcrumbs
   show the way back, and **Alt+←** retraces your steps.

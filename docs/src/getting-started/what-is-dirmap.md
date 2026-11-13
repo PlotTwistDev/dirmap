@@ -4,17 +4,16 @@ dirmap is a disk usage analyser for Windows, Linux and macOS, in the style of Wi
 answers one question quickly: **where has my space gone?**
 
 It scans a drive or folder, adds up the size of every file and folder, and shows the result in
-three linked views:
+linked views:
 
-- A **directory tree**, like Explorer's folder list, sorted largest first, with each item's size,
-  its share of the folder above it, how many files it holds and when it last changed.
+- A **file manager**, like Finder or Explorer, with tabs and list, icon, column and tree layouts,
+  sorted largest first, with each item's size, its share of the folder, how many files it holds
+  and when it last changed. Copy, move, rename and delete files right there.
 - A **treemap**: every file is a rectangle whose area is proportional to its size, grouped by
   folder. Big files are big rectangles, so you can see them at once even among millions of
   small ones.
 - A **sunburst**: the same data as rings, the selected folder in the middle and each ring one
   folder level deeper.
-- A **Files view**: browse the scan like Finder or Explorer, as a list, icons or columns, with
-  every item's size and share of its folder.
 
 Clicking in one view selects the same item in the others.
 
@@ -28,7 +27,7 @@ Clicking in one view selects the same item in the others.
 - Find numbered image or render sequences and their missing frames.
 - Find duplicate files (identical contents) and how much space the extra copies use.
 - Save a snapshot of a scan and later see what is new, deleted, grew or shrank.
-- Open, reveal, hash, move or delete files straight from the folder list.
+- Open, reveal, hash, move or delete files straight from the file manager.
 
 ## What dirmap doesn't do
 

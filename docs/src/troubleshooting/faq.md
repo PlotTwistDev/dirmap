@@ -57,8 +57,9 @@ the Settings window restores the defaults.
 
 ## Can I use dirmap without a mouse?
 
-Partly. File commands, the Custom filter and the treemap's zoom, Home and Back/Forward have
-keyboard shortcuts, but moving through the folder list with the arrow keys isn't supported yet.
+Mostly. The file manager works entirely from the keyboard, as Finder or Explorer do, and file
+commands, the Custom filter and the treemap's zoom, Home and Back/Forward have shortcuts too.
+There's no keyboard way to move between the file manager and the map, or to use the side panel.
 See [Keyboard shortcuts](../reference/keyboard.md).
 
 ## Is there a portable version?

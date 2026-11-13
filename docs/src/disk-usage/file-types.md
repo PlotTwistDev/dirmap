@@ -23,7 +23,7 @@ The **File types** tab on the right lists every extension found, largest total f
   again (or **Clear highlight** above the list) to stop.
 - **Right-click** a row for:
   - **🔍 Find all .ext files**: a window listing every file of that type, largest first. Click one
-    to select it in the folder list and on the map.
+    to select it in the file manager and on the map.
   - **Highlight in Map** / **Clear Highlight**.
   - **Copy Extension**: copies `.ext` to the clipboard.
   - **Add to Exclusion Filter**: adds `*.ext` to the files skipped by future scans. See

@@ -30,7 +30,7 @@ swatches in the **File types** list. Other colour modes show age or change since
 - **Hover** over a rectangle: the status bar shows its full path, size and modification date.
   A faint outline marks the folder that contains it.
 - **Click** it to select it. A white outline marks the selection (you can change the colour in
-  Settings > Treemap) and the folder list opens up to show it. If the selected item is too small
+  Settings > Treemap) and the file manager opens up to show it. If the selected item is too small
   to see at the current zoom, the smallest folder around it that is big enough is outlined
   instead.
 - With **File names on tiles** turned on, names (and sizes, on taller tiles) are written on

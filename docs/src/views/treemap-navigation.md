@@ -28,8 +28,8 @@ anything, so you can't select by accident.
 
 ## Selecting
 
-**Click** a rectangle to select that file. Its path appears in the status bar and the folder
-list opens up to show it. Selecting in the folder list or another tab selects it on the map too.
+**Click** a rectangle to select that file. Its path appears in the status bar and the file
+manager shows it, in the folder that holds it. Selecting in the file manager or another tab selects it on the map too.
 
 ## Opening a folder
 
@@ -45,7 +45,7 @@ it.
 
 **Zoom to selection** in the toolbar brings the selected file or folder into view, as large as
 fits. If it's in a different folder from the one on screen, dirmap moves there first. Use it after
-selecting something in the folder list, the Duplicates or Sequences tab, or a **Find all** list.
+selecting something in the file manager, the Duplicates or Sequences tab, or a **Find all** list.
 
 ## Returning to the parent folder
 

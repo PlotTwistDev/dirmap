@@ -8,11 +8,11 @@ version.
 
 | Feature | Notes |
 |---|---|
-| Drive list and folder scanning | Parallel, with live progress and a live folder list. Windows, Linux and macOS. |
+| Drive list and folder scanning | Parallel, with live progress and a live file manager. Windows, Linux and macOS. |
 | Directory tree | Sortable Size, % of parent, Files and Last change columns; Explorer icons on Windows. |
 | Treemap | Cushion shading on the GPU, cursor-anchored smooth zoom, pan with inertia, drill in and out, Back/Forward, zoom to selection, labels, pointer lighting. |
 | Sunburst | Six rings, zoom in and out, selection. |
-| Files view | Finder/Explorer-style browsing in List, Icons and Columns layouts: sizes and share of folder, sorting, path bar, Back/Forward, keyboard navigation, type to select, filters, right-click menu; shares the selection and folder with the maps. |
+| File manager | Finder/Explorer-style browsing above the map in List, Icons, Columns and Tree layouts: tabs, sizes and share of folder, sorting, path bar, Back/Forward, keyboard navigation, type to select, multi-select, rename, new folder, copy/cut/paste, drag and drop, filters, right-click menu; moves with the map. |
 | Colour by type, age, and change since a snapshot | |
 | File types list | Highlight, find all files of a type, copy, exclude. |
 | Category, size and Custom name filters | Highlight or Show matches only; wildcards, exclusions, AND/OR, frame numbers, padding and ranges; presets and recent patterns. |
@@ -20,7 +20,7 @@ version.
 | Size histogram | Click a range to filter. |
 | Snapshots and comparison | Save, compare, colour by change; from the command line too. |
 | Duplicate finder | Size, then first 64 KB, then whole-file hash. |
-| Right-click menu on the folder list | Open, Copy Path, reveal, terminals, Refresh, Properties, SHA-256, exclude, Delete, Recycle Bin/Trash, Remove Empty Folders, Empty Folder, Move to, with keyboard shortcuts. |
+| Right-click menu in the file manager | Open, Copy, Cut, Paste, Rename, New Folder, Copy Path, reveal, terminals, Refresh, Properties, SHA-256, exclude, Delete, Recycle Bin/Trash, Remove Empty Folders, Empty Folder, Move to, with keyboard shortcuts. |
 | Settings | Appearance, scan exclusions, columns, treemap look and navigation, threads, administrator mode. |
 | Run as administrator | Windows: ask, always or never, and restart on request. |
 | Command-line report and snapshots | `--cli`, `--top`, `--save-snapshot`, `--compare`, `--all-fs`. |
@@ -30,11 +30,11 @@ version.
 
 | Feature | What's missing |
 |---|---|
-| Right-click menus | Only in the folder list, the Files view and the File types list. The treemap and sunburst have none (right-click zooms out there). WinDirStat's **Compress**, **Sparsify**, **Optimize VHD**, **Custom Cleanup**, the full **Windows Explorer** context submenu and **Group Unregistered Types** aren't available. |
-| Keyboard use | Shortcuts exist for file commands, the Custom filter, help and the treemap, and the Files view can be used entirely from the keyboard, but the folder list can't be moved through with the arrow keys, and there's no keyboard way to move between panels. |
+| Right-click menus | Only in the file manager and the File types list. The treemap and sunburst have none (right-click zooms out there). WinDirStat's **Compress**, **Sparsify**, **Optimize VHD**, **Custom Cleanup**, the full **Windows Explorer** context submenu and **Group Unregistered Types** aren't available. |
+| Keyboard use | The file manager can be used entirely from the keyboard, and there are shortcuts for file commands, the Custom filter, help and the treemap, but there's no keyboard way to move between panels, and the Tree layout can't be moved through with the arrow keys. |
 | Duplicate verification | Matches use a 64-bit hash of the whole contents, not a byte-by-byte comparison. There's no "delete all but one" action; copies are deleted one at a time. |
-| Sunburst navigation | No Back/Forward history (the treemap and the Files view have it). |
-| Files view | One item selected at a time; no renaming, new folders or drag and drop. Real Finder icons on macOS aren't used yet (drawn icons instead). |
+| Sunburst navigation | No Back/Forward history (the treemap and the file manager have it). |
+| File manager | No Undo. Copy and Cut work only inside dirmap (the paths go to the clipboard as text), and files can't be dragged to or from other apps. Changes made by other apps show after a Refresh. Real Finder icons on macOS aren't used yet (drawn icons instead). |
 | Size accuracy | File sizes only. Hard links are counted once per name; compressed, sparse and cloud-only files show their full size. See [How sizes are calculated](../disk-usage/sizes.md). |
 | Administrator mode | A restart button on Windows only; on Linux use `sudo`, on macOS Full Disk Access. |
 

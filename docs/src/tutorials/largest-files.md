@@ -13,12 +13,12 @@
    about ten remain.
 4. Alternatively, open the **Sizes** tab and click the **over 10 GB** or **1 – 10 GB** bar to show
    just that range.
-5. Click each rectangle to select it. The folder list opens to show where it lives, with its exact
+5. Click each rectangle to select it. The file manager opens to show where it lives, with its exact
    size and date.
 
 ## Tips
 
-- In the folder list, the largest item of each folder is always first. Opening the first folder at
+- In the file manager, the largest item of each folder is always first. Opening the first folder at
   each level usually leads straight to a large file.
 - Combine with a category: **Show: 🎬 Video** plus **Larger than 1 GB** lists big videos only.
 - To see the largest files of one type, right-click that type in the **File types** tab and choose

@@ -10,7 +10,7 @@ are.
    and **Files** columns tell you how much space that type uses.
 3. **Click** it: those files stay bright on the map and everything else goes dark.
 4. **Right-click** it and choose **🔍 Find all .ext files** for a list of every file of that type,
-   largest first. Click one to select it in the folder list and on the map.
+   largest first. Click one to select it in the file manager and on the map.
 
 ## Method 2: with the Custom filter
 
@@ -19,7 +19,7 @@ are.
    in the scan; press **Tab** to complete one.
 3. The count next to **Highlight** / **Show matches only** shows how many files match and how
    much space they use.
-4. Choose **Show matches only** to see just those files on the map and in the folder list, with
+4. Choose **Show matches only** to see just those files on the map and in the file manager, with
    the folders that hold them.
 
 Several types at once: `*.iso, *.img, *.dmg`.

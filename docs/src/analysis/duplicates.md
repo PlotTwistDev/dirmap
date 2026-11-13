@@ -31,7 +31,7 @@ Reading happens on several threads at once. Files that can't be opened are left 
 dirmap matches files by **size plus a 64-bit fingerprint of their entire contents**. Two different
 files of the same size having the same fingerprint is astronomically unlikely in practice, but it
 isn't a byte-by-byte comparison, and the fingerprint isn't cryptographic. If you need certainty,
-right-click each copy in the folder list and choose **Compute Hash (SHA-256)**: identical
+right-click each copy in the file manager and choose **Compute Hash (SHA-256)**: identical
 SHA-256 hashes mean identical files.
 
 ## Reading the results
@@ -51,7 +51,7 @@ where the copies are.
 ## Managing duplicates safely
 
 dirmap never deletes duplicates by itself. To remove a copy, click it in the list, then use the
-right-click menu in the folder list (or press **Delete** to send it to the Recycle Bin or Trash).
+right-click menu in the file manager (or press **Delete** to send it to the Recycle Bin or Trash).
 
 Before deleting:
 

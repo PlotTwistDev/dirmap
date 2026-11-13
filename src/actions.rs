@@ -344,6 +344,75 @@ pub fn move_into(src: &Path, dest_dir: &Path) -> Result<PathBuf, String> {
     }
 }
 
+/// A name in `dir` that isn't taken yet: `name`, else "stem copy.ext", "stem copy 2.ext", …
+/// (`first` is the first suffix to try, e.g. "copy"; for new folders the plain name gets numbers).
+pub fn free_name(dir: &Path, name: &str, first: &str) -> PathBuf {
+    let taken = |p: &Path| fs::symlink_metadata(p).is_ok();
+    let plain = dir.join(name);
+    if !taken(&plain) {
+        return plain;
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    for n in 1.. {
+        let suffix = match (first.is_empty(), n) {
+            (true, n) => format!(" {}", n + 1),
+            (false, 1) => format!(" {first}"),
+            (false, n) => format!(" {first} {n}"),
+        };
+        let p = dir.join(format!("{stem}{suffix}{ext}"));
+        if !taken(&p) {
+            return p;
+        }
+    }
+    unreachable!()
+}
+
+/// Copy into `dest_dir`. If the name is taken there (pasting into the same folder, say), the
+/// copy gets " copy" added, as Finder and Explorer do. Returns the new path.
+pub fn copy_into(src: &Path, dest_dir: &Path) -> Result<PathBuf, String> {
+    let name = src.file_name().ok_or("Can't copy a drive.")?.to_string_lossy().to_string();
+    if dest_dir.starts_with(src) {
+        return Err("Can't copy a folder into itself.".into());
+    }
+    let dest = free_name(dest_dir, &name, "copy");
+    copy_all(src, &dest).map_err(|e| {
+        let _ = delete(&dest);
+        format!("Couldn't copy {name}: {e}")
+    })?;
+    Ok(dest)
+}
+
+/// Give a file or folder a new name in the same folder. Returns the new path.
+pub fn rename(path: &Path, new_name: &str) -> Result<PathBuf, String> {
+    let new_name = new_name.trim();
+    if new_name.is_empty() || new_name == "." || new_name == ".." {
+        return Err("Type a name.".into());
+    }
+    if new_name.contains('/') || (cfg!(windows) && new_name.contains(['\\', ':', '*', '?', '"', '<', '>', '|'])) {
+        return Err(if cfg!(windows) { "A name can't contain any of \\ / : * ? \" < > |".into() } else { "A name can't contain /.".into() });
+    }
+    let parent = path.parent().ok_or("Can't rename a drive.")?;
+    let dest = parent.join(new_name);
+    // A change of case only is fine (the same file on case-insensitive disks).
+    let same = dest.as_os_str().to_string_lossy().to_lowercase() == path.as_os_str().to_string_lossy().to_lowercase();
+    if !same && fs::symlink_metadata(&dest).is_ok() {
+        return Err(format!("There's already something called {new_name} here."));
+    }
+    fs::rename(path, &dest).map_err(|e| format!("Couldn't rename: {e}"))?;
+    Ok(dest)
+}
+
+/// Make a new, empty folder in `dir` with a free name. Returns its path.
+pub fn new_folder(dir: &Path) -> Result<PathBuf, String> {
+    let base = if cfg!(target_os = "macos") { "untitled folder" } else { "New folder" };
+    let p = free_name(dir, base, "");
+    fs::create_dir(&p).map_err(|e| format!("Couldn't make a folder: {e}"))?;
+    Ok(p)
+}
+
 fn is_cross_device(e: &io::Error) -> bool {
     // EXDEV on Unix, ERROR_NOT_SAME_DEVICE on Windows.
     e.kind() == io::ErrorKind::CrossesDevices || e.raw_os_error() == Some(if cfg!(windows) { 17 } else { 18 })
@@ -435,6 +504,28 @@ mod tests {
         copy_all(&d.join("dest"), &d.join("copy")).unwrap();
         assert_eq!(fs::read_to_string(d.join("copy/src/inner/f")).unwrap(), "abc");
         delete(&d).unwrap();
+    }
+
+    #[test]
+    fn copy_rename_new_folder() {
+        let d = tmp("ops");
+        fs::write(d.join("a.txt"), b"hi").unwrap();
+        let c = copy_into(&d.join("a.txt"), &d).unwrap();
+        assert_eq!(c.file_name().unwrap(), "a copy.txt");
+        assert_eq!(copy_into(&d.join("a.txt"), &d).unwrap().file_name().unwrap(), "a copy 2.txt");
+        let r = rename(&c, "b.txt").unwrap();
+        assert_eq!(fs::read(&r).unwrap(), b"hi");
+        assert!(rename(&r, "a.txt").is_err(), "name taken");
+        assert!(rename(&r, "x/y").is_err());
+        let f1 = new_folder(&d).unwrap();
+        let f2 = new_folder(&d).unwrap();
+        assert!(f1.is_dir() && f2.is_dir() && f1 != f2);
+        assert!(f2.file_name().unwrap().to_string_lossy().ends_with(" 2"));
+        fs::write(f1.join("in.txt"), b"x").unwrap();
+        let sub = copy_into(&f1, &f2).unwrap();
+        assert!(sub.join("in.txt").is_file());
+        assert!(copy_into(&f1, &f1).is_err(), "into itself");
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]

@@ -1,14 +1,19 @@
-//! The Files view: a Finder / Explorer-style browser over the scan, as an alternative to the
-//! treemap and sunburst. Its folder is the same `zoom` the maps use and its selection is the
-//! app's selection, so switching views keeps your place.
+//! The file manager at the top of the window: a Finder / Explorer-style browser over the scan,
+//! with tabs, List, Icons and Columns layouts (and the folder tree), multi-selection and the
+//! usual file commands. It follows the map: opening a folder here zooms the map to it, zooming
+//! the map moves it here, and the selection is shared.
 
 use super::*;
 use crate::actions;
 use menus::{ItemInfo, TreeAction};
 use std::cmp::Ordering as Cmp;
+use std::collections::BTreeSet;
+use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Default)]
 pub(super) enum Layout {
+    /// The folder tree (the list dirmap always had).
+    Tree,
     #[default]
     List,
     Icons,
@@ -79,18 +84,50 @@ impl Col {
     }
 }
 
-#[derive(Default)]
-pub(super) struct Browser {
+/// One tab: a folder with its own layout and history. Folders are kept as paths on disk, so
+/// they survive refreshes and file operations that renumber the tree.
+pub(super) struct Tab {
     pub layout: Layout,
+    folder: PathBuf,
+    back: Vec<PathBuf>,
+    fwd: Vec<PathBuf>,
+}
+
+/// Items copied or cut, waiting to be pasted.
+pub(super) struct Clip {
+    paths: Vec<PathBuf>,
+    cut: bool,
+}
+
+/// What's being dragged.
+pub(super) struct DragItems(Vec<PathBuf>);
+
+pub(super) struct Browser {
+    tabs: Vec<Tab>,
+    active: usize,
+    /// The current folder, as a path in the tree on screen.
+    folder: Vec<u32>,
     sort: SortKey,
     /// Opposite of the sort's natural direction.
     reversed: bool,
-    back: Vec<Vec<u32>>,
-    fwd: Vec<Vec<u32>>,
-    /// The folder and selection as of last frame, to notice changes made elsewhere.
+    /// Other items selected along with the selection, in `folder` (child indices). Empty when
+    /// just one item is selected.
+    picked: BTreeSet<u32>,
+    /// Items to select once they're in the tree (just pasted, moved or made).
+    pick_later: Vec<PathBuf>,
+    /// Where Shift-click selection ranges start.
+    anchor: Option<u32>,
+    /// Keys go to the file manager (it was clicked last) rather than the map.
+    pub focused: bool,
+    /// Where the map was drawn last frame, to tell which one a click went to.
+    pub map_rect: Option<Rect>,
+    /// Where the file manager was drawn, so the map leaves the mouse's side buttons to it.
+    pub rect: Option<Rect>,
+    clip: Option<Clip>,
+    /// The map's folder and the selection as of last frame, to notice changes made elsewhere.
     seen_zoom: Option<Vec<u32>>,
     seen_sel: Option<Vec<u32>>,
-    /// The tree the history and sort orders belong to.
+    /// The tree that `folder` and the sort orders belong to.
     tree_id: usize,
     orders: HashMap<Vec<u32>, Arc<Vec<u32>>>,
     order_key: (usize, SortKey, bool),
@@ -103,6 +140,45 @@ pub(super) struct Browser {
     /// Type-to-select: letters typed so far and when the last one came.
     typed: String,
     typed_at: f64,
+}
+
+impl Default for Browser {
+    fn default() -> Self {
+        Self {
+            tabs: vec![Tab { layout: Layout::List, folder: PathBuf::new(), back: Vec::new(), fwd: Vec::new() }],
+            active: 0,
+            folder: Vec::new(),
+            sort: SortKey::Size,
+            reversed: false,
+            picked: BTreeSet::new(),
+            pick_later: Vec::new(),
+            anchor: None,
+            focused: true,
+            map_rect: None,
+            rect: None,
+            clip: None,
+            seen_zoom: None,
+            seen_sel: None,
+            tree_id: 0,
+            orders: HashMap::new(),
+            order_key: (0, SortKey::Size, false),
+            scroll_to_sel: false,
+            view: (0.0, 0.0),
+            grid_cols: 1,
+            typed: String::new(),
+            typed_at: 0.0,
+        }
+    }
+}
+
+impl Browser {
+    fn tab(&mut self) -> &mut Tab {
+        &mut self.tabs[self.active]
+    }
+
+    pub fn layout(&self) -> Layout {
+        self.tabs[self.active].layout
+    }
 }
 
 const ROW: f32 = 22.0;
@@ -201,7 +277,8 @@ pub(super) fn sorted(n: &Node, key: SortKey, reversed: bool) -> Vec<u32> {
 /// What was clicked or picked while drawing, acted on afterwards.
 #[derive(Default)]
 struct Picks {
-    select: Option<Vec<u32>>,
+    /// Clicked, with the modifier keys held (Ctrl/⌘ adds to the selection, Shift extends it).
+    select: Option<(Vec<u32>, egui::Modifiers)>,
     /// Selected from a column: the folder that column shows becomes the current one.
     column_select: Option<(Vec<u32>, Vec<u32>)>,
     open: Option<Vec<u32>>,
@@ -209,6 +286,13 @@ struct Picks {
     menu: Option<(TreeAction, Vec<u32>)>,
     sort: Option<SortKey>,
     hover: Option<Vec<u32>>,
+    /// Dropped: these items into this folder; copy rather than move.
+    drop: Option<(Vec<PathBuf>, PathBuf, bool)>,
+    new_tab: Option<PathBuf>,
+    switch_tab: Option<usize>,
+    close_tab: Option<usize>,
+    new_folder: bool,
+    paste: bool,
 }
 
 impl App {
@@ -227,17 +311,41 @@ impl App {
         o
     }
 
-    /// Go to a folder, remembering where we were for Back.
-    fn browse_to(&mut self, folder: Vec<u32>) {
-        self.browser.typed.clear();
-        if folder != self.zoom {
-            self.browser.back.push(std::mem::replace(&mut self.zoom, folder));
-            self.browser.fwd.clear();
+    /// The folder at `disk` in the tree on screen, or the nearest folder above it that's there.
+    fn resolve_folder(&self, disk: &Path) -> Vec<u32> {
+        let Some(tree) = self.shown_tree() else { return Vec::new() };
+        disk.ancestors()
+            .find_map(|a| self.tree_path_of(a).filter(|p| tree.at(p).is_some_and(|n| n.is_dir)))
+            .unwrap_or_default()
+    }
+
+    /// Show a folder without touching history or the map.
+    fn set_folder(&mut self, folder: Vec<u32>) {
+        if folder != self.browser.folder {
+            self.browser.picked.clear();
+            self.browser.anchor = None;
+            self.browser.typed.clear();
         }
+        let disk = self.full_path(&folder);
+        self.browser.tab().folder = disk;
+        self.browser.folder = folder;
+        self.browser.scroll_to_sel = true;
+    }
+
+    /// Go to a folder, remembering where we were for Back, and take the map there too.
+    fn browse_to(&mut self, folder: Vec<u32>) {
+        if folder != self.browser.folder {
+            let from = self.full_path(&self.browser.folder);
+            let t = self.browser.tab();
+            t.back.push(from);
+            t.fwd.clear();
+        }
+        self.set_folder(folder.clone());
+        self.zoom = folder;
         self.browser.seen_zoom = Some(self.zoom.clone());
     }
 
-    /// Open a folder in the browser (or a file with its app).
+    /// Open a folder in the file manager (or a file with its app).
     pub(super) fn browse_into(&mut self, path: Vec<u32>) {
         let Some(tree) = self.shown_tree() else { return };
         let Some(n) = tree.at(&path) else { return };
@@ -246,50 +354,116 @@ impl App {
             return;
         }
         self.browse_to(path);
-        self.browser.scroll_to_sel = true;
     }
 
     /// Up to the folder above, selecting the one we were in.
     fn browse_up(&mut self) {
-        if self.zoom.is_empty() {
+        let from = self.browser.folder.clone();
+        if from.is_empty() {
             return;
         }
-        let from = self.zoom.clone();
         let mut up = from.clone();
         up.pop();
         self.browse_to(up);
         self.browser_select(from);
     }
 
-    pub(super) fn browser_can_back(&self) -> bool {
-        !self.browser.back.is_empty()
+    fn browser_back(&mut self) {
+        let Some(p) = self.browser.tab().back.pop() else { return };
+        let here = self.full_path(&self.browser.folder);
+        self.browser.tab().fwd.push(here);
+        let f = self.resolve_folder(&p);
+        self.set_folder(f.clone());
+        self.zoom = f;
+        self.browser.seen_zoom = Some(self.zoom.clone());
     }
 
-    pub(super) fn browser_can_forward(&self) -> bool {
-        !self.browser.fwd.is_empty()
+    fn browser_forward(&mut self) {
+        let Some(p) = self.browser.tab().fwd.pop() else { return };
+        let here = self.full_path(&self.browser.folder);
+        self.browser.tab().back.push(here);
+        let f = self.resolve_folder(&p);
+        self.set_folder(f.clone());
+        self.zoom = f;
+        self.browser.seen_zoom = Some(self.zoom.clone());
     }
 
-    pub(super) fn browser_back(&mut self) {
-        if let Some(p) = self.browser.back.pop() {
-            self.browser.fwd.push(std::mem::replace(&mut self.zoom, p));
-            self.browser.seen_zoom = Some(self.zoom.clone());
-            self.browser.scroll_to_sel = true;
-        }
-    }
-
-    pub(super) fn browser_forward(&mut self) {
-        if let Some(p) = self.browser.fwd.pop() {
-            self.browser.back.push(std::mem::replace(&mut self.zoom, p));
-            self.browser.seen_zoom = Some(self.zoom.clone());
-            self.browser.scroll_to_sel = true;
-        }
-    }
-
-    /// Select an item from the browser: shared with the folder list and the maps.
+    /// Select one item from the file manager: shared with the folder tree and the maps.
     fn browser_select(&mut self, path: Vec<u32>) {
+        self.browser.picked.clear();
+        self.browser.anchor = path.last().copied();
         self.select(path.clone());
         self.browser.seen_sel = Some(path);
         self.browser.scroll_to_sel = true;
+    }
+
+    /// A click on an item, with Ctrl/⌘ (add or remove) or Shift (a range) as in a file manager.
+    fn click_select(&mut self, path: Vec<u32>, m: egui::Modifiers, order: &[u32]) {
+        let Some((&i, folder)) = path.split_last() else { return self.browser_select(path) };
+        if folder != self.browser.folder.as_slice() {
+            return self.browser_select(path);
+        }
+        if m.command {
+            let b = &mut self.browser;
+            if b.picked.is_empty() {
+                if let Some(s) = self.selected.as_ref().filter(|s| s.len() == path.len() && s.starts_with(folder)) {
+                    b.picked.insert(*s.last().unwrap());
+                }
+            }
+            if !b.picked.remove(&i) {
+                b.picked.insert(i);
+            }
+            b.anchor = Some(i);
+            let primary = if b.picked.contains(&i) { Some(i) } else { b.picked.iter().next_back().copied() };
+            let picked = std::mem::take(&mut self.browser.picked);
+            if let Some(p) = primary {
+                let mut sel = folder.to_vec();
+                sel.push(p);
+                self.select(sel.clone());
+                self.browser.seen_sel = Some(sel);
+            }
+            // One left is an ordinary single selection.
+            self.browser.picked = if picked.len() > 1 { picked } else { BTreeSet::new() };
+        } else if let (true, Some(a)) = (m.shift, self.browser.anchor) {
+            let pa = order.iter().position(|&o| o == a);
+            let pi = order.iter().position(|&o| o == i);
+            if let (Some(pa), Some(pi)) = (pa, pi) {
+                let (lo, hi) = (pa.min(pi), pa.max(pi));
+                let range: BTreeSet<u32> = order[lo..=hi].iter().copied().collect();
+                self.select(path.clone());
+                self.browser.seen_sel = Some(path);
+                self.browser.picked = if range.len() > 1 { range } else { BTreeSet::new() };
+            } else {
+                self.browser_select(path);
+            }
+        } else {
+            self.browser_select(path);
+        }
+    }
+
+    /// Is this item of the current folder selected?
+    fn is_chosen(&self, folder: &[u32], i: u32) -> bool {
+        if folder != self.browser.folder.as_slice() {
+            return self.selected_in(folder) == Some(i);
+        }
+        if self.browser.picked.is_empty() { self.selected_in(folder) == Some(i) } else { self.browser.picked.contains(&i) }
+    }
+
+    /// Everything selected: the picked items of the current folder, or just the selection.
+    pub(super) fn chosen(&self) -> Vec<Vec<u32>> {
+        if !self.browser.picked.is_empty() && self.browser.layout() != Layout::Tree {
+            return self
+                .browser
+                .picked
+                .iter()
+                .map(|&i| {
+                    let mut p = self.browser.folder.clone();
+                    p.push(i);
+                    p
+                })
+                .collect();
+        }
+        self.selected.iter().cloned().collect()
     }
 
     /// The selection, if it's an item of `folder`.
@@ -298,35 +472,77 @@ impl App {
         (s.len() == folder.len() + 1 && s.starts_with(folder)).then(|| *s.last().unwrap())
     }
 
-    /// Keep history and folder in step with changes made elsewhere (the folder list, the
-    /// breadcrumbs, a new scan or filter).
+    /// The file manager takes the keyboard: it was clicked last and isn't showing the tree.
+    pub(super) fn browser_has_keys(&self) -> bool {
+        self.browser.focused && self.browser.layout() != Layout::Tree
+    }
+
+    /// Keep the folder in step with changes made elsewhere: the map zooming somewhere,
+    /// something selected on the map or in a list, a refresh, a new scan or filter.
     fn browser_sync(&mut self, tree: &Arc<Node>) {
         let id = Arc::as_ptr(tree) as usize;
         if self.browser.tree_id != id {
-            // Positions in a new tree mean nothing in the old one.
+            // Positions in a new tree mean nothing in the old one: find the folder again by path.
             self.browser.tree_id = id;
-            self.browser.back.clear();
-            self.browser.fwd.clear();
-            self.browser.seen_zoom = None;
+            self.browser.picked.clear();
+            let disk = self.browser.tab().folder.clone();
+            self.browser.folder = if disk.as_os_str().is_empty() { self.zoom.clone() } else { self.resolve_folder(&disk) };
         }
-        while !self.zoom.is_empty() && !tree.at(&self.zoom).is_some_and(|n| n.is_dir) {
-            self.zoom.pop();
+        while !self.browser.folder.is_empty() && !tree.at(&self.browser.folder).is_some_and(|n| n.is_dir) {
+            self.browser.folder.pop();
         }
-        if let Some(seen) = self.browser.seen_zoom.take().filter(|s| *s != self.zoom) {
-            self.browser.back.push(seen);
-            self.browser.fwd.clear();
+        // The map moved to another folder: follow it.
+        if self.browser.seen_zoom.as_ref() != Some(&self.zoom) {
+            if self.browser.seen_zoom.is_some() && tree.at(&self.zoom).is_some_and(|n| n.is_dir) {
+                self.set_folder(self.zoom.clone());
+            }
+            self.browser.seen_zoom = Some(self.zoom.clone());
         }
         // Something selected elsewhere: show it among the items around it.
         if self.selected != self.browser.seen_sel {
             if let Some(sel) = self.selected.clone().filter(|s| tree.at(s).is_some()) {
-                if sel != self.zoom && !sel.is_empty() && sel[..sel.len() - 1] != self.zoom[..] {
-                    self.browse_to(sel[..sel.len() - 1].to_vec());
+                if let Some((&i, parent)) = sel.split_last() {
+                    if parent != self.browser.folder.as_slice() && sel != self.browser.folder {
+                        let from = self.full_path(&self.browser.folder);
+                        let t = self.browser.tab();
+                        t.back.push(from);
+                        t.fwd.clear();
+                        self.set_folder(parent.to_vec());
+                    }
+                    self.browser.picked.clear();
+                    self.browser.anchor = Some(i);
                 }
                 self.browser.scroll_to_sel = true;
             }
             self.browser.seen_sel = self.selected.clone();
         }
-        self.browser.seen_zoom = Some(self.zoom.clone());
+        // Items just pasted or moved here: select them all.
+        let later = std::mem::take(&mut self.browser.pick_later);
+        if later.len() > 1 {
+            let here: BTreeSet<u32> = later
+                .iter()
+                .filter_map(|p| self.tree_path_of(p))
+                .filter_map(|tp| tp.split_last().filter(|(_, parent)| *parent == self.browser.folder.as_slice()).map(|(&i, _)| i))
+                .collect();
+            if here.len() > 1 {
+                self.browser.picked = here;
+            }
+        }
+        let disk = self.full_path(&self.browser.folder);
+        self.browser.tab().folder = disk;
+    }
+
+    /// Select these items (by path on disk) once the tree has them.
+    pub(super) fn browser_pick_later(&mut self, paths: Vec<PathBuf>) {
+        self.browser.pick_later = paths;
+    }
+
+    /// Paths of the items picked along with the selection, for the maps to outline too.
+    pub(super) fn picked_paths(&self) -> Vec<Vec<u32>> {
+        if self.browser.picked.len() < 2 || self.browser.layout() == Layout::Tree {
+            return Vec::new();
+        }
+        self.chosen()
     }
 
     /// Faint (Highlight mode): a file that doesn't match, or a folder with no matches inside.
@@ -341,39 +557,336 @@ impl App {
         self.node_color(n, &self.full_of(path))
     }
 
+    /// Selection colours: strong when the file manager has the keyboard, quieter when the map has.
+    fn sel_colors(&self, vis: &egui::Visuals) -> (Color32, Color32) {
+        if self.browser.focused {
+            (vis.selection.bg_fill, vis.selection.stroke.color)
+        } else {
+            (vis.widgets.active.weak_bg_fill, vis.strong_text_color())
+        }
+    }
+
+    // ---------- commands ----------
+
+    /// A command from the right-click menu or the keyboard, applied to everything selected
+    /// when `path` is one of several selected items.
+    pub(super) fn browser_action(&mut self, a: TreeAction, path: Vec<u32>) {
+        let chosen = self.chosen();
+        let multi = matches!(
+            a,
+            TreeAction::Delete
+                | TreeAction::Recycle
+                | TreeAction::MoveTo
+                | TreeAction::CopyPath
+                | TreeAction::Open
+                | TreeAction::Exclude
+                | TreeAction::CopyItems
+                | TreeAction::CutItems
+        );
+        if multi && chosen.len() > 1 && chosen.contains(&path) {
+            self.items_action(a, chosen);
+        } else {
+            self.tree_action(a, path);
+        }
+    }
+
+    /// Commands that work on several items, and the file manager's own commands.
+    pub(super) fn items_action(&mut self, a: TreeAction, paths: Vec<Vec<u32>>) {
+        let Some(tree) = self.shown_tree() else { return };
+        let nodes: Vec<&Node> = paths.iter().filter_map(|p| tree.at(p)).collect();
+        if nodes.len() != paths.len() || paths.is_empty() {
+            return;
+        }
+        let disks: Vec<PathBuf> = paths.iter().map(|p| self.full_path(p)).collect();
+        let count = |n: usize| if n == 1 { "1 item".to_string() } else { format!("{n} items") };
+        match a {
+            TreeAction::Rename => self.start_rename(disks[0].clone()),
+            TreeAction::CopyItems | TreeAction::CutItems => {
+                let cut = a == TreeAction::CutItems;
+                if cut && paths.iter().any(|p| p.is_empty()) {
+                    return;
+                }
+                // The paths go on the system clipboard as text too, for pasting into a terminal
+                // or another app (and so Ctrl+V reaches dirmap as a paste).
+                self.ctx_copy = Some(text_of(&disks));
+                let what = if disks.len() == 1 { nodes[0].name.to_string() } else { count(disks.len()) };
+                let keys = if cfg!(target_os = "macos") { "⌘V" } else { "Ctrl+V" };
+                self.ops.notice = Some((format!("{} {what}. Open a folder and press {keys} to paste.", if cut { "Cut" } else { "Copied" }), false));
+                self.browser.clip = Some(Clip { paths: disks, cut });
+            }
+            TreeAction::Paste => {
+                let dest = if nodes.len() == 1 && nodes[0].is_dir { disks[0].clone() } else { self.full_path(&self.browser.folder) };
+                self.paste_into(dest);
+            }
+            TreeAction::NewFolder => self.new_folder(),
+            TreeAction::NewTab => {
+                if nodes[0].is_dir {
+                    self.new_tab(disks[0].clone());
+                }
+            }
+            TreeAction::Delete | TreeAction::Recycle => {
+                if paths.iter().any(|p| p.is_empty()) {
+                    return;
+                }
+                self.ops.confirm = Some(menus::Confirm {
+                    action: a,
+                    paths: disks,
+                    is_dir: nodes[0].is_dir,
+                    size: nodes.iter().map(|n| n.size).sum(),
+                    files: nodes.iter().map(|n| n.files).sum(),
+                });
+            }
+            TreeAction::MoveTo => {
+                if paths.iter().any(|p| p.is_empty()) {
+                    return;
+                }
+                let start = disks[0].parent().map(Path::to_path_buf).unwrap_or_default();
+                if let Some(dest) = rfd::FileDialog::new().set_title("Move to folder").set_directory(start).pick_folder() {
+                    self.transfer(disks, dest, false);
+                }
+            }
+            TreeAction::CopyPath => {
+                self.ctx_copy = Some(text_of(&disks));
+                self.ops.notice = Some((format!("Copied the paths of {}", count(disks.len())), false));
+            }
+            TreeAction::Open => {
+                for d in &disks {
+                    if let Err(e) = actions::open(d) {
+                        self.ops.notice = Some((e, true));
+                    }
+                }
+            }
+            _ => {
+                for p in paths {
+                    self.tree_action(a, p);
+                }
+            }
+        }
+    }
+
+    pub(super) fn start_rename(&mut self, path: PathBuf) {
+        let text = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        self.ops.rename = Some(menus::RenameBox { path, text, fresh: true, error: None });
+    }
+
+    /// A new folder in the current folder, then the Rename box for it.
+    fn new_folder(&mut self) {
+        if self.ops.job.is_some() {
+            return;
+        }
+        let dir = self.full_path(&self.browser.folder);
+        self.ops.then_rename = true;
+        self.run_op_select("Making a new folder".into(), move || match actions::new_folder(&dir) {
+            Ok(p) => (Ok(None), vec![p.clone()], vec![p]),
+            Err(e) => (Err(e), vec![], vec![]),
+        });
+    }
+
+    /// Paste what was copied or cut into `dest`.
+    fn paste_into(&mut self, dest: PathBuf) {
+        let Some(clip) = &self.browser.clip else { return };
+        let (paths, cut) = (clip.paths.clone(), clip.cut);
+        if cut {
+            // Cut items move once; after that there's nothing left to paste.
+            self.browser.clip = None;
+        }
+        self.transfer(paths, dest, !cut);
+    }
+
+    /// Copy or move items into a folder, in the background, then select the last of them.
+    fn transfer(&mut self, sources: Vec<PathBuf>, dest: PathBuf, copy: bool) {
+        if self.ops.job.is_some() {
+            self.ops.notice = Some(("Another file operation is still running.".into(), true));
+            return;
+        }
+        // Moving something to where it already is does nothing.
+        let sources: Vec<PathBuf> = sources.into_iter().filter(|s| copy || s.parent() != Some(dest.as_path())).collect();
+        if sources.is_empty() {
+            return;
+        }
+        let name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| dest.display().to_string());
+        let what = if sources.len() == 1 {
+            sources[0].file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+        } else {
+            format!("{} items", sources.len())
+        };
+        let label = format!("{} {what} to {name}", if copy { "Copying" } else { "Moving" });
+        let root = self.scanned_path.clone();
+        // Select the results only when they land in the folder on screen (a paste); a drop
+        // onto another folder leaves you where you are, as in Finder and Explorer.
+        let here = dest == self.full_path(&self.browser.folder);
+        self.run_op_select(label, move || {
+            let mut affected = Vec::new();
+            let mut made = Vec::new();
+            let mut errors = Vec::new();
+            for s in &sources {
+                let r = if copy { actions::copy_into(s, &dest) } else { actions::move_into(s, &dest) };
+                match r {
+                    Ok(to) => {
+                        if !copy {
+                            affected.push(s.clone());
+                        }
+                        if to.starts_with(&root) {
+                            affected.push(to.clone());
+                        }
+                        made.push(to);
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+            let note = match (copy, sources.len() - errors.len()) {
+                (_, 0) => None,
+                (true, 1) => Some(format!("Copied to {}", dest.display())),
+                (false, 1) => Some(format!("Moved to {}", dest.display())),
+                (true, n) => Some(format!("Copied {n} items to {}", dest.display())),
+                (false, n) => Some(format!("Moved {n} items to {}", dest.display())),
+            };
+            let r = if errors.is_empty() { Ok(note) } else { Err(errors.join(" ")) };
+            (r, affected, if here { made } else { Vec::new() })
+        });
+    }
+
+    // ---------- tabs ----------
+
+    fn new_tab(&mut self, folder: PathBuf) {
+        let layout = self.browser.layout();
+        let b = &mut self.browser;
+        b.tabs.insert(b.active + 1, Tab { layout, folder: folder.clone(), back: Vec::new(), fwd: Vec::new() });
+        self.switch_tab(self.browser.active + 1);
+    }
+
+    fn switch_tab(&mut self, i: usize) {
+        if i >= self.browser.tabs.len() {
+            return;
+        }
+        let here = self.full_path(&self.browser.folder);
+        self.browser.tab().folder = here;
+        self.browser.active = i;
+        self.load_tab();
+    }
+
+    /// Show the active tab's folder, and take the map there.
+    fn load_tab(&mut self) {
+        let disk = self.browser.tab().folder.clone();
+        let f = self.resolve_folder(&disk);
+        self.set_folder(f.clone());
+        self.zoom = f;
+        self.browser.seen_zoom = Some(self.zoom.clone());
+    }
+
+    fn close_tab(&mut self, i: usize) {
+        let b = &mut self.browser;
+        if b.tabs.len() < 2 || i >= b.tabs.len() {
+            return;
+        }
+        b.tabs.remove(i);
+        if i == b.active {
+            b.active = i.min(b.tabs.len() - 1);
+            self.load_tab();
+        } else if i < b.active {
+            b.active -= 1;
+        }
+    }
+
+    fn tab_title(&self, i: usize) -> String {
+        let t = &self.browser.tabs[i];
+        if i == self.browser.active {
+            if let Some(n) = self.shown_tree().as_ref().and_then(|tr| tr.at(&self.browser.folder).map(|n| n.name.to_string())) {
+                return n;
+            }
+        }
+        t.folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| t.folder.display().to_string())
+    }
+
     // ---------- the panel ----------
 
-    pub(super) fn browser_panel(&mut self, ui: &mut egui::Ui) {
+    /// The file manager: tabs, the path bar and the chosen layout.
+    pub(super) fn file_manager(&mut self, ui: &mut egui::Ui) {
         let Some(tree) = self.shown_tree() else { return };
         self.browser_sync(&tree);
-        let prev_status = self.hover_status.take();
         let rect = ui.max_rect();
-        ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
+        self.browser.rect = Some(rect);
+        // Which part of the window has the keyboard: the one clicked last.
+        let pressed = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
+        if let Some(p) = pressed {
+            if rect.contains(p) {
+                self.browser.focused = true;
+            } else if self.browser.map_rect.is_some_and(|r| r.contains(p)) {
+                self.browser.focused = false;
+            }
+        }
+        let prev_status = self.hover_status.clone();
         let mut picks = Picks::default();
 
-        let bar = egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| self.browser_bar(ui, &tree, &mut picks));
+        ui.spacing_mut().item_spacing.y = 2.0;
+        self.tabs_row(ui, &mut picks);
+        let bar = egui::Frame::NONE.inner_margin(egui::Margin::symmetric(6, 2)).show(ui, |ui| self.browser_bar(ui, &tree, &mut picks));
         let bar_rect = bar.response.rect;
-        ui.painter().hline(bar_rect.x_range(), bar_rect.bottom(), ui.visuals().widgets.noninteractive.bg_stroke);
+        ui.painter().hline(rect.x_range(), bar_rect.bottom() + 1.0, ui.visuals().widgets.noninteractive.bg_stroke);
+        ui.add_space(2.0);
 
-        let order = self.browser_order(&tree, &self.zoom.clone());
-        let pointer_in = ui.rect_contains_pointer(rect);
-        self.browser_keys(ui.ctx(), &tree, &order, pointer_in);
-
-        let footer_h = 22.0;
-        let mut body = ui.available_rect_before_wrap();
-        body.max.y -= footer_h;
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
-        child.set_clip_rect(body.intersect(ui.clip_rect()));
-        match self.browser.layout {
-            Layout::List => self.browser_list(&mut child, &tree, &order, &mut picks),
-            Layout::Icons => self.browser_icons(&mut child, &tree, &order, &mut picks),
-            Layout::Columns => self.browser_columns(&mut child, &tree, &mut picks),
+        let mut folder = self.browser.folder.clone();
+        let mut order = self.browser_order(&tree, &folder);
+        if self.browser.layout() == Layout::Tree {
+            self.tree_panel(ui);
+        } else {
+            let pointer_in = ui.rect_contains_pointer(rect);
+            self.browser_keys(ui.ctx(), &tree, &order, pointer_in, &mut picks);
+            // The keys may have opened another folder (or tab): draw that one.
+            if self.browser.folder != folder {
+                folder = self.browser.folder.clone();
+                order = self.browser_order(&tree, &folder);
+            }
+            let footer_h = 20.0;
+            let mut body = ui.available_rect_before_wrap();
+            body.max.y -= footer_h;
+            // The background (before the items, so they're on top of it): drops and a menu.
+            let empty = ui.interact(body, ui.id().with("fm-body"), Sense::click());
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
+            child.set_clip_rect(body.intersect(ui.clip_rect()));
+            match self.browser.layout() {
+                Layout::Icons => self.browser_icons(&mut child, &tree, &order, &mut picks),
+                Layout::Columns => self.browser_columns(&mut child, &tree, &mut picks),
+                _ => self.browser_list(&mut child, &tree, &order, &mut picks),
+            }
+            // A drop on the empty part of the view goes into the current folder.
+            let busy = self.ops.job.is_some();
+            let can_paste = self.browser.clip.is_some() && !busy;
+            empty.context_menu(|ui| {
+                let ctx = ui.ctx().clone();
+                let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
+                if ui.add_enabled(!busy, egui::Button::new("New Folder").shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::N))).clicked() {
+                    picks.new_folder = true;
+                }
+                if ui.add_enabled(can_paste, egui::Button::new("Paste").shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::V))).clicked() {
+                    picks.paste = true;
+                }
+                if ui.button("Open in New Tab").clicked() {
+                    picks.new_tab = Some(self.full_path(&folder));
+                }
+            });
+            if empty.clicked() {
+                self.browser.picked.clear();
+            }
+            if picks.drop.is_none() {
+                if let Some(p) = empty.dnd_release_payload::<DragItems>() {
+                    let copy = ui.input(|i| i.modifiers.alt);
+                    picks.drop = Some((p.0.clone(), self.full_path(&folder), copy));
+                }
+            }
+            let footer = Rect::from_min_max(pos2(rect.left(), body.bottom()), pos2(rect.right(), body.bottom() + footer_h));
+            self.browser_footer(ui, footer, &tree, &order);
+            ui.allocate_rect(Rect::from_min_max(body.min, footer.max), Sense::hover());
         }
-        let footer = Rect::from_min_max(pos2(rect.left(), body.bottom()), pos2(rect.right(), body.bottom() + footer_h));
-        self.browser_footer(ui, footer, &tree, &order);
         self.browser.scroll_to_sel = false;
+        self.drag_preview(ui.ctx());
+        self.apply_picks(picks, &order);
+        if self.hover_status != prev_status {
+            ui.ctx().request_repaint();
+        }
+    }
 
-        // Act on what was clicked.
+    fn apply_picks(&mut self, picks: Picks, order: &[u32]) {
         if let Some(p) = picks.hover {
             self.hover_status = Some(self.hover_text(&p));
         }
@@ -386,56 +899,142 @@ impl App {
             }
         }
         if let Some((folder, p)) = picks.column_select {
-            // Moving along the columns isn't a place to go Back to.
+            // Moving along the columns: the map follows, but it isn't a place to go Back to.
+            self.set_folder(folder.clone());
             self.zoom = folder;
             self.browser.seen_zoom = Some(self.zoom.clone());
             self.browser_select(p);
         }
-        if let Some(p) = picks.select {
-            self.browser_select(p);
+        if let Some((p, m)) = picks.select {
+            self.click_select(p, m, order);
         }
         if let Some(p) = picks.go {
             self.browse_to(p);
-            self.browser.scroll_to_sel = true;
         }
         if let Some(p) = picks.open {
             self.browser_select(p.clone());
             self.browse_into(p);
         }
         if let Some((a, p)) = picks.menu {
-            self.browser.seen_sel = Some(p.clone());
+            // A right-click on an item outside the selection selects just that item first.
+            if !self.chosen().contains(&p) {
+                self.browser_select(p.clone());
+            }
             match a {
                 TreeAction::Toggle => self.browse_into(p),
-                a => self.tree_action(a, p),
+                a => self.browser_action(a, p),
             }
             self.browser.seen_sel = self.selected.clone();
         }
-        if self.hover_status != prev_status {
-            ui.ctx().request_repaint();
+        if let Some((items, dest, copy)) = picks.drop {
+            self.transfer(items, dest, copy);
+        }
+        if let Some(f) = picks.new_tab {
+            self.new_tab(f);
+        }
+        if let Some(i) = picks.switch_tab {
+            self.switch_tab(i);
+        }
+        if let Some(i) = picks.close_tab {
+            self.close_tab(i);
+        }
+        if picks.new_folder {
+            self.new_folder();
+        }
+        if picks.paste {
+            let dest = self.full_path(&self.browser.folder);
+            self.paste_into(dest);
         }
     }
 
-    /// Back, Forward, Up, the path, and the layout and sort controls.
+    /// While dragging: what will happen, next to the pointer.
+    fn drag_preview(&self, ctx: &egui::Context) {
+        let Some(items) = egui::DragAndDrop::payload::<DragItems>(ctx) else { return };
+        let Some(p) = ctx.pointer_latest_pos() else { return };
+        let copy = ctx.input(|i| i.modifiers.alt);
+        let what = match items.0.len() {
+            1 => items.0[0].file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+            n => format!("{n} items"),
+        };
+        let alt = if cfg!(target_os = "macos") { "⌥" } else { "Alt" };
+        let text = if copy { format!("Copy {what}") } else { format!("Move {what}  (hold {alt} to copy)") };
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("fm-drag")));
+        let font = FontId::proportional(13.0);
+        let galley = painter.layout_no_wrap(text, font, Color32::WHITE);
+        let r = Rect::from_min_size(p + vec2(14.0, 10.0), galley.size() + vec2(12.0, 6.0));
+        painter.rect_filled(r, 4.0, Color32::from_rgba_unmultiplied(30, 90, 170, 235));
+        painter.galley(r.min + vec2(6.0, 3.0), galley, Color32::WHITE);
+        ctx.request_repaint();
+    }
+
+    /// Tabs above the path bar; each can take a drop.
+    fn tabs_row(&mut self, ui: &mut egui::Ui, picks: &mut Picks) {
+        let ctx = ui.ctx().clone();
+        let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let n = self.browser.tabs.len();
+            for i in 0..n {
+                let title = self.tab_title(i);
+                let short: String = title.chars().take(24).collect();
+                let short = if title.chars().count() > 24 { format!("{short}…") } else { short };
+                let on = i == self.browser.active;
+                let text = if on { egui::RichText::new(short.clone()).strong() } else { egui::RichText::new(short) };
+                let resp = ui.add(egui::Button::selectable(on, text)).on_hover_text(self.browser.tabs[i].folder.display().to_string());
+                if resp.clicked() && !on {
+                    picks.switch_tab = Some(i);
+                }
+                if resp.middle_clicked() {
+                    picks.close_tab = Some(i);
+                }
+                if resp.dnd_hover_payload::<DragItems>().is_some() {
+                    ui.painter().rect_stroke(resp.rect, 3.0, Stroke::new(2.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
+                }
+                if let Some(p) = resp.dnd_release_payload::<DragItems>() {
+                    let copy = ui.input(|i| i.modifiers.alt);
+                    let dest = if on { self.full_path(&self.browser.folder) } else { self.browser.tabs[i].folder.clone() };
+                    picks.drop = Some((p.0.clone(), dest, copy));
+                }
+                if n > 1 {
+                    let x = ui.add(egui::Button::new(egui::RichText::new("✖").small()).frame(false)).on_hover_text(format!("Close tab ({})", k(egui::Modifiers::COMMAND, egui::Key::W)));
+                    if x.clicked() {
+                        picks.close_tab = Some(i);
+                    }
+                }
+                ui.add_space(4.0);
+            }
+            let plus = ui.add(egui::Button::new("➕").frame(false)).on_hover_text(format!("New tab ({})", k(egui::Modifiers::COMMAND, egui::Key::T)));
+            if plus.clicked() {
+                picks.new_tab = Some(self.full_path(&self.browser.folder));
+            }
+        });
+    }
+
+    /// Back, Forward, Up, the path, file commands, and the layout and sort controls.
     fn browser_bar(&mut self, ui: &mut egui::Ui, tree: &Arc<Node>, picks: &mut Picks) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let ctx = ui.ctx().clone();
             let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
-            if ui.add_enabled(self.browser_can_back(), egui::Button::new("◀")).on_hover_text(format!("Back ({})", k(egui::Modifiers::ALT, egui::Key::ArrowLeft))).clicked() {
+            let (can_back, can_fwd) = {
+                let t = &self.browser.tabs[self.browser.active];
+                (!t.back.is_empty(), !t.fwd.is_empty())
+            };
+            if ui.add_enabled(can_back, egui::Button::new("◀")).on_hover_text(format!("Back ({})", k(egui::Modifiers::ALT, egui::Key::ArrowLeft))).clicked() {
                 self.browser_back();
             }
-            if ui.add_enabled(self.browser_can_forward(), egui::Button::new("▶")).on_hover_text(format!("Forward ({})", k(egui::Modifiers::ALT, egui::Key::ArrowRight))).clicked() {
+            if ui.add_enabled(can_fwd, egui::Button::new("▶")).on_hover_text(format!("Forward ({})", k(egui::Modifiers::ALT, egui::Key::ArrowRight))).clicked() {
                 self.browser_forward();
             }
-            if ui.add_enabled(!self.zoom.is_empty(), egui::Button::new("⏶")).on_hover_text(format!("Up to the enclosing folder (Backspace or {})", k(egui::Modifiers::COMMAND, egui::Key::ArrowUp))).clicked() {
+            if ui.add_enabled(!self.browser.folder.is_empty(), egui::Button::new("⏶")).on_hover_text(format!("Up to the enclosing folder (Backspace or {})", k(egui::Modifiers::COMMAND, egui::Key::ArrowUp))).clicked() {
                 self.browse_up();
             }
             ui.add_space(6.0);
-            // The path, each part clickable.
+            // The path, each part clickable and a place to drop.
             ui.spacing_mut().item_spacing.x = 3.0;
             let mut n: &Node = tree;
             let crumbs: Vec<(usize, String)> = std::iter::once((0, format!("🖴 {}", tree.name)))
-                .chain(self.zoom.iter().enumerate().filter_map(|(k, &i)| {
+                .chain(self.browser.folder.iter().enumerate().filter_map(|(k, &i)| {
                     n = n.children.get(i as usize)?;
                     Some((k + 1, n.name.to_string()))
                 }))
@@ -446,66 +1045,117 @@ impl App {
                     ui.weak("›");
                 }
                 let text = if k == last { egui::RichText::new(label).strong() } else { egui::RichText::new(label) };
-                if ui.add(egui::Button::new(text).frame(false)).clicked() && k != last {
-                    picks.go = Some(self.zoom[..depth].to_vec());
+                let resp = ui.add(egui::Button::new(text).frame(false));
+                if resp.clicked() && k != last {
+                    picks.go = Some(self.browser.folder[..depth].to_vec());
+                }
+                if resp.dnd_hover_payload::<DragItems>().is_some() {
+                    ui.painter().rect_stroke(resp.rect, 3.0, Stroke::new(2.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
+                }
+                if let Some(p) = resp.dnd_release_payload::<DragItems>() {
+                    let copy = ui.input(|i| i.modifiers.alt);
+                    picks.drop = Some((p.0.clone(), self.full_path(&self.browser.folder[..depth]), copy));
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                let b = &mut self.browser;
-                let arrow = if b.reversed != b.sort.natural_desc() { "⏷" } else { "⏶" };
-                egui::ComboBox::from_id_salt("browser-sort")
-                    .selected_text(format!("Sort: {} {arrow}", b.sort.label()))
-                    .width(150.0)
-                    .show_ui(ui, |ui| {
-                        for key in SortKey::ALL {
-                            if ui.selectable_label(b.sort == key, key.label()).clicked() {
-                                picks.sort = Some(key);
+                if self.browser.layout() != Layout::Tree {
+                    let b = &mut self.browser;
+                    let arrow = if b.reversed != b.sort.natural_desc() { "⏷" } else { "⏶" };
+                    egui::ComboBox::from_id_salt("browser-sort")
+                        .selected_text(format!("Sort: {} {arrow}", b.sort.label()))
+                        .width(140.0)
+                        .show_ui(ui, |ui| {
+                            for key in SortKey::ALL {
+                                if ui.selectable_label(b.sort == key, key.label()).clicked() {
+                                    picks.sort = Some(key);
+                                }
                             }
-                        }
-                    })
-                    .response
-                    .on_hover_text("Choose the order; pick the same one again to reverse it");
-                ui.add_space(8.0);
+                        })
+                        .response
+                        .on_hover_text("Choose the order; pick the same one again to reverse it");
+                    ui.add_space(6.0);
+                }
+                let t = self.browser.tab();
                 for (layout, label, tip) in [
                     (Layout::Columns, "◫ Columns", "A column per folder, from the top of the scan down to here"),
                     (Layout::Icons, "⊞ Icons", "Large icons in a grid"),
                     (Layout::List, "☰ List", "One line per item, with sizes and dates"),
+                    (Layout::Tree, "🌲 Tree", "The whole scan as a folder tree"),
                 ] {
-                    ui.selectable_value(&mut b.layout, layout, label).on_hover_text(tip);
+                    ui.selectable_value(&mut t.layout, layout, label).on_hover_text(tip);
+                }
+                ui.add_space(6.0);
+                let busy = self.ops.job.is_some();
+                let paste_tip = match &self.browser.clip {
+                    Some(c) => format!("Paste {} here ({})", if c.paths.len() == 1 { "1 item".into() } else { format!("{} items", c.paths.len()) }, k(egui::Modifiers::COMMAND, egui::Key::V)),
+                    None => "Paste: copy or cut something first".into(),
+                };
+                if ui.add_enabled(self.browser.clip.is_some() && !busy, egui::Button::new("Paste")).on_hover_text(paste_tip).on_disabled_hover_text("Paste: copy or cut something first").clicked() {
+                    picks.paste = true;
+                }
+                if ui.add_enabled(!busy, egui::Button::new("New Folder")).on_hover_text(format!("New folder here ({})", k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::N))).clicked() {
+                    picks.new_folder = true;
                 }
             });
         });
     }
 
-    /// Count and total of the folder, and the selected item.
+    /// Count and total of the folder, and what's selected.
     fn browser_footer(&mut self, ui: &mut egui::Ui, rect: Rect, tree: &Arc<Node>, order: &[u32]) {
         let p = ui.painter();
         p.rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
-        let Some(folder) = tree.at(&self.zoom) else { return };
+        let Some(folder) = tree.at(&self.browser.folder) else { return };
         let items = order.len();
         let mut text = format!("{} item{} · {}", group(items as u64), if items == 1 { "" } else { "s" }, scan::human(folder.size));
-        if let Some(i) = self.selected_in(&self.zoom) {
-            if let Some(n) = folder.children.get(i as usize) {
-                let share = if folder.size > 0 { n.size as f64 * 100.0 / folder.size as f64 } else { 0.0 };
-                text.push_str(&format!("  ·  “{}” selected: {} ({share:.1}% of this folder)", n.name, scan::human(n.size)));
-            }
+        let picked = &self.browser.picked;
+        if picked.len() > 1 {
+            let size: u64 = picked.iter().filter_map(|&i| folder.children.get(i as usize)).map(|n| n.size).sum();
+            let share = if folder.size > 0 { size as f64 * 100.0 / folder.size as f64 } else { 0.0 };
+            text.push_str(&format!("  ·  {} selected: {} ({share:.1}% of this folder)", picked.len(), scan::human(size)));
+        } else if let Some(n) = self.selected_in(&self.browser.folder).and_then(|i| folder.children.get(i as usize)) {
+            let share = if folder.size > 0 { n.size as f64 * 100.0 / folder.size as f64 } else { 0.0 };
+            text.push_str(&format!("  ·  “{}” selected: {} ({share:.1}% of this folder)", n.name, scan::human(n.size)));
+        }
+        if let Some(c) = &self.browser.clip {
+            text.push_str(&format!("  ·  {} {} to paste", if c.cut { "cut:" } else { "copied:" }, c.paths.len()));
         }
         p.text(pos2(rect.left() + 10.0, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(12.0), ui.visuals().weak_text_color());
     }
 
-    /// Arrow keys, Enter, Backspace, Back/Forward and type-to-select.
-    fn browser_keys(&mut self, ctx: &egui::Context, tree: &Arc<Node>, order: &[u32], pointer_in: bool) {
+    /// Arrow keys, Enter, Backspace, Back/Forward, tabs, select all, new folder, paste and
+    /// type-to-select.
+    fn browser_keys(&mut self, ctx: &egui::Context, tree: &Arc<Node>, order: &[u32], pointer_in: bool, picks: &mut Picks) {
         use egui::{Key, Modifiers as M};
         if self.ops.modal() || ctx.egui_wants_keyboard_input() {
             return;
         }
         let help_hovered = self.help.hovered;
-        let cols = match self.browser.layout {
+        // The mouse's side buttons go to whichever part is under the pointer.
+        let mouse = pointer_in && !help_hovered;
+        let side = ctx.input(|i| {
+            if mouse && i.pointer.button_pressed(egui::PointerButton::Extra1) {
+                Some(false)
+            } else if mouse && i.pointer.button_pressed(egui::PointerButton::Extra2) {
+                Some(true)
+            } else {
+                None
+            }
+        });
+        match side {
+            Some(false) => return self.browser_back(),
+            Some(true) => return self.browser_forward(),
+            None => {}
+        }
+        if !self.browser.focused {
+            return;
+        }
+        let cols = match self.browser.layout() {
             Layout::Icons => self.browser.grid_cols.max(1) as i64,
             _ => 1,
         };
-        let pos = self.selected_in(&self.zoom).and_then(|i| order.iter().position(|&o| o == i)).map(|p| p as i64);
+        let folder = self.browser.folder.clone();
+        let pos = self.selected_in(&folder).and_then(|i| order.iter().position(|&o| o == i)).map(|p| p as i64);
         let now = ctx.input(|i| i.time);
         enum Do {
             Move(i64),
@@ -515,14 +1165,20 @@ impl App {
             Open,
             Back,
             Forward,
+            All,
+            NewTab,
+            CloseTab,
+            NextTab(bool),
+            NewFolder,
+            Paste(String),
             Find(String),
         }
+        let layout = self.browser.layout();
         let act = ctx.input_mut(|i| {
-            let mouse = pointer_in && !help_hovered;
-            if (mouse && i.pointer.button_pressed(egui::PointerButton::Extra1)) || i.consume_key(M::ALT, Key::ArrowLeft) {
+            if i.consume_key(M::ALT, Key::ArrowLeft) {
                 return Some(Do::Back);
             }
-            if (mouse && i.pointer.button_pressed(egui::PointerButton::Extra2)) || i.consume_key(M::ALT, Key::ArrowRight) {
+            if i.consume_key(M::ALT, Key::ArrowRight) {
                 return Some(Do::Forward);
             }
             if i.consume_key(M::COMMAND, Key::ArrowUp) || i.consume_key(M::NONE, Key::Backspace) {
@@ -530,6 +1186,31 @@ impl App {
             }
             if i.consume_key(M::COMMAND, Key::ArrowDown) {
                 return Some(Do::Open);
+            }
+            if i.consume_key(M::COMMAND, Key::A) {
+                return Some(Do::All);
+            }
+            if i.consume_key(M::COMMAND, Key::T) {
+                return Some(Do::NewTab);
+            }
+            if i.consume_key(M::COMMAND, Key::W) {
+                return Some(Do::CloseTab);
+            }
+            if i.consume_key(M::CTRL | M::SHIFT, Key::Tab) {
+                return Some(Do::NextTab(false));
+            }
+            if i.consume_key(M::CTRL, Key::Tab) {
+                return Some(Do::NextTab(true));
+            }
+            if i.consume_key(M::COMMAND | M::SHIFT, Key::N) {
+                return Some(Do::NewFolder);
+            }
+            let pasted = i.events.iter().find_map(|e| match e {
+                egui::Event::Paste(t) => Some(t.clone()),
+                _ => None,
+            });
+            if let Some(t) = pasted {
+                return Some(Do::Paste(t));
             }
             if i.consume_key(M::NONE, Key::ArrowDown) {
                 return Some(Do::Move(cols));
@@ -549,7 +1230,7 @@ impl App {
             if i.consume_key(M::NONE, Key::PageUp) {
                 return Some(Do::Move(-20 * cols));
             }
-            match self.browser.layout {
+            match layout {
                 Layout::Icons => {
                     if i.consume_key(M::NONE, Key::ArrowRight) {
                         return Some(Do::Move(1));
@@ -566,7 +1247,7 @@ impl App {
                         return Some(Do::Up);
                     }
                 }
-                Layout::List => {}
+                _ => {}
             }
             if i.modifiers.command || i.modifiers.ctrl || i.modifiers.alt {
                 return None;
@@ -585,7 +1266,7 @@ impl App {
         let len = order.len() as i64;
         let pick = |app: &mut Self, p: i64| {
             if len > 0 {
-                let mut path = app.zoom.clone();
+                let mut path = app.browser.folder.clone();
                 path.push(order[p.clamp(0, len - 1) as usize]);
                 app.browser_select(path);
             }
@@ -596,6 +1277,43 @@ impl App {
             Do::Up => self.browse_up(),
             Do::Back => self.browser_back(),
             Do::Forward => self.browser_forward(),
+            Do::All => {
+                if len > 0 {
+                    if pos.is_none() {
+                        pick(self, 0);
+                    }
+                    self.browser.picked = order.iter().copied().collect();
+                    if self.browser.picked.len() < 2 {
+                        self.browser.picked.clear();
+                    }
+                }
+            }
+            Do::NewTab => picks.new_tab = Some(self.full_path(&folder)),
+            Do::CloseTab => picks.close_tab = Some(self.browser.active),
+            Do::NextTab(fwd) => {
+                let n = self.browser.tabs.len();
+                picks.switch_tab = Some(if fwd { (self.browser.active + 1) % n } else { (self.browser.active + n - 1) % n });
+            }
+            Do::NewFolder => picks.new_folder = true,
+            Do::Paste(text) => {
+                let ours = self.browser.clip.as_ref().is_some_and(|c| text_of(&c.paths) == text.trim_end());
+                if ours || self.browser.clip.is_some() && text.trim().is_empty() {
+                    picks.paste = true;
+                } else {
+                    // Paths copied elsewhere (one per line), e.g. "Copy as path" in Explorer.
+                    let paths: Vec<PathBuf> = text
+                        .lines()
+                        .map(|l| PathBuf::from(l.trim().trim_matches('"')))
+                        .filter(|p| p.is_absolute() && fs_exists(p))
+                        .collect();
+                    if !paths.is_empty() && paths.len() == text.lines().filter(|l| !l.trim().is_empty()).count() {
+                        let dest = self.full_path(&folder);
+                        self.transfer(paths, dest, true);
+                    } else if self.browser.clip.is_some() {
+                        picks.paste = true;
+                    }
+                }
+            }
             Do::Open => {
                 if let Some(s) = self.selected.clone().filter(|_| pos.is_some()) {
                     self.browse_into(s);
@@ -606,9 +1324,9 @@ impl App {
                 if let Some(s) = self.selected.clone().filter(|_| pos.is_some()) {
                     if tree.at(&s).is_some_and(|n| n.is_dir && !n.children.is_empty()) {
                         let first = self.browser_order(tree, &s).first().copied();
+                        self.set_folder(s.clone());
                         self.zoom = s.clone();
                         self.browser.seen_zoom = Some(self.zoom.clone());
-                        self.browser.typed.clear();
                         if let Some(f) = first {
                             let mut p = s;
                             p.push(f);
@@ -624,8 +1342,8 @@ impl App {
                 self.browser.typed_at = now;
                 self.browser.typed.push_str(&t.to_lowercase());
                 let want = self.browser.typed.clone();
-                if let Some(folder) = tree.at(&self.zoom) {
-                    let hit = order.iter().position(|&i| folder.children[i as usize].name.to_lowercase().starts_with(&want));
+                if let Some(f) = tree.at(&folder) {
+                    let hit = order.iter().position(|&i| f.children[i as usize].name.to_lowercase().starts_with(&want));
                     if let Some(p) = hit {
                         pick(self, p as i64);
                     }
@@ -651,7 +1369,7 @@ impl App {
     }
 
     fn browser_list(&mut self, ui: &mut egui::Ui, tree: &Arc<Node>, order: &Arc<Vec<u32>>, picks: &mut Picks) {
-        let folder_path = self.zoom.clone();
+        let folder_path = self.browser.folder.clone();
         let Some(folder) = tree.at(&folder_path) else { return };
         let width = ui.available_width();
         let cols = Self::list_columns(width);
@@ -683,8 +1401,7 @@ impl App {
             return;
         }
         let hits = self.current_hits();
-        let sel = self.selected_in(&folder_path);
-        let sel_row = sel.and_then(|s| order.iter().position(|&o| o == s));
+        let sel_row = self.selected_in(&folder_path).and_then(|s| order.iter().position(|&o| o == s));
         let mut area = egui::ScrollArea::vertical().id_salt(("blist", &folder_path)).auto_shrink(false);
         if let Some(r) = sel_row.filter(|_| self.browser.scroll_to_sel) {
             area = area.vertical_scroll_offset(keep_in_view(self.browser.view, r as f32 * ROW, ROW));
@@ -696,20 +1413,21 @@ impl App {
                 let n = &folder.children[i as usize];
                 let mut path = folder_path.clone();
                 path.push(i);
-                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
-                let selected = sel == Some(i);
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click_and_drag());
+                let selected = self.is_chosen(&folder_path, i);
                 let dim = self.browser_dim(n, &path, &hits);
                 let vis = ui.visuals().clone();
+                let (sel_bg, sel_fg) = self.sel_colors(&vis);
                 let p = ui.painter().clone();
                 if selected {
-                    p.rect_filled(rect, 3.0, vis.selection.bg_fill);
+                    p.rect_filled(rect, 3.0, sel_bg);
                 } else if resp.hovered() {
                     p.rect_filled(rect, 3.0, vis.widgets.hovered.weak_bg_fill);
                 } else if r % 2 == 1 && self.view().stripes {
                     p.rect_filled(rect, 0.0, vis.faint_bg_color);
                 }
                 let tc = if selected {
-                    vis.selection.stroke.color
+                    sel_fg
                 } else if dim {
                     vis.weak_text_color().gamma_multiply(0.6)
                 } else {
@@ -761,22 +1479,51 @@ impl App {
                         }
                     }
                 }
-                self.item_input(&resp, &path, n, picks);
+                self.item_input(ui, &resp, &path, n, picks);
             }
         });
         self.browser.view = (out.state.offset.y, out.inner_rect.height());
     }
 
-    /// Clicks, double-clicks, hover and the right-click menu, the same in every layout.
-    fn item_input(&self, resp: &egui::Response, path: &[u32], n: &Node, picks: &mut Picks) {
+    /// Clicks, double-clicks, hover, dragging, dropping and the right-click menu, the same in
+    /// every layout.
+    fn item_input(&self, ui: &egui::Ui, resp: &egui::Response, path: &[u32], n: &Node, picks: &mut Picks) {
         if resp.double_clicked() {
             picks.open = Some(path.to_vec());
-        } else if resp.clicked() || resp.secondary_clicked() {
-            picks.select = Some(path.to_vec());
+        } else if resp.clicked() {
+            picks.select = Some((path.to_vec(), ui.input(|i| i.modifiers)));
+        } else if resp.secondary_clicked() && !self.chosen().iter().any(|c| c == path) {
+            picks.select = Some((path.to_vec(), egui::Modifiers::NONE));
+        }
+        if resp.middle_clicked() && n.is_dir {
+            picks.new_tab = Some(self.full_path(path));
         }
         if resp.hovered() {
             picks.hover = Some(path.to_vec());
         }
+        // Drag what's selected (or just this, if it isn't), drop onto folders.
+        if resp.drag_started() && !path.is_empty() {
+            let chosen = self.chosen();
+            let items: Vec<PathBuf> = if chosen.iter().any(|c| c == path) {
+                chosen.iter().map(|c| self.full_path(c)).collect()
+            } else {
+                vec![self.full_path(path)]
+            };
+            resp.dnd_set_drag_payload(DragItems(items));
+        }
+        if n.is_dir {
+            if resp.dnd_hover_payload::<DragItems>().is_some() {
+                ui.painter().rect_stroke(resp.rect, 3.0, Stroke::new(2.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
+            }
+            if let Some(p) = resp.dnd_release_payload::<DragItems>() {
+                let copy = ui.input(|i| i.modifiers.alt);
+                let dest = self.full_path(path);
+                if !p.0.contains(&dest) {
+                    picks.drop = Some((p.0.clone(), dest, copy));
+                }
+            }
+        }
+        let count = if self.chosen().iter().any(|c| c == path) { self.chosen().len() } else { 1 };
         let info = ItemInfo {
             is_dir: n.is_dir,
             open: false,
@@ -784,6 +1531,8 @@ impl App {
             is_drive: path.is_empty() && self.scanned_path.parent().is_none(),
             busy: self.ops.job.is_some(),
             in_browser: true,
+            count,
+            can_paste: self.browser.clip.is_some(),
         };
         resp.context_menu(|ui| {
             if let Some(a) = Self::tree_menu(ui, &info) {
@@ -801,7 +1550,7 @@ impl App {
     // ---------- Icons ----------
 
     fn browser_icons(&mut self, ui: &mut egui::Ui, tree: &Arc<Node>, order: &Arc<Vec<u32>>, picks: &mut Picks) {
-        let folder_path = self.zoom.clone();
+        let folder_path = self.browser.folder.clone();
         let Some(folder) = tree.at(&folder_path) else { return };
         if order.is_empty() {
             Self::empty_note(ui, self.shown.is_some());
@@ -812,8 +1561,7 @@ impl App {
         self.browser.grid_cols = per_row;
         let rows = order.len().div_ceil(per_row);
         let hits = self.current_hits();
-        let sel = self.selected_in(&folder_path);
-        let sel_row = sel.and_then(|s| order.iter().position(|&o| o == s)).map(|p| p / per_row);
+        let sel_row = self.selected_in(&folder_path).and_then(|s| order.iter().position(|&o| o == s)).map(|p| p / per_row);
         let mut area = egui::ScrollArea::vertical().id_salt(("bicons", &folder_path)).auto_shrink(false);
         if let Some(r) = sel_row.filter(|_| self.browser.scroll_to_sel) {
             area = area.vertical_scroll_offset(keep_in_view(self.browser.view, r as f32 * CELL_H, CELL_H));
@@ -828,13 +1576,14 @@ impl App {
                     let mut path = folder_path.clone();
                     path.push(i);
                     let cell = Rect::from_min_size(pos2(line.left() + 6.0 + c as f32 * CELL_W, line.top()), vec2(CELL_W, CELL_H)).shrink(3.0);
-                    let resp = ui.interact(cell, ui.id().with(("bicon", i)), Sense::click());
-                    let selected = sel == Some(i);
+                    let resp = ui.interact(cell, ui.id().with(("bicon", i)), Sense::click_and_drag());
+                    let selected = self.is_chosen(&folder_path, i);
                     let dim = self.browser_dim(n, &path, &hits);
                     let vis = ui.visuals().clone();
+                    let (sel_bg, sel_fg) = self.sel_colors(&vis);
                     let p = ui.painter().clone();
                     if selected {
-                        p.rect_filled(cell, 6.0, vis.selection.bg_fill);
+                        p.rect_filled(cell, 6.0, sel_bg);
                     } else if resp.hovered() {
                         p.rect_filled(cell, 6.0, vis.widgets.hovered.weak_bg_fill);
                     }
@@ -853,7 +1602,7 @@ impl App {
                     fill.set_width((bar.width() * frac).max(if frac > 0.0 { 1.0 } else { 0.0 }));
                     p.rect_filled(fill, 1.5, if n.is_dir { Color32::from_rgb(90, 140, 220) } else { tint });
                     let tc = if selected {
-                        vis.selection.stroke.color
+                        sel_fg
                     } else if dim {
                         vis.weak_text_color().gamma_multiply(0.6)
                     } else {
@@ -868,7 +1617,7 @@ impl App {
                     p.galley(pos2(cell.center().x, cell.top() + 61.0), galley, tc);
                     let weak = if selected || dim { tc } else { vis.weak_text_color() };
                     p.text(pos2(cell.center().x, cell.top() + 63.0 + gh), Align2::CENTER_TOP, scan::human(n.size), FontId::proportional(11.0), weak);
-                    self.item_input(&resp, &path, n, picks);
+                    self.item_input(ui, &resp, &path, n, picks);
                 }
             }
         });
@@ -880,9 +1629,10 @@ impl App {
     fn browser_columns(&mut self, ui: &mut egui::Ui, tree: &Arc<Node>, picks: &mut Picks) {
         // One column per folder from the top down to the current one, then the selected
         // folder's contents or the selected file's details.
-        let mut folders: Vec<Vec<u32>> = (0..=self.zoom.len()).map(|k| self.zoom[..k].to_vec()).collect();
-        let sel_here = self.selected_in(&self.zoom).map(|i| {
-            let mut p = self.zoom.clone();
+        let current = self.browser.folder.clone();
+        let mut folders: Vec<Vec<u32>> = (0..=current.len()).map(|k| current[..k].to_vec()).collect();
+        let sel_here = self.selected_in(&current).filter(|_| self.browser.picked.len() < 2).map(|i| {
+            let mut p = current.clone();
             p.push(i);
             p
         });
@@ -902,18 +1652,24 @@ impl App {
                 for (k, folder_path) in folders.iter().enumerate() {
                     let order = self.browser_order(tree, folder_path);
                     let Some(folder) = tree.at(folder_path) else { continue };
-                    // The item that leads to the next column, or the selection in the last folder.
-                    let mark = if k < self.zoom.len() { Some(self.zoom[k]) } else { self.selected_in(folder_path) };
-                    let active = k == self.zoom.len();
-                    let (col_rect, _) = ui.allocate_exact_size(vec2(COL_W, height), Sense::hover());
+                    let active = k == current.len();
+                    // The item that leads to the next column.
+                    let mark = if k < current.len() { Some(current[k]) } else { None };
+                    let (col_rect, col_resp) = ui.allocate_exact_size(vec2(COL_W, height), Sense::hover());
                     let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(col_rect).layout(egui::Layout::top_down(egui::Align::Min)));
                     cui.set_clip_rect(col_rect.intersect(ui.clip_rect()));
                     ui.painter().vline(col_rect.right(), col_rect.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
+                    if col_resp.dnd_hover_payload::<DragItems>().is_some() {
+                        ui.painter().rect_stroke(col_rect, 0.0, Stroke::new(1.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
+                    }
+                    if let Some(p) = col_resp.dnd_release_payload::<DragItems>() {
+                        picks.drop = Some((p.0.clone(), self.full_path(folder_path), ui.input(|i| i.modifiers.alt)));
+                    }
                     if order.is_empty() {
                         Self::empty_note(&mut cui, self.shown.is_some());
                         continue;
                     }
-                    let mark_row = mark.and_then(|m| order.iter().position(|&o| o == m));
+                    let mark_row = mark.or_else(|| if active { self.selected_in(folder_path) } else { None }).and_then(|m| order.iter().position(|&o| o == m));
                     let mut area = egui::ScrollArea::vertical().id_salt(("bcol", folder_path)).auto_shrink(false);
                     if let Some(r) = mark_row.filter(|_| self.browser.scroll_to_sel) {
                         let y = r as f32 * ROW;
@@ -926,20 +1682,21 @@ impl App {
                             let n = &folder.children[i as usize];
                             let mut path = folder_path.clone();
                             path.push(i);
-                            let (rect, resp) = ui.allocate_exact_size(vec2(COL_W - 1.0, ROW), Sense::click());
-                            let on = mark == Some(i);
+                            let (rect, resp) = ui.allocate_exact_size(vec2(COL_W - 1.0, ROW), Sense::click_and_drag());
+                            let on = if active { self.is_chosen(folder_path, i) } else { mark == Some(i) };
                             let vis = ui.visuals().clone();
+                            let (sel_bg, sel_fg) = self.sel_colors(&vis);
                             let p = ui.painter().clone();
                             let dim = self.browser_dim(n, &path, &hits);
                             if on {
                                 // The trail to the current folder is drawn quieter than the selection.
-                                let fill = if active { vis.selection.bg_fill } else { vis.widgets.inactive.weak_bg_fill };
+                                let fill = if active { sel_bg } else { vis.widgets.inactive.weak_bg_fill };
                                 p.rect_filled(rect.shrink2(vec2(3.0, 0.0)), 3.0, fill);
                             } else if resp.hovered() {
                                 p.rect_filled(rect.shrink2(vec2(3.0, 0.0)), 3.0, vis.widgets.hovered.weak_bg_fill);
                             }
                             let tc = if on && active {
-                                vis.selection.stroke.color
+                                sel_fg
                             } else if dim {
                                 vis.weak_text_color().gamma_multiply(0.6)
                             } else {
@@ -950,19 +1707,18 @@ impl App {
                             let tint = self.icon_tint(n, &path);
                             let tint = if dim { custom::dim(tint) } else { tint };
                             self.icons.paint(ui, Rect::from_min_size(pos2(rect.left() + 8.0, cy - 8.0), vec2(16.0, 16.0)), n.is_dir, n.ext(), tint);
-                            let size = scan::human(n.size);
                             let size_w = 74.0;
-                            p.text(pos2(rect.right() - 20.0, cy), Align2::RIGHT_CENTER, size, FontId::proportional(11.5), weak);
+                            p.text(pos2(rect.right() - 20.0, cy), Align2::RIGHT_CENTER, scan::human(n.size), FontId::proportional(11.5), weak);
                             if n.is_dir {
                                 p.text(pos2(rect.right() - 8.0, cy), Align2::CENTER_CENTER, "›", FontId::proportional(14.0), weak);
                             }
                             let clip = Rect::from_min_max(pos2(rect.left() + 30.0, rect.top()), pos2(rect.right() - 20.0 - size_w, rect.bottom()));
                             p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &*n.name, FontId::proportional(13.0), tc);
-                            // A click in any column makes that column's folder the current one.
-                            let before = (picks.select.clone(), picks.open.clone());
-                            self.item_input(&resp, &path, n, picks);
-                            if picks.select != before.0 {
-                                if let Some(s) = picks.select.take() {
+                            // A plain click in another column makes that column's folder the current one.
+                            let before = picks.select.is_some();
+                            self.item_input(ui, &resp, &path, n, picks);
+                            if !before && !active {
+                                if let Some((s, _)) = picks.select.take() {
                                     picks.column_select = Some((folder_path.clone(), s));
                                 }
                             }
@@ -1019,6 +1775,15 @@ impl App {
             self.tree_action(a, path.to_vec());
         }
     }
+}
+
+/// Paths as clipboard text, one per line.
+fn text_of(paths: &[PathBuf]) -> String {
+    paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n")
+}
+
+fn fs_exists(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).is_ok()
 }
 
 /// Scroll offset that brings a row at `y` (height `h`) into a view last at `(offset, height)`,

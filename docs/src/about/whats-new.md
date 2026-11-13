@@ -2,13 +2,19 @@
 
 ## Version 0.2.0
 
-### Files view
+### File manager
 
-- A new **View: Files**: browse the scan like Finder or Windows Explorer, in **List**, **Icons**
-  or **Columns** layout, with each item's size and share of its folder. Sort by name, size, kind,
-  items or date; click the path, use Back, Forward and Up, the arrow keys and type-to-select; the
-  filters and the right-click menu work there too. It shares its folder and selection with the
-  treemap and sunburst. See [The Files view](../views/file-browser.md).
+- The folder list at the top is now a **file manager** like Finder or Windows Explorer, with the
+  map still underneath. Choose **List**, **Icons**, **Columns** or **Tree**, each with every
+  item's size and share of its folder. Sort by name, size, kind, items or date; click the path,
+  use Back, Forward and Up, the arrow keys and type-to-select. Opening a folder zooms the map
+  there, and zooming the map moves the file manager. See [The file manager](../views/file-browser.md).
+- **Tabs**: **Ctrl+T**, **Ctrl+W**, **Ctrl+Tab**, middle-click a folder or **Open in New Tab**.
+- **Select several items** with Ctrl- and Shift-click or **Ctrl+A**.
+- **Rename** (**F2**), **New Folder** (**Ctrl+Shift+N**), **Copy**, **Cut** and **Paste**
+  (**Ctrl+C**, **Ctrl+X**, **Ctrl+V**), and **drag and drop** onto folders, the path or tabs
+  (hold **Alt** to copy).
+- **Copy Path** is now **Ctrl+Shift+C**, since **Ctrl+C** copies the items.
 
 ### Help and documentation
 
@@ -30,7 +36,7 @@
 
 ### Right-click menus
 
-- A WinDirStat-style right-click menu on the folder list, with keyboard shortcuts: Open, Copy
+- A WinDirStat-style right-click menu on the file manager, with keyboard shortcuts: Open, Copy
   Path, Select in Explorer, Command Prompt and PowerShell (Terminal elsewhere), Refresh Selected,
   Properties, Compute Hash (SHA-256), Add to Exclusion Filter, Delete Permanently, Delete to
   Recycle Bin, Remove Empty Folders, Empty Folder and Move to.
@@ -53,12 +59,12 @@
 - Sunburst view, colour by age and change, size histogram, snapshots and comparison, duplicate
   finder.
 - Wheel zoom, tile labels, hover information and kind and size filters.
-- Live scan progress and live folder list, Explorer icons on Windows, the Settings window.
+- Live scan progress and live file manager, Explorer icons on Windows, the Settings window.
 - Light theme fixes.
 
 ## Version 0.1
 
-- First version: parallel scanning, drive list, folder list and cushion treemap.
+- First version: parallel scanning, drive list, file manager and cushion treemap.
 
 ## Related topics
 

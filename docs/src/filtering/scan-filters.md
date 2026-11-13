@@ -19,7 +19,7 @@ doesn't need a rescan.
 | **Skip files smaller than** | In KB. 0 turns it off. |
 | **Skip files not changed for** | In days. Files last modified longer ago than this are skipped. 0 turns it off. |
 
-Folders can also be added straight from the folder list: right-click a folder and choose **Add to
+Folders can also be added straight from the file manager: right-click a folder and choose **Add to
 Exclusion Filter**. On a file, that adds its name to **File names to skip**; in the File types list
 it adds `*.ext`. A message in the status bar confirms it, and the change applies to the next scan.
 

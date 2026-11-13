@@ -11,7 +11,7 @@
 3. **Pan with a drag** to look around at the same zoom.
 4. **Open a folder** by double-clicking one of its tiles when you want to work inside it. The
    breadcrumbs above the map now show the path, and the map lays out just that folder.
-5. **Select as you go.** Click a tile, and the folder list opens to show exactly where it is. The
+5. **Select as you go.** Click a tile, and the file manager opens to show exactly where it is. The
    selection outline stays visible at any zoom.
 6. **Step back** with **Alt+←** or the mouse's back button. Each place you stopped at is
    remembered, including how far you were zoomed in. **Alt+→** goes forward again.

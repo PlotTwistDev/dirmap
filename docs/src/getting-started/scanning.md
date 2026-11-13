@@ -25,7 +25,7 @@ drives aren't listed, but you can still type their path.
   any, how many items couldn't be read.
 - The folder being read right now is shown in grey.
 - With **Show folders and files as they are found** turned on (the default, in
-  **⚙ Settings > General**), the folder list fills in live: click a folder to open it while the
+  **⚙ Settings > General**), a tree of what's been found so far fills in live: click a folder to open it while the
   scan carries on. A spinner marks folders still being read. Each open folder lists its 200
   largest files so far; the rest are summarised as "… and N smaller files".
 - **Cancel** stops the scan and keeps whatever you had open before.
@@ -36,7 +36,7 @@ result appears.
 ## Scanning again
 
 Press **⟳ Scan** to scan the same folder again. To refresh just one folder after you've changed
-things on disk, select it in the folder list and press **F5** (**Refresh Selected**): only that
+things on disk, select it in the file manager and press **F5** (**Refresh Selected**): only that
 folder is read again. Refreshing the top item of the scan rescans everything.
 
 If you change a setting that affects what a scan finds (for example the scan exclusions), the

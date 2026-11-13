@@ -1,7 +1,9 @@
 # The directory tree
 
-The folder list at the top of the window shows what you scanned as a tree, like Explorer's
-folder pane, with sizes.
+The file manager's **🌲 Tree** layout shows what you scanned as a tree, like Explorer's folder
+pane, with sizes. Choose it with the button at the top right of the
+[file manager](file-browser.md). Unlike the other layouts it shows the whole scan at once, and the
+keys go to the map while it's showing.
 
 ## Columns
 

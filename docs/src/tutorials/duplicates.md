@@ -13,10 +13,10 @@
    with another file are read.
 5. The heading shows how many sets were found and how much space removing the extra copies would
    free. Sets are sorted by space wasted.
-6. Click a path to select that copy in the folder list and on the map. Tick **Show only duplicates
+6. Click a path to select that copy in the file manager and on the map. Tick **Show only duplicates
    on the map** to see where the copies are.
 7. To remove a copy, select it and press **Delete** (it asks first, and goes to the Recycle Bin
-   or Trash), or right-click it in the folder list.
+   or Trash), or right-click it in the file manager.
 
 ## Before you delete
 

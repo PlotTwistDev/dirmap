@@ -19,21 +19,21 @@ The window has six parts, from top to bottom:
 | **❓ Help** | This help: Help Centre, shortcuts, examples, troubleshooting and About. |
 | **⚙ Settings** | Appearance, scan filters, columns, treemap look and advanced options. |
 
-## Folder list (directory tree)
+## File manager
 
-The scanned folder and everything in it, largest first, with **Size**, **% of parent**,
-**Files** and **Last change** columns. Click a column heading to sort by it. Right-click any
-item for commands such as Open, Copy Path and Delete. The border under the list can be dragged
-to give the list or the map more room. See [The directory tree](../views/directory-tree.md).
+A Finder- or Explorer-style file manager for the scan, with tabs, Back and Forward, a clickable
+path and **List**, **Icons**, **Columns** and **Tree** layouts. Every item shows its size and
+share of the folder, largest first. Double-click a folder to open it (the map follows), and use
+the usual keys and the right-click menu to copy, move, rename and delete. The border under it can
+be dragged to give it or the map more room. See [The file manager](../views/file-browser.md).
 
 ## Filter bar
 
-Under the folder list:
+Under the file manager:
 
 - **Breadcrumbs** (🏠 *scan* › *folder* › …) show which folder the map is showing; click one to
   jump there.
-- **View:** switches between **Treemap**, **Sunburst** and **Files**, a Finder- or
-  Explorer-style browser. See [The Files view](../views/file-browser.md).
+- **View:** switches the map between **Treemap** and **Sunburst**.
 - **Color by:** colours the map by **Type**, **Age** or **Change**. See [Colour modes](../views/color-modes.md).
 - **Show:** limits the map to kinds of files (Audio, Video, Images…) or to a **🔍 Custom**
   name pattern.
@@ -46,8 +46,7 @@ Under the folder list:
 
 The treemap (or sunburst) fills the middle of the window. Hover to see what something is,
 click to select, double-click to open a folder, wheel to zoom, drag to pan and right-click to
-go back up. See [Navigating the treemap](../views/treemap-navigation.md). With **View: Files**
-a file browser takes its place instead.
+go back up. See [Navigating the treemap](../views/treemap-navigation.md).
 
 ## Side panel
 

@@ -31,19 +31,27 @@ A trackpad works too: two-finger scrolling acts as the wheel, and pinching zooms
 | **Wheel back** | Go up one level. |
 | **Click the middle, or right-click** | Go up one level. |
 
-### Files view
+### File manager
 
 | Input | Action |
 |---|---|
 | **Hover** | Show the item's path, size and date in the status bar. |
-| **Click** | Select the item (also in the folder list and on the maps). |
-| **Double-click** | Open a folder in the Files view, or a file with its usual app. |
-| **Right-click** | Select the item and open the right-click menu. |
+| **Click** | Select the item (also on the maps). |
+| **Ctrl+click (⌘-click on a Mac)** | Add the item to the selection, or take it out. |
+| **Shift+click** | Select everything from the last item clicked to this one. |
+| **Double-click** | Open a folder (the map follows), or a file with its usual app. |
+| **Middle-click a folder** | Open it in a new tab. |
+| **Right-click** | Select the item and open the right-click menu. On empty space: New Folder, Paste, Open in New Tab. |
+| **Drag onto a folder, a folder in the path, a tab or empty space** | Move the selected items there. Hold Alt (⌥ on a Mac) when you let go to copy them instead. |
 | **Click a column heading (List)** | Sort by that column; click again to reverse. |
 | **Click a folder in the path** | Go to that folder. |
+| **Click a tab, or middle-click it** | Switch to that tab, or close it. |
 | **Back / forward mouse buttons** | Back and Forward through folders you've opened. |
+| **Drag the border below the file manager** | Give the file manager or the map more room. |
 
-### Folder list
+### Tree layout
+
+The file manager's Tree layout.
 
 | Input | Action |
 |---|---|
@@ -51,7 +59,6 @@ A trackpad works too: two-finger scrolling acts as the wheel, and pinching zooms
 | **Click the arrow, or double-click a folder** | Open or close the folder. |
 | **Right-click** | Select the item and open the right-click menu. |
 | **Click a column heading** | Sort by that column; click again to reverse. |
-| **Drag the border below the list** | Give the list or the map more room. |
 
 ### Side panel and other lists
 
@@ -80,4 +87,4 @@ Larger than, Smaller than, and the Duplicates minimum.
 - [Keyboard shortcuts](keyboard.md)
 - [Moving around the treemap](../views/treemap-navigation.md)
 - [The sunburst](../views/sunburst.md)
-- [The folder list](../views/directory-tree.md)
+- [The file manager](../views/directory-tree.md)

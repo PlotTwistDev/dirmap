@@ -87,8 +87,6 @@ enum ColorMode {
 enum MapKind {
     Treemap,
     Sunburst,
-    /// The Files view: a Finder / Explorer-style browser.
-    Browser,
 }
 
 /// Tabs of the right-hand panel.
@@ -222,7 +220,7 @@ pub struct App {
 
     color_mode: ColorMode,
     map_kind: MapKind,
-    /// The Files view's layout, sort and history.
+    /// The file manager at the top: tabs, layouts, history, selection and clipboard.
     browser: browser::Browser,
     side_tab: SideTab,
     /// Bumped whenever something that changes tile colors (other than the cache's own keys) changes.
@@ -688,24 +686,13 @@ impl App {
             ui.add_enabled_ui(self.tree.is_some() && self.job.is_none(), |ui| {
                 let feel = self.feel();
                 let treemap = self.map_kind == MapKind::Treemap;
-                let files = self.map_kind == MapKind::Browser;
-                let can_back = (treemap && self.map.can_go_back()) || (files && self.browser_can_back());
-                let back = ui.add_enabled(can_back, egui::Button::new("◀")).on_hover_text("Back (Alt+Left, or the mouse's back button)");
+                let back = ui.add_enabled(treemap && self.map.can_go_back(), egui::Button::new("◀")).on_hover_text("Back (Alt+Left, or the mouse's back button)");
                 if back.clicked() {
-                    if files {
-                        self.browser_back();
-                    } else {
-                        self.map.back(&feel);
-                    }
+                    self.map.back(&feel);
                 }
-                let can_fwd = (treemap && self.map.can_go_forward()) || (files && self.browser_can_forward());
-                let fwd = ui.add_enabled(can_fwd, egui::Button::new("▶")).on_hover_text("Forward (Alt+Right)");
+                let fwd = ui.add_enabled(treemap && self.map.can_go_forward(), egui::Button::new("▶")).on_hover_text("Forward (Alt+Right)");
                 if fwd.clicked() {
-                    if files {
-                        self.browser_forward();
-                    } else {
-                        self.map.forward(&feel);
-                    }
+                    self.map.forward(&feel);
                 }
                 let zoom_sel = ui.add_enabled(self.selected.is_some(), egui::Button::new("Zoom to selection"));
                 if zoom_sel.on_hover_text("Bring the selected file or folder into view").clicked() {
@@ -1025,6 +1012,8 @@ impl App {
                     is_drive: row.path.is_empty() && self.scanned_path.parent().is_none(),
                     busy: self.ops.job.is_some(),
                     in_browser: false,
+                    count: 1,
+                    can_paste: false,
                 };
                 resp.context_menu(|ui| {
                     if let Some(a) = Self::tree_menu(ui, &info) {
@@ -1759,8 +1748,10 @@ impl App {
         painter.text(center - vec2(0.0, 8.0), Align2::CENTER_CENTER, name, font, Color32::WHITE);
         painter.text(center + vec2(0.0, 9.0), Align2::CENTER_CENTER, scan::human(zroot.size), FontId::proportional(12.0), Color32::LIGHT_GRAY);
 
-        // Outline the selection (or its nearest shown ancestor).
-        if let Some(sel) = self.selected.as_ref().filter(|s| s.starts_with(&self.zoom)) {
+        // Outline the selection (or its nearest shown ancestor), and the other items selected
+        // with it in the file manager.
+        let picked = self.picked_paths();
+        for sel in self.selected.iter().chain(picked.iter().take(500)).filter(|s| s.starts_with(&self.zoom)) {
             let rel = &sel[zl..];
             if let Some(s) = segs.iter().filter(|s| rel.starts_with(&s.path)).max_by_key(|s| s.path.len()) {
                 let pts = arc_outline(center, r_in(s.ring), r_in(s.ring) + ring_w, s.a0, s.a1);
@@ -1930,7 +1921,12 @@ impl App {
         let typing = ctx.egui_wants_keyboard_input();
         // The help window has its own Back and Forward.
         let help_hovered = self.help.hovered;
+        // The keys go to the map unless the file manager was clicked last; the side buttons go to
+        // whichever is under the pointer.
+        let keys = !typing && !self.browser_has_keys();
+        let fm = self.browser.rect;
         let (wheel, pinch, back, forward, home, plus, minus) = ui.input(|i| {
+            let side = !help_hovered && !i.pointer.hover_pos().is_some_and(|p| fm.is_some_and(|r| r.contains(p)));
             let mut wheel = 0.0f64;
             for e in &i.raw.events {
                 if let egui::Event::MouseWheel { delta, unit, modifiers, .. } = e {
@@ -1949,11 +1945,11 @@ impl App {
             (
                 wheel,
                 i.zoom_delta() as f64,
-                (!help_hovered && i.pointer.button_pressed(egui::PointerButton::Extra1)) || (!typing && alt && i.key_pressed(egui::Key::ArrowLeft)),
-                (!help_hovered && i.pointer.button_pressed(egui::PointerButton::Extra2)) || (!typing && alt && i.key_pressed(egui::Key::ArrowRight)),
-                !typing && i.key_pressed(egui::Key::Home),
-                !typing && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals)),
-                !typing && i.key_pressed(egui::Key::Minus),
+                (side && i.pointer.button_pressed(egui::PointerButton::Extra1)) || (keys && alt && i.key_pressed(egui::Key::ArrowLeft)),
+                (side && i.pointer.button_pressed(egui::PointerButton::Extra2)) || (keys && alt && i.key_pressed(egui::Key::ArrowRight)),
+                keys && i.key_pressed(egui::Key::Home),
+                keys && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals)),
+                keys && i.key_pressed(egui::Key::Minus),
             )
         });
         if let Some(p) = pointer.filter(|_| first_pass) {
@@ -2057,9 +2053,12 @@ impl App {
             }
         }
 
-        // Outline the selection (or the nearest ancestor big enough to see), at any zoom.
+        // Outline the selection (or the nearest ancestor big enough to see), at any zoom, and
+        // the other items selected with it in the file manager.
         if !self.map.in_transition() {
-            if let Some(sel) = self.selected.as_ref().filter(|s| s.starts_with(&root)) {
+            let picked = self.picked_paths();
+            let all = self.selected.iter().chain(picked.iter().take(500));
+            for sel in all.filter(|s| s.starts_with(&root)) {
                 let rel = &sel[root.len()..];
                 let rects = treemap::ancestors(zroot, self.map.camera.world(), rel);
                 if let Some(r) = rects.iter().rev().map(|r| self.map.to_screen(bounds, r)).find(|r| r.width() >= 3.0 && r.height() >= 3.0) {
@@ -2108,38 +2107,28 @@ impl App {
         let total = self.tree.as_ref().map_or(0, |t| t.size);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            // (The Files view has its own path bar.)
-            if self.map_kind != MapKind::Browser {
-                let mut go = None;
-                if ui.small_button(format!("🏠 {}", tree.name)).clicked() {
-                    go = Some(0);
-                }
-                let mut n: &Node = &tree;
-                for (k, &i) in self.zoom.iter().enumerate() {
-                    n = &n.children[i as usize];
-                    ui.weak("›");
-                    if ui.small_button(&*n.name).clicked() {
-                        go = Some(k + 1);
-                    }
-                }
-                if let Some(k) = go {
-                    self.zoom.truncate(k);
-                }
-                ui.add_space(12.0);
+            let mut go = None;
+            if ui.small_button(format!("🏠 {}", tree.name)).clicked() {
+                go = Some(0);
             }
-            if self.map_kind == MapKind::Browser {
-                ui.weak("Double-click to open, Backspace to go up.");
-                if help::link_button(ui, "Using the Files view") {
-                    self.help.show_topic(topics::BROWSER);
+            let mut n: &Node = &tree;
+            for (k, &i) in self.zoom.iter().enumerate() {
+                n = &n.children[i as usize];
+                ui.weak("›");
+                if ui.small_button(&*n.name).clicked() {
+                    go = Some(k + 1);
                 }
-            } else {
-                ui.weak("Wheel to zoom, drag to pan, right-click to zoom out.");
-                if help::link_button(ui, "Moving around the map") {
-                    self.help.show_topic(match self.map_kind {
-                        MapKind::Sunburst => topics::SUNBURST,
-                        _ => topics::TREEMAP_NAV,
-                    });
-                }
+            }
+            if let Some(k) = go {
+                self.zoom.truncate(k);
+            }
+            ui.add_space(12.0);
+            ui.weak("Wheel to zoom, drag to pan, right-click to zoom out.");
+            if help::link_button(ui, "Moving around the map") {
+                self.help.show_topic(match self.map_kind {
+                    MapKind::Treemap => topics::TREEMAP_NAV,
+                    MapKind::Sunburst => topics::SUNBURST,
+                });
             }
             ui.separator();
             ui.label("View:");
@@ -2147,8 +2136,6 @@ impl App {
                 .on_hover_text("Rectangles sized by space used; zoom and pan freely");
             ui.selectable_value(&mut self.map_kind, MapKind::Sunburst, "Sunburst")
                 .on_hover_text("Rings: the centre is the folder, each ring one level deeper");
-            ui.selectable_value(&mut self.map_kind, MapKind::Browser, "Files")
-                .on_hover_text("Browse like Finder or Explorer: list, icons or columns, with sizes");
             ui.separator();
             ui.label("Color by:");
             let before = self.color_mode;
@@ -2212,13 +2199,11 @@ impl App {
             if self.filter.active() {
                 self.filter_summary(ui, total);
             }
-            if self.map_kind != MapKind::Browser {
-                ui.separator();
-                let mut labels = self.settings.show_labels;
-                if ui.checkbox(&mut labels, "File names on tiles").changed() {
-                    self.settings.show_labels = labels;
-                    self.dialog.draft.show_labels = labels;
-                }
+            ui.separator();
+            let mut labels = self.settings.show_labels;
+            if ui.checkbox(&mut labels, "File names on tiles").changed() {
+                self.settings.show_labels = labels;
+                self.dialog.draft.show_labels = labels;
             }
         });
     }
@@ -2449,11 +2434,7 @@ impl eframe::App for App {
                     ui.spinner();
                     ui.label(format!("Scanning {}…", job.root.display()));
                 } else if let Some(t) = &self.tree {
-                    let how = if self.map_kind == MapKind::Browser {
-                        "Click to select, double-click to open, right-click for more."
-                    } else {
-                        "Click a tile to select, double-click to open a folder, right-click to zoom out."
-                    };
+                    let how = "Click a tile to select, double-click to open a folder, right-click to zoom out.";
                     ui.label(format!(
                         "{}: {} in {} files, scanned in {:.1}s. {how}",
                         self.scanned_path.display(),
@@ -2523,8 +2504,8 @@ impl eframe::App for App {
 
         let r = egui::Panel::right("exts").default_size(330.0).resizable(true).show(ui, |ui| self.side_panel(ui));
         self.help_regions.push((r.response.rect, self.side_topic()));
-        let r = egui::Panel::top("tree").default_size(320.0).resizable(true).show(ui, |ui| self.tree_panel(ui));
-        self.help_regions.push((r.response.rect, topics::TREE));
+        let r = egui::Panel::top("tree").default_size(340.0).resizable(true).show(ui, |ui| self.file_manager(ui));
+        self.help_regions.push((r.response.rect, if self.browser.layout() == browser::Layout::Tree { topics::TREE } else { topics::BROWSER }));
         // Its own panel, so it gets the theme's background (readable in light and dark themes).
         let r = egui::Panel::top("filters").show(ui, |ui| {
             ui.add_space(2.0);
@@ -2536,21 +2517,20 @@ impl eframe::App for App {
         let map_topic = match self.map_kind {
             MapKind::Treemap => topics::TREEMAP_NAV,
             MapKind::Sunburst => topics::SUNBURST,
-            MapKind::Browser => topics::BROWSER,
         };
         let r = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let rect = ui.max_rect();
             match self.map_kind {
                 MapKind::Treemap => self.treemap_panel(ui),
                 MapKind::Sunburst => self.sunburst_panel(ui),
-                MapKind::Browser => self.browser_panel(ui),
             }
-            if self.map_kind != MapKind::Browser && self.shown.as_ref().is_some_and(|s| s.tree.files == 0) {
+            if self.shown.as_ref().is_some_and(|s| s.tree.files == 0) {
                 let msg = "No files match the filter";
                 ui.painter().text(rect.center(), Align2::CENTER_CENTER, msg, FontId::proportional(16.0), Color32::GRAY);
             }
         });
         self.help_regions.push((r.response.rect, map_topic));
+        self.browser.map_rect = Some(r.response.rect);
     }
 }
 

@@ -7,17 +7,22 @@ When a scan finishes, the status bar sums it up, for example:
 That is the total size of every file found, how many files there are, how long the scan took
 and, if any, how many folders or files couldn't be read (and so are missing from the totals).
 
-## Reading the folder list
+## Reading the file manager
+
+In the file manager's **List** layout:
 
 | Column | Meaning |
 |---|---|
-| **Name** | The file or folder. Folders have an arrow to open them. |
+| **Name** | The file or folder. Double-click a folder to open it. |
 | **Size** | The total size of the file, or of everything inside the folder at any depth. |
-| **% of parent** | This item's size as a share of the folder that contains it, with a bar. The top item is always 100%. |
-| **Files** | For folders: how many files are inside, at any depth. |
+| **% of folder** | This item's size as a share of the folder you're looking at, with a bar. |
+| **Kind** | Folder, or the type of file. |
+| **Items** | For folders: how many files are inside, at any depth. |
 | **Last change** | For files: when the file was last modified. For folders: the newest modification of anything inside. |
 
 Everything is sorted largest first, so the first few rows of each folder are where the space is.
+The **Tree** layout shows the same figures for the whole scan at once; see
+[The directory tree](../views/directory-tree.md).
 
 ## Reading the treemap
 

@@ -1,18 +1,25 @@
 # Right-click menus and file operations
 
-## The folder list's right-click menu
+## The file manager's right-click menu
 
-Right-click any file or folder in the folder list to select it and open this menu. Most commands
-also have a keyboard shortcut, which works on the selected item wherever it was selected (in the
-folder list, on the map, or in another tab), as long as you're not typing in a text box.
+Right-click any file or folder in the file manager to select it and open this menu. With several
+items selected, the commands act on all of them. Most commands also have a keyboard shortcut,
+which works on the selection wherever it was made (in the file manager, on the map, or in another
+tab), as long as you're not typing in a text box.
 
 ![The right-click menu](../images/context-menu.png)
 
 | Command | Shortcut | What it does |
 |---|---|---|
-| **Expand** / **Collapse** | | Opens or closes the folder in the list (folders only). |
+| **Expand** / **Collapse** | | Tree layout, folders only: opens or closes the folder in the tree. |
+| **Open Folder** | **Enter** | Folders, in the List, Icons and Columns layouts: opens the folder in dirmap's file manager. |
 | **Open…** | **Enter** | Opens the file with its usual app, or the folder in Explorer, Finder or your file manager. |
-| **Copy Path** | **Ctrl+C** (or **Ctrl+Insert**) | Copies the full path to the clipboard. |
+| **Copy** / **Cut** | **Ctrl+C** / **Ctrl+X** | Remembers the items, to copy or move them with **Paste**. Their paths also go on the clipboard as text. |
+| **Paste Into Folder** | | Folders: copies or moves what you copied or cut into this folder. **Ctrl+V** pastes into the folder on screen. |
+| **Open in New Tab** | **Ctrl+T** | Folders: opens it in a new file manager tab. |
+| **Rename…** | **F2** | Renames the item. |
+| **New Folder** | **Ctrl+Shift+N** | Makes a folder in the folder on screen and asks for its name. |
+| **Copy Path** | **Ctrl+Shift+C** | Copies the full path to the clipboard. |
 | **Select in Explorer…** (**Show in Finder…** / **Show in File Manager…**) | **Ctrl+E** | Opens the containing folder with the item selected. |
 | **Open in Command Prompt…** | **Ctrl+P** | Windows: opens a Command Prompt in the folder (for a file, in its folder). |
 | **Open in PowerShell…** | **Ctrl+S** | Windows: opens PowerShell in the folder. |
@@ -57,7 +64,7 @@ On a Mac, use **⌘** instead of **Ctrl**.
 
 ### After a change
 
-Only the items affected are read again, so the folder list, the map and the totals update without
+Only the items affected are read again, so the file manager, the map and the totals update without
 a full rescan. Your selection, open folders and place on the map are kept. Results that depended
 on the old state, such as the duplicate list and found sequences, are cleared; run them again if
 you need them. The status bar reports the result (for example **Removed 3 empty folders.**) or the
@@ -74,10 +81,10 @@ problem if something failed; click **✖** to dismiss it.
 
 ## The map
 
-The [Files view](../views/file-browser.md) has the same right-click menu as the folder list. The
-treemap and sunburst have none: a right-click there zooms out. Select an item on
-the map and use the keyboard shortcuts above, or find it in the folder list (it's selected there
-too) and right-click it.
+The treemap and sunburst have no right-click menu: a right-click there zooms out. Select an item
+on the map and use the keyboard shortcuts above, or right-click it in the file manager, which
+shows it as soon as you click it on the map. See [The file manager](../views/file-browser.md) for
+copying, moving and renaming there.
 
 ## Related topics
 
