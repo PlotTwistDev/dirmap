@@ -33,7 +33,7 @@ disk itself.
 ## Finding them
 
 1. Scan the drive.
-2. Click **Show: 💿 Disk images**. Everything else is dimmed.
+2. Click **Show: 💿 Disk images**. Everything else is hidden.
 3. Hover over the bright rectangles to see their paths, or use the **File types** tab:
    right-click `.vhdx` and choose **🔍 Find all .vhdx files** for a list, largest first.
 

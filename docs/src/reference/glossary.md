@@ -21,7 +21,7 @@ See [Custom filter syntax](../filtering/syntax.md).
 
 **Hard link**: A second name for the same file. dirmap counts the file under each name.
 
-**Highlight mode**: Shows filter matches in colour and dims everything else, keeping the map's layout.
+**Highlight mode**: Shows filter matches in colour and hides everything else, keeping the map's layout.
 
 **Junction / symbolic link**: A signpost to another folder or file. dirmap never follows them.
 
