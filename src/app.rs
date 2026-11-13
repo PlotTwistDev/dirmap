@@ -29,6 +29,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 mod custom;
+mod browser;
 
 #[derive(PartialEq, Clone, Copy)]
 enum SortBy {
@@ -86,6 +87,8 @@ enum ColorMode {
 enum MapKind {
     Treemap,
     Sunburst,
+    /// The Files view: a Finder / Explorer-style browser.
+    Browser,
 }
 
 /// Tabs of the right-hand panel.
@@ -219,6 +222,8 @@ pub struct App {
 
     color_mode: ColorMode,
     map_kind: MapKind,
+    /// The Files view's layout, sort and history.
+    browser: browser::Browser,
     side_tab: SideTab,
     /// Bumped whenever something that changes tile colors (other than the cache's own keys) changes.
     paint_gen: u32,
@@ -309,6 +314,7 @@ impl App {
             wheel: 0.0,
             color_mode: ColorMode::Type,
             map_kind: MapKind::Treemap,
+            browser: Default::default(),
             side_tab: SideTab::Types,
             paint_gen: 0,
             hist: None,
@@ -682,13 +688,24 @@ impl App {
             ui.add_enabled_ui(self.tree.is_some() && self.job.is_none(), |ui| {
                 let feel = self.feel();
                 let treemap = self.map_kind == MapKind::Treemap;
-                let back = ui.add_enabled(treemap && self.map.can_go_back(), egui::Button::new("◀")).on_hover_text("Back (Alt+Left, or the mouse's back button)");
+                let files = self.map_kind == MapKind::Browser;
+                let can_back = (treemap && self.map.can_go_back()) || (files && self.browser_can_back());
+                let back = ui.add_enabled(can_back, egui::Button::new("◀")).on_hover_text("Back (Alt+Left, or the mouse's back button)");
                 if back.clicked() {
-                    self.map.back(&feel);
+                    if files {
+                        self.browser_back();
+                    } else {
+                        self.map.back(&feel);
+                    }
                 }
-                let fwd = ui.add_enabled(treemap && self.map.can_go_forward(), egui::Button::new("▶")).on_hover_text("Forward (Alt+Right)");
+                let can_fwd = (treemap && self.map.can_go_forward()) || (files && self.browser_can_forward());
+                let fwd = ui.add_enabled(can_fwd, egui::Button::new("▶")).on_hover_text("Forward (Alt+Right)");
                 if fwd.clicked() {
-                    self.map.forward(&feel);
+                    if files {
+                        self.browser_forward();
+                    } else {
+                        self.map.forward(&feel);
+                    }
                 }
                 let zoom_sel = ui.add_enabled(self.selected.is_some(), egui::Button::new("Zoom to selection"));
                 if zoom_sel.on_hover_text("Bring the selected file or folder into view").clicked() {
@@ -1007,6 +1024,7 @@ impl App {
                     is_root: row.path.is_empty(),
                     is_drive: row.path.is_empty() && self.scanned_path.parent().is_none(),
                     busy: self.ops.job.is_some(),
+                    in_browser: false,
                 };
                 resp.context_menu(|ui| {
                     if let Some(a) = Self::tree_menu(ui, &info) {
@@ -2090,28 +2108,38 @@ impl App {
         let total = self.tree.as_ref().map_or(0, |t| t.size);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            let mut go = None;
-            if ui.small_button(format!("🏠 {}", tree.name)).clicked() {
-                go = Some(0);
-            }
-            let mut n: &Node = &tree;
-            for (k, &i) in self.zoom.iter().enumerate() {
-                n = &n.children[i as usize];
-                ui.weak("›");
-                if ui.small_button(&*n.name).clicked() {
-                    go = Some(k + 1);
+            // (The Files view has its own path bar.)
+            if self.map_kind != MapKind::Browser {
+                let mut go = None;
+                if ui.small_button(format!("🏠 {}", tree.name)).clicked() {
+                    go = Some(0);
                 }
+                let mut n: &Node = &tree;
+                for (k, &i) in self.zoom.iter().enumerate() {
+                    n = &n.children[i as usize];
+                    ui.weak("›");
+                    if ui.small_button(&*n.name).clicked() {
+                        go = Some(k + 1);
+                    }
+                }
+                if let Some(k) = go {
+                    self.zoom.truncate(k);
+                }
+                ui.add_space(12.0);
             }
-            if let Some(k) = go {
-                self.zoom.truncate(k);
-            }
-            ui.add_space(12.0);
-            ui.weak("Wheel to zoom, drag to pan, right-click to zoom out.");
-            if help::link_button(ui, "Moving around the map") {
-                self.help.show_topic(match self.map_kind {
-                    MapKind::Treemap => topics::TREEMAP_NAV,
-                    MapKind::Sunburst => topics::SUNBURST,
-                });
+            if self.map_kind == MapKind::Browser {
+                ui.weak("Double-click to open, Backspace to go up.");
+                if help::link_button(ui, "Using the Files view") {
+                    self.help.show_topic(topics::BROWSER);
+                }
+            } else {
+                ui.weak("Wheel to zoom, drag to pan, right-click to zoom out.");
+                if help::link_button(ui, "Moving around the map") {
+                    self.help.show_topic(match self.map_kind {
+                        MapKind::Sunburst => topics::SUNBURST,
+                        _ => topics::TREEMAP_NAV,
+                    });
+                }
             }
             ui.separator();
             ui.label("View:");
@@ -2119,6 +2147,8 @@ impl App {
                 .on_hover_text("Rectangles sized by space used; zoom and pan freely");
             ui.selectable_value(&mut self.map_kind, MapKind::Sunburst, "Sunburst")
                 .on_hover_text("Rings: the centre is the folder, each ring one level deeper");
+            ui.selectable_value(&mut self.map_kind, MapKind::Browser, "Files")
+                .on_hover_text("Browse like Finder or Explorer: list, icons or columns, with sizes");
             ui.separator();
             ui.label("Color by:");
             let before = self.color_mode;
@@ -2182,11 +2212,13 @@ impl App {
             if self.filter.active() {
                 self.filter_summary(ui, total);
             }
-            ui.separator();
-            let mut labels = self.settings.show_labels;
-            if ui.checkbox(&mut labels, "File names on tiles").changed() {
-                self.settings.show_labels = labels;
-                self.dialog.draft.show_labels = labels;
+            if self.map_kind != MapKind::Browser {
+                ui.separator();
+                let mut labels = self.settings.show_labels;
+                if ui.checkbox(&mut labels, "File names on tiles").changed() {
+                    self.settings.show_labels = labels;
+                    self.dialog.draft.show_labels = labels;
+                }
             }
         });
     }
@@ -2417,8 +2449,13 @@ impl eframe::App for App {
                     ui.spinner();
                     ui.label(format!("Scanning {}…", job.root.display()));
                 } else if let Some(t) = &self.tree {
+                    let how = if self.map_kind == MapKind::Browser {
+                        "Click to select, double-click to open, right-click for more."
+                    } else {
+                        "Click a tile to select, double-click to open a folder, right-click to zoom out."
+                    };
                     ui.label(format!(
-                        "{}: {} in {} files, scanned in {:.1}s. Click a tile to select, double-click to open a folder, right-click to zoom out.",
+                        "{}: {} in {} files, scanned in {:.1}s. {how}",
                         self.scanned_path.display(),
                         scan::human(t.size),
                         group(t.files),
@@ -2499,14 +2536,16 @@ impl eframe::App for App {
         let map_topic = match self.map_kind {
             MapKind::Treemap => topics::TREEMAP_NAV,
             MapKind::Sunburst => topics::SUNBURST,
+            MapKind::Browser => topics::BROWSER,
         };
         let r = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let rect = ui.max_rect();
             match self.map_kind {
                 MapKind::Treemap => self.treemap_panel(ui),
                 MapKind::Sunburst => self.sunburst_panel(ui),
+                MapKind::Browser => self.browser_panel(ui),
             }
-            if self.shown.as_ref().is_some_and(|s| s.tree.files == 0) {
+            if self.map_kind != MapKind::Browser && self.shown.as_ref().is_some_and(|s| s.tree.files == 0) {
                 let msg = "No files match the filter";
                 ui.painter().text(rect.center(), Align2::CENTER_CENTER, msg, FontId::proportional(16.0), Color32::GRAY);
             }

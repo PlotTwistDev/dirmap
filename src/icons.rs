@@ -24,33 +24,53 @@ impl Icons {
                 let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
                 ui.painter().image(t.id(), rect, uv, Color32::WHITE);
             }
-            None => paint_glyph(ui.painter(), rect, is_dir, tint),
+            None => paint_glyph(ui.painter(), rect, is_dir, ext, tint),
         }
     }
 }
 
 /// Fallback icons: a manila folder, or a page with a folded corner in the extension's color.
-fn paint_glyph(p: &egui::Painter, r: Rect, is_dir: bool, tint: Color32) {
-    let r = r.shrink(1.0);
+/// Drawn in proportion, so they work from list size (16 px) up to the Files view's big icons,
+/// where the page also carries the extension.
+fn paint_glyph(p: &egui::Painter, r: Rect, is_dir: bool, ext: &str, tint: Color32) {
+    let s = r.height() / 16.0;
+    let r = r.shrink(s);
+    let round = 1.5 * s;
     if is_dir {
-        let tab = Rect::from_min_size(r.min + egui::vec2(0.0, 1.0), egui::vec2(r.width() * 0.45, 3.0));
-        let body = Rect::from_min_max(r.min + egui::vec2(0.0, 3.0), r.max - egui::vec2(0.0, 1.0));
         let c = Color32::from_rgb(232, 188, 80);
-        p.rect_filled(tab, 1.0, c.gamma_multiply(0.85));
-        p.rect_filled(body, 1.5, c);
+        let tab = Rect::from_min_size(r.min + egui::vec2(0.0, s), egui::vec2(r.width() * 0.45, 3.0 * s));
+        let body = Rect::from_min_max(r.min + egui::vec2(0.0, 3.0 * s), r.max - egui::vec2(0.0, s));
+        p.rect_filled(tab, round * 0.7, c.gamma_multiply(0.85));
+        p.rect_filled(body, round, c);
+        if s >= 2.0 {
+            // A lighter front flap gives the big folder some depth.
+            let flap = Rect::from_min_max(egui::pos2(body.min.x, body.min.y + body.height() * 0.22), body.max);
+            p.rect_filled(flap, round, Color32::from_rgb(245, 205, 105));
+        }
     } else {
         let w = r.height() * 0.78;
         let page = Rect::from_center_size(r.center(), egui::vec2(w, r.height()));
-        p.rect_filled(page, 1.5, Color32::from_gray(225));
-        let band = Rect::from_min_max(egui::pos2(page.min.x, page.max.y - 5.0), page.max);
-        p.rect_filled(band, 1.5, tint);
+        p.rect_filled(page, round, Color32::from_gray(225));
+        let band = Rect::from_min_max(egui::pos2(page.min.x, page.max.y - 5.0 * s), page.max);
+        p.rect_filled(band, round, tint);
         let fold = page.right_top();
+        let f = 4.0 * s;
         p.add(egui::Shape::convex_polygon(
-            vec![fold + egui::vec2(-4.0, 0.0), fold + egui::vec2(0.0, 4.0), fold + egui::vec2(-4.0, 4.0)],
+            vec![fold + egui::vec2(-f, 0.0), fold + egui::vec2(0.0, f), fold + egui::vec2(-f, f)],
             Color32::from_gray(160),
             egui::Stroke::NONE,
         ));
+        if s >= 2.0 && !ext.is_empty() {
+            let label: String = ext.to_uppercase().chars().take(5).collect();
+            let size = (band.height() * 0.62).min(band.width() / (label.chars().count() as f32 * 0.62));
+            let text = if luma(tint) > 150.0 { Color32::from_gray(30) } else { Color32::WHITE };
+            p.text(band.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(size), text);
+        }
     }
+}
+
+fn luma(c: Color32) -> f32 {
+    0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32
 }
 
 #[cfg(not(windows))]

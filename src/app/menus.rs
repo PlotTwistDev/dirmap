@@ -44,6 +44,8 @@ pub(super) struct ItemInfo {
     pub is_drive: bool,
     /// Another file operation is still running.
     pub busy: bool,
+    /// Right-clicked in the Files view: folders open there rather than expanding in the list.
+    pub in_browser: bool,
 }
 
 /// A file operation running in the background.
@@ -98,7 +100,7 @@ pub(super) struct Ops {
 
 impl Ops {
     /// A window of ours is up and owns the keyboard.
-    fn modal(&self) -> bool {
+    pub(super) fn modal(&self) -> bool {
         self.confirm.is_some()
     }
 }
@@ -127,12 +129,15 @@ impl App {
         ui.set_min_width(250.0);
         let can_change = !info.busy;
         if info.is_dir {
-            let label = egui::RichText::new(if info.open { "Collapse" } else { "Expand" }).strong();
-            set(item(ui, true, label, ""), TreeAction::Toggle);
+            let label = if info.in_browser { "Open Folder" } else if info.open { "Collapse" } else { "Expand" };
+            let label = egui::RichText::new(label).strong();
+            let keys = if info.in_browser { k(M::NONE, Key::Enter) } else { String::new() };
+            set(item(ui, true, label, &keys), TreeAction::Toggle);
             ui.separator();
         }
         let open = if info.is_dir { egui::RichText::new("Open…") } else { egui::RichText::new("Open…").strong() };
-        set(item(ui, true, open, &k(M::NONE, Key::Enter)), TreeAction::Open);
+        let open_keys = if info.in_browser && info.is_dir { String::new() } else { k(M::NONE, Key::Enter) };
+        set(item(ui, true, open, &open_keys), TreeAction::Open);
         set(item(ui, true, "Copy Path", &k(M::COMMAND, Key::C)), TreeAction::CopyPath);
         let reveal = if cfg!(windows) { format!("Select in {}…", actions::FILE_MANAGER) } else { format!("Show in {}…", actions::FILE_MANAGER) };
         set(item(ui, true, reveal, &k(M::COMMAND, Key::E)), TreeAction::Reveal);
@@ -190,6 +195,7 @@ impl App {
             is_root: path.is_empty(),
             is_drive: path.is_empty() && self.scanned_path.parent().is_none(),
             busy: self.ops.job.is_some(),
+            in_browser: false,
         })
     }
 
@@ -201,6 +207,11 @@ impl App {
         }
         let Some(sel) = self.selected.clone() else { return };
         let Some(info) = self.item_info(&sel) else { return };
+        // In the Files view, Enter opens a folder there, like Explorer.
+        if self.map_kind == MapKind::Browser && info.is_dir && ctx.input_mut(|i| i.consume_key(M::NONE, Key::Enter)) {
+            self.browse_into(sel);
+            return;
+        }
         let action = ctx.input_mut(|i| {
             // Ctrl+C reaches egui as a Copy event rather than a key press.
             let copy = i.events.iter().any(|e| matches!(e, egui::Event::Copy)) || i.consume_key(M::CTRL, Key::Insert);

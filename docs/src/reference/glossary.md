@@ -46,6 +46,9 @@ number. See [Numbered sequences](../filtering/sequences.md).
 
 **Sunburst**: A ring chart of the scan, each ring one folder level deeper.
 
+**Files view**: A Finder- or Explorer-style browser of the scan (List, Icons or Columns), chosen
+with **View: Files**.
+
 **Tile**: One rectangle on the treemap, standing for one file (or, when too small to draw, a group of
 very small files).
 

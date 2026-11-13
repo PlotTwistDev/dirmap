@@ -25,6 +25,7 @@
 - [The treemap](views/treemap.md)
 - [Navigating the treemap](views/treemap-navigation.md)
 - [The sunburst](views/sunburst.md)
+- [The Files view](views/file-browser.md)
 - [The directory tree](views/directory-tree.md)
 - [Colour modes](views/color-modes.md)
 - [Lighting and visual effects](views/visual-effects.md)

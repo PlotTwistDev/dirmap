@@ -74,7 +74,8 @@ problem if something failed; click **✖** to dismiss it.
 
 ## The map
 
-The treemap and sunburst have no right-click menu: a right-click there zooms out. Select an item on
+The [Files view](../views/file-browser.md) has the same right-click menu as the folder list. The
+treemap and sunburst have none: a right-click there zooms out. Select an item on
 the map and use the keyboard shortcuts above, or find it in the folder list (it's selected there
 too) and right-click it.
 

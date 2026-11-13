@@ -13,6 +13,8 @@ three linked views:
   small ones.
 - A **sunburst**: the same data as rings, the selected folder in the middle and each ring one
   folder level deeper.
+- A **Files view**: browse the scan like Finder or Explorer, as a list, icons or columns, with
+  every item's size and share of its folder.
 
 Clicking in one view selects the same item in the others.
 

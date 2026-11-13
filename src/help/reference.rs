@@ -26,6 +26,7 @@ const APP: &str = "src/app.rs";
 const MENUS: &str = "src/app/menus.rs";
 const CUSTOM: &str = "src/app/custom.rs";
 const HELP: &str = "src/help/mod.rs";
+const BROWSER: &str = "src/app/browser.rs";
 
 const fn b(keys: &'static str, mac: &'static str, action: &'static str, source: &'static [(&'static str, &'static str)]) -> Binding {
     Binding { keys, mac, action, source }
@@ -49,6 +50,22 @@ pub const KEYBOARD: &[Group] = &[
             b("Home", "", "Whole map: back to the complete scan.", &[(APP, "egui::Key::Home")]),
             b("Alt+←", "⌥←", "Back to the previous place.", &[(APP, "alt && i.key_pressed(egui::Key::ArrowLeft)")]),
             b("Alt+→", "⌥→", "Forward again.", &[(APP, "alt && i.key_pressed(egui::Key::ArrowRight)")]),
+        ],
+    },
+    Group {
+        title: "Files view",
+        note: "When the Files view is showing and the cursor isn't in a text box.",
+        bindings: &[
+            b("↑ / ↓", "", "Select the item above or below (in Icons, the row above or below).", &[(BROWSER, "return Some(Do::Move(cols));"), (BROWSER, "return Some(Do::Move(-cols));")]),
+            b("← / →", "", "Icons: the previous or next item. Columns: up to the enclosing folder, or into the selected folder.", &[(BROWSER, "return Some(Do::Move(-1));"), (BROWSER, "return Some(Do::Into);")]),
+            b("Home / End", "", "Select the first or last item.", &[(BROWSER, "i.consume_key(M::NONE, Key::Home)"), (BROWSER, "i.consume_key(M::NONE, Key::End)")]),
+            b("Page Up / Page Down", "", "Move 20 items (20 rows of icons).", &[(BROWSER, "i.consume_key(M::NONE, Key::PageDown)"), (BROWSER, "i.consume_key(M::NONE, Key::PageUp)")]),
+            b("Enter", "", "Open the selected folder in the Files view. A selected file opens with its usual app.", &[(MENUS, "self.map_kind == MapKind::Browser && info.is_dir && ctx.input_mut(|i| i.consume_key(M::NONE, Key::Enter))")]),
+            b("Ctrl+↓", "⌘↓", "Open the selected folder or file.", &[(BROWSER, "i.consume_key(M::COMMAND, Key::ArrowDown)")]),
+            b("Backspace or Ctrl+↑", "Backspace or ⌘↑", "Up to the enclosing folder, selecting the one you were in.", &[(BROWSER, "i.consume_key(M::COMMAND, Key::ArrowUp) || i.consume_key(M::NONE, Key::Backspace)")]),
+            b("Alt+←", "⌥←", "Back to the previous folder.", &[(BROWSER, "i.consume_key(M::ALT, Key::ArrowLeft)")]),
+            b("Alt+→", "⌥→", "Forward again.", &[(BROWSER, "i.consume_key(M::ALT, Key::ArrowRight)")]),
+            b("Type a name", "", "Jump to the first item whose name starts with what you type.", &[(BROWSER, "(!typed.is_empty()).then_some(Do::Find(typed))")]),
         ],
     },
     Group {
@@ -119,6 +136,19 @@ pub const MOUSE: &[Group] = &[
             b("Wheel forward", "", "Go into the top-level folder under the pointer.", &[(APP, "fn wheel_zoom(")]),
             b("Wheel back", "", "Go up one level.", &[(APP, "if *wheel <= -40.0 {")]),
             b("Click the middle, or right-click", "", "Go up one level.", &[(APP, "} else if in_hole {"), (APP, "if resp.secondary_clicked() && !self.zoom.is_empty() {")]),
+        ],
+    },
+    Group {
+        title: "Files view",
+        note: "",
+        bindings: &[
+            b("Hover", "", "Show the item's path, size and date in the status bar.", &[(BROWSER, "picks.hover = Some(path.to_vec());")]),
+            b("Click", "", "Select the item (also in the folder list and on the maps).", &[(BROWSER, "picks.select = Some(path.to_vec());")]),
+            b("Double-click", "", "Open a folder in the Files view, or a file with its usual app.", &[(BROWSER, "picks.open = Some(path.to_vec());")]),
+            b("Right-click", "", "Select the item and open the right-click menu.", &[(BROWSER, "resp.context_menu(|ui| {")]),
+            b("Click a column heading (List)", "", "Sort by that column; click again to reverse.", &[(BROWSER, "picks.sort = col.sort();")]),
+            b("Click a folder in the path", "", "Go to that folder.", &[(BROWSER, "picks.go = Some(self.zoom[..depth].to_vec());")]),
+            b("Back / forward mouse buttons", "", "Back and Forward through folders you've opened.", &[(BROWSER, "egui::PointerButton::Extra1"), (BROWSER, "egui::PointerButton::Extra2")]),
         ],
     },
     Group {

@@ -31,6 +31,18 @@ A trackpad works too: two-finger scrolling acts as the wheel, and pinching zooms
 | **Wheel back** | Go up one level. |
 | **Click the middle, or right-click** | Go up one level. |
 
+### Files view
+
+| Input | Action |
+|---|---|
+| **Hover** | Show the item's path, size and date in the status bar. |
+| **Click** | Select the item (also in the folder list and on the maps). |
+| **Double-click** | Open a folder in the Files view, or a file with its usual app. |
+| **Right-click** | Select the item and open the right-click menu. |
+| **Click a column heading (List)** | Sort by that column; click again to reverse. |
+| **Click a folder in the path** | Go to that folder. |
+| **Back / forward mouse buttons** | Back and Forward through folders you've opened. |
+
 ### Folder list
 
 | Input | Action |
