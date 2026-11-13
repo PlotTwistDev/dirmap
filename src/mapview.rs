@@ -15,6 +15,7 @@ use crate::scan::Node;
 use crate::tilegpu::{self, Backend, Draw, Instance, Uniforms};
 use crate::treemap::{self, Cushion, DRect, Detail, HitCache, Memo};
 use eframe::egui::{self, pos2, Color32, ColorImage, Pos2, Rect, TextureHandle, TextureOptions};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::Instant;
@@ -1154,8 +1155,68 @@ fn run(req: Req) -> Option<Built> {
     Some(Built { scene: req.scene, kind: req.kind, set, millis: t0.elapsed().as_secs_f64() * 1000.0 })
 }
 
-/// Smallest size, in points, of the marker over a patch of hidden matches (`Paint::hidden`).
+/// Size, in points, of the marker over filter matches too small to see (`Paint::hidden`).
 const MARK_PT: f64 = 5.0;
+/// Matches too small to see are marked at most once per square this many points across.
+const CELL_PT: f64 = 24.0;
+/// A match narrower than this many points is marked rather than drawn as a speck.
+const MIN_TILE_PT: f64 = 3.0;
+
+/// Where filter matches too small to see are, gathered per `cell`-sized square of the world
+/// (so markers stay put as the view pans), and which squares already show a match.
+struct Spots {
+    cell: f64,
+    /// Per square: sum of x, sum of y and how many.
+    at: HashMap<(i64, i64), (f64, f64, u32)>,
+    shown: std::collections::HashSet<(i64, i64)>,
+}
+
+impl Spots {
+    /// Cap on squares with matches, so a huge cover can't make this unbounded.
+    const MAX: usize = 20_000;
+
+    fn new(cell: f64) -> Self {
+        Spots { cell, at: HashMap::new(), shown: Default::default() }
+    }
+    fn key(&self, (x, y): (f64, f64)) -> (i64, i64) {
+        ((x / self.cell).floor() as i64, (y / self.cell).floor() as i64)
+    }
+    fn has(&self, p: (f64, f64)) -> bool {
+        self.at.contains_key(&self.key(p))
+    }
+    fn full(&self) -> bool {
+        self.at.len() >= Self::MAX
+    }
+    fn add(&mut self, p: (f64, f64)) {
+        let k = self.key(p);
+        if self.at.len() >= Self::MAX && !self.at.contains_key(&k) {
+            return;
+        }
+        let e = self.at.entry(k).or_insert((0.0, 0.0, 0));
+        e.0 += p.0;
+        e.1 += p.1;
+        e.2 += 1;
+    }
+    /// A match drawn big enough to see covers `r`.
+    fn cover(&mut self, r: &DRect) {
+        let (a, b) = (self.key((r.x0, r.y0)), self.key((r.x1, r.y1)));
+        if (b.0 - a.0 + 1) * (b.1 - a.1 + 1) > 4 * Self::MAX as i64 {
+            return; // far bigger than the view: its neighbours are what matter, not its inside
+        }
+        for x in a.0..=b.0 {
+            for y in a.1..=b.1 {
+                self.shown.insert((x, y));
+            }
+        }
+    }
+    /// Marker centres: the middle of each square's matches, leaving out squares where a match
+    /// is drawn.
+    fn markers(&self) -> Vec<(f64, f64)> {
+        let mut out: Vec<_> = self.at.iter().filter(|(k, _)| !self.shown.contains(*k)).map(|(_, &(sx, sy, n))| (sx / n as f64, sy / n as f64)).collect();
+        out.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        out
+    }
+}
 
 /// Build the tiles for a request. None if it was cancelled.
 fn build_set(req: &Req) -> Option<TileSet> {
@@ -1184,9 +1245,6 @@ fn build_set(req: &Req) -> Option<TileSet> {
     inst.push(Instance { rect: set.local_rect(&req.cover), grad: [0.0; 4], color: bg.to_array(), flags: tilegpu::FLAT });
     let mut raster = Vec::new();
     let mut labels = Vec::new();
-    // Drawn last, over their neighbours.
-    let mut markers = Vec::new();
-    let mut raster_markers = Vec::new();
     let mut abs = req.root.clone();
     let rl = abs.len();
     let pt_per_unit = ppu / req.ppp;
@@ -1194,6 +1252,9 @@ fn build_set(req: &Req) -> Option<TileSet> {
     let mut count = 0u32;
     let mut cancelled = false;
     let dark = Color32::from_gray(24);
+    let cell = CELL_PT * req.ppp / ppu;
+    let mut spots = Spots::new(cell);
+    let mut mark = None;
     treemap::build(root, req.world, &req.cover, Detail { unit }, req.paint.cushion, Some(&req.memo), &mut |l| {
         count += 1;
         if count % 4096 == 0 && req.cancel.load(Ordering::Relaxed) {
@@ -1204,37 +1265,26 @@ fn build_set(req: &Req) -> Option<TileSet> {
         abs.extend_from_slice(l.path);
         let rect = set.local_rect(&l.rect);
         if l.node.is_dir {
+            if let Some(hidden) = &req.paint.hidden {
+                // Filtering: matches too small to see are gathered into `spots` and shown as
+                // markers below; the patch itself is left as background (blended slivers of it
+                // peeking between other tiles only add noise).
+                if let Some(c) = hidden(l.node, &abs, l.hidden_from) {
+                    mark.get_or_insert(c);
+                    if l.rect.w().max(l.rect.h()) < cell {
+                        spots.add(l.rect.center());
+                    } else {
+                        // A big folder whose small files hold matches, or a long thin one too
+                        // narrow to divide: find where in it the matches are.
+                        hidden_spots(l.node, &l.rect, l.hidden_from, &mut abs, &req.cover, &req.memo, &*req.paint.colorize, &**hidden, &mut spots);
+                    }
+                }
+                return true;
+            }
             // Files too small to draw at this zoom: fill their area with the colour they
             // would add up to, shaded as part of the folder, rather than leaving dark holes.
             let mut budget = 48;
-            let marked = req.paint.hidden.as_ref().and_then(|h| h(l.node, &abs, l.hidden_from));
-            if let Some(c) = marked {
-                // A sliver of a pixel is easy to miss: also drop a small square marker on top,
-                // MARK_PT across, centred on the patch.
-                let min = MARK_PT * req.ppp / ppu;
-                let mut mark_at = |x: f64, y: f64| {
-                    let hw = min / 2.0;
-                    let r = DRect { x0: x - hw, y0: y - hw, x1: x + hw, y1: y + hw };
-                    markers.push(Instance { rect: set.local_rect(&r), grad: [0.0; 4], color: c.to_array(), flags: tilegpu::FLAT });
-                    if req.raster {
-                        raster_markers.push(RasterTile { rect: r, surface: l.surface, color: c, flat: true });
-                    }
-                };
-                if l.rect.w().max(l.rect.h()) < min {
-                    let (cx, cy) = l.rect.center();
-                    mark_at(cx, cy);
-                } else {
-                    // A big folder whose small files hold matches: the patch is covered by the
-                    // files drawn on top, leaving only slivers, so mark where the matches are.
-                    // The same for a long thin folder too narrow to divide: one marker in its
-                    // middle would be far from matches near its ends.
-                    let hidden = req.paint.hidden.as_ref().unwrap();
-                    for (x, y) in hidden_spots(l.node, &l.rect, l.hidden_from, &mut abs, &req.cover, min, &req.memo, &*req.paint.colorize, &**hidden) {
-                        mark_at(x, y);
-                    }
-                }
-            }
-            let Some(fill) = marked.or_else(|| blend_of(l.node, l.hidden_from, &mut abs, &*req.paint.colorize, 0, &mut budget)) else {
+            let Some(fill) = blend_of(l.node, l.hidden_from, &mut abs, &*req.paint.colorize, 0, &mut budget) else {
                 return true; // nothing in there passes the filter: background
             };
             let [s0, s1, s2, s3] = l.surface;
@@ -1253,25 +1303,22 @@ fn build_set(req: &Req) -> Option<TileSet> {
                 }
             }
             Some((fill, label)) => {
+                let (w, h) = (l.rect.w() * pt_per_unit, l.rect.h() * pt_per_unit);
+                if req.paint.hidden.is_some() {
+                    // Filtering: a match only a pixel or two across would be a speck of noise
+                    // and far harder to see than a marker, so it counts as a spot until it's
+                    // big enough to read as a tile. Big ones mark their area as shown.
+                    if w.min(h) < MIN_TILE_PT {
+                        spots.add(l.rect.center());
+                        return true;
+                    }
+                    spots.cover(&l.rect);
+                }
                 let [s0, s1, s2, s3] = l.surface;
                 let grad = [(2.0 * s0 / ppu) as f32, (2.0 * s0 * ox + s2) as f32, (2.0 * s1 / ppu) as f32, (2.0 * s1 * oy + s3) as f32];
                 inst.push(Instance { rect, grad, color: fill.to_array(), flags: 0 });
                 if req.raster {
                     raster.push(RasterTile { rect: l.rect, surface: l.surface, color: fill, flat: false });
-                }
-                let (w, h) = (l.rect.w() * pt_per_unit, l.rect.h() * pt_per_unit);
-                // A filter match only a pixel or two across is drawn, but is far harder to see
-                // than the marker it had while it was too small to draw: keep the marker until
-                // the tile is as big.
-                if req.paint.hidden.is_some() && w.min(h) < MARK_PT {
-                    let hw = MARK_PT * req.ppp / ppu / 2.0;
-                    let (cx, cy) = l.rect.center();
-                    let r = DRect { x0: cx - hw, y0: cy - hw, x1: cx + hw, y1: cy + hw };
-                    let c = fill.lerp_to_gamma(Color32::WHITE, 0.12);
-                    markers.push(Instance { rect: set.local_rect(&r), grad: [0.0; 4], color: c.to_array(), flags: tilegpu::FLAT });
-                    if req.raster {
-                        raster_markers.push(RasterTile { rect: r, surface: l.surface, color: c, flat: true });
-                    }
                 }
                 if w >= 26.0 && h >= 9.0 {
                     labels.push(Label { rect: l.rect, path: l.path.to_vec(), color: label });
@@ -1283,8 +1330,19 @@ fn build_set(req: &Req) -> Option<TileSet> {
     if cancelled || req.cancel.load(Ordering::Relaxed) {
         return None;
     }
-    inst.extend(markers);
-    raster.extend(raster_markers);
+    // One marker per cell holding matches too small to see, at their middle, unless a match
+    // big enough to see is already drawn in that cell.
+    if let Some(hidden) = &req.paint.hidden {
+        let c = mark.or_else(|| hidden(root, &req.root, 0)).unwrap_or(Color32::WHITE);
+        let hw = MARK_PT * req.ppp / ppu / 2.0;
+        for (x, y) in spots.markers() {
+            let r = DRect { x0: x - hw, y0: y - hw, x1: x + hw, y1: y + hw };
+            inst.push(Instance { rect: set.local_rect(&r), grad: [0.0; 4], color: c.to_array(), flags: tilegpu::FLAT });
+            if req.raster {
+                raster.push(RasterTile { rect: r, surface: [0.0; 4], color: c, flat: true });
+            }
+        }
+    }
     set.instances = Arc::new(inst);
     set.labels = labels;
     if req.raster {
@@ -1293,11 +1351,11 @@ fn build_set(req: &Req) -> Option<TileSet> {
     Some(set)
 }
 
-/// Centres of a folder's children from index `from` on (those too small to draw) that are
-/// filter matches, as `colorize` (files) and `hidden` (folders) tell. Folders bigger than a
-/// `cell` are looked into, so a long thin one gets markers along it where its matches are. Only
-/// places in `cover`, at most one per `cell`-sized square, and only so many, so a folder of a
-/// million files stays cheap. `abs` is the folder's path from the scan root; it's restored.
+/// Add to `spots` where a folder's children from index `from` on (those too small to draw)
+/// are filter matches, as `colorize` (files) and `hidden` (folders) tell. Folders bigger than a
+/// spot cell are looked into, so a long thin one gets markers along it where its matches are.
+/// Only places in `cover`, and only so many children, so a folder of a million files stays
+/// cheap. `abs` is the folder's path from the scan root; it's restored.
 #[allow(clippy::too_many_arguments)]
 fn hidden_spots(
     node: &Node,
@@ -1305,67 +1363,58 @@ fn hidden_spots(
     from: usize,
     abs: &mut Vec<u32>,
     cover: &DRect,
-    cell: f64,
     memo: &treemap::Memo,
     colorize: &(dyn Fn(&Node, &[u32]) -> Option<(Color32, Color32)> + Send + Sync),
     hidden: &(dyn Fn(&Node, &[u32], usize) -> Option<Color32> + Send + Sync),
-) -> Vec<(f64, f64)> {
-    struct Spots<'a> {
-        cover: &'a DRect,
-        cell: f64,
-        memo: &'a treemap::Memo,
-        colorize: &'a (dyn Fn(&Node, &[u32]) -> Option<(Color32, Color32)> + Send + Sync),
-        hidden: &'a (dyn Fn(&Node, &[u32], usize) -> Option<Color32> + Send + Sync),
-        seen: std::collections::HashSet<(i64, i64)>,
-        out: Vec<(f64, f64)>,
-        looked: usize,
-    }
+    spots: &mut Spots,
+) {
+    let mut looked = 0;
+    walk_spots(node, rect, from, abs, cover, memo, colorize, hidden, spots, &mut looked);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_spots(
+    node: &Node,
+    rect: &DRect,
+    from: usize,
+    abs: &mut Vec<u32>,
+    cover: &DRect,
+    memo: &treemap::Memo,
+    colorize: &(dyn Fn(&Node, &[u32]) -> Option<(Color32, Color32)> + Send + Sync),
+    hidden: &(dyn Fn(&Node, &[u32], usize) -> Option<Color32> + Send + Sync),
+    spots: &mut Spots,
+    looked: &mut usize,
+) {
     const MAX_LOOK: usize = 200_000;
-    const MAX_SPOTS: usize = 4096;
-    impl Spots<'_> {
-        fn key(&self, (x, y): (f64, f64)) -> (i64, i64) {
-            ((x / self.cell).floor() as i64, (y / self.cell).floor() as i64)
+    let rects = treemap::child_rects(node, rect, 0.0, Some(memo));
+    for (i, r) in rects.iter().enumerate().skip(from) {
+        if *looked >= MAX_LOOK || spots.full() {
+            return;
         }
-        fn walk(&mut self, node: &Node, rect: &DRect, from: usize, abs: &mut Vec<u32>) {
-            let rects = treemap::child_rects(node, rect, 0.0, Some(self.memo));
-            for (i, r) in rects.iter().enumerate().skip(from) {
-                if self.looked >= MAX_LOOK || self.out.len() >= MAX_SPOTS {
-                    return;
+        *looked += 1;
+        if !r.intersects(cover) {
+            continue;
+        }
+        let big = r.w().max(r.h()) >= spots.cell;
+        // A small child lands in one square: skip it if that square already has a match.
+        if !big && spots.has(r.center()) {
+            continue;
+        }
+        let c = &node.children[i];
+        abs.push(i as u32);
+        if c.is_dir {
+            if hidden(c, abs, 0).is_some() {
+                if big {
+                    walk_spots(c, r, 0, abs, cover, memo, colorize, hidden, spots, looked);
+                } else {
+                    spots.add(r.center());
                 }
-                self.looked += 1;
-                if !r.intersects(self.cover) {
-                    continue;
-                }
-                let c = &node.children[i];
-                let big = r.w().max(r.h()) >= self.cell;
-                // A small child lands in one cell: skip it if that cell already has a marker.
-                if !big && self.seen.contains(&self.key(r.center())) {
-                    continue;
-                }
-                abs.push(i as u32);
-                if c.is_dir {
-                    if (self.hidden)(c, abs, 0).is_some() {
-                        if big {
-                            self.walk(c, r, 0, abs);
-                        } else {
-                            self.spot(r.center());
-                        }
-                    }
-                } else if (self.colorize)(c, abs).is_some() {
-                    self.spot(r.center());
-                }
-                abs.pop();
             }
+        } else if colorize(c, abs).is_some() {
+            spots.add(r.center());
         }
-        fn spot(&mut self, p: (f64, f64)) {
-            if self.seen.insert(self.key(p)) {
-                self.out.push(p);
-            }
-        }
+        abs.pop();
     }
-    let mut s = Spots { cover, cell, memo, colorize, hidden, seen: Default::default(), out: Vec::new(), looked: 0 };
-    s.walk(node, rect, from, abs);
-    s.out
 }
 
 /// Size-weighted average colour of a folder's children from index `from` on, looking at the
@@ -1467,27 +1516,28 @@ mod tests {
 
     #[test]
     fn hidden_matches_are_marked() {
-        // A big tree seen whole: most files are too small to draw. With a `hidden` hook every
-        // blended patch takes its colour, and slivers get a marker at least MARK_PT across.
+        // A big tree seen whole: most files are too small to draw. With a `hidden` hook they
+        // get square markers MARK_PT across instead, no more than one per CELL_PT square, drawn
+        // after every tile so they're on top.
         let tree = Arc::new(treemap::synthetic(50_000, 4));
         let world = DRect { x0: 0.0, y0: 0.0, x1: 400.0, y1: 300.0 };
         let mark = Color32::from_rgb(250, 10, 10);
         let plain = build_set(&req(&tree, world, world, 1.0)).unwrap();
         assert!(!plain.instances.iter().any(|i| i.color == mark.to_array()));
         let mut r = req(&tree, world, world, 1.0);
+        r.paint.colorize = Arc::new(|n: &Node, _: &[u32]| n.name.ends_with(".txt").then_some((Color32::WHITE, Color32::WHITE)));
         r.paint.hidden = Some(Arc::new(move |_: &Node, _: &[u32], _: usize| Some(mark)));
         let set = build_set(&r).unwrap();
-        let marked: Vec<_> = set.instances.iter().filter(|i| i.color == mark.to_array()).collect();
-        assert!(!marked.is_empty(), "patches of hidden files take the mark colour");
-        let dots = marked.iter().filter(|i| i.flags == tilegpu::FLAT).count();
-        assert!(dots > 0, "slivers get markers");
-        for d in marked.iter().filter(|i| i.flags == tilegpu::FLAT) {
+        let dots: Vec<_> = set.instances.iter().filter(|i| i.color == mark.to_array()).collect();
+        assert!(!dots.is_empty(), "tiny matches get markers");
+        assert!(dots.len() <= (400.0 / CELL_PT + 1.0) as usize * (300.0 / CELL_PT + 1.0) as usize);
+        for d in &dots {
             let [x0, y0, x1, y1] = d.rect;
-            assert!((x1 - x0).min(y1 - y0) >= MARK_PT as f32 - 0.01, "{:?}", d.rect);
+            assert_eq!(d.flags, tilegpu::FLAT);
+            assert!(((x1 - x0) - MARK_PT as f32).abs() < 0.01 && ((y1 - y0) - MARK_PT as f32).abs() < 0.01, "{:?}", d.rect);
         }
-        // Markers come after every tile, so they're drawn on top.
-        let first_dot = set.instances.iter().position(|i| i.color == mark.to_array() && i.flags == tilegpu::FLAT).unwrap();
-        assert!(set.instances[first_dot..].iter().all(|i| i.flags == tilegpu::FLAT));
+        let first_dot = set.instances.iter().position(|i| i.color == mark.to_array()).unwrap();
+        assert!(set.instances[first_dot..].iter().all(|i| i.color == mark.to_array()));
     }
 
     #[test]
@@ -1519,9 +1569,9 @@ mod tests {
     }
 
     #[test]
-    fn small_drawn_match_keeps_a_marker_until_it_is_as_big() {
-        // A match drawn only a couple of pixels across would look like it vanished after its
-        // marker went, so it keeps one until its tile is MARK_PT across.
+    fn small_match_is_marked_until_it_is_big_enough_to_see() {
+        // A match only a pixel or two across would be a speck that looks like it vanished, so
+        // it's shown as a marker until its tile is MIN_TILE_PT across.
         let file = |name: &str, size: u64| Node { name: name.into(), size, files: 1, modified: 0, is_dir: false, children: Vec::new() };
         let kids = vec![file("big.bin", 120_000 * 1000 - 4000), file("small.onnx", 4000)];
         let size = kids.iter().map(|k| k.size).sum();
@@ -1537,18 +1587,19 @@ mod tests {
             r.paint.colorize = Arc::new(move |n: &Node, _: &[u32]| n.name.ends_with(".onnx").then_some((tile, tile)));
             r.paint.hidden = Some(Arc::new(move |_: &Node, _: &[u32], _: usize| Some(mark)));
             let set = build_set(&r).unwrap();
-            assert!(set.instances.iter().any(|i| i.color == tile.to_array()), "the small file is drawn at {ppu}");
-            set.instances.iter().filter(|i| i.flags == tilegpu::FLAT && i.color != Color32::from_gray(24).to_array() && i.color != r.paint.background.to_array()).count()
+            let drawn = set.instances.iter().any(|i| i.color == tile.to_array());
+            (drawn, set.instances.iter().filter(|i| i.color == mark.to_array()).count())
         };
-        // A strip 4 px² in area at 1:1 (thinner than a pixel), and about 7 px wide at 500:1.
-        assert_eq!(markers(1.0), 1);
-        assert_eq!(markers(500.0), 0);
+        // A strip 4 px² in area at 1:1 (thinner than a pixel): a marker, not a speck. About
+        // 7 px wide at 500:1: drawn, no marker.
+        assert_eq!(markers(1.0), (false, 1));
+        assert_eq!(markers(500.0), (true, 0));
     }
 
     #[test]
     fn every_match_in_view_is_drawn_or_marked() {
         // Zoomed in anywhere, each matching file in view is either drawn as its own tile or
-        // has a marker on it, however small it is.
+        // has a marker or a drawn match near it, however small it is.
         let tree = Arc::new(treemap::synthetic(60_000, 7));
         let never = AtomicBool::new(false);
         let is = |n: &Node| n.name.ends_with(".txt");
@@ -1586,7 +1637,9 @@ mod tests {
                 let inner = DRect { x0: cover.x0 + w * 0.05, y0: cover.y0 + h * 0.05, x1: cover.x1 - w * 0.05, y1: cover.y1 - h * 0.05 };
                 for m in found.iter().filter(|m| m.intersects(&inner)) {
                     let (mx, my) = m.center();
-                    let slack = MARK_PT / z;
+                    // Markers stand for every match in their square, and are left out where a
+                    // match is drawn.
+                    let slack = 2.0 * CELL_PT / z;
                     let near = DRect { x0: mx - slack, y0: my - slack, x1: mx + slack, y1: my + slack };
                     assert!(shown.iter().any(|s| s.intersects(&near) || s.intersects(m)), "zoom {z}: match at {m:?} neither drawn nor marked");
                     checked += 1;
