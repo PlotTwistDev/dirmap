@@ -2,6 +2,14 @@
 
 ## Version 0.2.0
 
+### Files view
+
+- A new **View: Files**: browse the scan like Finder or Windows Explorer, in **List**, **Icons**
+  or **Columns** layout, with each item's size and share of its folder. Sort by name, size, kind,
+  items or date; click the path, use Back, Forward and Up, the arrow keys and type-to-select; the
+  filters and the right-click menu work there too. It shares its folder and selection with the
+  treemap and sunburst. See [The Files view](../views/file-browser.md).
+
 ### Help and documentation
 
 - **Help Centre** built into dirmap: the complete manual, tutorials, keyboard and mouse

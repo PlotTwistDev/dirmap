@@ -30,6 +30,23 @@ When the treemap is showing (not the sunburst) and the cursor isn't in a text bo
 | **Alt+←** | **⌥←** | Back to the previous place. |
 | **Alt+→** | **⌥→** | Forward again. |
 
+### Files view
+
+When the Files view is showing and the cursor isn't in a text box.
+
+| Windows and Linux | macOS | Action |
+|---|---|---|
+| **↑ / ↓** | **↑ / ↓** | Select the item above or below (in Icons, the row above or below). |
+| **← / →** | **← / →** | Icons: the previous or next item. Columns: up to the enclosing folder, or into the selected folder. |
+| **Home / End** | **Home / End** | Select the first or last item. |
+| **Page Up / Page Down** | **Page Up / Page Down** | Move 20 items (20 rows of icons). |
+| **Enter** | **Enter** | Open the selected folder in the Files view. A selected file opens with its usual app. |
+| **Ctrl+↓** | **⌘↓** | Open the selected folder or file. |
+| **Backspace or Ctrl+↑** | **Backspace or ⌘↑** | Up to the enclosing folder, selecting the one you were in. |
+| **Alt+←** | **⌥←** | Back to the previous folder. |
+| **Alt+→** | **⌥→** | Forward again. |
+| **Type a name** | **Type a name** | Jump to the first item whose name starts with what you type. |
+
 ### Selected file or folder
 
 Act on the selected item, wherever it was selected (folder list, map or a list), unless the cursor is in a text box. The same commands are in the folder list's right-click menu.

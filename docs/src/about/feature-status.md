@@ -12,6 +12,7 @@ version.
 | Directory tree | Sortable Size, % of parent, Files and Last change columns; Explorer icons on Windows. |
 | Treemap | Cushion shading on the GPU, cursor-anchored smooth zoom, pan with inertia, drill in and out, Back/Forward, zoom to selection, labels, pointer lighting. |
 | Sunburst | Six rings, zoom in and out, selection. |
+| Files view | Finder/Explorer-style browsing in List, Icons and Columns layouts: sizes and share of folder, sorting, path bar, Back/Forward, keyboard navigation, type to select, filters, right-click menu; shares the selection and folder with the maps. |
 | Colour by type, age, and change since a snapshot | |
 | File types list | Highlight, find all files of a type, copy, exclude. |
 | Category, size and Custom name filters | Highlight or Show matches only; wildcards, exclusions, AND/OR, frame numbers, padding and ranges; presets and recent patterns. |
@@ -29,10 +30,11 @@ version.
 
 | Feature | What's missing |
 |---|---|
-| Right-click menus | Only in the folder list and the File types list. The treemap and sunburst have none (right-click zooms out there). WinDirStat's **Compress**, **Sparsify**, **Optimize VHD**, **Custom Cleanup**, the full **Windows Explorer** context submenu and **Group Unregistered Types** aren't available. |
-| Keyboard use | Shortcuts exist for file commands, the Custom filter, help and the treemap, but the folder list can't be moved through with the arrow keys, and there's no keyboard way to move between panels. |
+| Right-click menus | Only in the folder list, the Files view and the File types list. The treemap and sunburst have none (right-click zooms out there). WinDirStat's **Compress**, **Sparsify**, **Optimize VHD**, **Custom Cleanup**, the full **Windows Explorer** context submenu and **Group Unregistered Types** aren't available. |
+| Keyboard use | Shortcuts exist for file commands, the Custom filter, help and the treemap, and the Files view can be used entirely from the keyboard, but the folder list can't be moved through with the arrow keys, and there's no keyboard way to move between panels. |
 | Duplicate verification | Matches use a 64-bit hash of the whole contents, not a byte-by-byte comparison. There's no "delete all but one" action; copies are deleted one at a time. |
-| Sunburst navigation | No Back/Forward history (the treemap has it). |
+| Sunburst navigation | No Back/Forward history (the treemap and the Files view have it). |
+| Files view | One item selected at a time; no renaming, new folders or drag and drop. Real Finder icons on macOS aren't used yet (drawn icons instead). |
 | Size accuracy | File sizes only. Hard links are counted once per name; compressed, sparse and cloud-only files show their full size. See [How sizes are calculated](../disk-usage/sizes.md). |
 | Administrator mode | A restart button on Windows only; on Linux use `sudo`, on macOS Full Disk Access. |
 

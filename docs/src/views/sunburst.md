@@ -31,10 +31,10 @@ Choose **View: Sunburst** in the filter bar to see the same scan as a ring chart
 
 **Zoom to selection** makes the selected folder (or the folder of the selected file) the
 centre, **Zoom out** goes up one level and **⟲ Whole map** returns to the whole scan. Back and
-Forward work on the treemap only.
+Forward work on the treemap and in the Files view only.
 
-The treemap and the sunburst share the same position: the folder you open in one is the folder
-shown when you switch to the other.
+The treemap, the sunburst and the [Files view](file-browser.md) share the same position: the
+folder you open in one is the folder shown when you switch to another.
 
 ## When to use which
 

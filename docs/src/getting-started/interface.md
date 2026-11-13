@@ -32,7 +32,8 @@ Under the folder list:
 
 - **Breadcrumbs** (🏠 *scan* › *folder* › …) show which folder the map is showing; click one to
   jump there.
-- **View:** switches between **Treemap** and **Sunburst**.
+- **View:** switches between **Treemap**, **Sunburst** and **Files**, a Finder- or
+  Explorer-style browser. See [The Files view](../views/file-browser.md).
 - **Color by:** colours the map by **Type**, **Age** or **Change**. See [Colour modes](../views/color-modes.md).
 - **Show:** limits the map to kinds of files (Audio, Video, Images…) or to a **🔍 Custom**
   name pattern.
@@ -45,7 +46,8 @@ Under the folder list:
 
 The treemap (or sunburst) fills the middle of the window. Hover to see what something is,
 click to select, double-click to open a folder, wheel to zoom, drag to pan and right-click to
-go back up. See [Navigating the treemap](../views/treemap-navigation.md).
+go back up. See [Navigating the treemap](../views/treemap-navigation.md). With **View: Files**
+a file browser takes its place instead.
 
 ## Side panel
 

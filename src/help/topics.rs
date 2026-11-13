@@ -22,6 +22,7 @@ pub const ZOOM_TO_SELECTION: &str = "views/treemap-navigation.md#zooming-to-the-
 pub const BACK_FORWARD: &str = "views/treemap-navigation.md#back-and-forward";
 pub const SUNBURST: &str = "views/sunburst.md";
 pub const TREE: &str = "views/directory-tree.md";
+pub const BROWSER: &str = "views/file-browser.md";
 pub const COLOR_MODES: &str = "views/color-modes.md";
 pub const FILTERING: &str = "filtering/overview.md";
 pub const HIGHLIGHT_OR_ONLY: &str = "filtering/overview.md#highlight-or-show-matches-only";
@@ -53,7 +54,7 @@ pub const ABOUT: &str = "about/about.md";
 #[cfg(test)]
 pub const ALL: &[&str] = &[
     HOME, QUICK_START, INTERFACE, TOOLBAR, SCANNING, WHILE_SCANNING, RESULTS, SIZES, PERCENTAGES, FILE_TYPES, UNREADABLE,
-    TREEMAP, TREEMAP_NAV, ZOOM_TO_SELECTION, BACK_FORWARD, SUNBURST, TREE, COLOR_MODES, FILTERING, HIGHLIGHT_OR_ONLY,
+    TREEMAP, TREEMAP_NAV, ZOOM_TO_SELECTION, BACK_FORWARD, SUNBURST, TREE, BROWSER, COLOR_MODES, FILTERING, HIGHLIGHT_OR_ONLY,
     CATEGORIES, SYNTAX, EXAMPLES, SEQUENCES, PRESETS, SCAN_FILTERS, HISTOGRAM, DUPLICATES, DUPLICATES_HOW, SNAPSHOTS,
     FILE_OPERATIONS, SETTINGS, SETTINGS_GENERAL, SETTINGS_FILTERING, SETTINGS_FOLDER_LIST, SETTINGS_TREEMAP,
     SETTINGS_ADVANCED, ADMINISTRATOR, KEYBOARD, MOUSE, TROUBLESHOOTING, WHATS_NEW, ABOUT,

@@ -73,6 +73,10 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
   number right before the extension and everything else identical are grouped.
 - **Sunburst view**: a ring chart of the same data, each ring one folder level deeper. Click to select,
   double-click or wheel to zoom, click the middle to go up.
+- **Files view**: browse the scan like Finder or Windows Explorer, in List, Icons or Columns layout, with
+  sizes, share of folder, sorting (names in natural order), a clickable path, Back/Forward, keyboard
+  navigation and type-to-select, the filters and the right-click menu. It shares its folder and selection with
+  the treemap and sunburst.
 - **Color by type, age or change**: age runs from red (changed today) to blue (10+ years old); change shows
   new, grown and shrunk files since a snapshot.
 - **Size histogram** (Sizes tab): how many files and how much space fall in each size range. Click a bar to
