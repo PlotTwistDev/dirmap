@@ -25,6 +25,7 @@ pub const TREE: &str = "views/directory-tree.md";
 pub const BROWSER: &str = "views/file-browser.md";
 pub const FILE_MANAGER: &str = "views/file-manager.md";
 pub const WORKSPACES: &str = "views/file-manager.md#workspaces";
+pub const ANALYSIS_DOCK: &str = "views/file-manager.md#the-analysis-dock";
 pub const COLOR_MODES: &str = "views/color-modes.md";
 pub const FILTERING: &str = "filtering/overview.md";
 pub const HIGHLIGHT_OR_ONLY: &str = "filtering/overview.md#highlight-or-show-matches-only";
@@ -56,7 +57,7 @@ pub const ABOUT: &str = "about/about.md";
 #[cfg(test)]
 pub const ALL: &[&str] = &[
     HOME, QUICK_START, INTERFACE, TOOLBAR, SCANNING, WHILE_SCANNING, RESULTS, SIZES, PERCENTAGES, FILE_TYPES, UNREADABLE,
-    TREEMAP, TREEMAP_NAV, ZOOM_TO_SELECTION, BACK_FORWARD, SUNBURST, TREE, BROWSER, FILE_MANAGER, WORKSPACES, COLOR_MODES, FILTERING, HIGHLIGHT_OR_ONLY,
+    TREEMAP, TREEMAP_NAV, ZOOM_TO_SELECTION, BACK_FORWARD, SUNBURST, TREE, BROWSER, FILE_MANAGER, WORKSPACES, ANALYSIS_DOCK, COLOR_MODES, FILTERING, HIGHLIGHT_OR_ONLY,
     CATEGORIES, SYNTAX, EXAMPLES, SEQUENCES, PRESETS, SCAN_FILTERS, HISTOGRAM, DUPLICATES, DUPLICATES_HOW, SNAPSHOTS,
     FILE_OPERATIONS, SETTINGS, SETTINGS_GENERAL, SETTINGS_FILTERING, SETTINGS_FOLDER_LIST, SETTINGS_TREEMAP,
     SETTINGS_ADVANCED, ADMINISTRATOR, KEYBOARD, MOUSE, TROUBLESHOOTING, WHATS_NEW, ABOUT,

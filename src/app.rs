@@ -31,6 +31,8 @@ use std::time::{Duration, Instant};
 mod custom;
 mod browser;
 mod files;
+mod dock;
+pub(crate) mod style;
 use files::Workspace;
 
 #[derive(PartialEq, Clone, Copy)]
@@ -49,6 +51,9 @@ struct Job {
     started: Instant,
     /// Used space on the drive when scanning a whole drive, to estimate percent complete.
     expected: Option<u64>,
+    /// Refreshing a folder inside the current analysis: swap the result into the tree instead
+    /// of replacing it.
+    merge: bool,
 }
 
 /// Which files the maps show; everything else is blanked out. Doesn't need a rescan.
@@ -197,6 +202,15 @@ pub struct App {
     highlight_ext: Option<String>,
     /// The treemap: camera, tiles and navigation.
     map: MapView,
+    /// The map is drawn in the File Manager's dock: right-click opens the item menu instead of
+    /// zooming out, and the keys only reach it while the pointer is over it.
+    map_in_dock: bool,
+    /// The tile under the pointer last frame, as a path in the shown tree.
+    map_hover: Option<Vec<u32>>,
+    /// The analysis dock in the File Manager.
+    dock: dock::Dock,
+    /// When the analysis on screen was made (seconds since the Unix epoch).
+    scanned_at: i64,
     /// Paint inputs the map was last given (`paint_key`).
     map_paint: Option<u64>,
     expanded: HashSet<Box<[u32]>>,
@@ -266,6 +280,7 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext, path: Option<PathBuf>, force_all_fs: bool, compare: Option<PathBuf>) -> Self {
+        style::install(&cc.egui_ctx);
         let mut settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, "settings")).unwrap_or_default();
         settings.admin = elevate::load_mode();
         let admin_prompt = elevate::can_elevate() && !elevate::is_elevated() && settings.admin == AdminMode::Ask;
@@ -301,6 +316,10 @@ impl App {
             sort: SortBy::Size,
             sort_desc: true,
             highlight_ext: None,
+            map_in_dock: false,
+            map_hover: None,
+            dock: Default::default(),
+            scanned_at: 0,
             map: MapView::new(Backend::new(cc)),
             map_paint: None,
             expanded: HashSet::new(),
@@ -415,7 +434,12 @@ impl App {
             input.push('\\');
             self.path_input = input.clone();
         }
-        let path = PathBuf::from(input);
+        self.start_scan_of(PathBuf::from(input), false);
+    }
+
+    /// Scan `path` in the background. With `merge`, the result replaces that folder inside the
+    /// current analysis (Refresh Analysis); otherwise it becomes the analysis.
+    fn start_scan_of(&mut self, path: PathBuf, merge: bool) {
         if let Some(job) = &self.job {
             job.progress.cancel.store(true, Ordering::Relaxed);
         }
@@ -432,18 +456,34 @@ impl App {
         self.live_open.clear();
         self.live_order.clear();
         self.live_open.insert(Arc::as_ptr(&live) as usize);
-        self.job = Some(Job { root: path, progress, live, rx, started: Instant::now(), expected: None });
+        self.job = Some(Job { root: path, progress, live, rx, started: Instant::now(), expected: None, merge });
     }
 
     fn finish_scan(&mut self, root: PathBuf, tree: Node, exts: Vec<ExtStat>, secs: f32) {
+        let with = Some(self.settings.clone());
+        self.adopt_analysis(root, Arc::new(tree), exts, secs, dock::unix_now(), with);
+    }
+
+    /// Make `tree` the analysis on screen. The one it replaces is kept for a while (see
+    /// `dock::Past`), so going back to a folder it covers doesn't need a rescan.
+    fn adopt_analysis(&mut self, root: PathBuf, tree: Arc<Node>, exts: Vec<ExtStat>, secs: f32, at: i64, with: Option<Settings>) {
+        if let Some(old) = self.tree.take() {
+            let past = dock::Past {
+                root: std::mem::take(&mut self.scanned_path),
+                tree: old,
+                exts: std::mem::take(&mut self.exts),
+                secs: self.scan_secs,
+                at: self.scanned_at,
+                with: self.scanned_with.take(),
+            };
+            self.dock.remember(past, &root);
+        }
         self.scanned_path = root;
-        self.scanned_with = Some(self.settings.clone());
+        self.scanned_with = with;
+        self.scanned_at = at;
         self.exts = exts;
         self.colors = self.exts.iter().enumerate().map(|(i, e)| (e.ext.clone(), ext_color(&e.ext, i))).collect();
-        // Freeing millions of nodes can take a while; do it off the UI thread.
-        if let Some(old) = self.tree.replace(Arc::new(tree)) {
-            std::thread::spawn(move || drop(old));
-        }
+        self.tree = Some(tree);
         self.scan_secs = secs;
         self.selected = None;
         self.zoom.clear();
@@ -1920,10 +1960,10 @@ impl App {
         self.map.set_paint(Paint { key, colorize, hidden, cushion, background, look });
     }
 
-    fn treemap_panel(&mut self, ui: &mut egui::Ui) {
+    fn treemap_panel(&mut self, ui: &mut egui::Ui) -> Option<egui::Response> {
         let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let bounds = resp.rect;
-        let Some(tree) = self.shown_tree() else { return };
+        let Some(tree) = self.shown_tree() else { return None };
         if tree.at(&self.zoom).is_none() {
             self.zoom.clear();
         }
@@ -1941,8 +1981,8 @@ impl App {
         let help_hovered = self.help.hovered;
         // The keys go to the map unless the file manager was clicked last; the side buttons go to
         // whichever is under the pointer.
-        let keys = !typing && !self.browser_has_keys();
-        let fm = self.browser.rect;
+        let keys = !typing && if self.map_in_dock { resp.hovered() } else { !self.browser_has_keys() };
+        let fm = if self.map_in_dock { None } else { self.browser.rect };
         let (wheel, pinch, back, forward, home, plus, minus) = ui.input(|i| {
             let side = !help_hovered && !i.pointer.hover_pos().is_some_and(|p| fm.is_some_and(|r| r.contains(p)));
             let mut wheel = 0.0f64;
@@ -2027,7 +2067,7 @@ impl App {
             }
         }
         if first_pass {
-            if resp.secondary_clicked() {
+            if resp.secondary_clicked() && !self.map_in_dock {
                 self.map.zoom_out(&tree, &feel);
             }
             if back {
@@ -2079,7 +2119,9 @@ impl App {
             for sel in all.filter(|s| s.starts_with(&root)) {
                 let rel = &sel[root.len()..];
                 let rects = treemap::ancestors(zroot, self.map.camera.world(), rel);
-                if let Some(r) = rects.iter().rev().map(|r| self.map.to_screen(bounds, r)).find(|r| r.width() >= 3.0 && r.height() >= 3.0) {
+                // The nearest ancestor big enough to see; never the whole folder on show, which
+                // would just frame the map.
+                if let Some(r) = rects.iter().skip(1).rev().map(|r| self.map.to_screen(bounds, r)).find(|r| r.width() >= 3.0 && r.height() >= 3.0) {
                     let stroke = Stroke::new(2.0, self.view().selection_color);
                     painter.with_clip_rect(bounds).rect_stroke(r, 0.0, stroke, egui::StrokeKind::Inside);
                 }
@@ -2087,6 +2129,11 @@ impl App {
         }
 
         let prev_status = self.hover_status.take();
+        self.map_hover = frame.hover.as_ref().map(|(rel, _)| {
+            let mut abs = root.clone();
+            abs.extend_from_slice(rel);
+            abs
+        });
         if let Some((rel, _)) = &frame.hover {
             // The folder around the hovered tile, faintly.
             if let Some((_, parent)) = rel.split_last() {
@@ -2117,6 +2164,7 @@ impl App {
         if frame.animating || selecting || self.map.labels_fading() || self.hover_status != prev_status {
             ctx.request_repaint();
         }
+        Some(resp)
     }
 
     /// Breadcrumbs for the zoomed folder, plus the "show only" filters for the treemap.
@@ -2365,7 +2413,11 @@ impl eframe::App for App {
                 let job = self.job.take().unwrap();
                 if !job.progress.cancel.load(Ordering::Relaxed) {
                     self.scan_errors = job.progress.errors.load(Ordering::Relaxed);
-                    self.finish_scan(job.root, tree, exts, job.started.elapsed().as_secs_f32());
+                    if job.merge && self.tree.is_some() && job.root.starts_with(&self.scanned_path) {
+                        self.merge_scan(job.root, tree);
+                    } else {
+                        self.finish_scan(job.root, tree, exts, job.started.elapsed().as_secs_f32());
+                    }
                 } else {
                     std::thread::spawn(move || drop(tree));
                 }
@@ -2555,7 +2607,9 @@ impl eframe::App for App {
         let r = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let rect = ui.max_rect();
             match self.map_kind {
-                MapKind::Treemap => self.treemap_panel(ui),
+                MapKind::Treemap => {
+                    self.treemap_panel(ui);
+                }
                 MapKind::Sunburst => self.sunburst_panel(ui),
             }
             if self.shown.as_ref().is_some_and(|s| s.tree.files == 0) {

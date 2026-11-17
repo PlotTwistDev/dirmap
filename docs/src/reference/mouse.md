@@ -22,6 +22,20 @@ A trackpad works too: two-finger scrolling acts as the wheel, and pinching zooms
 | **Click a place or drive in the sidebar** | Go there. Right-click for Open in New Tab, Pin or Unpin, Copy Path and Analyse. |
 | **Back / forward mouse buttons** | Back and Forward. |
 | **Drag the sidebar's right edge** | Make the sidebar wider or narrower. |
+| **Drag a tab** | Move it along the tab strip. Right-click a tab for New Tab, Close Tab and Close Other Tabs. |
+| **Drag a divider between column headings** | Resize the column to its right. Double-click the divider to reset it. |
+
+### Analysis dock
+
+The treemap or sunburst under the list in the Files workspace. Wheel, drag and the + − Home keys work as in Storage Analysis.
+
+| Input | Action |
+|---|---|
+| **Click a tile** | Select it. The item in the list that holds it is selected too. |
+| **Double-click a tile** | Open its folder in the list; the map follows. |
+| **Right-click a tile** | The same menu as in the list, plus Open in List or Show in List. |
+| **Click a file type under the map** | Highlight those files on the map; click again to stop. |
+| **Drag the line above the dock** | Give the list or the map more room. |
 
 ### Treemap
 

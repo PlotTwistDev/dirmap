@@ -43,6 +43,7 @@ After you've clicked in the list or the sidebar, unless the cursor is in a text 
 | **F5 or Ctrl+R** | **F5 or ⌘R** | Read the folder again. |
 | **Ctrl+Shift+.** | **⌘⇧.** | Show or hide hidden files and folders. |
 | **Ctrl+Shift+C** | **⌘⇧C** | Copy the full paths of the selected items. |
+| **Ctrl+J** | **⌘J** | Show or hide the analysis dock (works while typing elsewhere too). |
 
 ### Treemap
 

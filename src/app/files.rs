@@ -67,7 +67,33 @@ pub(super) struct FilesPrefs {
     pub reversed: bool,
     pub show_hidden: bool,
     pub sidebar_width: f32,
+    pub density: Density,
+    /// Widths of the Size, Type and Date modified columns (Name takes the rest).
+    pub col_widths: [f32; 3],
+    /// The analysis dock under the list.
+    pub dock: super::dock::DockPrefs,
 }
+
+/// Row height in the list and sidebar.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+pub(super) enum Density {
+    Compact,
+    #[default]
+    Comfortable,
+}
+
+impl Density {
+    pub(super) fn row(self) -> f32 {
+        match self {
+            Density::Compact => 22.0,
+            Density::Comfortable => 26.0,
+        }
+    }
+}
+
+/// Default widths of the Size, Type and Date modified columns.
+const COL_WIDTHS: [f32; 3] = [92.0, 150.0, 150.0];
+const COL_MIN: f32 = 56.0;
 
 impl Default for FilesPrefs {
     fn default() -> Self {
@@ -80,13 +106,23 @@ impl Default for FilesPrefs {
             sort: FSort::Name,
             reversed: false,
             show_hidden: false,
-            sidebar_width: 200.0,
+            sidebar_width: 210.0,
+            density: Density::Comfortable,
+            col_widths: COL_WIDTHS,
+            dock: Default::default(),
         }
     }
 }
 
 const RECENT_MAX: usize = 10;
-const ROW_F: f32 = 22.0;
+/// Sidebar rows (the list's rows follow the density setting).
+const ROW_F: f32 = 24.0;
+const TAB_STRIP_H: f32 = 34.0;
+const TAB_MIN_W: f32 = 110.0;
+const TAB_MAX_W: f32 = 210.0;
+/// The analysis dock and the list above it never get smaller than these.
+pub(super) const DOCK_MIN: f32 = 140.0;
+pub(super) const DOCK_MIN_LIST: f32 = 110.0;
 
 /// Folder name → (bytes, files) from the scan.
 type FolderSizes = HashMap<Box<str>, (u64, u64)>;
@@ -186,7 +222,7 @@ pub(super) struct Files {
     typed: String,
     typed_at: f64,
     /// Keys go to the list (it or the sidebar was clicked last, not the filter box).
-    focused: bool,
+    pub(super) focused: bool,
     /// Results of commands run in the background (open, reveal, terminal).
     results: Vec<mpsc::Receiver<Result<(), String>>>,
 }
@@ -323,6 +359,33 @@ impl Files {
         self.filter.clear();
     }
 
+    /// Swap tab `i` with its neighbour `j` (dragging), keeping the same tab active.
+    fn move_tab(&mut self, i: usize, j: usize) {
+        if i >= self.tabs.len() || j >= self.tabs.len() || i == j {
+            return;
+        }
+        self.tabs.swap(i, j);
+        if self.active == i {
+            self.active = j;
+        } else if self.active == j {
+            self.active = i;
+        }
+    }
+
+    fn close_others(&mut self, keep: usize) {
+        for i in (0..self.tabs.len()).rev() {
+            if i != keep {
+                let t = self.tabs.remove(i);
+                self.closed.push(t.hist.here);
+            }
+        }
+        let excess = self.closed.len().saturating_sub(20);
+        self.closed.drain(..excess);
+        self.active = 0;
+        self.path_edit = None;
+        self.filter.clear();
+    }
+
     fn switch_tab(&mut self, i: usize) {
         if i < self.tabs.len() && i != self.active {
             self.active = i;
@@ -357,8 +420,41 @@ impl Files {
         self.prefs.pinned.iter().any(|q| q == p)
     }
 
+    // ---- for the analysis dock ----
+
+    /// What the dock follows changes when any of this does: the tab, its folder, the item the
+    /// keyboard is on, and how many are selected.
+    pub(super) fn selection_key(&self) -> (usize, Location, Option<Box<str>>, usize) {
+        let t = &self.tabs[self.active];
+        (self.active, t.here().clone(), t.cursor.clone(), t.selected.len())
+    }
+
+    /// The item the keyboard is on (the last one clicked), if it's listed.
+    pub(super) fn cursor_entry(&self) -> Option<Entry> {
+        let t = &self.tabs[self.active];
+        let c = t.cursor.as_deref()?;
+        t.listing.as_ref()?.entries.iter().find(|e| &*e.name == c).cloned()
+    }
+
+    /// Select one item of the folder on screen by name, and scroll to it.
+    pub(super) fn select_name(&mut self, name: &str) {
+        let t = self.tab();
+        let name: Box<str> = name.into();
+        t.selected = std::iter::once(name.clone()).collect();
+        t.anchor = Some(name.clone());
+        t.cursor = Some(name);
+        t.scroll_to_cursor = true;
+    }
+
+    /// The finished listing of the folder on screen: (folder, listing generation, entries).
+    pub(super) fn finished_listing(&self) -> Option<(PathBuf, u64, Arc<Vec<Entry>>)> {
+        let t = &self.tabs[self.active];
+        let l = t.listing.as_ref().filter(|l| l.done && l.error.is_none())?;
+        Some((t.here().dir()?.to_path_buf(), l.generation, l.entries.clone()))
+    }
+
     /// Paths of the selected items, in display order.
-    fn chosen_paths(&self) -> Vec<PathBuf> {
+    pub(super) fn chosen_paths(&self) -> Vec<PathBuf> {
         let t = &self.tabs[self.active];
         let (Some(dir), Some(l)) = (t.here().dir(), t.listing.as_ref()) else { return Vec::new() };
         t.order
@@ -472,6 +568,8 @@ struct FPicks {
     new_tab: Option<Location>,
     switch_tab: Option<usize>,
     close_tab: Option<usize>,
+    close_others: Option<usize>,
+    move_tab: Option<(usize, usize)>,
     clear: bool,
     unpin: Option<PathBuf>,
     move_pin: Option<(usize, bool)>,
@@ -555,7 +653,7 @@ impl App {
                 to = Some(Workspace::Files);
             }
             if ui
-                .add(egui::Button::selectable(ws == Workspace::Analysis, "▦ Storage Analysis"))
+                .add(egui::Button::selectable(ws == Workspace::Analysis, "⊞ Storage Analysis"))
                 .on_hover_text(format!("Scan a drive or folder: folder tree, treemap, file types, duplicates… ({})", k(egui::Key::Num3)))
                 .clicked()
             {
@@ -583,11 +681,14 @@ impl App {
         }
     }
 
-    /// Start a scan of `dir` and show it in Storage Analysis.
-    fn analyse(&mut self, dir: PathBuf) {
+    /// Analyse `dir` without leaving the File Manager: the dock opens and shows the scan, and
+    /// the treemap once it's done. A folder inside the current analysis is refreshed in place.
+    pub(super) fn analyse(&mut self, dir: PathBuf) {
         self.path_input = dir.display().to_string();
-        self.start_scan();
-        self.files.prefs.workspace = Workspace::Analysis;
+        let inside = self.tree.is_some() && self.job.is_none() && dir.starts_with(&self.scanned_path);
+        self.start_scan_of(dir, inside);
+        self.files.prefs.dock.open = true;
+        self.dock.invalidate();
     }
 
     /// Bytes and file count of a folder according to the current scan, if it covers it.
@@ -604,48 +705,46 @@ impl App {
 
     // ---------- drawing ----------
 
-    /// Toolbar of the File Manager: workspaces, Back/Forward/Up/Refresh, the path, the filter
-    /// box, Settings and Help.
+    /// Toolbar of the File Manager, in groups: workspaces, navigation, the path, analysis, and
+    /// on the right the filter, View, Help and Settings.
     pub(super) fn files_toolbar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
         let mut go = None;
         ui.horizontal(|ui| {
+            style::roomy(ui);
             self.workspace_switch(ui);
             let (can_back, can_fwd) = {
                 let h = &self.files.tabs[self.files.active].hist;
                 (h.can_back(), h.can_forward())
             };
-            if ui.add_enabled(can_back, egui::Button::new("◀")).on_hover_text(format!("Back ({})", k(egui::Modifiers::ALT, egui::Key::ArrowLeft))).clicked() {
-                self.files.back();
-            }
-            if ui.add_enabled(can_fwd, egui::Button::new("▶")).on_hover_text(format!("Forward ({})", k(egui::Modifiers::ALT, egui::Key::ArrowRight))).clicked() {
-                self.files.forward();
-            }
             let up = self.files.here().up();
-            if ui.add_enabled(up.is_some(), egui::Button::new("⏶")).on_hover_text(format!("Up to the enclosing folder (Backspace or {})", k(egui::Modifiers::ALT, egui::Key::ArrowUp))).clicked() {
-                self.files.up();
-            }
-            if ui.button("⟳").on_hover_text("Refresh (F5)").clicked() {
-                self.files.refresh();
-            }
-            ui.add_space(4.0);
+            style::tool_group(ui, |ui| {
+                if style::icon_button(ui, can_back, "⏴", format!("Back ({})", k(egui::Modifiers::ALT, egui::Key::ArrowLeft))).clicked() {
+                    self.files.back();
+                }
+                if style::icon_button(ui, can_fwd, "⏵", format!("Forward ({})", k(egui::Modifiers::ALT, egui::Key::ArrowRight))).clicked() {
+                    self.files.forward();
+                }
+                if style::icon_button(ui, up.is_some(), "⏶", format!("Up to the enclosing folder (Backspace or {})", k(egui::Modifiers::ALT, egui::Key::ArrowUp))).clicked() {
+                    self.files.up();
+                }
+                if style::icon_button(ui, true, "⟳", "Read the folder again (F5)").clicked() {
+                    self.files.refresh();
+                }
+            });
+            ui.add_space(2.0);
             // Right-hand controls first, so the path takes whatever width is left.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("⚙").on_hover_text("Settings").clicked() {
+                if style::icon_button(ui, true, "⚙", "Settings: appearance, scan filters, treemap look").clicked() {
                     self.dialog.open(&self.settings);
                 }
                 self.help_menu(ui);
-                let hidden = ui
-                    .selectable_label(self.files.prefs.show_hidden, "Hidden")
-                    .on_hover_text(format!("Show hidden files and folders ({})", k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Period)));
-                if hidden.clicked() {
-                    self.files.prefs.show_hidden = !self.files.prefs.show_hidden;
-                }
+                self.files_view_menu(ui);
                 let f = ui.add(
                     egui::TextEdit::singleline(&mut self.files.filter)
                         .id(egui::Id::new("files-filter"))
-                        .desired_width(170.0)
+                        .desired_width(160.0)
                         .hint_text(format!("🔍 Filter ({})", k(egui::Modifiers::COMMAND, egui::Key::F))),
                 );
                 f.on_hover_text("Show only items whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
@@ -656,6 +755,8 @@ impl App {
                     self.files.filter.clear();
                     ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("files-filter")));
                 }
+                ui.add_space(6.0);
+                self.dock_toolbar_buttons(ui);
                 ui.add_space(4.0);
                 let w = ui.available_width();
                 ui.allocate_ui_with_layout(vec2(w, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -666,6 +767,37 @@ impl App {
         if let Some(to) = go {
             self.files.go(to);
         }
+    }
+
+    /// The View menu: hidden items, row density and column widths.
+    fn files_view_menu(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
+        ui.menu_button("View ⏷", |ui| {
+            let p = &mut self.files.prefs;
+            if ui
+                .add(egui::Button::selectable(p.show_hidden, "Hidden Items").shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Period)))
+                .on_hover_text("Show hidden files and folders: names starting with a dot, and items marked hidden on Windows")
+                .clicked()
+            {
+                p.show_hidden = !p.show_hidden;
+            }
+            ui.separator();
+            ui.weak("Rows");
+            ui.radio_value(&mut p.density, Density::Comfortable, "Comfortable");
+            ui.radio_value(&mut p.density, Density::Compact, "Compact");
+            ui.separator();
+            if ui.add_enabled(p.col_widths != COL_WIDTHS, egui::Button::new("Reset Column Widths")).clicked() {
+                p.col_widths = COL_WIDTHS;
+            }
+            ui.separator();
+            let dock = self.files.prefs.dock.open;
+            if ui.add(egui::Button::selectable(dock, "Analysis Dock").shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::J))).clicked() {
+                self.files.prefs.dock.open = !dock;
+            }
+        })
+        .response
+        .on_hover_text("Hidden items, row size, columns and the analysis dock");
     }
 
     /// The path as clickable breadcrumbs; click the empty part (or Ctrl+L) to type a path.
@@ -696,7 +828,9 @@ impl App {
         }
         // Breadcrumbs.
         let bg = ui.interact(frame, id.with("bg"), Sense::click());
-        ui.painter().rect_filled(frame, 3.0, ui.visuals().extreme_bg_color);
+        let pal = style::pal(ui);
+        let border = if bg.hovered() { pal.weak } else { pal.hairline };
+        ui.painter().rect(frame, style::RADIUS as f32, pal.well, Stroke::new(1.0, border), egui::StrokeKind::Inside);
         let mut go = None;
         let here = self.files.here().clone();
         let crumbs = crumbs_of(&here);
@@ -748,19 +882,24 @@ impl App {
     pub(super) fn files_workspace(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.files_poll(&ctx);
+        self.dock_poll(&ctx);
+        let pal = style::pal(ui);
 
-        let r = egui::Panel::bottom("files-status").show(ui, |ui| self.files_status(ui));
+        let status = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::symmetric(10, 3));
+        let r = egui::Panel::bottom("files-status").frame(status).show(ui, |ui| self.files_status(ui));
         self.help_regions.push((r.response.rect, topics::FILE_MANAGER));
+        let side = egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 6, right: 4, top: 8, bottom: 6 });
         let r = egui::Panel::left("places")
             .default_size(self.files.prefs.sidebar_width)
-            .min_size(140.0)
+            .min_size(150.0)
             .resizable(true)
+            .frame(side)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.sidebar(ui));
             });
         self.files.prefs.sidebar_width = r.response.rect.width();
         self.help_regions.push((r.response.rect, topics::FILE_MANAGER));
-        let r = egui::CentralPanel::default().show(ui, |ui| self.files_main(ui));
+        let r = egui::CentralPanel::default().frame(egui::Frame::new().fill(pal.chrome)).show(ui, |ui| self.files_main(ui));
         self.help_regions.push((r.response.rect, topics::FILE_MANAGER));
     }
 
@@ -912,7 +1051,7 @@ impl App {
             resp
         };
 
-        egui::CollapsingHeader::new("Quick access").id_salt("fm-quick").default_open(true).show(ui, |ui| {
+        side_section(ui, "fm-quick", "Quick access", true, |ui| {
             if self.files.places.is_empty() && self.files.places_rx.is_some() {
                 ui.weak("…");
             }
@@ -923,7 +1062,7 @@ impl App {
             }
         });
         if !self.files.prefs.pinned.is_empty() {
-            egui::CollapsingHeader::new("Pinned").id_salt("fm-pinned").default_open(true).show(ui, |ui| {
+            side_section(ui, "fm-pinned", "Pinned", true, |ui| {
                 let pinned = self.files.prefs.pinned.clone();
                 let n = pinned.len();
                 for (i, p) in pinned.iter().enumerate() {
@@ -943,7 +1082,7 @@ impl App {
             });
         }
         let computer = places::computer_name();
-        egui::CollapsingHeader::new("Drives").id_salt("fm-drives").default_open(true).show(ui, |ui| {
+        side_section(ui, "fm-drives", "Drives", true, |ui| {
             entry(ui, "🖳", computer, Location::Computer, format!("All drives and volumes ({computer})"));
             if self.drives.is_empty() && self.drives_rx.is_some() {
                 ui.weak("Looking for drives…");
@@ -965,12 +1104,13 @@ impl App {
                 let pinned = self.files.is_pinned(&root);
                 resp.context_menu(|ui| place_menu(ui, &root, pinned, &mut picks));
             }
-            if ui.small_button("⟳ Refresh drives").clicked() {
+            ui.add_space(2.0);
+            if ui.add(egui::Button::new(egui::RichText::new("⟳ Refresh drives").small().color(style::pal(ui).weak)).frame_when_inactive(false)).clicked() {
                 self.refresh_drives();
             }
         });
         if !self.files.prefs.recent.is_empty() {
-            egui::CollapsingHeader::new("Recent").id_salt("fm-recent").default_open(false).show(ui, |ui| {
+            side_section(ui, "fm-recent", "Recent", false, |ui| {
                 for p in self.files.prefs.recent.clone() {
                     let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.display().to_string());
                     let resp = entry(ui, "🕘", &name, Location::Dir(p.clone()), p.display().to_string());
@@ -997,63 +1137,167 @@ impl App {
 
     // ---------- main area ----------
 
+
+
     fn files_main(&mut self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
+        let mut picks = FPicks::default();
+        ui.spacing_mut().item_spacing.y = 0.0;
+        self.files_tabs_row(ui, &mut picks);
+        let pal = style::pal(ui);
+        // The page under the tabs: the list, and the analysis dock below it when it's open.
+        let page = ui.available_rect_before_wrap();
+        ui.painter().rect_filled(page, 0.0, pal.paper);
+        let mut page_ui = ui.new_child(egui::UiBuilder::new().max_rect(page).layout(egui::Layout::top_down(egui::Align::Min)));
+        let ui = &mut page_ui;
+        if self.files.prefs.dock.open {
+            let max = (page.height() - DOCK_MIN_LIST).max(DOCK_MIN);
+            let mut panel = egui::Panel::bottom("files-dock")
+                .resizable(true)
+                .size_range(DOCK_MIN..=max)
+                .default_size(self.files.prefs.dock.height.clamp(DOCK_MIN, max))
+                .frame(egui::Frame::new().fill(pal.paper));
+            if self.files.prefs.dock.maximised {
+                panel = panel.exact_size(max);
+            }
+            let r = panel.show(ui, |ui| self.dock_ui(ui));
+            if !self.files.prefs.dock.maximised {
+                self.files.prefs.dock.height = r.response.rect.height();
+            }
+            // A hairline above the dock, over the panel's own separator.
+            let top = r.response.rect.top();
+            ui.painter().hline(r.response.rect.x_range(), top, Stroke::new(1.0, pal.hairline));
+            self.help_regions.push((r.response.rect, topics::ANALYSIS_DOCK));
+        }
+        let list = ui.available_rect_before_wrap();
         let pressed = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
-        if pressed.is_some_and(|p| rect.contains(p)) {
+        if pressed.is_some_and(|p| list.contains(p) || rect.top() + TAB_STRIP_H > p.y && rect.contains(p)) {
             self.files.focused = true;
         }
-        let mut picks = FPicks::default();
-        ui.spacing_mut().item_spacing.y = 2.0;
-        self.files_tabs_row(ui, &mut picks);
-        ui.add_space(2.0);
-        self.files_keys(ui.ctx(), ui.rect_contains_pointer(rect), &mut picks);
+        self.files_keys(ui.ctx(), ui.rect_contains_pointer(list), &mut picks);
         self.files_apply(std::mem::take(&mut picks));
 
         match self.files.here().clone() {
-            Location::Computer => self.computer_view(ui, &mut picks),
+            Location::Computer => {
+                egui::Frame::new().inner_margin(egui::Margin::same(14)).show(ui, |ui| self.computer_view(ui, &mut picks));
+            }
             Location::Dir(dir) => self.details_view(ui, &dir, &mut picks),
         }
         self.files_apply(picks);
     }
 
+    /// The tabs: each with its folder icon, the active one joined to the page below; drag one
+    /// to reorder, middle-click or ✖ to close. Too many to fit: the strip scrolls sideways.
     fn files_tabs_row(&mut self, ui: &mut egui::Ui, picks: &mut FPicks) {
         let ctx = ui.ctx().clone();
         let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            let n = self.files.tabs.len();
-            for i in 0..n {
-                let here = self.files.tabs[i].here().clone();
-                let title = location_title(&here);
-                let short: String = title.chars().take(24).collect();
-                let short = if title.chars().count() > 24 { format!("{short}…") } else { short };
-                let on = i == self.files.active;
-                let text = if on { egui::RichText::new(short).strong() } else { egui::RichText::new(short) };
-                let tip = match &here {
-                    Location::Dir(p) => p.display().to_string(),
-                    Location::Computer => places::computer_name().to_string(),
-                };
-                let resp = ui.add(egui::Button::selectable(on, text)).on_hover_text(tip);
-                if resp.clicked() && !on {
-                    picks.switch_tab = Some(i);
-                }
-                if resp.middle_clicked() {
-                    picks.close_tab = Some(i);
-                }
-                if n > 1 {
-                    let x = ui.add(egui::Button::new(egui::RichText::new("✖").small()).frame(false)).on_hover_text(format!("Close tab ({})", k(egui::Modifiers::COMMAND, egui::Key::W)));
-                    if x.clicked() {
+        let pal = style::pal(ui);
+        let strip = Rect::from_min_size(ui.available_rect_before_wrap().min, vec2(ui.available_width(), TAB_STRIP_H));
+        ui.allocate_rect(strip, Sense::hover());
+        ui.painter().hline(strip.x_range(), strip.bottom() - 0.5, Stroke::new(1.0, pal.hairline));
+        let n = self.files.tabs.len();
+        let plus_w = 30.0;
+        let avail = (strip.width() - plus_w - 8.0).max(80.0);
+        // Tabs share the width, between a minimum and a maximum.
+        let tab_w = (avail / n as f32).clamp(TAB_MIN_W, TAB_MAX_W);
+        let total = tab_w * n as f32;
+        let mut strip_ui = ui.new_child(egui::UiBuilder::new().max_rect(strip.shrink2(vec2(6.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Max)));
+        let mut drag_to = None;
+        egui::ScrollArea::horizontal()
+            .id_salt("fm-tabs")
+            .max_width(avail)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(&mut strip_ui, |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let mut rects = Vec::with_capacity(n);
+                for i in 0..n {
+                    let here = self.files.tabs[i].here().clone();
+                    let on = i == self.files.active;
+                    let (r, resp) = ui.allocate_exact_size(vec2(tab_w, TAB_STRIP_H - 4.0), Sense::click_and_drag());
+                    rects.push(r);
+                    let hovered = resp.hovered() || resp.dragged();
+                    let p = ui.painter();
+                    let shape = egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 };
+                    if on {
+                        // Joined to the page: paper colour, a hairline round it, an accent line on top.
+                        let body = Rect::from_min_max(r.min, pos2(r.right(), r.bottom() + 1.0));
+                        p.rect(body, shape, pal.paper, Stroke::new(1.0, pal.hairline), egui::StrokeKind::Inside);
+                        p.rect_filled(Rect::from_min_max(pos2(r.left() + 1.0, r.bottom() - 1.0), pos2(r.right() - 1.0, r.bottom() + 1.5)), 0.0, pal.paper);
+                        p.rect_filled(Rect::from_min_size(r.min + vec2(6.0, 0.0), vec2(r.width() - 12.0, 2.0)), 1.0, pal.accent);
+                    } else if hovered {
+                        p.rect_filled(r.shrink2(vec2(1.0, 2.0)), shape, pal.hover);
+                    } else if i + 1 != self.files.active && i + 1 < n {
+                        // Separators between inactive tabs.
+                        p.vline(r.right() - 0.5, r.y_range().shrink(7.0), Stroke::new(1.0, pal.hairline));
+                    }
+                    let title = location_title(&here);
+                    let tc = if on { pal.strong } else { pal.text };
+                    let icon = if matches!(here, Location::Computer) { "🖳" } else { "🗀" };
+                    let cy = r.center().y + 1.0;
+                    p.text(pos2(r.left() + 10.0, cy), Align2::LEFT_CENTER, icon, FontId::proportional(13.0), if on { pal.accent } else { pal.weak });
+                    let show_x = n > 1 && (on || hovered);
+                    let clip = Rect::from_min_max(pos2(r.left() + 28.0, r.top()), pos2(r.right() - if show_x { 24.0 } else { 8.0 }, r.bottom()));
+                    p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &title, FontId::proportional(12.5), tc);
+                    let tip = match &here {
+                        Location::Dir(p) => p.display().to_string(),
+                        Location::Computer => places::computer_name().to_string(),
+                    };
+                    let mut closed = false;
+                    if show_x {
+                        let xr = Rect::from_center_size(pos2(r.right() - 13.0, cy), vec2(16.0, 16.0));
+                        let x = ui.interact(xr, ui.id().with(("tab-x", i)), Sense::click());
+                        if x.hovered() {
+                            ui.painter().rect_filled(xr, 3.0, pal.hover);
+                        }
+                        ui.painter().text(xr.center(), Align2::CENTER_CENTER, "✖", FontId::proportional(9.5), if x.hovered() { pal.strong } else { pal.weak });
+                        if x.on_hover_text(format!("Close tab ({})", k(egui::Modifiers::COMMAND, egui::Key::W))).clicked() {
+                            picks.close_tab = Some(i);
+                            closed = true;
+                        }
+                    }
+                    if resp.dragged()
+                        && let Some(p) = ctx.pointer_interact_pos()
+                    {
+                        drag_to = Some((i, p.x));
+                    }
+                    let resp = resp.on_hover_text(tip);
+                    if !closed && resp.clicked() && !on {
+                        picks.switch_tab = Some(i);
+                    }
+                    if resp.middle_clicked() && n > 1 {
                         picks.close_tab = Some(i);
                     }
+                    resp.context_menu(|ui| {
+                        if ui.button("New Tab").clicked() {
+                            picks.new_tab = Some(here.clone());
+                        }
+                        if ui.add_enabled(n > 1, egui::Button::new("Close Tab")).clicked() {
+                            picks.close_tab = Some(i);
+                        }
+                        if ui.add_enabled(n > 1, egui::Button::new("Close Other Tabs")).clicked() {
+                            picks.close_others = Some(i);
+                        }
+                    });
                 }
-                ui.add_space(4.0);
-            }
-            let plus = ui.add(egui::Button::new("➕").frame(false)).on_hover_text(format!("New tab ({})", k(egui::Modifiers::COMMAND, egui::Key::T)));
-            if plus.clicked() {
-                picks.new_tab = Some(self.files.here().clone());
-            }
-        });
+                // Dragging a tab past the middle of its neighbour swaps them.
+                if let Some((i, x)) = drag_to {
+                    if i > 0 && x < rects[i - 1].center().x {
+                        picks.move_tab = Some((i, i - 1));
+                    } else if i + 1 < n && x > rects[i + 1].center().x {
+                        picks.move_tab = Some((i, i + 1));
+                    }
+                }
+            });
+        let plus_at = pos2((strip.left() + 6.0 + total.min(avail) + 4.0).min(strip.right() - plus_w), strip.top() + 4.0);
+        let plus_r = Rect::from_min_size(plus_at, vec2(26.0, TAB_STRIP_H - 8.0));
+        let plus = ui.interact(plus_r, ui.id().with("tab-plus"), Sense::click());
+        if plus.hovered() {
+            ui.painter().rect_filled(plus_r, 5.0, pal.hover);
+        }
+        ui.painter().text(plus_r.center(), Align2::CENTER_CENTER, "+", FontId::proportional(17.0), if plus.hovered() { pal.strong } else { pal.weak });
+        if plus.on_hover_text(format!("New tab ({})", k(egui::Modifiers::COMMAND, egui::Key::T))).clicked() {
+            picks.new_tab = Some(self.files.here().clone());
+        }
     }
 
     /// "This PC" / "Computer": the drives and volumes, with their space.
@@ -1100,7 +1344,7 @@ impl App {
                     }
                     let pinned = self.files.is_pinned(&root);
                     resp.context_menu(|ui| {
-                        if ui.button("Analyse This Drive…").on_hover_text("Scan it and show it in Storage Analysis").clicked() {
+                        if ui.button("Analyse This Drive").on_hover_text("Scan it and show its treemap in the analysis dock").clicked() {
                             picks.menu = Some((FAction::Analyse, vec![root.clone()]));
                         }
                         ui.separator();
@@ -1111,8 +1355,10 @@ impl App {
         });
     }
 
-    fn details_columns(width: f32) -> Vec<(Option<FSort>, f32)> {
-        let mut cols = vec![(Some(FSort::Size), 96.0), (Some(FSort::Type), 140.0), (Some(FSort::Modified), 140.0)];
+    /// Column widths: Size, Type and Date modified as the user sized them (dropping Type, then
+    /// the date, when the window is too narrow), and Name gets the rest.
+    fn details_columns(width: f32, widths: [f32; 3]) -> Vec<(Option<FSort>, f32)> {
+        let mut cols = vec![(Some(FSort::Size), widths[0]), (Some(FSort::Type), widths[1]), (Some(FSort::Modified), widths[2])];
         for drop in [FSort::Type, FSort::Modified] {
             if width - cols.iter().map(|c| c.1).sum::<f32>() >= 220.0 {
                 break;
@@ -1127,8 +1373,10 @@ impl App {
     /// The Details list of a folder.
     fn details_view(&mut self, ui: &mut egui::Ui, dir: &Path, picks: &mut FPicks) {
         let width = ui.available_width();
-        let cols = Self::details_columns(width);
-        let footer_h = 20.0;
+        let cols = Self::details_columns(width, self.files.prefs.col_widths);
+        let row_h = self.files.prefs.density.row();
+        let pal = style::pal(ui);
+        let footer_h = 22.0;
         let mut body = ui.available_rect_before_wrap();
         body.max.y -= footer_h;
         let footer = Rect::from_min_max(pos2(body.left(), body.bottom()), pos2(body.right(), body.bottom() + footer_h));
@@ -1138,27 +1386,65 @@ impl App {
         child.set_clip_rect(body.intersect(ui.clip_rect()));
         let ui2 = &mut child;
 
-        // Headings.
-        let (hdr, _) = ui2.allocate_exact_size(vec2(width, ROW_F), Sense::hover());
-        ui2.painter().rect_filled(hdr, 0.0, ui2.visuals().faint_bg_color);
+        // Headings, with dividers you can drag to resize the column to their right.
+        let hdr_h = 26.0;
+        let (hdr, _) = ui2.allocate_exact_size(vec2(width, hdr_h), Sense::hover());
+        ui2.painter().hline(hdr.x_range(), hdr.bottom() - 0.5, Stroke::new(1.0, pal.hairline));
         let mut x = hdr.left();
         let (sort, reversed) = (self.files.prefs.sort, self.files.prefs.reversed);
+        let mut resized = None;
         for (i, (col, w)) in cols.iter().enumerate() {
-            let cell = Rect::from_min_size(pos2(x, hdr.top()), vec2(*w, ROW_F));
+            let cell = Rect::from_min_size(pos2(x, hdr.top()), vec2(*w, hdr_h));
             x += w;
             let Some(col) = *col else { continue };
             let resp = ui2.interact(cell, ui2.id().with(("fhdr", i)), Sense::click());
             let on = col == sort;
-            let arrow = if !on { "" } else if reversed != col.natural_desc() { " ⏷" } else { " ⏶" };
-            let color = if resp.hovered() || on { ui2.visuals().strong_text_color() } else { ui2.visuals().text_color() };
+            if resp.hovered() {
+                ui2.painter().rect_filled(cell.shrink2(vec2(1.0, 3.0)), style::RADIUS as f32, pal.hover);
+            }
+            let color = if resp.hovered() || on { pal.strong } else { pal.weak };
+            let font = FontId::proportional(12.0);
             let (at, align) = match col {
-                FSort::Size => (pos2(cell.right() - 8.0, cell.center().y), Align2::RIGHT_CENTER),
-                _ => (pos2(cell.left() + 8.0, cell.center().y), Align2::LEFT_CENTER),
+                FSort::Size => (pos2(cell.right() - 10.0, cell.center().y), Align2::RIGHT_CENTER),
+                _ => (pos2(cell.left() + if col == FSort::Name { 10.0 } else { 8.0 }, cell.center().y), Align2::LEFT_CENTER),
             };
-            ui2.painter().text(at, align, format!("{}{arrow}", col.title()), FontId::proportional(13.0), color);
+            let g = ui2.painter().layout_no_wrap(col.title().to_string(), font, color);
+            let tr = align.anchor_size(at, g.size());
+            ui2.painter().galley(tr.min, g, color);
+            if on {
+                // A small chevron beside the title: up for A→Z / smallest first.
+                let up = reversed == col.natural_desc();
+                let ax = if align == Align2::RIGHT_CENTER { tr.left() - 9.0 } else { tr.right() + 9.0 };
+                let c = pos2(ax, cell.center().y);
+                let d = if up { -1.0 } else { 1.0 };
+                let pts = vec![c + vec2(-3.5, 1.75 * d), c + vec2(0.0, -1.75 * d), c + vec2(3.5, 1.75 * d)];
+                ui2.painter().add(egui::Shape::line(pts, Stroke::new(1.4, pal.accent)));
+            }
             if resp.on_hover_text("Click to sort; again to reverse").clicked() {
                 picks.sort = Some(col);
             }
+            // Divider at this column's left edge (not before Name); dragging it resizes this column.
+            if i > 0 {
+                let line = cell.left();
+                ui2.painter().vline(line, hdr.y_range().shrink(6.0), Stroke::new(1.0, pal.hairline));
+                let grip = Rect::from_center_size(pos2(line, hdr.center().y), vec2(8.0, hdr_h));
+                let g = ui2.interact(grip, ui2.id().with(("fgrip", i)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeColumn);
+                if g.dragged() {
+                    resized = Some((col, -g.drag_delta().x));
+                }
+                if g.double_clicked() {
+                    resized = Some((col, f32::NAN));
+                }
+            }
+        }
+        if let Some((col, dx)) = resized {
+            let k = match col {
+                FSort::Size => 0,
+                FSort::Type => 1,
+                _ => 2,
+            };
+            let w = &mut self.files.prefs.col_widths[k];
+            *w = if dx.is_nan() { COL_WIDTHS[k] } else { (*w + dx).clamp(COL_MIN, 600.0) };
         }
 
         let focused = self.files.focused;
@@ -1167,8 +1453,13 @@ impl App {
         let Some(l) = t.listing.as_ref() else { return };
         let (done, error, slow, total) = (l.done, l.error.clone(), l.slow(), l.entries.len());
         if t.order.is_empty() {
-            ui2.add_space(30.0);
+            ui2.add_space((body.height() * 0.22).clamp(24.0, 120.0));
             ui2.vertical_centered(|ui| {
+                ui.spacing_mut().item_spacing.y = 8.0;
+                // A large faint symbol, then one line saying why there's nothing to show.
+                let big = |ui: &mut egui::Ui, s: &str| {
+                    ui.label(egui::RichText::new(s).size(40.0).color(style::blend(pal.paper, pal.weak, 0.45)));
+                };
                 if !done {
                     ui.spinner();
                     if slow {
@@ -1179,16 +1470,20 @@ impl App {
                         }
                     }
                 } else if let Some(e) = &error {
+                    big(ui, "⚠");
                     ui.colored_label(ui.visuals().error_fg_color, e);
                     if ui.button("Go up").clicked() {
                         picks.go = Location::Dir(dir.to_path_buf()).up();
                     }
                 } else if total > 0 && !self.files.filter.trim().is_empty() {
-                    ui.weak("Nothing here matches the filter");
+                    big(ui, "🔍");
+                    ui.label(egui::RichText::new("Nothing here matches the filter").color(pal.weak));
                 } else if total > 0 {
-                    ui.weak("Only hidden items here. Click Hidden on the toolbar to show them.");
+                    big(ui, "🗀");
+                    ui.label(egui::RichText::new("Only hidden items here. Choose View > Hidden Items to show them.").color(pal.weak));
                 } else {
-                    ui.weak("This folder is empty");
+                    big(ui, "🗀");
+                    ui.label(egui::RichText::new("This folder is empty").color(pal.weak));
                 }
             });
         } else {
@@ -1196,51 +1491,51 @@ impl App {
             let cursor_row = t.cursor.as_deref().and_then(|c| t.pos_of(c));
             let mut area = egui::ScrollArea::vertical().id_salt(("flist", dir)).auto_shrink(false);
             if let Some(r) = cursor_row.filter(|_| t.scroll_to_cursor) {
-                area = area.vertical_scroll_offset(browser::keep_in_view(t.view, r as f32 * ROW_F, ROW_F));
+                area = area.vertical_scroll_offset(browser::keep_in_view(t.view, r as f32 * row_h, row_h));
             }
             ui2.spacing_mut().item_spacing.y = 0.0;
             let vis = ui2.visuals().clone();
-            let (sel_bg, sel_fg) = if focused { (vis.selection.bg_fill, vis.selection.stroke.color) } else { (vis.widgets.active.weak_bg_fill, vis.strong_text_color()) };
+            let (sel_bg, sel_fg) = if focused { (pal.sel, pal.strong) } else { (pal.sel_dim, pal.strong) };
             let font = FontId::proportional(13.0);
             let order = &t.order;
             let colors = &self.colors;
             let color_for = |ext: &str| colors.get(ext).or_else(|| colors.get(&ext.to_lowercase())).copied().unwrap_or(Color32::GRAY);
             let mut hovered_row = None;
-            let out = area.show_rows(ui2, ROW_F, order.len(), |ui, range| {
+            let out = area.show_rows(ui2, row_h, order.len(), |ui, range| {
                 for r in range {
                     let i = order[r];
                     let e = &l.entries[i as usize];
-                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_F), Sense::click());
+                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
                     let selected = t.selected.contains(&e.name);
                     let p = ui.painter().clone();
                     if selected {
-                        p.rect_filled(rect, 3.0, sel_bg);
+                        p.rect_filled(rect.shrink2(vec2(2.0, 0.5)), style::RADIUS as f32, sel_bg);
                     } else if resp.hovered() {
-                        p.rect_filled(rect, 3.0, vis.widgets.hovered.weak_bg_fill);
+                        p.rect_filled(rect.shrink2(vec2(2.0, 0.5)), style::RADIUS as f32, pal.hover);
                     } else if r % 2 == 1 && stripes {
-                        p.rect_filled(rect, 0.0, vis.faint_bg_color);
+                        p.rect_filled(rect, 0.0, pal.stripe);
                     }
                     if focused && t.cursor.as_deref() == Some(&*e.name) && !selected {
-                        p.rect_stroke(rect.shrink(0.5), 3.0, Stroke::new(1.0, vis.selection.bg_fill), egui::StrokeKind::Inside);
+                        p.rect_stroke(rect.shrink2(vec2(2.0, 0.5)), style::RADIUS as f32, Stroke::new(1.0, pal.accent), egui::StrokeKind::Inside);
                     }
                     let faint = e.hidden;
-                    let tc = if selected { sel_fg } else if faint { vis.weak_text_color() } else { vis.text_color() };
-                    let weak = if selected { sel_fg } else { vis.weak_text_color() };
+                    let tc = if selected { sel_fg } else if faint { pal.weak } else { pal.text };
+                    let weak = if selected { sel_fg } else { pal.weak };
                     let cy = rect.center().y;
                     let mut x = rect.left();
                     for (col, w) in &cols {
-                        let cell = Rect::from_min_size(pos2(x, rect.top()), vec2(*w, ROW_F));
+                        let cell = Rect::from_min_size(pos2(x, rect.top()), vec2(*w, row_h));
                         x += w;
-                        let right = pos2(cell.right() - 8.0, cy);
+                        let right = pos2(cell.right() - 10.0, cy);
                         match col {
                             Some(FSort::Name) => {
-                                let icon = Rect::from_min_size(pos2(cell.left() + 8.0, cy - 8.0), vec2(16.0, 16.0));
+                                let icon = Rect::from_min_size(pos2(cell.left() + 10.0, cy - 8.0), vec2(16.0, 16.0));
                                 let tint = if faint { Color32::from_gray(120) } else { color_for(e.ext()) };
                                 self.icons.paint(ui, icon, e.is_dir, e.ext(), tint);
                                 if e.is_link {
                                     p.text(icon.left_bottom() + vec2(-3.0, 2.0), Align2::LEFT_BOTTOM, "↪", FontId::proportional(10.0), vis.strong_text_color());
                                 }
-                                let clip = Rect::from_min_max(pos2(cell.left() + 30.0, rect.top()), pos2(cell.right() - 6.0, rect.bottom()));
+                                let clip = Rect::from_min_max(pos2(cell.left() + 33.0, rect.top()), pos2(cell.right() - 6.0, rect.bottom()));
                                 p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &*e.name, font.clone(), tc);
                             }
                             Some(FSort::Size) => {
@@ -1330,7 +1625,9 @@ impl App {
     /// Count of items, what's selected, and how the listing is going.
     fn files_footer(&self, ui: &egui::Ui, rect: Rect) {
         let p = ui.painter();
-        p.rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
+        let pal = style::pal(ui);
+        p.rect_filled(rect, 0.0, pal.paper);
+        p.hline(rect.x_range(), rect.top() + 0.5, Stroke::new(1.0, pal.hairline));
         let t = &self.files.tabs[self.files.active];
         let Some(l) = t.listing.as_ref() else { return };
         let shown = t.order.len();
@@ -1357,25 +1654,14 @@ impl App {
         if let Some(e) = &l.error {
             text.push_str(&format!("  ·  {e}"));
         }
-        p.text(pos2(rect.left() + 10.0, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(12.0), ui.visuals().weak_text_color());
+        p.text(pos2(rect.left() + 10.0, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(12.0), pal.weak);
     }
 
-    /// The status bar: a running scan or command, the last result, or what's under the pointer.
+    /// The status bar: notices on the left, the folder, and background activity on the right.
     fn files_status(&mut self, ui: &mut egui::Ui) {
+        let pal = style::pal(ui);
         ui.horizontal(|ui| {
-            if let Some(job) = &self.job {
-                ui.spinner();
-                let files = job.progress.files.load(Ordering::Relaxed);
-                ui.label(format!("Scanning {}… {} files so far", job.root.display(), group(files)));
-                if ui.small_button("Show").on_hover_text("Switch to Storage Analysis to watch the scan").clicked() {
-                    self.files.prefs.workspace = Workspace::Analysis;
-                }
-                ui.separator();
-            } else if let Some(op) = &self.ops.job {
-                ui.spinner();
-                ui.label(format!("{}…", op.label));
-                ui.separator();
-            }
+            ui.spacing_mut().item_spacing.x = 8.0;
             if let Some((text, error)) = self.ops.notice.clone() {
                 if error {
                     ui.colored_label(ui.visuals().error_fg_color, text);
@@ -1385,11 +1671,12 @@ impl App {
                 if ui.small_button("✖").on_hover_text("Dismiss").clicked() {
                     self.ops.notice = None;
                 }
-                ui.separator();
+            } else if let Some(dir) = self.files.here().dir() {
+                ui.label(egui::RichText::new(dir.display().to_string()).size(12.0).color(pal.weak));
             }
-            if let Some(dir) = self.files.here().dir() {
-                ui.label(dir.display().to_string());
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.activity_chip(ui);
+            });
         });
     }
 
@@ -1417,7 +1704,10 @@ impl App {
             None => {}
         }
         // Shortcuts that work even while typing in the filter box.
-        let (find, path) = ctx.input_mut(|i| (i.consume_key(M::COMMAND, Key::F), i.consume_key(M::COMMAND, Key::L)));
+        let (find, path, dock) = ctx.input_mut(|i| (i.consume_key(M::COMMAND, Key::F), i.consume_key(M::COMMAND, Key::L), i.consume_key(M::COMMAND, Key::J)));
+        if dock {
+            self.files.prefs.dock.open = !self.files.prefs.dock.open;
+        }
         if find {
             self.files.focus_filter = true;
         }
@@ -1521,7 +1811,7 @@ impl App {
         let Some(act) = act else { return };
         let shift = ctx.input(|i| i.modifiers.shift);
         let now = ctx.input(|i| i.time);
-        let page = (((self.files.tabs[self.files.active].view.1 / ROW_F) as i64) - 1).max(1);
+        let page = (((self.files.tabs[self.files.active].view.1 / self.files.prefs.density.row()) as i64) - 1).max(1);
         match act {
             Do::Back => self.files.back(),
             Do::Forward => self.files.forward(),
@@ -1677,12 +1967,33 @@ impl App {
         if let Some(i) = picks.close_tab {
             self.files.close_tab(i);
         }
+        if let Some(i) = picks.close_others {
+            self.files.close_others(i);
+        }
+        if let Some((i, j)) = picks.move_tab {
+            self.files.move_tab(i, j);
+        }
         if let Some(i) = picks.switch_tab {
             self.files.switch_tab(i);
         }
         if let Some(p) = picks.unpin {
             self.files.unpin(&p);
         }
+    }
+
+    /// The list's item menu for a tile on the dock's map, run through the same commands.
+    pub(super) fn tile_menu(&mut self, ui: &mut egui::Ui, disk: &Path, is_dir: bool) {
+        let pinned = self.files.is_pinned(disk);
+        let Some(a) = item_menu(ui, is_dir, 1, pinned) else { return };
+        match a {
+            FAction::Open if is_dir => self.files.go(Location::Dir(disk.to_path_buf())),
+            FAction::Open => {
+                let p = disk.to_path_buf();
+                self.files.spawn(move || actions::open(&p));
+            }
+            a => self.files_action(a, vec![disk.to_path_buf()]),
+        }
+        ui.close();
     }
 
     fn files_action(&mut self, a: FAction, paths: Vec<PathBuf>) {
@@ -1798,7 +2109,7 @@ fn folder_menu(ui: &mut egui::Ui, pinned: bool) -> Option<FAction> {
     } else if ui.button("Pin to Sidebar").clicked() {
         out = Some(FAction::Pin);
     }
-    if ui.button("Analyse This Folder…").on_hover_text("Scan it and show it in Storage Analysis: sizes, treemap, file types").clicked() {
+    if ui.button("Analyse This Folder").on_hover_text("Scan it and show its treemap in the analysis dock, while you keep browsing").clicked() {
         out = Some(FAction::Analyse);
     }
     out
@@ -1819,27 +2130,52 @@ fn place_menu(ui: &mut egui::Ui, path: &Path, pinned: bool, picks: &mut FPicks) 
     if ui.button("Copy Path").clicked() {
         picks.menu = Some((FAction::CopyPath, vec![path.to_path_buf()]));
     }
-    if ui.button("Analyse This Folder…").clicked() {
+    if ui.button("Analyse This Folder").clicked() {
         picks.menu = Some((FAction::Analyse, vec![path.to_path_buf()]));
     }
 }
 
-/// A sidebar line: icon and label, left-aligned, highlighted when it's where we are.
+/// A sidebar line: icon and label, left-aligned. Where we are gets the selection tint and an
+/// accent bar at its left edge.
 fn side_row(ui: &mut egui::Ui, icon: &str, label: &str, on: bool, h: f32) -> egui::Response {
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::click());
-    let vis = ui.visuals();
-    if on {
-        ui.painter().rect_filled(r, 4.0, vis.selection.bg_fill);
-    } else if resp.hovered() {
-        ui.painter().rect_filled(r, 4.0, vis.widgets.hovered.weak_bg_fill);
-    }
-    let color = if on { vis.selection.stroke.color } else { vis.text_color() };
-    let cy = r.top() + ROW_F / 2.0 + if h > ROW_F { 1.0 } else { 0.0 };
+    let pal = style::pal(ui);
     let p = ui.painter();
-    p.text(pos2(r.left() + 8.0, cy), Align2::LEFT_CENTER, icon, FontId::proportional(13.0), color);
-    let clip = Rect::from_min_max(pos2(r.left() + 28.0, r.top()), pos2(r.right() - 4.0, r.bottom()));
+    if on {
+        p.rect_filled(r, style::RADIUS as f32, pal.sel);
+        p.rect_filled(Rect::from_min_size(pos2(r.left(), r.top() + 5.0), vec2(3.0, ROW_F - 10.0)), 1.5, pal.accent);
+    } else if resp.hovered() {
+        p.rect_filled(r, style::RADIUS as f32, pal.hover);
+    }
+    let color = if on { pal.strong } else { pal.text };
+    let cy = r.top() + ROW_F / 2.0;
+    p.text(pos2(r.left() + 11.0, cy), Align2::LEFT_CENTER, icon, FontId::proportional(13.0), if on { pal.accent } else { pal.weak });
+    let clip = Rect::from_min_max(pos2(r.left() + 31.0, r.top()), pos2(r.right() - 4.0, r.bottom()));
     p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, label, FontId::proportional(13.0), color);
     resp
+}
+
+/// A sidebar group: a small-caps title that folds the group away when clicked.
+fn side_section(ui: &mut egui::Ui, salt: &str, title: &str, default_open: bool, add: impl FnOnce(&mut egui::Ui)) {
+    let id = ui.id().with(salt);
+    let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(default_open);
+    ui.add_space(6.0);
+    let resp = ui
+        .horizontal(|ui| {
+            ui.add_space(6.0);
+            let t = style::section_title(ui, title);
+            let arrow = ui.add(egui::Label::new(egui::RichText::new(if open { "⏷" } else { "⏵" }).size(9.0).color(style::pal(ui).weak)).sense(Sense::click()));
+            t.union(arrow)
+        })
+        .inner;
+    if resp.on_hover_text(if open { "Click to fold away" } else { "Click to show" }).clicked() {
+        open = !open;
+        ui.data_mut(|d| d.insert_temp(id, open));
+    }
+    ui.add_space(2.0);
+    if open {
+        add(ui);
+    }
 }
 
 /// "C: (Windows)", "/home", "Backup (/media/rich/Backup)".

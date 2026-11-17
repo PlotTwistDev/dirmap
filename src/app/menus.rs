@@ -813,7 +813,7 @@ impl App {
 
     /// Put fresh copies of changed items into the tree (or take them out), keeping the
     /// selection, the zoomed folder and the open folders where they were.
-    fn apply_updates(&mut self, updates: Vec<(PathBuf, Option<Node>)>) {
+    pub(super) fn apply_updates(&mut self, updates: Vec<(PathBuf, Option<Node>)>) {
         if updates.is_empty() || self.tree.is_none() {
             return;
         }

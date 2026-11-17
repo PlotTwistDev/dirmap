@@ -28,6 +28,7 @@ const CUSTOM: &str = "src/app/custom.rs";
 const HELP: &str = "src/help/mod.rs";
 const BROWSER: &str = "src/app/browser.rs";
 const FILES: &str = "src/app/files.rs";
+const DOCK: &str = "src/app/dock.rs";
 
 const fn b(keys: &'static str, mac: &'static str, action: &'static str, source: &'static [(&'static str, &'static str)]) -> Binding {
     Binding { keys, mac, action, source }
@@ -65,6 +66,7 @@ pub const KEYBOARD: &[Group] = &[
             b("F5 or Ctrl+R", "F5 or ⌘R", "Read the folder again.", &[(FILES, "i.consume_key(M::NONE, Key::F5) || i.consume_key(M::COMMAND, Key::R)")]),
             b("Ctrl+Shift+.", "⌘⇧.", "Show or hide hidden files and folders.", &[(FILES, "i.consume_key(M::COMMAND | M::SHIFT, Key::Period)")]),
             b("Ctrl+Shift+C", "⌘⇧C", "Copy the full paths of the selected items.", &[(FILES, "i.consume_key(M::COMMAND | M::SHIFT, Key::C)")]),
+            b("Ctrl+J", "⌘J", "Show or hide the analysis dock (works while typing elsewhere too).", &[(FILES, "i.consume_key(M::COMMAND, Key::J)")]),
         ],
     },
     Group {
@@ -162,6 +164,19 @@ pub const MOUSE: &[Group] = &[
             b("Click a place or drive in the sidebar", "", "Go there. Right-click for Open in New Tab, Pin or Unpin, Copy Path and Analyse.", &[(FILES, "let resp = side_row(ui, icon, label, here == loc, ROW_F).on_hover_text(tip);"), (FILES, "place_menu(ui, &p.path, pinned, &mut picks)")]),
             b("Back / forward mouse buttons", "", "Back and Forward.", &[(FILES, "egui::PointerButton::Extra1"), (FILES, "egui::PointerButton::Extra2")]),
             b("Drag the sidebar's right edge", "", "Make the sidebar wider or narrower.", &[(FILES, "egui::Panel::left(\"places\")")]),
+            b("Drag a tab", "", "Move it along the tab strip. Right-click a tab for New Tab, Close Tab and Close Other Tabs.", &[(FILES, "picks.move_tab = Some((i, i - 1));"), (FILES, "picks.close_others = Some(i);")]),
+            b("Drag a divider between column headings", "", "Resize the column to its right. Double-click the divider to reset it.", &[(FILES, "resized = Some((col, -g.drag_delta().x));"), (FILES, "resized = Some((col, f32::NAN));")]),
+        ],
+    },
+    Group {
+        title: "Analysis dock",
+        note: "The treemap or sunburst under the list in the Files workspace. Wheel, drag and the + − Home keys work as in Storage Analysis.",
+        bindings: &[
+            b("Click a tile", "", "Select it. The item in the list that holds it is selected too.", &[(DOCK, "self.files.select_name(&first.as_os_str().to_string_lossy());")]),
+            b("Double-click a tile", "", "Open its folder in the list; the map follows.", &[(DOCK, "self.files.go(Location::Dir(disk));")]),
+            b("Right-click a tile", "", "The same menu as in the list, plus Open in List or Show in List.", &[(DOCK, "self.tile_menu(ui, &disk, is_dir);")]),
+            b("Click a file type under the map", "", "Highlight those files on the map; click again to stop.", &[(DOCK, "self.highlight_ext = if on { None } else { Some(ext.clone()) };")]),
+            b("Drag the line above the dock", "", "Give the list or the map more room.", &[(FILES, "egui::Panel::bottom(\"files-dock\")")]),
         ],
     },
     Group {

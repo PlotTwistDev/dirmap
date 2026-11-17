@@ -15,8 +15,29 @@
   - Shift and Ctrl selection.
 
   See [The Files workspace](../views/file-manager.md).
-- **Analyse This Folder** scans the folder you're in and switches to **Storage Analysis**, which is
-  the dirmap you know. **Ctrl+1** and **Ctrl+3** switch between the two, and each keeps your place.
+- **The analysis dock** (**Ctrl+J**) shows the treemap or sunburst of the folder you're in, under
+  the list. Once a folder or drive is analysed, every folder inside it shows its treemap
+  straight away as you browse, with no rescanning.
+  - **Analyse Folder** scans in the background while you keep browsing.
+  - **Refresh Analysis** rescans just one folder inside a bigger analysis.
+  - The dock can follow the open folder, follow the selected folder, or stay pinned to one
+    folder.
+  - Selecting in the list outlines the item on the map, and clicking a tile selects it in the
+    list. Tiles have the same right-click menu as the list.
+  - A line above the map shows the folder's size, file and folder counts, its largest file and
+    subfolder, and whether it has changed since it was analysed. The legend under the map
+    highlights a file type when you click it.
+
+  See [The analysis dock](../views/file-manager.md#the-analysis-dock).
+- **Storage Analysis** is still the dirmap you know, with everything in it. **Ctrl+1** and
+  **Ctrl+3** switch between the two workspaces, and each keeps your place.
+- **A new look.** It has:
+  - calmer panel colours in both themes, and one accent colour;
+  - grouped toolbar buttons;
+  - proper tabs, which you can drag to reorder;
+  - resizable columns;
+  - Comfortable or Compact rows (**View** menu);
+  - a status bar that shows background work.
 - Folder sizes from the last scan show in the Files list.
 - Big folders and slow network drives never freeze the window: folders are read in the
   background, and a share that takes a while says so and can be cancelled.
