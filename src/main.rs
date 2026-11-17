@@ -88,6 +88,7 @@ fn main() -> eframe::Result {
                 .with_title("dirmap")
                 .with_inner_size([1280.0, 820.0]),
             renderer,
+            wgpu_options: wgpu_options(),
             ..Default::default()
         };
         let all_fs = !opts.one_file_system;
@@ -139,4 +140,19 @@ fn report(root: &std::path::Path, opts: scan::Options, top: usize, save_snapshot
             Err(e) => eprintln!("\nCouldn't save the snapshot: {e}"),
         }
     }
+}
+
+/// The GPU setup. On Windows, use DirectX 12 rather than letting wgpu pick: its Vulkan path
+/// presents several frames late on many machines, so highlights trail behind the mouse.
+/// `WGPU_BACKEND` (vulkan, dx12, gl) still overrides it, for testing.
+fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    #[allow(unused_mut)]
+    let mut opts = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
+    #[cfg(windows)]
+    if std::env::var_os("WGPU_BACKEND").is_none() {
+        let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+        setup.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
+        opts.wgpu_setup = eframe::egui_wgpu::WgpuSetup::CreateNew(setup);
+    }
+    opts
 }

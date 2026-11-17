@@ -346,8 +346,14 @@ impl App {
             help: Default::default(),
             help_regions: Vec::new(),
             scan_errors: 0,
-            renderer: if cc.wgpu_render_state.is_some() {
-                "WebGPU (wgpu)"
+            renderer: if let Some(rs) = &cc.wgpu_render_state {
+                match rs.adapter.get_info().backend {
+                    eframe::wgpu::Backend::Dx12 => "WebGPU (wgpu, DirectX 12)",
+                    eframe::wgpu::Backend::Vulkan => "WebGPU (wgpu, Vulkan)",
+                    eframe::wgpu::Backend::Metal => "WebGPU (wgpu, Metal)",
+                    eframe::wgpu::Backend::Gl => "WebGPU (wgpu, OpenGL)",
+                    _ => "WebGPU (wgpu)",
+                }
             } else if cc.gl.is_some() {
                 "OpenGL (glow)"
             } else {
