@@ -38,6 +38,7 @@ mod fileops;
 mod addr;
 mod netui;
 mod preview;
+mod thumbs;
 pub(crate) mod style;
 use files::Workspace;
 

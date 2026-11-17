@@ -92,7 +92,7 @@ favourites. **↑**/**↓** choose one, **Tab** completes the name, **Enter** go
 | `\\server\share` | A Windows share, opened directly. |
 | `smb://server/share` | The same share on Windows. On a Mac or Linux, connect to it first with **Connect to Server…**. |
 | `file:///home/me` | A file URL. |
-| `>` then a word | A command, for example `>split`, `>new folder`, `>hidden`, `>connect` or `>preview`. The list shows each command with its shortcut. |
+| `>` then a word | A command, for example `>split`, `>icons`, `>new folder`, `>hidden`, `>connect` or `>preview`. The list shows each command with its shortcut. |
 | `@` then a name | Your favourites whose names match. |
 
 The path box never runs programs or shell commands. SFTP, FTP and WebDAV addresses aren't built
@@ -120,6 +120,8 @@ The **View** menu has:
 - **Reset Column Widths**;
 - **Panes**: **One Pane**, **Side by Side** or **One Above the Other**, then **Swap Panes** and
   **Same Folder in Other Pane**;
+- **☰ Details** or **⊞ Icons** for the pane you're in, and in Icons, **Sort By** and the icon
+  **Size** (see [The Icons view](#the-icons-view));
 - **Preview Pane**;
 - **Analysis Dock**.
 
@@ -174,6 +176,29 @@ The bar under the list counts the items and adds up the size of what's selected.
   wildcards, for example `*.exr` or `shot_??.png`. **Escape** clears it.
 - **View > Hidden Items** (**Ctrl+Shift+.**) shows hidden files and folders: names starting with
   a dot, and items marked hidden on Windows.
+
+## The Icons view
+
+Click **⊞** at the bottom right of the list (or choose **View > ⊞ Icons**) to see the folder as
+big icons. Images show a small picture of themselves, so you can find a render or a photo at a
+glance. **☰** goes back to Details. Each pane remembers its own choice.
+
+![The Icons view, with pictures of images and the preview pane](../images/file-manager-icons.png)
+
+- **Size.** Hold **Ctrl** (**⌘** on a Mac) and turn the mouse wheel over the icons, or pinch on a
+  trackpad, or use **View > Size**.
+- **Sorting.** There are no column headings, so use **View > Sort By**: Name, Size, Type or Date
+  modified, and **Reverse Order**.
+- **Keys.** **←** and **→** move along a row, **↑** and **↓** to the row above or below. Everything
+  else works as in Details: Shift and Ctrl to select several, **Enter** to open, **Space** for
+  Quick Look, typing a name to jump to it.
+- Clicking, dragging, dropping onto folders and the right-click menu work as in Details.
+
+Pictures are made for the same image types as the [preview](#quick-look-and-the-preview-pane),
+including OpenEXR and HDR, in the background and only for the icons on screen. Scrolling quickly
+through thousands of images never freezes the window, and dirmap keeps the pictures within a
+fixed amount of memory, dropping the ones you haven't seen for a while. A file that can't be
+read shows its type's icon instead.
 
 ## Right-click menu
 

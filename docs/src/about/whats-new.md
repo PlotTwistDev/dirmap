@@ -29,6 +29,9 @@
 - **Quick Look and a preview pane.** Press **Space** for a large preview, or **Alt+P** for a
   preview pane, with zoom and pan. Images (including OpenEXR and HDR) and text files. See
   [Quick Look and the preview pane](../views/file-manager.md#quick-look-and-the-preview-pane).
+- **The Icons view.** Click **⊞** at the bottom right of the list for big icons, with pictures of
+  images (OpenEXR and HDR too). **Ctrl+wheel** changes the size. See
+  [The Icons view](../views/file-manager.md#the-icons-view).
 - **A smarter address bar.** Suggestions as you type, **Tab** completion, `%VAR%` and `$VAR`,
   `>` for commands and `@` for favourites. Each part of the path takes drops and has a menu of
   the folders inside it. See [Typing a path](../views/file-manager.md#typing-a-path).

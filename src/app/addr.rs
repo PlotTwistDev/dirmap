@@ -37,6 +37,7 @@ pub(super) enum Cmd {
     NewTab,
     SplitView,
     SwapPanes,
+    IconsView,
     PreviewPane,
     HiddenItems,
     AnalysisDock,
@@ -49,11 +50,12 @@ pub(super) enum Cmd {
 }
 
 impl Cmd {
-    const ALL: [Cmd; 13] = [
+    const ALL: [Cmd; 14] = [
         Cmd::NewFolder,
         Cmd::NewTab,
         Cmd::SplitView,
         Cmd::SwapPanes,
+        Cmd::IconsView,
         Cmd::PreviewPane,
         Cmd::HiddenItems,
         Cmd::AnalysisDock,
@@ -71,6 +73,7 @@ impl Cmd {
             Cmd::NewTab => "New Tab",
             Cmd::SplitView => "Split View: one or two panes",
             Cmd::SwapPanes => "Swap Panes",
+            Cmd::IconsView => "Icons or Details View",
             Cmd::PreviewPane => "Preview Pane",
             Cmd::HiddenItems => "Show or Hide Hidden Items",
             Cmd::AnalysisDock => "Analysis Dock",
@@ -617,6 +620,10 @@ impl App {
             }
             Cmd::SplitView => self.toggle_split(),
             Cmd::SwapPanes => self.files.swap_panes(),
+            Cmd::IconsView => {
+                let p = self.files.pane_mut();
+                p.view = if p.view == files::FView::Icons { files::FView::Details } else { files::FView::Icons };
+            }
             Cmd::PreviewPane => self.files.prefs.preview = !self.files.prefs.preview,
             Cmd::HiddenItems => self.files.prefs.show_hidden = !self.files.prefs.show_hidden,
             Cmd::AnalysisDock => self.files.prefs.dock.open = !self.files.prefs.dock.open,
@@ -626,7 +633,7 @@ impl App {
                 }
             }
             Cmd::StorageAnalysis => self.set_workspace(files::Workspace::Analysis),
-            Cmd::ConnectServer => self.files.connect = Some(Default::default()),
+            Cmd::ConnectServer => self.files.connect = Some(super::netui::ConnectBox { remember: true, save: true, fresh: true, ..Default::default() }),
             Cmd::TemplatesFolder => self.open_templates_folder(),
             Cmd::Settings => self.dialog.open(&self.settings),
             Cmd::Help => self.help.show_topic(crate::help::topics::FILE_MANAGER),

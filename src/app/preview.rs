@@ -96,14 +96,21 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
 }
 
 fn load_image(path: &Path, linear: bool, size: u64) -> Content {
-    if size > IMAGE_MAX_FILE {
-        return Content::Error(format!("Too big to preview ({}).", crate::scan::human(size)));
+    match decode_image(path, linear, size, SHOW_MAX) {
+        Ok((pixels, size, info)) => Content::Image { pixels: Some(pixels), tex: None, size, info },
+        Err(e) => Content::Error(e),
     }
-    let reader = match image::ImageReader::open(path).and_then(|r| r.with_guessed_format()) {
-        Ok(r) => r,
-        Err(e) => return Content::Error(format!("Couldn't open it: {e}")),
-    };
-    let mut reader = reader;
+}
+
+/// Decode an image file for display, no larger than `max` pixels across: the pixels, the full
+/// size and a description of the pixel format. Linear-light and float images go through the sRGB
+/// curve. Big files and huge dimensions are refused rather than risk the memory. Runs on worker
+/// threads (previews and thumbnails).
+pub(super) fn decode_image(path: &Path, linear: bool, size: u64, max: u32) -> Result<(egui::ColorImage, [u32; 2], String), String> {
+    if size > IMAGE_MAX_FILE {
+        return Err(format!("Too big to preview ({}).", crate::scan::human(size)));
+    }
+    let mut reader = image::ImageReader::open(path).and_then(|r| r.with_guessed_format()).map_err(|e| format!("Couldn't open it: {e}"))?;
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(16_384);
     limits.max_image_height = Some(16_384);
@@ -111,12 +118,12 @@ fn load_image(path: &Path, linear: bool, size: u64) -> Content {
     reader.limits(limits);
     let img = match reader.decode() {
         Ok(i) => i,
-        Err(image::ImageError::Limits(_)) => return Content::Error("Too large to preview safely.".into()),
-        Err(e) => return Content::Error(format!("Couldn't read the image: {e}")),
+        Err(image::ImageError::Limits(_)) => return Err("Too large to preview safely.".into()),
+        Err(e) => return Err(format!("Couldn't read the image: {e}")),
     };
     let (w, h) = (img.width(), img.height());
     let info = describe(img.color());
-    let small = if w > SHOW_MAX || h > SHOW_MAX { img.thumbnail(SHOW_MAX, SHOW_MAX) } else { img };
+    let small = if w > max || h > max { img.thumbnail(max, max) } else { img };
     let pixels = if linear || matches!(small.color(), image::ColorType::Rgb32F | image::ColorType::Rgba32F) {
         // Scene-linear floats: through the sRGB transfer curve for display.
         let f = small.to_rgba32f();
@@ -133,7 +140,7 @@ fn load_image(path: &Path, linear: bool, size: u64) -> Content {
         egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw())
     };
     let info = if linear { format!("{info} · linear, shown as sRGB") } else { info };
-    Content::Image { pixels: Some(pixels), tex: None, size: [w, h], info }
+    Ok((pixels, [w, h], info))
 }
 
 /// Linear light to the sRGB display curve.

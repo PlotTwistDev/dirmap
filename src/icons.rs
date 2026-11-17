@@ -29,6 +29,18 @@ impl Icons {
     }
 }
 
+impl Icons {
+    /// Draw a big icon (the Icons view). The system's icons are only 32 pixels, so above 48 the
+    /// drawn icon is used instead, which stays sharp at any size.
+    pub fn paint_big(&mut self, ui: &egui::Ui, rect: Rect, is_dir: bool, ext: &str, tint: Color32) {
+        if rect.height() <= 48.0 {
+            self.paint(ui, rect, is_dir, ext, tint);
+        } else {
+            paint_glyph(ui.painter(), rect, is_dir, ext, tint);
+        }
+    }
+}
+
 /// Fallback icons: a manila folder, or a page with a folded corner in the extension's color.
 /// Drawn in proportion, so they work from list size (16 px) up to the Files view's big icons,
 /// where the page also carries the extension.

@@ -287,3 +287,39 @@ Stages 1 to 7 are this round, ending with a review with Rich before Phase 3b.
 - The scan benchmark, unchanged.
 - Under Xvfb: the workflow for each stage, with screenshots for the manual.
 - The Help Centre pages and the keyboard and mouse reference are updated with the code.
+
+## 7. Tracker
+
+The living list of what's done and what's left. Update it in the same change as the code.
+Status: ✅ done · 🔨 in progress · ⬜ not started. "Win" means checked on Windows itself.
+
+| # | Item | Phase | Tier | Status | Notes |
+|---|---|---|---|---|---|
+| 1 | Copy, cut, paste, rename, Recycle Bin, delete in Files | 1 | Essential | ✅ | Recycle Bin not yet checked on Win |
+| 2 | Drag and drop everywhere, Move/Copy by volume with label | 1 | Essential | ✅ | |
+| 3 | Favourites: drag to add, groups, reorder, rename | 2 | Essential | ✅ | |
+| 4 | Split panes, Tab, Shift+F5/F6, swap, divider | 3 | Essential | ✅ | |
+| 5 | Address bar: suggestions, Tab, variables, crumb menus and drops, `>`, `@` | 4 | Essential | ✅ | |
+| 6 | Quick Look and preview pane: images (EXR, HDR), text | 5 | Essential | ✅ | |
+| 7 | New menu: folder, starter files, scripts, user templates | 6 | Advanced | ✅ | |
+| 8 | Network & Remote: mapped drives, mounts, Connect to Server (SMB), disconnect | 7 | Essential | ✅ | Not yet checked on Win |
+| 9 | Icons view with thumbnails in Files | 3b | Essential | ✅ | Per pane; Ctrl+wheel size; EXR/HDR thumbs; Windows shell icons are 32 px so big icons are drawn |
+| 10 | Gallery and column views in Files | 3b | Advanced | 🔨 | Next |
+| 11 | Grouping (by type, date, size) | 3b | Advanced | ⬜ | |
+| 12 | Remembered view per folder | 3b | Advanced | ⬜ | |
+| 13 | Audio, video and PDF previews | 3b | Advanced | ⬜ | |
+| 14 | Undo for file operations | 3b | Advanced | ⬜ | |
+| 15 | Conflict choices (Replace, Keep Both, Skip), pause, transfer queue | 3b | Advanced | ⬜ | |
+| 16 | Notice changes made by other apps (file watching) | 3b | Advanced | ⬜ | Today: F5 |
+| 17 | SFTP connection manager, keychain, host key checks | 4 | Advanced | ⬜ | |
+| 18 | FTP(S) (flagged insecure) and WebDAV | 4 | Specialist | ⬜ | |
+| 19 | Analysing remote folders | 4 | Specialist | ⬜ | |
+| 20 | Image sequence grouping in Files | 5 | Specialist | ⬜ | |
+| 21 | RAM sequence player: cache, timeline, A/B | 5 | Specialist | ⬜ | |
+| 22 | DPX decode, OCIO colour | 5 | Specialist | ⬜ | |
+| 23 | Batch rename | 6 | Advanced | ⬜ | |
+| 24 | Folder compare and sync preview | 6 | Advanced | ⬜ | |
+| 25 | Search scopes and saved searches | 6 | Advanced | ⬜ | |
+| 26 | Folder colours, tags and notes | 6 | Specialist | ⬜ | |
+| 27 | App launcher and Open With favourites | 6 | Specialist | ⬜ | |
+| 28 | Keyboard move between sidebar and list | — | Advanced | ⬜ | |

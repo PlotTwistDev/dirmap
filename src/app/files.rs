@@ -87,6 +87,9 @@ pub(super) struct FilesPrefs {
     /// The preview pane at the right.
     pub preview: bool,
     pub preview_width: f32,
+    /// The first pane's view (the second pane's is in `second`), and the Icons view's size.
+    pub view: FView,
+    pub icon_size: f32,
 }
 
 /// Row height in the list and sidebar.
@@ -133,6 +136,8 @@ impl Default for FilesPrefs {
             second: PaneSave::default(),
             preview: false,
             preview_width: 300.0,
+            view: FView::Details,
+            icon_size: 96.0,
         }
     }
 }
@@ -262,6 +267,20 @@ pub(super) enum Split {
     Horizontal,
 }
 
+/// How a pane shows a folder.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+pub(super) enum FView {
+    /// Rows with Name, Size, Type and Date modified columns.
+    #[default]
+    Details,
+    /// A grid of big icons, with thumbnails of images.
+    Icons,
+}
+
+/// Icon sizes in the Icons view, smallest and largest (Ctrl+wheel changes it).
+pub(super) const ICON_MIN: f32 = 48.0;
+pub(super) const ICON_MAX: f32 = 256.0;
+
 /// What's remembered of the second pane.
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -270,6 +289,7 @@ pub(super) struct PaneSave {
     pub active: usize,
     pub sort: FSort,
     pub reversed: bool,
+    pub view: FView,
 }
 
 /// One side of the window: its tabs, sort and filter.
@@ -280,16 +300,19 @@ pub(super) struct Pane {
     pub(super) reversed: bool,
     /// Show only items whose names contain this (or match it, with * or ?).
     pub(super) filter: String,
+    pub(super) view: FView,
+    /// The Icons view's grid last frame: (icons per row, row height), for the arrow keys.
+    pub(super) grid: (usize, f32),
 }
 
 impl Pane {
-    fn new(tabs: &[Location], active: usize, sort: FSort, reversed: bool) -> Self {
+    fn new(tabs: &[Location], active: usize, sort: FSort, reversed: bool, view: FView) -> Self {
         let mut tabs: Vec<FTab> = tabs.iter().cloned().map(FTab::new).collect();
         if tabs.is_empty() {
             tabs.push(FTab::new(places::home().map(Location::Dir).unwrap_or(Location::Computer)));
         }
         let active = active.min(tabs.len() - 1);
-        Self { tabs, active, sort, reversed, filter: String::new() }
+        Self { tabs, active, sort, reversed, filter: String::new(), view, grid: (1, 100.0) }
     }
 
     pub(super) fn tab(&self) -> &FTab {
@@ -301,7 +324,7 @@ impl Pane {
     }
 
     fn save(&self) -> PaneSave {
-        PaneSave { tabs: self.tabs.iter().map(|t| t.here().clone()).collect(), active: self.active, sort: self.sort, reversed: self.reversed }
+        PaneSave { tabs: self.tabs.iter().map(|t| t.here().clone()).collect(), active: self.active, sort: self.sort, reversed: self.reversed, view: self.view }
     }
 }
 
@@ -349,15 +372,17 @@ pub(super) struct Files {
     pub(super) connect: Option<netui::ConnectBox>,
     pub(super) net_jobs: Vec<mpsc::Receiver<Result<Option<PathBuf>, String>>>,
     pub(super) net_asked: bool,
+    /// Thumbnails for the Icons view.
+    pub(super) thumbs: thumbs::Thumbs,
 }
 
 impl Files {
     pub fn new(mut prefs: FilesPrefs) -> Self {
-        let first = Pane::new(&prefs.tabs, prefs.active, prefs.sort, prefs.reversed);
+        let first = Pane::new(&prefs.tabs, prefs.active, prefs.sort, prefs.reversed, prefs.view);
         let mut panes = vec![first];
         if prefs.split != Split::Single {
             let s = &prefs.second;
-            panes.push(Pane::new(&s.tabs, s.active, s.sort, s.reversed));
+            panes.push(Pane::new(&s.tabs, s.active, s.sort, s.reversed, s.view));
         }
         favs::migrate(&mut prefs);
         // The standard places are in the user's profile, but a profile folder can be
@@ -394,6 +419,7 @@ impl Files {
             connect: None,
             net_jobs: Vec::new(),
             net_asked: false,
+            thumbs: Default::default(),
         }
     }
 
@@ -405,6 +431,7 @@ impl Files {
         p.active = first.active;
         p.sort = first.sort;
         p.reversed = first.reversed;
+        p.view = first.view;
         if let Some(second) = self.panes.get(1) {
             p.second = second.save();
         }
@@ -452,9 +479,9 @@ impl Files {
             let s = self.prefs.second.clone();
             let mut p = if s.tabs.is_empty() {
                 let here = self.here().clone();
-                Pane::new(&[here], 0, self.pane().sort, self.pane().reversed)
+                Pane::new(&[here], 0, self.pane().sort, self.pane().reversed, self.pane().view)
             } else {
-                Pane::new(&s.tabs, s.active, s.sort, s.reversed)
+                Pane::new(&s.tabs, s.active, s.sort, s.reversed, s.view)
             };
             p.filter.clear();
             self.panes.push(p);
@@ -1000,6 +1027,30 @@ impl App {
                 same = true;
             }
             ui.separator();
+            ui.weak(if two { "This pane" } else { "Layout" });
+            let pane = self.files.pane_mut();
+            for (v, label, tip) in [(FView::Details, "☰ Details", "Rows with size, type and date"), (FView::Icons, "⊞ Icons", "Big icons, with pictures of images")] {
+                if ui.add(egui::Button::selectable(pane.view == v, label)).on_hover_text(tip).clicked() {
+                    pane.view = v;
+                }
+            }
+            if pane.view == FView::Icons {
+                ui.menu_button("Sort By", |ui| {
+                    for col in [FSort::Name, FSort::Size, FSort::Type, FSort::Modified] {
+                        if ui.add(egui::Button::selectable(pane.sort == col, col.title())).clicked() {
+                            pane.sort = col;
+                        }
+                    }
+                    ui.separator();
+                    if ui.add(egui::Button::selectable(pane.reversed, "Reverse Order")).clicked() {
+                        pane.reversed = !pane.reversed;
+                    }
+                });
+                let size = &mut self.files.prefs.icon_size;
+                ui.add(egui::Slider::new(size, ICON_MIN..=ICON_MAX).text("Size").show_value(false))
+                    .on_hover_text(format!("Or hold {} and turn the mouse wheel over the icons", if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" }));
+            }
+            ui.separator();
             let p = &mut self.files.prefs;
             if ui.add(egui::Button::selectable(p.preview, "Preview Pane").shortcut_text(k(egui::Modifiers::ALT, egui::Key::P))).clicked() {
                 p.preview = !p.preview;
@@ -1026,7 +1077,7 @@ impl App {
             }
         })
         .response
-        .on_hover_text("Panes, preview, hidden items, row size, columns and the analysis dock");
+        .on_hover_text("Panes, Details or Icons, preview, hidden items, row size, columns and the analysis dock");
         if let Some(s) = split_to {
             if s != Split::Single {
                 self.files.prefs.last_split = s;
@@ -1072,6 +1123,9 @@ impl App {
 
     /// Start listings, collect them, re-sort, and gather results of background commands.
     fn files_poll(&mut self, ctx: &egui::Context) {
+        // Thumbnails asked for while drawing last frame, then any that are ready.
+        self.files.thumbs.flush();
+        self.files.thumbs.poll(ctx);
         if let Some(rx) = &self.files.places_rx {
             if let Ok(p) = rx.try_recv() {
                 self.files.places = p;
@@ -1637,65 +1691,68 @@ impl App {
         child.set_clip_rect(body.intersect(ui.clip_rect()));
         let ui2 = &mut child;
 
-        // Headings, with dividers you can drag to resize the column to their right.
-        let hdr_h = 26.0;
-        let (hdr, _) = ui2.allocate_exact_size(vec2(width, hdr_h), Sense::hover());
-        ui2.painter().hline(hdr.x_range(), hdr.bottom() - 0.5, Stroke::new(1.0, pal.hairline));
-        let mut x = hdr.left();
-        let (sort, reversed) = (self.files.pane().sort, self.files.pane().reversed);
-        let mut resized = None;
-        for (i, (col, w)) in cols.iter().enumerate() {
-            let cell = Rect::from_min_size(pos2(x, hdr.top()), vec2(*w, hdr_h));
-            x += w;
-            let Some(col) = *col else { continue };
-            let resp = ui2.interact(cell, ui2.id().with(("fhdr", i)), Sense::click());
-            let on = col == sort;
-            if resp.hovered() {
-                ui2.painter().rect_filled(cell.shrink2(vec2(1.0, 3.0)), style::RADIUS as f32, pal.hover);
-            }
-            let color = if resp.hovered() || on { pal.strong } else { pal.weak };
-            let font = FontId::proportional(12.0);
-            let (at, align) = match col {
-                FSort::Size => (pos2(cell.right() - 10.0, cell.center().y), Align2::RIGHT_CENTER),
-                _ => (pos2(cell.left() + if col == FSort::Name { 10.0 } else { 8.0 }, cell.center().y), Align2::LEFT_CENTER),
-            };
-            let g = ui2.painter().layout_no_wrap(col.title().to_string(), font, color);
-            let tr = align.anchor_size(at, g.size());
-            ui2.painter().galley(tr.min, g, color);
-            if on {
-                // A small chevron beside the title: up for A→Z / smallest first.
-                let up = reversed == col.natural_desc();
-                let ax = if align == Align2::RIGHT_CENTER { tr.left() - 9.0 } else { tr.right() + 9.0 };
-                let c = pos2(ax, cell.center().y);
-                let d = if up { -1.0 } else { 1.0 };
-                let pts = vec![c + vec2(-3.5, 1.75 * d), c + vec2(0.0, -1.75 * d), c + vec2(3.5, 1.75 * d)];
-                ui2.painter().add(egui::Shape::line(pts, Stroke::new(1.4, pal.accent)));
-            }
-            if resp.on_hover_text("Click to sort; again to reverse").clicked() {
-                picks.sort = Some(col);
-            }
-            // Divider at this column's left edge (not before Name); dragging it resizes this column.
-            if i > 0 {
-                let line = cell.left();
-                ui2.painter().vline(line, hdr.y_range().shrink(6.0), Stroke::new(1.0, pal.hairline));
-                let grip = Rect::from_center_size(pos2(line, hdr.center().y), vec2(8.0, hdr_h));
-                let g = ui2.interact(grip, ui2.id().with(("fgrip", i)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeColumn);
-                if g.dragged() {
-                    resized = Some((col, -g.drag_delta().x));
+        let view = self.files.pane().view;
+        if view == FView::Details {
+            // Headings, with dividers you can drag to resize the column to their right.
+            let hdr_h = 26.0;
+            let (hdr, _) = ui2.allocate_exact_size(vec2(width, hdr_h), Sense::hover());
+            ui2.painter().hline(hdr.x_range(), hdr.bottom() - 0.5, Stroke::new(1.0, pal.hairline));
+            let mut x = hdr.left();
+            let (sort, reversed) = (self.files.pane().sort, self.files.pane().reversed);
+            let mut resized = None;
+            for (i, (col, w)) in cols.iter().enumerate() {
+                let cell = Rect::from_min_size(pos2(x, hdr.top()), vec2(*w, hdr_h));
+                x += w;
+                let Some(col) = *col else { continue };
+                let resp = ui2.interact(cell, ui2.id().with(("fhdr", i)), Sense::click());
+                let on = col == sort;
+                if resp.hovered() {
+                    ui2.painter().rect_filled(cell.shrink2(vec2(1.0, 3.0)), style::RADIUS as f32, pal.hover);
                 }
-                if g.double_clicked() {
-                    resized = Some((col, f32::NAN));
+                let color = if resp.hovered() || on { pal.strong } else { pal.weak };
+                let font = FontId::proportional(12.0);
+                let (at, align) = match col {
+                    FSort::Size => (pos2(cell.right() - 10.0, cell.center().y), Align2::RIGHT_CENTER),
+                    _ => (pos2(cell.left() + if col == FSort::Name { 10.0 } else { 8.0 }, cell.center().y), Align2::LEFT_CENTER),
+                };
+                let g = ui2.painter().layout_no_wrap(col.title().to_string(), font, color);
+                let tr = align.anchor_size(at, g.size());
+                ui2.painter().galley(tr.min, g, color);
+                if on {
+                    // A small chevron beside the title: up for A→Z / smallest first.
+                    let up = reversed == col.natural_desc();
+                    let ax = if align == Align2::RIGHT_CENTER { tr.left() - 9.0 } else { tr.right() + 9.0 };
+                    let c = pos2(ax, cell.center().y);
+                    let d = if up { -1.0 } else { 1.0 };
+                    let pts = vec![c + vec2(-3.5, 1.75 * d), c + vec2(0.0, -1.75 * d), c + vec2(3.5, 1.75 * d)];
+                    ui2.painter().add(egui::Shape::line(pts, Stroke::new(1.4, pal.accent)));
+                }
+                if resp.on_hover_text("Click to sort; again to reverse").clicked() {
+                    picks.sort = Some(col);
+                }
+                // Divider at this column's left edge (not before Name); dragging it resizes this column.
+                if i > 0 {
+                    let line = cell.left();
+                    ui2.painter().vline(line, hdr.y_range().shrink(6.0), Stroke::new(1.0, pal.hairline));
+                    let grip = Rect::from_center_size(pos2(line, hdr.center().y), vec2(8.0, hdr_h));
+                    let g = ui2.interact(grip, ui2.id().with(("fgrip", i)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeColumn);
+                    if g.dragged() {
+                        resized = Some((col, -g.drag_delta().x));
+                    }
+                    if g.double_clicked() {
+                        resized = Some((col, f32::NAN));
+                    }
                 }
             }
-        }
-        if let Some((col, dx)) = resized {
-            let k = match col {
-                FSort::Size => 0,
-                FSort::Type => 1,
-                _ => 2,
-            };
-            let w = &mut self.files.prefs.col_widths[k];
-            *w = if dx.is_nan() { COL_WIDTHS[k] } else { (*w + dx).clamp(COL_MIN, 600.0) };
+            if let Some((col, dx)) = resized {
+                let k = match col {
+                    FSort::Size => 0,
+                    FSort::Type => 1,
+                    _ => 2,
+                };
+                let w = &mut self.files.prefs.col_widths[k];
+                *w = if dx.is_nan() { COL_WIDTHS[k] } else { (*w + dx).clamp(COL_MIN, 600.0) };
+            }
         }
 
         let focused = self.files.focused && pane_focused;
@@ -1737,6 +1794,8 @@ impl App {
                     ui.label(egui::RichText::new("This folder is empty").color(pal.weak));
                 }
             });
+        } else if view == FView::Icons {
+            self.icons_grid(ui2, pane, focused, dir, picks);
         } else {
             let sizes = t.sizes.as_ref().map(|s| &s.1);
             let cursor_row = t.cursor.as_deref().and_then(|c| t.pos_of(c));
@@ -1822,45 +1881,9 @@ impl App {
                     if resp.hovered() {
                         hovered_row = Some(i);
                     }
-                    if resp.double_clicked() {
-                        picks.open = Some(i);
-                    } else if resp.clicked() {
-                        picks.select = Some((i, ui.input(|inp| inp.modifiers)));
-                    } else if resp.secondary_clicked() && !selected {
-                        picks.select = Some((i, egui::Modifiers::NONE));
-                    }
-                    if resp.middle_clicked() && e.is_dir {
-                        picks.new_tab = Some(Location::Dir(dir.join(&*e.name)));
-                    }
-                    let tip_dir = e.is_dir.then(|| sizes.and_then(|s| s.get(&e.name)).copied()).flatten();
-                    let resp = if let Some((bytes, files)) = tip_dir {
-                        resp.on_hover_text_at_pointer(format!("{}: {} in {} files (from the last scan)", e.name, scan::human(bytes), group(files)))
-                    } else {
-                        resp
-                    };
-                    let count = if selected { t.selected.len() } else { 1 };
-                    let path = dir.join(&*e.name);
-                    let is_dir = e.is_dir;
-                    // Drag what's selected (or just this row, if it isn't).
-                    if resp.drag_started() {
-                        let (items, dirs): (Vec<PathBuf>, Vec<bool>) = if selected {
-                            order.iter().map(|&k| &l.entries[k as usize]).filter(|x| t.selected.contains(&x.name)).map(|x| (dir.join(&*x.name), x.is_dir)).unzip()
-                        } else {
-                            (vec![path.clone()], vec![is_dir])
-                        };
-                        egui::DragAndDrop::set_payload(ui.ctx(), dnd::DragItems(items, dirs));
-                    }
-                    if is_dir {
-                        rows_drop.push((resp.clone(), path.clone()));
-                    }
-                    let pinned = self.files.is_pinned(&path);
-                    let ctx_menu = RowMenu { is_dir, count, pinned, two: two_panes, can_paste };
-                    resp.context_menu(|ui| {
-                        if let Some(a) = item_menu(ui, &ctx_menu) {
-                            let paths = if selected { t.chosen_paths() } else { vec![path.clone()] };
-                            picks.menu = Some((a, paths));
-                        }
-                    });
+                    let pinned = e.is_dir && self.files.is_pinned(&dir.join(&*e.name));
+                    let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste };
+                    item_actions(ui, resp, i, &ic, pinned, picks, &mut rows_drop);
                 }
             });
             let _ = hovered_row;
@@ -1916,12 +1939,132 @@ impl App {
         if let Some(p) = new_pick {
             picks.new_item = Some((p, here.clone()));
         }
-        self.files_footer(ui, footer, pane);
+        // Details or Icons, at the right of the footer as in Explorer.
+        let reserve = 52.0;
+        self.files_footer(ui, footer, pane, reserve);
+        let mut x = footer.right() - reserve - 4.0;
+        for (v, glyph, tip) in [(FView::Details, "☰", "Details"), (FView::Icons, "⊞", "Icons")] {
+            let r = Rect::from_min_size(pos2(x + 4.0, footer.top() + 2.0), vec2(22.0, footer_h - 4.0));
+            x += 26.0;
+            let on = self.files.panes[pane].view == v;
+            let resp = ui.interact(r, ui.id().with(("fview", pane, glyph)), Sense::click()).on_hover_text(tip);
+            let pal = style::pal(ui);
+            if on || resp.hovered() {
+                ui.painter().rect_filled(r, style::RADIUS as f32, if on { pal.sel } else { pal.hover });
+            }
+            ui.painter().text(r.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(13.0), if on { pal.strong } else { pal.weak });
+            if resp.clicked() {
+                self.files.panes[pane].view = v;
+            }
+        }
         ui.allocate_rect(Rect::from_min_max(body.min, footer.max), Sense::hover());
     }
 
+    /// The Icons view: a grid of big icons, images showing their thumbnails, names under them.
+    /// Clicks, drags and menus work as in Details. Ctrl+wheel (⌘ on a Mac) changes the size.
+    fn icons_grid(&mut self, ui: &mut egui::Ui, pane: usize, focused: bool, dir: &Path, picks: &mut FPicks) {
+        let pal = style::pal(ui);
+        // Ctrl+wheel or a pinch over the grid: bigger or smaller icons.
+        if ui.rect_contains_pointer(ui.max_rect()) {
+            let z = ui.input(|i| i.zoom_delta());
+            if z != 1.0 {
+                let s = &mut self.files.prefs.icon_size;
+                *s = (*s * z).clamp(ICON_MIN, ICON_MAX);
+            }
+        }
+        let size = self.files.prefs.icon_size.clamp(ICON_MIN, ICON_MAX).round();
+        let width = (ui.available_width() - 8.0).max(1.0);
+        let min_w = (size + 28.0).max(116.0);
+        let cols = ((width / min_w).floor() as usize).max(1);
+        let cell_w = width / cols as f32;
+        let cell_h = size + 52.0;
+        self.files.panes[pane].grid = (cols, cell_h);
+        let can_paste = self.can_paste();
+        let two_panes = self.files.panes.len() > 1;
+        let files = &mut self.files;
+        let (panes, thumb_cache, favourites) = (&files.panes, &mut files.thumbs, &files.prefs.favourites);
+        let icons = &mut self.icons;
+        let t = panes[pane].tab();
+        let Some(l) = t.listing.as_ref() else { return };
+        let n = t.order.len();
+        let rows = n.div_ceil(cols);
+        let sizes = t.sizes.as_ref().map(|s| &s.1);
+        let cursor = t.cursor.as_deref().and_then(|c| t.pos_of(c));
+        let mut area = egui::ScrollArea::vertical().id_salt(("fgrid", pane, dir)).auto_shrink(false);
+        if let Some(r) = cursor.filter(|_| t.scroll_to_cursor) {
+            area = area.vertical_scroll_offset(browser::keep_in_view(t.view, (r / cols) as f32 * cell_h, cell_h));
+        }
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        let (sel_bg, sel_fg) = if focused { (pal.sel, pal.strong) } else { (pal.sel_dim, pal.strong) };
+        let colors = &self.colors;
+        let color_for = |ext: &str| colors.get(ext).or_else(|| colors.get(&ext.to_lowercase())).copied().unwrap_or(Color32::GRAY);
+        let mut drops: Vec<(egui::Response, PathBuf)> = Vec::new();
+        let out = area.show_rows(ui, cell_h, rows, |ui, range| {
+            for row in range {
+                let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), cell_h), Sense::hover());
+                for c in 0..cols {
+                    let k = row * cols + c;
+                    if k >= n {
+                        break;
+                    }
+                    let i = t.order[k];
+                    let e = &l.entries[i as usize];
+                    let cell = Rect::from_min_size(pos2(line.left() + 4.0 + c as f32 * cell_w, line.top()), vec2(cell_w, cell_h)).shrink(3.0);
+                    let resp = ui.interact(cell, ui.id().with(("fcell", k)), Sense::click_and_drag());
+                    let selected = t.selected.contains(&e.name);
+                    let p = ui.painter().clone();
+                    if selected {
+                        p.rect_filled(cell, style::RADIUS as f32 + 2.0, sel_bg);
+                    } else if resp.hovered() {
+                        p.rect_filled(cell, style::RADIUS as f32 + 2.0, pal.hover);
+                    }
+                    if focused && cursor == Some(k) && !selected {
+                        p.rect_stroke(cell, style::RADIUS as f32 + 2.0, Stroke::new(1.0, pal.accent), egui::StrokeKind::Inside);
+                    }
+                    // The picture: a thumbnail for images once it's ready, else the type's icon.
+                    let pic = Rect::from_center_size(pos2(cell.center().x, cell.top() + 6.0 + size / 2.0), vec2(size, size));
+                    let path = dir.join(&*e.name);
+                    let thumb = if !e.is_dir && thumbs::wants_thumb(&e.name) { thumb_cache.get(&path, thumbs::stamp(e.size, e.modified), e.size).map(|t| (t.id(), t.size_vec2())) } else { None };
+                    if let Some((id, tsize)) = thumb {
+                        let scale = (size / tsize.x).min(size / tsize.y).min(2.0);
+                        let r = Rect::from_center_size(pic.center(), tsize * scale);
+                        p.rect_filled(r.expand(1.0), 2.0, pal.hairline);
+                        p.image(id, r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                    } else {
+                        let faint = e.hidden;
+                        let tint = if faint { Color32::from_gray(120) } else { color_for(e.ext()) };
+                        icons.paint_big(ui, Rect::from_center_size(pic.center(), vec2(size * 0.8, size * 0.8)), e.is_dir, e.ext(), tint);
+                    }
+                    if e.is_link {
+                        p.text(pic.left_bottom() + vec2(size * 0.1, -2.0), Align2::LEFT_BOTTOM, "↪", FontId::proportional(14.0), pal.strong);
+                    }
+                    // The name: up to two lines, centred, shortened with … when longer.
+                    let tc = if selected { sel_fg } else if e.hidden { pal.weak } else { pal.text };
+                    let mut job = egui::text::LayoutJob::simple(e.name.to_string(), FontId::proportional(12.5), tc, cell.width() - 10.0);
+                    job.wrap.max_rows = 2;
+                    job.wrap.break_anywhere = true;
+                    job.halign = egui::Align::Center;
+                    let g = ui.fonts_mut(|f| f.layout_job(job));
+                    p.galley(pos2(cell.center().x, pic.bottom() + 6.0), g, tc);
+                    let pinned = e.is_dir && favourites.iter().any(|g| g.items.iter().any(|f| f.path == path));
+                    let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste };
+                    let resp = resp.on_hover_text_at_pointer(if e.is_dir { e.name.to_string() } else { format!("{}\n{}", e.name, scan::human(e.size)) });
+                    item_actions(ui, resp, i, &ic, pinned, picks, &mut drops);
+                }
+            }
+        });
+        for (resp, p) in drops {
+            if let Some(d) = self.folder_drop(ui, &resp, &p) {
+                picks.drop = Some(d);
+            }
+        }
+        let t = self.files.panes[pane].tab_mut();
+        t.view = (out.state.offset.y, out.inner_rect.height());
+        t.scroll_to_cursor = false;
+    }
+
     /// Count of items, what's selected, and how the listing is going.
-    fn files_footer(&self, ui: &egui::Ui, rect: Rect, pane: usize) {
+    fn files_footer(&self, ui: &egui::Ui, rect: Rect, pane: usize, reserve: f32) {
         let p = ui.painter();
         let pal = style::pal(ui);
         p.rect_filled(rect, 0.0, pal.paper);
@@ -1953,14 +2096,14 @@ impl App {
             text.push_str(&format!("  ·  {e}"));
         }
         // In split view each pane says where it is, at the right of its footer.
-        let mut right = rect.right() - 10.0;
+        let mut right = rect.right() - 10.0 - reserve;
         if self.files.panes.len() > 1
             && let Some(d) = t.here().dir()
         {
             let g = p.layout_no_wrap(d.display().to_string(), FontId::proportional(11.5), pal.weak);
             let w = g.size().x.min(rect.width() * 0.5);
-            let clip = Rect::from_min_max(pos2(rect.right() - 10.0 - w, rect.top()), pos2(rect.right() - 10.0, rect.bottom()));
-            p.with_clip_rect(clip).galley(pos2(rect.right() - 10.0 - g.size().x.min(w), rect.center().y - g.size().y / 2.0), g, pal.weak);
+            let clip = Rect::from_min_max(pos2(right - w, rect.top()), pos2(right, rect.bottom()));
+            p.with_clip_rect(clip).galley(pos2(right - g.size().x.min(w), rect.center().y - g.size().y / 2.0), g, pal.weak);
             right -= w + 12.0;
         }
         let clip = Rect::from_min_max(rect.min, pos2(right, rect.bottom()));
@@ -2038,6 +2181,9 @@ impl App {
         }
         // Quick Look takes the arrow keys while it's open; Space and Escape close it there.
         let look = self.files.look.open;
+        // In the Icons view ← and → move along a row, ↑ and ↓ a row up or down.
+        let icons = self.files.pane().view == FView::Icons;
+        let cols = self.files.pane().grid.0.max(1) as i64;
         enum Do {
             Move(i64),
             To(i64),
@@ -2147,10 +2293,16 @@ impl App {
             }
             let shift = i.modifiers.shift;
             let m = if shift { M::SHIFT } else { M::NONE };
-            if i.consume_key(m, Key::ArrowDown) || (look && i.consume_key(m, Key::ArrowRight)) {
+            if icons && i.consume_key(m, Key::ArrowDown) {
+                return Some(Do::Move(cols));
+            }
+            if icons && i.consume_key(m, Key::ArrowUp) {
+                return Some(Do::Move(-cols));
+            }
+            if i.consume_key(m, Key::ArrowDown) || ((look || icons) && i.consume_key(m, Key::ArrowRight)) {
                 return Some(Do::Move(1));
             }
-            if i.consume_key(m, Key::ArrowUp) || (look && i.consume_key(m, Key::ArrowLeft)) {
+            if i.consume_key(m, Key::ArrowUp) || ((look || icons) && i.consume_key(m, Key::ArrowLeft)) {
                 return Some(Do::Move(-1));
             }
             if i.consume_key(m, Key::Home) {
@@ -2177,7 +2329,13 @@ impl App {
         let Some(act) = act else { return };
         let shift = ctx.input(|i| i.modifiers.shift);
         let now = ctx.input(|i| i.time);
-        let page = (((self.files.cur().view.1 / self.files.prefs.density.row()) as i64) - 1).max(1);
+        let page = match self.files.pane().view {
+            FView::Details => (((self.files.cur().view.1 / self.files.prefs.density.row()) as i64) - 1).max(1),
+            FView::Icons => {
+                let (cols, h) = self.files.pane().grid;
+                (((self.files.cur().view.1 / h) as i64) - 1).max(1) * cols.max(1) as i64
+            }
+        };
         let here = self.files.here().dir().map(Path::to_path_buf);
         match act {
             Do::Back => self.files.back(),
@@ -2509,6 +2667,63 @@ pub(super) struct RowMenu {
 }
 
 /// The menu for an item in the list.
+/// What a row or an icon needs to know to handle clicks, drags and its menu.
+struct ItemCtx<'a> {
+    t: &'a FTab,
+    l: &'a Listing,
+    dir: &'a Path,
+    sizes: Option<&'a FolderSizes>,
+    two: bool,
+    can_paste: bool,
+}
+
+/// Clicks, double-clicks, middle-clicks, dragging and the right-click menu for one item (a row
+/// in Details, an icon in Icons). Folders are added to `drops` to take dropped items.
+fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &ItemCtx, pinned: bool, picks: &mut FPicks, drops: &mut Vec<(egui::Response, PathBuf)>) {
+    let (t, l, dir, sizes) = (c.t, c.l, c.dir, c.sizes);
+    let e = &l.entries[i as usize];
+    let order = &t.order;
+    let selected = t.selected.contains(&e.name);
+    if resp.double_clicked() {
+        picks.open = Some(i);
+    } else if resp.clicked() {
+        picks.select = Some((i, ui.input(|inp| inp.modifiers)));
+    } else if resp.secondary_clicked() && !selected {
+        picks.select = Some((i, egui::Modifiers::NONE));
+    }
+    if resp.middle_clicked() && e.is_dir {
+        picks.new_tab = Some(Location::Dir(dir.join(&*e.name)));
+    }
+    let tip_dir = e.is_dir.then(|| sizes.and_then(|s| s.get(&e.name)).copied()).flatten();
+    let resp = if let Some((bytes, files)) = tip_dir {
+        resp.on_hover_text_at_pointer(format!("{}: {} in {} files (from the last scan)", e.name, scan::human(bytes), group(files)))
+    } else {
+        resp
+    };
+    let count = if selected { t.selected.len() } else { 1 };
+    let path = dir.join(&*e.name);
+    let is_dir = e.is_dir;
+    // Drag what's selected (or just this item, if it isn't).
+    if resp.drag_started() {
+        let (items, dirs): (Vec<PathBuf>, Vec<bool>) = if selected {
+            order.iter().map(|&k| &l.entries[k as usize]).filter(|x| t.selected.contains(&x.name)).map(|x| (dir.join(&*x.name), x.is_dir)).unzip()
+        } else {
+            (vec![path.clone()], vec![is_dir])
+        };
+        egui::DragAndDrop::set_payload(ui.ctx(), dnd::DragItems(items, dirs));
+    }
+    if is_dir {
+        drops.push((resp.clone(), path.clone()));
+    }
+    let ctx_menu = RowMenu { is_dir, count, pinned, two: c.two, can_paste: c.can_paste };
+    resp.context_menu(|ui| {
+        if let Some(a) = item_menu(ui, &ctx_menu) {
+            let paths = if selected { t.chosen_paths() } else { vec![path.clone()] };
+            picks.menu = Some((a, paths));
+        }
+    });
+}
+
 fn item_menu(ui: &mut egui::Ui, m: &RowMenu) -> Option<FAction> {
     use egui::{Key, Modifiers as M};
     let ctx = ui.ctx().clone();
