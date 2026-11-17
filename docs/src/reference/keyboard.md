@@ -16,11 +16,37 @@ In the main window, unless the cursor is in a text box.
 | Windows and Linux | macOS | Action |
 |---|---|---|
 | **F1** | **F1** | Open help for the part of the window under the pointer. |
-| **Ctrl+F** | **⌘F** | Open the Custom filter and put the cursor in it. |
+| **Ctrl+1** | **⌘1** | Switch to the Files workspace. |
+| **Ctrl+3** | **⌘3** | Switch to the Storage Analysis workspace. |
+| **Ctrl+F** | **⌘F** | Files: put the cursor in the Filter box. Storage Analysis: open the Custom filter. |
+
+### Files workspace
+
+After you've clicked in the list or the sidebar, unless the cursor is in a text box.
+
+| Windows and Linux | macOS | Action |
+|---|---|---|
+| **↑ / ↓** | **↑ / ↓** | Select the item above or below. Hold Shift to extend the selection. |
+| **Home / End** | **Home / End** | Select the first or last item. |
+| **Page Up / Page Down** | **Page Up / Page Down** | Move a screenful. |
+| **Enter or Ctrl+↓** | **Enter or ⌘↓** | Open the selected folder, or the file with its usual app. |
+| **Backspace, Alt+↑ or Ctrl+↑** | **Backspace, ⌥↑ or ⌘↑** | Up to the enclosing folder, selecting the one you were in. Above a drive: the Computer view. |
+| **Alt+← / Alt+→** | **⌥← / ⌥→** | Back and Forward. |
+| **Ctrl+A** | **⌘A** | Select everything shown. |
+| **Escape** | **Escape** | Select nothing. |
+| **Type a name** | **Type a name** | Jump to the first item whose name starts with what you type. |
+| **Ctrl+L** | **⌘L** | Type a path (works while typing elsewhere too). |
+| **Ctrl+T** | **⌘T** | New tab, showing the same folder. |
+| **Ctrl+W** | **⌘W** | Close the tab. |
+| **Ctrl+Shift+T** | **⌘⇧T** | Reopen the tab you closed last. |
+| **Ctrl+Tab / Ctrl+Shift+Tab** | **⌃Tab / ⌃⇧Tab** | Next or previous tab. |
+| **F5 or Ctrl+R** | **F5 or ⌘R** | Read the folder again. |
+| **Ctrl+Shift+.** | **⌘⇧.** | Show or hide hidden files and folders. |
+| **Ctrl+Shift+C** | **⌘⇧C** | Copy the full paths of the selected items. |
 
 ### Treemap
 
-When the treemap is showing (not the sunburst), the cursor isn't in a text box, and you last clicked the map (or the file manager is in its Tree layout).
+In Storage Analysis, when the treemap is showing (not the sunburst), the cursor isn't in a text box, and you last clicked the map (or the file manager is in its Tree layout).
 
 | Windows and Linux | macOS | Action |
 |---|---|---|
@@ -32,7 +58,7 @@ When the treemap is showing (not the sunburst), the cursor isn't in a text box, 
 
 ### File manager
 
-After you've clicked in the file manager (not the map), in the List, Icons and Columns layouts, unless the cursor is in a text box.
+In Storage Analysis, after you've clicked in the file manager (not the map), in the List, Icons and Columns layouts, unless the cursor is in a text box.
 
 | Windows and Linux | macOS | Action |
 |---|---|---|
@@ -55,7 +81,7 @@ After you've clicked in the file manager (not the map), in the List, Icons and C
 
 ### Selected file or folder
 
-Act on the selected item, wherever it was selected (file manager, map or a list), unless the cursor is in a text box. In the file manager they act on every selected item. The same commands are in the right-click menu.
+In Storage Analysis. Act on the selected item, wherever it was selected (file manager, map or a list), unless the cursor is in a text box. In the file manager they act on every selected item. The same commands are in the right-click menu.
 
 | Windows and Linux | macOS | Action |
 |---|---|---|

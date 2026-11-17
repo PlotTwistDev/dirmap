@@ -20,13 +20,10 @@ pub struct Entry {
     /// A symbolic link, junction or other reparse point.
     pub is_link: bool,
     pub hidden: bool,
-    pub readonly: bool,
     /// Bytes for files; 0 for folders.
     pub size: u64,
     /// Seconds since the Unix epoch, 0 when unknown.
     pub modified: i64,
-    /// Creation time where the file system records it.
-    pub created: Option<i64>,
 }
 
 impl Entry {
@@ -43,13 +40,11 @@ enum Msg {
 
 /// A folder being read (or read).
 pub struct Listing {
-    pub path: PathBuf,
-    pub entries: Vec<Entry>,
+    /// Shared so a large folder can be sorted on another thread without copying it.
+    pub entries: Arc<Vec<Entry>>,
     pub done: bool,
     /// Why the folder couldn't be read (it may still have delivered some entries).
     pub error: Option<String>,
-    /// Entries that couldn't be read (vanished or not allowed).
-    pub skipped: u64,
     pub started: Instant,
     /// Bumped whenever `entries` changes, so views know to sort again.
     pub generation: u64,
@@ -67,14 +62,12 @@ impl Listing {
     pub fn start(path: PathBuf) -> Self {
         let (tx, rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        let (p, c) = (path.clone(), cancel.clone());
-        let spawned = std::thread::Builder::new().name("dirmap-list".into()).spawn(move || read(&p, &c, &tx));
+        let c = cancel.clone();
+        let spawned = std::thread::Builder::new().name("dirmap-list".into()).spawn(move || read(&path, &c, &tx));
         let mut l = Listing {
-            path,
-            entries: Vec::new(),
+            entries: Arc::new(Vec::new()),
             done: false,
             error: None,
-            skipped: 0,
             started: Instant::now(),
             generation: 0,
             rx,
@@ -93,7 +86,7 @@ impl Listing {
         loop {
             match self.rx.try_recv() {
                 Ok(Msg::Batch(b)) => {
-                    self.entries.extend(b);
+                    Arc::make_mut(&mut self.entries).extend(b);
                     changed = true;
                 }
                 Ok(Msg::Done(err)) => {
@@ -171,10 +164,8 @@ pub fn entry(e: &fs::DirEntry) -> Option<Entry> {
     let is_dir = if md.file_type().is_symlink() { fs::metadata(e.path()).is_ok_and(|t| t.is_dir()) } else { md.is_dir() };
     Some(Entry {
         hidden: crate::scan::is_hidden(&name, &md),
-        readonly: md.permissions().readonly(),
         size: if md.is_file() { md.len() } else { 0 },
         modified: secs(md.modified()),
-        created: md.created().ok().map(|t| secs(Ok(t))),
         is_dir,
         is_link,
         name,

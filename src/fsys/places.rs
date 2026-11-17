@@ -13,6 +13,7 @@ pub enum Kind {
     Pictures,
     Music,
     Videos,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Applications,
 }
 

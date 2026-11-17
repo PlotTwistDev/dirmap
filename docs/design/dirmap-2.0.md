@@ -587,5 +587,46 @@ below).
 
 ## Phase 1: what was delivered
 
-See the pull request description for the full list, screenshots and benchmark results. The
-manual page [The File Manager](../src/views/file-manager.md) describes it for users.
+### Built
+
+| Step | Status |
+|---|---|
+| 1. `fsys::listing` | Done. Streams batches of 512 entries or 40 ms from a worker. Dropping a listing cancels it. Unix links to folders open like folders. Six tests. |
+| 2. `fsys::places` | Done. Known Folders on Windows (`SHGetKnownFolderPath`), XDG `user-dirs.dirs` on Linux, the standard folders on macOS. Found on a worker at start-up. Two tests. |
+| 3. `fsys::history` | Done. Back, Forward and Up, with Computer above a drive root. History is capped at 200 places. Three tests. |
+| 4. `app/files.rs` | Done, as planned. Large folders (over 3,000 items) are sorted on a worker. While a large folder streams in, new items are added at the end, and the whole folder is sorted once it's complete. |
+| 5. Workspaces | Done. Storage Analysis is unchanged apart from the switcher on its toolbar. Ctrl+1 and Ctrl+3 switch. Scan shortcuts (Delete, Ctrl+C, F2 and so on) are off in Files. |
+| 6. Folder sizes from the scan | Done. Shown in italics, with a tooltip that gives the file count. They also sort folders by size. |
+| 7. Persistence | Done. Saved under its own storage key (`files`), so the `Settings` struct is unchanged. |
+| 8. Docs | Done. New page `views/file-manager.md` with two screenshots. Interface, Quick Start, What's new and Feature status updated. Keyboard and mouse reference regenerated. |
+| 9. `rename` fix | Done, with a test. |
+| Extra | `natural_cmp` no longer allocates: sorting 100,000 names went from about 300 ms to about 70 ms, which also speeds up the scan browser. |
+
+### Measured in the cloud container
+
+These are Linux numbers on a 4-core container. Windows and macOS were type-checked but not run.
+
+| Measurement | Result |
+|---|---|
+| Scan, 200,000 files in 2,041 folders, warm cache, 10 runs alternating | Before: 0.07–0.10 s (median 0.08). After: 0.08–0.11 s (median 0.08). No regression. `scan.rs` is unchanged apart from making `is_hidden` visible to the crate |
+| A 100,000-file folder, warm | First entries in about 1 ms. All of them in 125–145 ms. Sorting on a worker takes 70–110 ms |
+| A 100,000-file folder, cold cache | First entries in 28 ms. All of them in 0.57 s |
+
+### Still to do, by phase
+
+- **Phase 2:** file operations in Files (rename, copy, move, delete, queue, conflicts, undo),
+  watchers, drag and drop.
+- **Phase 3:**
+  - the Explorer + Analysis workspace;
+  - one tab model shared by both browsers (Files tabs are separate from the Storage Analysis
+    file manager's tabs today);
+  - linked selection while both are on screen.
+- **Phase 4:**
+  - Icons, Columns and thumbnail layouts on live listings, and per-column visibility and widths
+    (Phase 1 has fixed column widths that drop columns in narrow windows);
+  - a choice between restoring the last session and a fixed start folder (Phase 1 always
+    restores);
+  - path autocomplete.
+- **Platforms:** network locations other than mapped or mounted drives, such as browsing SMB
+  servers before they're mounted, need OS integration (`WNetEnumResource`, GVFS or `smbutil`).
+  UNC paths typed into the path bar already work on Windows.

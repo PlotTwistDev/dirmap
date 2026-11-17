@@ -1,13 +1,21 @@
 # Understanding the interface
 
-![The main window, with its parts](../images/main-window.png)
+dirmap has two workspaces, switched with the buttons at the left of the toolbar:
 
-The window has six parts, from top to bottom:
+- **🗀 Files** (**Ctrl+1**) is a file manager for browsing your drives and folders without a
+  scan. It's where dirmap starts. See [The Files workspace](../views/file-manager.md).
+- **▦ Storage Analysis** (**Ctrl+3**) is the scan with its treemap, described on the rest of this
+  page.
+
+![Storage Analysis, with its parts](../images/main-window.png)
+
+Storage Analysis has six parts, from top to bottom:
 
 ## Toolbar
 
 | Control | What it does |
 |---|---|
+| **🗀 Files** / **▦ Storage Analysis** | Switch workspace. See [The Files workspace](../views/file-manager.md#workspaces). |
 | **🖴 Drives…** | Shows the list of drives with their size and free space. Click one to scan it. |
 | Folder box | The drive or folder to scan. Type a path and press **Enter**. |
 | **Browse…** | Pick a folder with the system's folder picker, then scan it. |
