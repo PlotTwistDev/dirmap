@@ -30,6 +30,7 @@ mod snapshot;
 mod sunburst;
 mod templates;
 mod tilegpu;
+mod transfer;
 mod treemap;
 
 use std::path::PathBuf;

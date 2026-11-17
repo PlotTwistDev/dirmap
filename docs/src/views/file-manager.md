@@ -362,10 +362,41 @@ on the dock's toolbar switches to colouring by age, or by change since a snapsho
   **⌥** copies and **⌘** moves). The label by the pointer always says which will happen, and a
   folder can't be dropped inside itself.
 - **Rename** with **F2**, and **Delete** to send items to the Recycle Bin or Trash. dirmap asks
-  first.
+  first. **Ctrl+Z** undoes any of these.
 
 Copies and moves run in the background with a progress bar in the status bar, and the open
 folders are read again when they finish. One file operation runs at a time.
+
+### When a name is already taken
+
+If a file or folder you copy or move would land on one with the same name, dirmap stops and
+asks, showing both items' sizes and dates and which is newer:
+
+| Choice | What happens |
+|---|---|
+| **Replace** | The item that's there goes to the Recycle Bin or Trash, and the new one takes its place. |
+| **Keep Both** | The new one gets a free name, such as `photo 2.jpg`. |
+| **Skip** | The new one stays where it was. |
+| **Merge** (two folders) | The folders' contents are put together. You're asked again about any files inside with the same name. |
+| **Stop** | Nothing more is copied or moved. What's done so far stays, and **Undo** puts it back. |
+
+Tick **Do the same for other files that clash** to answer once for the rest (folders are asked
+separately). Copying an item into the folder it's already in never asks: the copy is called
+`name copy.ext`.
+
+### Undo
+
+**Ctrl+Z** (**⌘Z** on a Mac) undoes the last change dirmap made: a copy, a move, a rename, a new
+folder or file, or **Move to Trash**. Press it again to undo the one before; dirmap remembers the
+last 30. After a change, the status bar also shows an **Undo** button beside its note, and the
+right-click menu of empty space in the list has **Undo**.
+
+- Undoing a copy or a new item sends it to the Recycle Bin or Trash, so nothing is lost.
+- Undoing a move or a rename puts the items back where they were.
+- Undoing **Move to Trash**, or a **Replace**, takes the items back out of the bin. If an item
+  can't be found there (it was emptied, or the drive has no bin, as on a network share), dirmap
+  says so and you can restore it yourself.
+- **Delete Permanently** can't be undone, which is why it asks first.
 
 ## Slow and unreachable drives
 

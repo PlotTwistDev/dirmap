@@ -4,6 +4,8 @@
 use super::*;
 use crate::actions::{self, Terminal};
 use std::path::Path;
+use crate::transfer::{self, Choice, Clash, Step};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 
 /// Something to do with an item of the tree.
@@ -127,12 +129,52 @@ pub(super) struct Ops {
     type_files: Option<TypeFiles>,
     /// Last result, shown in the status bar: (text, is an error).
     pub notice: Option<(String, bool)>,
+    /// What can be undone, the latest last.
+    pub undo: Vec<UndoEntry>,
+    /// The steps of the running operation, as it records them.
+    pub recording: Option<Arc<Mutex<Vec<Step>>>>,
+    /// The latest change has just finished: the status bar offers Undo beside its note.
+    pub undo_fresh: bool,
+    /// A copy or move asking what to do about a name that's taken.
+    pub clash: Option<ClashAsk>,
 }
+
+/// Something that can be undone: what to call it, and the steps to play back.
+pub(super) struct UndoEntry {
+    pub label: String,
+    pub steps: Vec<Step>,
+}
+
+/// The reply to a clash: the choice, and whether it goes for the rest of this kind too.
+pub(super) type ClashReply = mpsc::Sender<(Choice, bool)>;
+
+/// A running copy or move's questions about clashes.
+pub(super) struct ClashAsk {
+    pub rx: mpsc::Receiver<(Clash, ClashReply)>,
+    pub current: Option<(Clash, ClashReply)>,
+    pub all: bool,
+    pub copy: bool,
+}
+
+/// How many changes Undo remembers.
+const UNDO_MAX: usize = 30;
 
 impl Ops {
     /// A window of ours is up and owns the keyboard.
     pub(super) fn modal(&self) -> bool {
-        self.confirm.is_some() || self.rename.is_some()
+        self.confirm.is_some() || self.rename.is_some() || self.clash.as_ref().is_some_and(|c| c.current.is_some())
+    }
+
+    /// Start recording the steps of the operation about to run, for Undo.
+    pub(super) fn record(&mut self) -> Arc<Mutex<Vec<Step>>> {
+        let r = Arc::new(Mutex::new(Vec::new()));
+        self.recording = Some(r.clone());
+        r
+    }
+
+    /// The name of what Ctrl+Z would undo.
+    pub(super) fn undo_label(&self) -> Option<&str> {
+        self.undo.last().map(|u| u.label.as_str())
     }
 }
 
@@ -377,17 +419,7 @@ impl App {
             TreeAction::MoveTo => {
                 let start = disk.parent().map(Path::to_path_buf).unwrap_or_default();
                 if let Some(dest) = rfd::FileDialog::new().set_title("Move to folder").set_directory(start).pick_folder() {
-                    let root = self.scanned_path.clone();
-                    self.run_op(format!("Moving {}", n.name), move || match actions::move_into(&disk, &dest) {
-                        Ok(to) => {
-                            let mut affected = vec![disk];
-                            if to.starts_with(&root) {
-                                affected.push(to.clone());
-                            }
-                            (Ok(Some(format!("Moved to {}", to.display()))), affected)
-                        }
-                        Err(e) => (Err(e), vec![disk]),
-                    });
+                    self.transfer(vec![disk], dest, false);
                 }
                 Ok(())
             }
@@ -470,6 +502,7 @@ impl App {
             let _ = tx.send(OpDone { error, note, updates, select });
         });
         self.ops.notice = None;
+        self.ops.undo_fresh = false;
         self.ops.job = Some(OpJob { label, rx });
     }
 
@@ -495,6 +528,17 @@ impl App {
             match job.rx.try_recv() {
                 Ok(done) => {
                     self.ops.job = None;
+                    self.ops.clash = None;
+                    if let Some(rec) = self.ops.recording.take() {
+                        let steps = std::mem::take(&mut *rec.lock().unwrap());
+                        if !steps.is_empty() {
+                            self.ops.undo.push(UndoEntry { label: transfer::describe(&steps), steps });
+                            if self.ops.undo.len() > UNDO_MAX {
+                                self.ops.undo.remove(0);
+                            }
+                            self.ops.undo_fresh = true;
+                        }
+                    }
                     self.apply_updates(done.updates);
                     self.ops.notice = done.error.map(|e| (e, true)).or(done.note.map(|n| (n, false)));
                     // A renamed item, a new folder or pasted items get selected.
@@ -514,14 +558,110 @@ impl App {
                     self.browser_pick_later(then);
                 }
                 Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
-                Err(mpsc::TryRecvError::Disconnected) => self.ops.job = None,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.ops.job = None;
+                    self.ops.clash = None;
+                    self.ops.recording = None;
+                }
             }
         }
+        self.clash_window(ctx);
         self.confirm_window(ctx);
         self.rename_window(ctx);
         self.hash_window(ctx);
         self.props_window(ctx);
         self.type_files_window(ctx);
+    }
+
+    /// Undo the last change (Ctrl+Z), in the background.
+    pub(super) fn undo_last(&mut self) {
+        if self.ops.job.is_some() {
+            self.ops.notice = Some(("Another file operation is still running.".into(), true));
+            return;
+        }
+        let Some(e) = self.ops.undo.pop() else {
+            self.ops.notice = Some(("There's nothing to undo.".into(), false));
+            return;
+        };
+        let label = e.label;
+        let steps = e.steps;
+        self.run_op(format!("Undoing {label}"), move || {
+            let (errors, touched) = transfer::undo(&steps);
+            let r = if errors.is_empty() { Ok(Some(format!("Undid {label}."))) } else { Err(format!("Undo {label}: {}", errors.join(" "))) };
+            (r, touched)
+        });
+    }
+
+    /// Asks what to do when a copy or move finds a name taken. The copy waits meanwhile.
+    fn clash_window(&mut self, ctx: &egui::Context) {
+        let Some(c) = &mut self.ops.clash else { return };
+        if c.current.is_none() {
+            match c.rx.try_recv() {
+                Ok(x) => c.current = Some(x),
+                Err(_) => return,
+            }
+        }
+        let Some((clash, _)) = &c.current else { return };
+        let name = clash.dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let folder = clash.dest.parent().map(|p| p.display().to_string()).unwrap_or_default();
+        let both_dirs = clash.src_dir && clash.dest_dir;
+        let what = |d: bool| if d { "folder" } else { "file" };
+        let mut pick = None;
+        egui::Modal::new(egui::Id::new("clash")).show(ctx, |ui| {
+            ui.set_width(460.0);
+            ui.heading(if both_dirs { "This folder is already there" } else { "Replace or skip?" });
+            ui.add_space(6.0);
+            ui.label(format!("{folder} already has a {} called {name}.", what(clash.dest_dir)));
+            if let Some(from) = clash.src.parent() {
+                ui.weak(format!("{} from {}", if c.copy { "Copying" } else { "Moving" }, from.display()));
+            }
+            ui.add_space(6.0);
+            let when = |t: Option<std::time::SystemTime>| {
+                t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| fmt_time(d.as_secs() as i64)).unwrap_or_default()
+            };
+            egui::Grid::new("clash-grid").num_columns(3).spacing([14.0, 4.0]).show(ui, |ui| {
+                let newer = |a: Option<std::time::SystemTime>, b: Option<std::time::SystemTime>| matches!((a, b), (Some(a), Some(b)) if a > b);
+                ui.weak(if c.copy { "Copying" } else { "Moving" });
+                ui.label(if clash.src_dir { "Folder".to_string() } else { scan::human(clash.src_size) });
+                ui.label(format!("{}{}", when(clash.src_modified), if newer(clash.src_modified, clash.dest_modified) { "  (newer)" } else { "" }));
+                ui.end_row();
+                ui.weak("Already there");
+                ui.label(if clash.dest_dir { "Folder".to_string() } else { scan::human(clash.dest_size) });
+                ui.label(format!("{}{}", when(clash.dest_modified), if newer(clash.dest_modified, clash.src_modified) { "  (newer)" } else { "" }));
+                ui.end_row();
+            });
+            ui.add_space(8.0);
+            let bin = actions::BIN;
+            ui.horizontal_wrapped(|ui| {
+                if both_dirs && ui.button("Merge").on_hover_text("Put the contents together, asking about any files with the same name").clicked() {
+                    pick = Some(Choice::Merge);
+                }
+                if ui.button("Replace").on_hover_text(format!("The {} that's there goes to the {bin}, and this one takes its place", what(clash.dest_dir))).clicked() {
+                    pick = Some(Choice::Replace);
+                }
+                if ui.button("Keep Both").on_hover_text("This one gets a new name, like \"photo 2.jpg\"").clicked() {
+                    pick = Some(Choice::KeepBoth);
+                }
+                if ui.button("Skip").on_hover_text("Leave this one where it is").clicked() {
+                    pick = Some(Choice::Skip);
+                }
+                if ui.button("Stop").on_hover_text(format!("{} nothing more; what's done so far stays (Undo puts it back)", if c.copy { "Copy" } else { "Move" })).clicked()
+                    || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                {
+                    pick = Some(Choice::Stop);
+                }
+            });
+            ui.add_space(4.0);
+            ui.checkbox(&mut c.all, format!("Do the same for other {}s that clash", if both_dirs { "folder" } else { "file" }));
+        });
+        if let Some(choice) = pick {
+            ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            });
+            let (_, reply) = c.current.take().unwrap();
+            let _ = reply.send((choice, c.all && choice != Choice::Stop));
+            c.all = false;
+        }
     }
 
     fn confirm_window(&mut self, ctx: &egui::Context) {
@@ -584,10 +724,25 @@ impl App {
                     let r = paths.iter().try_for_each(|p| actions::delete(p)).map(|_| None).map_err(|e| format!("Couldn't delete everything: {e}"));
                     (r, paths)
                 }),
-                TreeAction::Recycle => self.run_op(format!("Moving {name} to the {}", actions::BIN), move || {
-                    let r = paths.iter().try_for_each(|p| actions::trash(p)).map(|_| None);
-                    (r, paths)
-                }),
+                TreeAction::Recycle => {
+                    let rec = self.ops.record();
+                    self.run_op(format!("Moving {name} to the {}", actions::BIN), move || {
+                        // Each item goes to the bin, noting where it went so Undo can put it back.
+                        let mut steps = Vec::new();
+                        let mut r = Ok(None);
+                        for p in &paths {
+                            match actions::trash_keep(p) {
+                                Ok(receipt) => steps.push(Step::Trashed { original: p.clone(), receipt }),
+                                Err(e) => {
+                                    r = Err(e);
+                                    break;
+                                }
+                            }
+                        }
+                        *rec.lock().unwrap() = steps;
+                        (r, paths)
+                    })
+                }
                 _ => self.run_op(format!("Emptying {name}"), move || {
                     let r = paths.iter().try_for_each(|p| actions::empty_folder(p)).map(|_| None).map_err(|e| format!("Couldn't delete everything: {e}"));
                     (r, paths)
@@ -656,9 +811,13 @@ impl App {
             self.ops.rename = None;
             let dest = path.with_file_name(&text);
             self.ops.then_select = Some(dest.clone());
+            let rec = self.ops.record();
             self.run_op(format!("Renaming {}", path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()), move || {
                 match actions::rename(&path, &text) {
-                    Ok(new) => (Ok(None), vec![path, new]),
+                    Ok(new) => {
+                        rec.lock().unwrap().push(Step::Moved { from: path.clone(), to: new.clone() });
+                        (Ok(None), vec![path, new])
+                    }
                     Err(e) => (Err(e), vec![]),
                 }
             });

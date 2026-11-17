@@ -1912,6 +1912,9 @@ impl App {
         let pinned = self.files.is_pinned(&here);
         let can_paste = self.can_paste();
         let mut new_pick = None;
+        let undo_label = self.ops.undo_label().map(str::to_string);
+        let busy = self.ops.job.is_some();
+        let mut undo_now = false;
         empty.context_menu(|ui| {
             let ctx = ui.ctx().clone();
             let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
@@ -1920,6 +1923,10 @@ impl App {
             });
             if ui.add_enabled(can_paste, egui::Button::new("Paste").shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::V))).clicked() {
                 picks.menu = Some((FAction::Paste, vec![here.clone()]));
+            }
+            let undo = undo_label.as_deref().map_or("Undo".to_string(), |w| format!("Undo {w}"));
+            if ui.add_enabled(undo_label.is_some() && !busy, egui::Button::new(undo).shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::Z))).clicked() {
+                undo_now = true;
             }
             ui.separator();
             if ui.add(egui::Button::new("Refresh").shortcut_text(k(egui::Modifiers::NONE, egui::Key::F5))).clicked() {
@@ -1938,6 +1945,9 @@ impl App {
         });
         if let Some(p) = new_pick {
             picks.new_item = Some((p, here.clone()));
+        }
+        if undo_now {
+            self.undo_last();
         }
         // Details or Icons, at the right of the footer as in Explorer.
         let reserve = 52.0;
@@ -2121,8 +2131,16 @@ impl App {
                 } else {
                     ui.label(text);
                 }
+                if !error
+                    && self.ops.undo_fresh
+                    && let Some(what) = self.ops.undo_label()
+                    && ui.small_button("Undo").on_hover_text(format!("Undo {what} ({})", if cfg!(target_os = "macos") { "⌘Z" } else { "Ctrl+Z" })).clicked()
+                {
+                    self.undo_last();
+                }
                 if ui.small_button("✖").on_hover_text("Dismiss").clicked() {
                     self.ops.notice = None;
+                    self.ops.undo_fresh = false;
                 }
             } else if let Some(dir) = self.files.here().dir() {
                 ui.label(egui::RichText::new(dir.display().to_string()).size(12.0).color(pal.weak));
@@ -2202,6 +2220,7 @@ impl App {
             Hidden,
             Act(FAction),
             NewFolder,
+            Undo,
             OtherPane,
             Swap,
             Find(String),
@@ -2248,6 +2267,9 @@ impl App {
             }
             if i.consume_key(M::COMMAND, Key::U) {
                 return Some(Do::Swap);
+            }
+            if i.consume_key(M::COMMAND, Key::Z) {
+                return Some(Do::Undo);
             }
             if i.consume_key(M::ALT, Key::ArrowLeft) {
                 return Some(Do::Back);
@@ -2372,6 +2394,7 @@ impl App {
                 }
             }
             Do::Swap => self.files.swap_panes(),
+            Do::Undo => self.undo_last(),
             Do::Refresh => self.files.refresh(),
             Do::Hidden => self.files.prefs.show_hidden = !self.files.prefs.show_hidden,
             Do::NewFolder => {

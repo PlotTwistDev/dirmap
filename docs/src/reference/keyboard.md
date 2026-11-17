@@ -49,6 +49,7 @@ After you've clicked in the list or the sidebar, unless the cursor is in a text 
 | **Delete** | **Delete or ⌘Backspace** | Move the selected items to the Recycle Bin or Trash (it asks first). |
 | **Shift+Delete** | **⇧Delete** | Delete the selected items for good (it asks first). |
 | **Ctrl+Shift+N** | **⌘⇧N** | New folder here, with its name ready to type. |
+| **Ctrl+Z** | **⌘Z** | Undo the last copy, move, rename, new item or Move to Trash. Press again to undo the one before. |
 | **Alt+Enter** | **⌥Enter** | Properties: size, contents and dates. |
 | **Space** | **Space** | Quick Look: a large preview of the selected file. ↑ / ↓ move to the next file while it's open; Space or Escape closes it. |
 | **Alt+P** | **⌥P** | Show or hide the preview pane (works while typing elsewhere too). |
@@ -91,6 +92,7 @@ In Storage Analysis, after you've clicked in the file manager (not the map), in 
 | **Ctrl+W** | **⌘W** | Close the tab. |
 | **Ctrl+Tab / Ctrl+Shift+Tab** | **⌃Tab / ⌃⇧Tab** | Next or previous tab. |
 | **Ctrl+Shift+N** | **⌘⇧N** | New folder in the current folder, ready to name. |
+| **Ctrl+Z** | **⌘Z** | Undo the last file change, as in the Files workspace. |
 | **Ctrl+V** | **⌘V** | Paste: copy or move what you copied or cut into the current folder. Paths copied as text in another app are copied in too. |
 
 ### Selected file or folder

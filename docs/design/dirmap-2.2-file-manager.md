@@ -308,8 +308,8 @@ Status: ✅ done · 🔨 in progress · ⬜ not started. "Win" means checked on 
 | 11 | Grouping (by type, date, size) | 3b | Advanced | ⬜ | |
 | 12 | Remembered view per folder | 3b | Advanced | ⬜ | |
 | 13 | Audio, video and PDF previews | 3b | Advanced | ⬜ | |
-| 14 | Undo for file operations | 3b | Advanced | ⬜ | |
-| 15 | Conflict choices (Replace, Keep Both, Skip), pause, transfer queue | 3b | Advanced | ⬜ | |
+| 14 | Undo for file operations | 3b | Advanced | ✅ | Ctrl+Z, last 30; restores from Recycle Bin/Trash (Windows $I parsing and macOS untested on device); no Redo yet |
+| 15 | Conflict choices (Replace, Keep Both, Skip), pause, transfer queue | 3b | Advanced | 🔨 | Replace/Keep Both/Skip/Merge/Stop done; pause and queue to do |
 | 16 | Notice changes made by other apps (file watching) | 3b | Advanced | ⬜ | Today: F5 |
 | 17 | SFTP connection manager, keychain, host key checks | 4 | Advanced | ⬜ | |
 | 18 | FTP(S) (flagged insecure) and WebDAV | 4 | Specialist | ⬜ | |

@@ -182,6 +182,24 @@ pub fn shell_properties(path: &Path) -> bool {
 
 /// Move to the Recycle Bin / Trash.
 pub fn trash(path: &Path) -> Result<(), String> {
+    trash_inner(path).map(drop)
+}
+
+/// Move to the Recycle Bin or Trash, then find where it went so Undo can put it back. `None`
+/// when it's gone but can't be found there (a bin dirmap can't read, or none: on a network
+/// share Windows deletes for good).
+pub fn trash_keep(path: &Path) -> Result<Option<crate::transfer::Receipt>, String> {
+    let original = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let since = std::time::SystemTime::now() - std::time::Duration::from_secs(5);
+    let told = trash_inner(path)?;
+    if let Some(p) = told {
+        return Ok(Some(crate::transfer::Receipt { in_bin: p, info: None }));
+    }
+    Ok(bin::find(&original, since))
+}
+
+/// Trash, returning where it went when the system says (Finder does).
+fn trash_inner(path: &Path) -> Result<Option<PathBuf>, String> {
     #[cfg(windows)]
     {
         use windows_sys::Win32::UI::Shell::{FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHFILEOPSTRUCTW, SHFileOperationW};
@@ -202,16 +220,18 @@ pub fn trash(path: &Path) -> Result<(), String> {
         if path.exists() {
             return Err("Some of it couldn't be moved to the Recycle Bin (in use, or no permission).".into());
         }
-        Ok(())
+        Ok(None)
     }
     #[cfg(target_os = "macos")]
     {
         // Through Finder, so "Put Back" works.
         let p = path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!("tell application \"Finder\" to delete POSIX file \"{p}\"");
+        // Finder answers with the item in the Trash, for Undo.
+        let script = format!("tell application \"Finder\" to return POSIX path of ((delete POSIX file \"{p}\") as alias)");
         let out = Command::new("osascript").arg("-e").arg(script).output().map_err(|e| format!("Couldn't run osascript: {e}"))?;
         if out.status.success() {
-            Ok(())
+            let at = String::from_utf8_lossy(&out.stdout).trim().trim_end_matches('/').to_string();
+            Ok((!at.is_empty()).then(|| PathBuf::from(at)))
         } else {
             Err(format!("Finder couldn't move it to the Trash: {}", String::from_utf8_lossy(&out.stderr).trim()))
         }
@@ -227,7 +247,7 @@ pub fn trash(path: &Path) -> Result<(), String> {
             }
             if let Ok(out) = cmd.output() {
                 if out.status.success() && !path.exists() {
-                    return Ok(());
+                    return Ok(None);
                 }
                 if a[0] == "gio" {
                     return Err(format!("Couldn't move it to the Trash: {}", String::from_utf8_lossy(&out.stderr).trim()));
@@ -318,32 +338,6 @@ pub fn remove_empty_folders(dir: &Path) -> io::Result<u64> {
     Ok(count)
 }
 
-/// Move into `dest_dir`, keeping the name. Across drives this copies, then deletes the original.
-/// Returns the new path.
-pub fn move_into(src: &Path, dest_dir: &Path) -> Result<PathBuf, String> {
-    let name = src.file_name().ok_or("Can't move a drive.")?;
-    let dest = dest_dir.join(name);
-    if dest.starts_with(src) {
-        return Err("Can't move a folder into itself.".into());
-    }
-    if fs::symlink_metadata(&dest).is_ok() {
-        return Err(format!("{} already exists.", dest.display()));
-    }
-    match fs::rename(src, &dest) {
-        Ok(()) => Ok(dest),
-        Err(e) if is_cross_device(&e) => {
-            if let Err(e) = copy_all(src, &dest) {
-                // Leave the original alone and tidy up the partial copy.
-                let _ = delete(&dest);
-                return Err(format!("Copying to {} failed: {e}", dest_dir.display()));
-            }
-            delete(src).map_err(|e| format!("Copied, but couldn't remove the original: {e}"))?;
-            Ok(dest)
-        }
-        Err(e) => Err(format!("Couldn't move: {e}")),
-    }
-}
-
 /// A name in `dir` that isn't taken yet: `name`, else "stem copy.ext", "stem copy 2.ext", …
 /// (`first` is the first suffix to try, e.g. "copy"; for new folders the plain name gets numbers).
 pub fn free_name(dir: &Path, name: &str, first: &str) -> PathBuf {
@@ -368,21 +362,6 @@ pub fn free_name(dir: &Path, name: &str, first: &str) -> PathBuf {
         }
     }
     unreachable!()
-}
-
-/// Copy into `dest_dir`. If the name is taken there (pasting into the same folder, say), the
-/// copy gets " copy" added, as Finder and Explorer do. Returns the new path.
-pub fn copy_into(src: &Path, dest_dir: &Path) -> Result<PathBuf, String> {
-    let name = src.file_name().ok_or("Can't copy a drive.")?.to_string_lossy().to_string();
-    if dest_dir.starts_with(src) {
-        return Err("Can't copy a folder into itself.".into());
-    }
-    let dest = free_name(dest_dir, &name, "copy");
-    copy_all(src, &dest).map_err(|e| {
-        let _ = delete(&dest);
-        format!("Couldn't copy {name}: {e}")
-    })?;
-    Ok(dest)
 }
 
 /// Give a file or folder a new name in the same folder. Returns the new path.
@@ -443,12 +422,12 @@ pub fn new_from_template(dir: &Path, template: &Path, name: &str) -> Result<Path
     Ok(p)
 }
 
-fn is_cross_device(e: &io::Error) -> bool {
+pub(crate) fn is_cross_device(e: &io::Error) -> bool {
     // EXDEV on Unix, ERROR_NOT_SAME_DEVICE on Windows.
     e.kind() == io::ErrorKind::CrossesDevices || e.raw_os_error() == Some(if cfg!(windows) { 17 } else { 18 })
 }
 
-fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
+pub(crate) fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
     let md = fs::symlink_metadata(src)?;
     if md.is_dir() && !is_link(&md) {
         fs::create_dir(dest)?;
@@ -546,8 +525,9 @@ mod tests {
         fs::create_dir_all(d.join("src/inner")).unwrap();
         fs::write(d.join("src/inner/f"), "abc").unwrap();
         fs::create_dir_all(d.join("dest")).unwrap();
-        assert!(move_into(&d.join("src"), &d.join("src/inner")).is_err());
-        let to = move_into(&d.join("src"), &d.join("dest")).unwrap();
+        let into = |src: &Path, dir: &Path| crate::transfer::transfer(&[src.to_path_buf()], dir, false, &mut |_| panic!("no clash"));
+        assert!(!into(&d.join("src"), &d.join("src/inner")).errors.is_empty());
+        let to = into(&d.join("src"), &d.join("dest")).made[0].clone();
         assert_eq!(fs::read_to_string(to.join("inner/f")).unwrap(), "abc");
         copy_all(&d.join("dest"), &d.join("copy")).unwrap();
         assert_eq!(fs::read_to_string(d.join("copy/src/inner/f")).unwrap(), "abc");
@@ -558,6 +538,10 @@ mod tests {
     fn copy_rename_new_folder() {
         let d = tmp("ops");
         fs::write(d.join("a.txt"), b"hi").unwrap();
+        let copy_into = |src: &Path, dir: &Path| {
+            let o = crate::transfer::transfer(&[src.to_path_buf()], dir, true, &mut |_| panic!("no clash"));
+            if o.errors.is_empty() { Ok(o.made[0].clone()) } else { Err(o.errors.join(" ")) }
+        };
         let c = copy_into(&d.join("a.txt"), &d).unwrap();
         assert_eq!(c.file_name().unwrap(), "a copy.txt");
         assert_eq!(copy_into(&d.join("a.txt"), &d).unwrap().file_name().unwrap(), "a copy 2.txt");
@@ -602,5 +586,150 @@ mod tests {
         let h = sha256(&d.join("f"), &Default::default(), &Default::default()).unwrap();
         assert_eq!(h, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
         delete(&d).unwrap();
+    }
+}
+
+/// Finding an item just sent to the bin, to put it back.
+mod bin {
+    use crate::transfer::Receipt;
+    use std::path::Path;
+    use std::time::SystemTime;
+
+    /// Windows: each drive's `$Recycle.Bin\<user SID>` holds `$R…` (the item) and `$I…` (where it
+    /// came from). Only the user's own folder can be read, so trying them all finds it.
+    #[cfg(windows)]
+    pub fn find(original: &Path, since: SystemTime) -> Option<Receipt> {
+        use std::path::Component;
+        let Some(Component::Prefix(pre)) = original.components().next() else { return None };
+        let root = std::path::PathBuf::from(format!("{}\\$Recycle.Bin", pre.as_os_str().to_string_lossy()));
+        let want = original.to_string_lossy().to_lowercase();
+        let mut best: Option<(u64, Receipt)> = None;
+        for user in std::fs::read_dir(&root).ok()?.flatten() {
+            let Ok(items) = std::fs::read_dir(user.path()) else { continue };
+            for e in items.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if !name.starts_with("$I") || e.metadata().and_then(|m| m.modified()).is_ok_and(|m| m < since) {
+                    continue;
+                }
+                let Ok(bytes) = std::fs::read(e.path()) else { continue };
+                let Some((when, path)) = parse_i(&bytes) else { continue };
+                if path.to_lowercase() == want && best.as_ref().is_none_or(|b| when > b.0) {
+                    let r = Receipt { in_bin: user.path().join(format!("$R{}", &name[2..])), info: Some(e.path()) };
+                    best = Some((when, r));
+                }
+            }
+        }
+        best.map(|b| b.1)
+    }
+
+    /// A `$I` file: version, size, deletion time, then the original path (fixed 260 characters
+    /// in version 1, length-prefixed in version 2). Returns (deletion time, path).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn parse_i(b: &[u8]) -> Option<(u64, String)> {
+        let u64_at = |i: usize| b.get(i..i + 8).map(|x| u64::from_le_bytes(x.try_into().unwrap()));
+        let version = u64_at(0)?;
+        let when = u64_at(16)?;
+        let units: Vec<u16> = match version {
+            1 => b.get(24..24 + 520)?.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect(),
+            2 => {
+                let n = u32::from_le_bytes(b.get(24..28)?.try_into().ok()?) as usize;
+                b.get(28..28 + n * 2)?.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect()
+            }
+            _ => return None,
+        };
+        let end = units.iter().position(|&u| u == 0).unwrap_or(units.len());
+        Some((when, String::from_utf16_lossy(&units[..end])))
+    }
+
+    /// Finder told us where it went.
+    #[cfg(target_os = "macos")]
+    pub fn find(_original: &Path, _since: SystemTime) -> Option<Receipt> {
+        None
+    }
+
+    /// Linux and other Unixes (the freedesktop.org Trash): the home Trash, or `.Trash-<uid>` at
+    /// the top of the drive. `info/<name>.trashinfo` says where `files/<name>` came from.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    pub fn find(original: &Path, since: SystemTime) -> Option<Receipt> {
+        use std::os::unix::fs::MetadataExt;
+        let uid = unsafe { libc::getuid() };
+        let mut bins: Vec<(std::path::PathBuf, Option<std::path::PathBuf>)> = Vec::new();
+        let data = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| crate::fsys::places::home().map(|h| h.join(".local/share")));
+        if let Some(d) = data {
+            bins.push((d.join("Trash"), None));
+        }
+        // The top of the drive the item was on: the last folder up on the same device.
+        if let Some(parent) = original.parent()
+            && let Ok(dev) = std::fs::metadata(parent).map(|m| m.dev())
+        {
+            let mut top = parent.to_path_buf();
+            while let Some(up) = top.parent() {
+                if std::fs::metadata(up).map(|m| m.dev()).ok() != Some(dev) {
+                    break;
+                }
+                top = up.to_path_buf();
+            }
+            bins.push((top.join(format!(".Trash-{uid}")), Some(top.clone())));
+            bins.push((top.join(".Trash").join(uid.to_string()), Some(top)));
+        }
+        let mut best: Option<(SystemTime, Receipt)> = None;
+        for (bin, top) in bins {
+            let Ok(rd) = std::fs::read_dir(bin.join("info")) else { continue };
+            for e in rd.flatten() {
+                let Ok(when) = e.metadata().and_then(|m| m.modified()) else { continue };
+                if when < since {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(e.path()) else { continue };
+                let Some(path) = text.lines().find_map(|l| l.strip_prefix("Path=")).map(unescape) else { continue };
+                let full = match &top {
+                    Some(t) if !path.starts_with('/') => t.join(&path),
+                    _ => std::path::PathBuf::from(&path),
+                };
+                if full != original || best.as_ref().is_some_and(|b| b.0 >= when) {
+                    continue;
+                }
+                let name = e.file_name().to_string_lossy().trim_end_matches(".trashinfo").to_string();
+                best = Some((when, Receipt { in_bin: bin.join("files").join(name), info: Some(e.path()) }));
+            }
+        }
+        best.map(|b| b.1)
+    }
+
+    /// %-escapes in a .trashinfo path.
+    #[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
+    pub fn unescape(s: &str) -> String {
+        let b = s.as_bytes();
+        let mut out = Vec::with_capacity(b.len());
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'%'
+                && let Some(v) = s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok())
+            {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+            out.push(b[i]);
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn bin_notes() {
+        assert_eq!(unescape("/home/r/My%20Shots/a%25b.exr"), "/home/r/My Shots/a%b.exr");
+        // A version 2 $I file for C:\x.txt.
+        let mut b = Vec::new();
+        b.extend(2u64.to_le_bytes());
+        b.extend(5u64.to_le_bytes());
+        b.extend(99u64.to_le_bytes());
+        let p: Vec<u16> = "C:\\x.txt\0".encode_utf16().collect();
+        b.extend((p.len() as u32).to_le_bytes());
+        for u in p {
+            b.extend(u.to_le_bytes());
+        }
+        assert_eq!(parse_i(&b), Some((99, "C:\\x.txt".to_string())));
     }
 }

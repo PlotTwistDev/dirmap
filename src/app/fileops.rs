@@ -96,9 +96,19 @@ impl App {
         if self.busy_note() {
             return;
         }
+        self.make_new("Making a new folder".into(), move || actions::new_folder(&dir));
+    }
+
+    /// Make something new in the background, select it and open the Rename box on it. Undo
+    /// sends it to the bin.
+    pub(super) fn make_new(&mut self, label: String, make: impl FnOnce() -> Result<PathBuf, String> + Send + 'static) {
         self.ops.then_rename = true;
-        self.run_op_select("Making a new folder".into(), move || match actions::new_folder(&dir) {
-            Ok(p) => (Ok(None), vec![p.clone()], vec![p]),
+        let rec = self.ops.record();
+        self.run_op_select(label, move || match make() {
+            Ok(p) => {
+                rec.lock().unwrap().push(crate::transfer::Step::Created(p.clone()));
+                (Ok(None), vec![p.clone()], vec![p])
+            }
             Err(e) => (Err(e), vec![], vec![]),
         });
     }
@@ -108,11 +118,7 @@ impl App {
         if self.busy_note() {
             return;
         }
-        self.ops.then_rename = true;
-        self.run_op_select(format!("Making {}", b.name), move || match actions::new_file(&dir, b.name, b.contents.as_bytes(), b.executable) {
-            Ok(p) => (Ok(None), vec![p.clone()], vec![p]),
-            Err(e) => (Err(e), vec![], vec![]),
-        });
+        self.make_new(format!("Making {}", b.name), move || actions::new_file(&dir, b.name, b.contents.as_bytes(), b.executable));
     }
 
     /// A copy of one of the user's templates, then the Rename box for it.
@@ -120,12 +126,8 @@ impl App {
         if self.busy_note() {
             return;
         }
-        self.ops.then_rename = true;
         let name = templates::new_name(&t.path);
-        self.run_op_select(format!("Making {name}"), move || match actions::new_from_template(&dir, &t.path, &name) {
-            Ok(p) => (Ok(None), vec![p.clone()], vec![p]),
-            Err(e) => (Err(e), vec![], vec![]),
-        });
+        self.make_new(format!("Making {name}"), move || actions::new_from_template(&dir, &t.path, &name));
     }
 
     /// Say so when another operation is still running. True if one is.

@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::actions;
+use crate::transfer;
 use menus::{ItemInfo, TreeAction};
 use std::cmp::Ordering as Cmp;
 use std::collections::BTreeSet;
@@ -702,11 +703,7 @@ impl App {
             return;
         }
         let dir = self.full_path(&self.browser.folder);
-        self.ops.then_rename = true;
-        self.run_op_select("Making a new folder".into(), move || match actions::new_folder(&dir) {
-            Ok(p) => (Ok(None), vec![p.clone()], vec![p]),
-            Err(e) => (Err(e), vec![], vec![]),
-        });
+        self.make_new("Making a new folder".into(), move || actions::new_folder(&dir));
     }
 
     /// Paste what was copied or cut into `dest`.
@@ -738,38 +735,53 @@ impl App {
             format!("{} items", sources.len())
         };
         let label = format!("{} {what} to {name}", if copy { "Copying" } else { "Moving" });
-        let root = self.scanned_path.clone();
         // Select the results only when they land in the folder on screen (a paste); a drop
         // onto another folder leaves you where you are, as in Finder and Explorer.
         let here = (self.shown_tree().is_some() && dest == self.full_path(&self.browser.folder)) || self.files.here().dir() == Some(dest.as_path());
+        // Clashes are asked about while the work waits; "for the rest" is remembered here,
+        // separately for files and for folders.
+        let (ask_tx, ask_rx) = mpsc::channel();
+        self.ops.clash = Some(menus::ClashAsk { rx: ask_rx, current: None, all: false, copy });
+        let rec = self.ops.record();
         self.run_op_select(label, move || {
-            let mut affected = Vec::new();
-            let mut made = Vec::new();
-            let mut errors = Vec::new();
-            for s in &sources {
-                let r = if copy { actions::copy_into(s, &dest) } else { actions::move_into(s, &dest) };
-                match r {
-                    Ok(to) => {
-                        if !copy {
-                            affected.push(s.clone());
-                        }
-                        if to.starts_with(&root) {
-                            affected.push(to.clone());
-                        }
-                        made.push(to);
-                    }
-                    Err(e) => errors.push(e),
+            let (mut for_files, mut for_dirs) = (None, None);
+            let mut ask = |c: &transfer::Clash| {
+                let slot = if c.src_dir && c.dest_dir { &mut for_dirs } else { &mut for_files };
+                if let Some(ch) = *slot {
+                    return ch;
                 }
-            }
-            let note = match (copy, sources.len() - errors.len()) {
-                (_, 0) => None,
-                (true, 1) => Some(format!("Copied to {}", dest.display())),
-                (false, 1) => Some(format!("Moved to {}", dest.display())),
-                (true, n) => Some(format!("Copied {n} items to {}", dest.display())),
-                (false, n) => Some(format!("Moved {n} items to {}", dest.display())),
+                let (tx, rx) = mpsc::channel();
+                if ask_tx.send((c.clone(), tx)).is_err() {
+                    return transfer::Choice::Stop;
+                }
+                match rx.recv() {
+                    Ok((ch, all)) => {
+                        if all {
+                            *slot = Some(ch);
+                        }
+                        ch
+                    }
+                    Err(_) => transfer::Choice::Stop,
+                }
             };
-            let r = if errors.is_empty() { Ok(note) } else { Err(errors.join(" ")) };
-            (r, affected, if here { made } else { Vec::new() })
+            let out = transfer::transfer(&sources, &dest, copy, &mut ask);
+            *rec.lock().unwrap() = out.steps;
+            let done = out.made.len();
+            let mut note = match (copy, done) {
+                (_, 0) => String::new(),
+                (true, 1) => format!("Copied to {}", dest.display()),
+                (false, 1) => format!("Moved to {}", dest.display()),
+                (true, n) => format!("Copied {n} items to {}", dest.display()),
+                (false, n) => format!("Moved {n} items to {}", dest.display()),
+            };
+            if out.skipped > 0 {
+                note.push_str(&format!("{}{} skipped", if note.is_empty() { "" } else { "; " }, if out.skipped == 1 { "1 item".into() } else { format!("{} items", out.skipped) }));
+            }
+            if out.stopped {
+                note.push_str(if note.is_empty() { "Stopped" } else { "; stopped" });
+            }
+            let r = if out.errors.is_empty() { Ok((!note.is_empty()).then_some(note)) } else { Err(out.errors.join(" ")) };
+            (r, out.touched, if here { out.made } else { Vec::new() })
         });
     }
 
@@ -1188,6 +1200,7 @@ impl App {
             NextTab(bool),
             NewFolder,
             Paste(String),
+            Undo,
             Find(String),
         }
         let layout = self.browser.layout();
@@ -1221,6 +1234,9 @@ impl App {
             }
             if i.consume_key(M::COMMAND | M::SHIFT, Key::N) {
                 return Some(Do::NewFolder);
+            }
+            if i.consume_key(M::COMMAND, Key::Z) {
+                return Some(Do::Undo);
             }
             let pasted = i.events.iter().find_map(|e| match e {
                 egui::Event::Paste(t) => Some(t.clone()),
@@ -1312,6 +1328,7 @@ impl App {
                 picks.switch_tab = Some(if fwd { (self.browser.active + 1) % n } else { (self.browser.active + n - 1) % n });
             }
             Do::NewFolder => picks.new_folder = true,
+            Do::Undo => self.undo_last(),
             Do::Paste(text) => {
                 let ours = self.browser.clip.as_ref().is_some_and(|c| text_of(&c.paths) == text.trim_end());
                 if ours || self.browser.clip.is_some() && text.trim().is_empty() {

@@ -2516,8 +2516,16 @@ impl eframe::App for App {
                     } else {
                         ui.label(text);
                     }
+                    if !error
+                        && self.ops.undo_fresh
+                        && let Some(what) = self.ops.undo_label()
+                        && ui.small_button("Undo").on_hover_text(format!("Undo {what} ({})", if cfg!(target_os = "macos") { "⌘Z" } else { "Ctrl+Z" })).clicked()
+                    {
+                        self.undo_last();
+                    }
                     if ui.small_button("✖").on_hover_text("Dismiss").clicked() {
                         self.ops.notice = None;
+                        self.ops.undo_fresh = false;
                     }
                     ui.separator();
                 }

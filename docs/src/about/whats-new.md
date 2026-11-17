@@ -20,6 +20,10 @@
   Drops move items on the same drive and copy them to another, as in Explorer and Finder, and the
   label by the pointer says which. See
   [Copying, moving and deleting](../views/file-manager.md#copying-moving-and-deleting).
+- **Undo and name clashes.** **Ctrl+Z** undoes copies, moves, renames, new items and Move to
+  Trash, putting deleted items back from the bin. When a copy or move meets a name that's taken,
+  dirmap asks: Replace, Keep Both, Skip, or Merge for folders. See
+  [Undo](../views/file-manager.md#undo).
 - **Two panes** (**Ctrl+\\**): two folders side by side or one above the other, each with its own
   tabs, sort and filter. Drag between them, or press **Shift+F5** to copy and **Shift+F6** to move
   to the other one. See [Two panes](../views/file-manager.md#two-panes).
