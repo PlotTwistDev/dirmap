@@ -176,6 +176,11 @@ impl Browser {
         &mut self.tabs[self.active]
     }
 
+    /// The folder on screen, as a path in the scan.
+    pub fn current_folder(&self) -> &[u32] {
+        &self.folder
+    }
+
     pub fn layout(&self) -> Layout {
         self.tabs[self.active].layout
     }
@@ -188,14 +193,19 @@ const COL_W: f32 = 250.0;
 
 /// What a folder's entry is: "Folder", "PNG image", "File".
 pub(super) fn kind_of(n: &Node) -> String {
-    if n.is_dir {
+    kind_for(&n.name, n.is_dir)
+}
+
+/// What an item is, from its name: "Folder", "PNG image", "File".
+pub(super) fn kind_for(name: &str, is_dir: bool) -> String {
+    if is_dir {
         return "Folder".into();
     }
-    let ext = n.ext();
+    let ext = scan::ext_of(name);
     if ext.is_empty() {
         return "File".into();
     }
-    let noun = match categories::of(&n.name) {
+    let noun = match categories::of(name) {
         Category::Audio => "audio",
         Category::Video => "video",
         Category::Images => "image",
@@ -211,40 +221,52 @@ pub(super) fn kind_of(n: &Node) -> String {
 }
 
 /// Case-insensitive, with runs of digits compared as numbers: "shot2" before "shot10".
+/// Allocation-free, since sorting a 100,000-item folder calls it a couple of million times.
 pub(super) fn natural_cmp(a: &str, b: &str) -> Cmp {
-    let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
+    let (ab, bb) = (a.as_bytes(), b.as_bytes());
+    let (mut i, mut j) = (0, 0);
     loop {
-        match (a.peek().copied(), b.peek().copied()) {
+        match (ab.get(i), bb.get(j)) {
             (None, None) => return Cmp::Equal,
             (None, _) => return Cmp::Less,
             (_, None) => return Cmp::Greater,
             (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
-                let mut na = String::new();
-                while let Some(c) = a.peek().copied().filter(char::is_ascii_digit) {
-                    na.push(c);
-                    a.next();
-                }
-                let mut nb = String::new();
-                while let Some(c) = b.peek().copied().filter(char::is_ascii_digit) {
-                    nb.push(c);
-                    b.next();
-                }
-                let (ta, tb) = (na.trim_start_matches('0'), nb.trim_start_matches('0'));
+                let run = |s: &[u8], from: usize| from + s[from..].iter().take_while(|c| c.is_ascii_digit()).count();
+                let (ea, eb) = (run(ab, i), run(bb, j));
+                let (na, nb) = (&ab[i..ea], &bb[j..eb]);
+                let (ta, tb) = (trim_zeros(na), trim_zeros(nb));
                 let o = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb)).then_with(|| na.len().cmp(&nb.len()));
                 if o != Cmp::Equal {
                     return o;
                 }
+                i = ea;
+                j = eb;
             }
-            (Some(x), Some(y)) => {
-                let o = x.to_lowercase().cmp(y.to_lowercase());
+            (Some(x), Some(y)) if x.is_ascii() && y.is_ascii() => {
+                let o = x.to_ascii_lowercase().cmp(&y.to_ascii_lowercase());
                 if o != Cmp::Equal {
                     return o;
                 }
-                a.next();
-                b.next();
+                i += 1;
+                j += 1;
+            }
+            _ => {
+                // Non-ASCII: compare one whole character, lowercased.
+                let (ca, cb) = (a[i..].chars().next().unwrap(), b[j..].chars().next().unwrap());
+                let o = ca.to_lowercase().cmp(cb.to_lowercase());
+                if o != Cmp::Equal {
+                    return o;
+                }
+                i += ca.len_utf8();
+                j += cb.len_utf8();
             }
         }
     }
+}
+
+fn trim_zeros(n: &[u8]) -> &[u8] {
+    let z = n.iter().take_while(|&&c| c == b'0').count();
+    &n[z..]
 }
 
 /// The order to list a folder's children in.
@@ -333,7 +355,7 @@ impl App {
     }
 
     /// Go to a folder, remembering where we were for Back, and take the map there too.
-    fn browse_to(&mut self, folder: Vec<u32>) {
+    pub(super) fn browse_to(&mut self, folder: Vec<u32>) {
         if folder != self.browser.folder {
             let from = self.full_path(&self.browser.folder);
             let t = self.browser.tab();
@@ -1788,7 +1810,7 @@ fn fs_exists(p: &Path) -> bool {
 
 /// Scroll offset that brings a row at `y` (height `h`) into a view last at `(offset, height)`,
 /// moving as little as possible.
-fn keep_in_view(view: (f32, f32), y: f32, h: f32) -> f32 {
+pub(super) fn keep_in_view(view: (f32, f32), y: f32, h: f32) -> f32 {
     let (off, height) = view;
     if y < off {
         y
@@ -1823,6 +1845,11 @@ mod tests {
         assert_eq!(natural_cmp("Apple", "banana"), Cmp::Less);
         assert_eq!(natural_cmp("a01", "a1"), Cmp::Greater);
         assert_eq!(natural_cmp("a", "a"), Cmp::Equal);
+        assert_eq!(natural_cmp("a", "a1"), Cmp::Less);
+        assert_eq!(natural_cmp("file_000010", "file_9"), Cmp::Greater);
+        assert_eq!(natural_cmp("Été", "été2"), Cmp::Less);
+        assert_eq!(natural_cmp("Zoë", "zoe"), Cmp::Greater);
+        assert_eq!(natural_cmp("ÄB", "äa"), Cmp::Greater);
     }
 
     #[test]

@@ -1,5 +1,8 @@
 # The file manager
 
+This page is about the file manager in **Storage Analysis**, which shows what was scanned. To
+browse your computer without scanning, use the [Files workspace](file-manager.md).
+
 The top part of the window is a file manager for what you scanned, like Finder or Windows
 Explorer: folders you open by double-clicking, a path you can click, Back and Forward, tabs, and
 the usual list, icon and column layouts. Unlike a file manager, every item shows how much space

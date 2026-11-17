@@ -325,7 +325,7 @@ fn mtime(md: &fs::Metadata) -> i64 {
 }
 
 #[cfg(windows)]
-fn is_hidden(_name: &str, md: &fs::Metadata) -> bool {
+pub(crate) fn is_hidden(_name: &str, md: &fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
     const HIDDEN: u32 = 0x2;
     const SYSTEM: u32 = 0x4;
@@ -333,7 +333,7 @@ fn is_hidden(_name: &str, md: &fs::Metadata) -> bool {
 }
 
 #[cfg(not(windows))]
-fn is_hidden(name: &str, _md: &fs::Metadata) -> bool {
+pub(crate) fn is_hidden(name: &str, _md: &fs::Metadata) -> bool {
     name.starts_with('.')
 }
 

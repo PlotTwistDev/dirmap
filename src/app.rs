@@ -30,6 +30,8 @@ use std::time::{Duration, Instant};
 
 mod custom;
 mod browser;
+mod files;
+use files::Workspace;
 
 #[derive(PartialEq, Clone, Copy)]
 enum SortBy {
@@ -222,6 +224,8 @@ pub struct App {
     map_kind: MapKind,
     /// The file manager at the top: tabs, layouts, history, selection and clipboard.
     browser: browser::Browser,
+    /// The File Manager workspace: browsing the disk directly, without a scan.
+    files: files::Files,
     side_tab: SideTab,
     /// Bumped whenever something that changes tile colors (other than the cache's own keys) changes.
     paint_gen: u32,
@@ -265,6 +269,12 @@ impl App {
         let mut settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, "settings")).unwrap_or_default();
         settings.admin = elevate::load_mode();
         let admin_prompt = elevate::can_elevate() && !elevate::is_elevated() && settings.admin == AdminMode::Ask;
+        let mut files_prefs: files::FilesPrefs = cc.storage.and_then(|s| eframe::get_value(s, "files")).unwrap_or_default();
+        // Asked to scan something (a path, a snapshot to compare, a test tree): start in Storage
+        // Analysis. Otherwise open where the user left off, the File Manager the first time.
+        if path.is_some() || compare.is_some() || std::env::var("DIRMAP_SYNTHETIC").is_ok() {
+            files_prefs.workspace = Workspace::Analysis;
+        }
         let mut app = Self {
             settings,
             dialog: Default::default(),
@@ -313,6 +323,7 @@ impl App {
             color_mode: ColorMode::Type,
             map_kind: MapKind::Treemap,
             browser: Default::default(),
+            files: files::Files::new(files_prefs),
             side_tab: SideTab::Types,
             paint_gen: 0,
             hist: None,
@@ -665,6 +676,7 @@ impl App {
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
+            self.workspace_switch(ui);
             if ui.button("🖴 Drives…").clicked() {
                 self.show_drives = !self.show_drives;
                 if self.show_drives {
@@ -2284,6 +2296,7 @@ impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "settings", &self.settings);
         eframe::set_value(storage, "custom_filter", &self.custom.prefs);
+        eframe::set_value(storage, "files", &self.files.to_save());
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -2317,7 +2330,12 @@ impl eframe::App for App {
             self.restart_as_admin(&ctx);
         }
         self.admin_question(&ctx);
-        self.tree_shortcuts(&ctx);
+        self.workspace_keys(&ctx);
+        let analysis = self.files.prefs.workspace == Workspace::Analysis;
+        // Shortcuts that act on the scan only work where the scan is on screen.
+        if analysis {
+            self.tree_shortcuts(&ctx);
+        }
         self.ops_ui(&ctx);
 
         if let Some(rx) = &self.drives_rx {
@@ -2387,16 +2405,26 @@ impl eframe::App for App {
             }
         }
 
-        self.custom_shortcut(&ctx);
+        if analysis {
+            self.custom_shortcut(&ctx);
+        }
         self.drive_filter(&ctx);
         self.poll_sequences(&ctx);
 
         let r = egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(2.0);
-            self.toolbar(ui);
+            if analysis {
+                self.toolbar(ui);
+            } else {
+                self.files_toolbar(ui);
+            }
             ui.add_space(2.0);
         });
-        self.help_regions.push((r.response.rect, topics::TOOLBAR));
+        self.help_regions.push((r.response.rect, if analysis { topics::TOOLBAR } else { topics::FILE_MANAGER }));
+        if !analysis {
+            self.files_workspace(ui);
+            return;
+        }
 
         if self.show_drives && self.tree.is_some() {
             let mut open = true;

@@ -27,6 +27,7 @@ const MENUS: &str = "src/app/menus.rs";
 const CUSTOM: &str = "src/app/custom.rs";
 const HELP: &str = "src/help/mod.rs";
 const BROWSER: &str = "src/app/browser.rs";
+const FILES: &str = "src/app/files.rs";
 
 const fn b(keys: &'static str, mac: &'static str, action: &'static str, source: &'static [(&'static str, &'static str)]) -> Binding {
     Binding { keys, mac, action, source }
@@ -38,12 +39,37 @@ pub const KEYBOARD: &[Group] = &[
         note: "In the main window, unless the cursor is in a text box.",
         bindings: &[
             b("F1", "", "Open help for the part of the window under the pointer.", &[(APP, "Key::F1")]),
-            b("Ctrl+F", "⌘F", "Open the Custom filter and put the cursor in it.", &[(CUSTOM, "egui::Modifiers::COMMAND, egui::Key::F")]),
+            b("Ctrl+1", "⌘1", "Switch to the Files workspace.", &[(FILES, "i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num1)")]),
+            b("Ctrl+3", "⌘3", "Switch to the Storage Analysis workspace.", &[(FILES, "i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num3)")]),
+            b("Ctrl+F", "⌘F", "Files: put the cursor in the Filter box. Storage Analysis: open the Custom filter.", &[(FILES, "i.consume_key(M::COMMAND, Key::F)"), (CUSTOM, "egui::Modifiers::COMMAND, egui::Key::F")]),
+        ],
+    },
+    Group {
+        title: "Files workspace",
+        note: "After you've clicked in the list or the sidebar, unless the cursor is in a text box.",
+        bindings: &[
+            b("↑ / ↓", "", "Select the item above or below. Hold Shift to extend the selection.", &[(FILES, "return Some(Do::Move(1));"), (FILES, "return Some(Do::Move(-1));")]),
+            b("Home / End", "", "Select the first or last item.", &[(FILES, "return Some(Do::To(0));"), (FILES, "return Some(Do::To(i64::MAX));")]),
+            b("Page Up / Page Down", "", "Move a screenful.", &[(FILES, "return Some(Do::Page(1));"), (FILES, "return Some(Do::Page(-1));")]),
+            b("Enter or Ctrl+↓", "Enter or ⌘↓", "Open the selected folder, or the file with its usual app.", &[(FILES, "i.consume_key(M::COMMAND, Key::ArrowDown) || i.consume_key(M::NONE, Key::Enter)")]),
+            b("Backspace, Alt+↑ or Ctrl+↑", "Backspace, ⌥↑ or ⌘↑", "Up to the enclosing folder, selecting the one you were in. Above a drive: the Computer view.", &[(FILES, "i.consume_key(M::ALT, Key::ArrowUp) || i.consume_key(M::COMMAND, Key::ArrowUp) || i.consume_key(M::NONE, Key::Backspace)")]),
+            b("Alt+← / Alt+→", "⌥← / ⌥→", "Back and Forward.", &[(FILES, "i.consume_key(M::ALT, Key::ArrowLeft)"), (FILES, "i.consume_key(M::ALT, Key::ArrowRight)")]),
+            b("Ctrl+A", "⌘A", "Select everything shown.", &[(FILES, "return Some(Do::All);")]),
+            b("Escape", "", "Select nothing.", &[(FILES, "i.consume_key(M::NONE, Key::Escape)")]),
+            b("Type a name", "", "Jump to the first item whose name starts with what you type.", &[(FILES, "return Some(Do::Find(typed));")]),
+            b("Ctrl+L", "⌘L", "Type a path (works while typing elsewhere too).", &[(FILES, "i.consume_key(M::COMMAND, Key::L)")]),
+            b("Ctrl+T", "⌘T", "New tab, showing the same folder.", &[(FILES, "return Some(Do::NewTab);")]),
+            b("Ctrl+W", "⌘W", "Close the tab.", &[(FILES, "return Some(Do::CloseTab);")]),
+            b("Ctrl+Shift+T", "⌘⇧T", "Reopen the tab you closed last.", &[(FILES, "i.consume_key(M::COMMAND | M::SHIFT, Key::T)")]),
+            b("Ctrl+Tab / Ctrl+Shift+Tab", "⌃Tab / ⌃⇧Tab", "Next or previous tab.", &[(FILES, "return Some(Do::NextTab(true));"), (FILES, "return Some(Do::NextTab(false));")]),
+            b("F5 or Ctrl+R", "F5 or ⌘R", "Read the folder again.", &[(FILES, "i.consume_key(M::NONE, Key::F5) || i.consume_key(M::COMMAND, Key::R)")]),
+            b("Ctrl+Shift+.", "⌘⇧.", "Show or hide hidden files and folders.", &[(FILES, "i.consume_key(M::COMMAND | M::SHIFT, Key::Period)")]),
+            b("Ctrl+Shift+C", "⌘⇧C", "Copy the full paths of the selected items.", &[(FILES, "i.consume_key(M::COMMAND | M::SHIFT, Key::C)")]),
         ],
     },
     Group {
         title: "Treemap",
-        note: "When the treemap is showing (not the sunburst), the cursor isn't in a text box, and you last clicked the map (or the file manager is in its Tree layout).",
+        note: "In Storage Analysis, when the treemap is showing (not the sunburst), the cursor isn't in a text box, and you last clicked the map (or the file manager is in its Tree layout).",
         bindings: &[
             b("+ or =", "", "Zoom in, around the pointer (or the middle of the map).", &[(APP, "egui::Key::Plus"), (APP, "egui::Key::Equals")]),
             b("−", "", "Zoom out, around the pointer (or the middle of the map).", &[(APP, "egui::Key::Minus")]),
@@ -54,7 +80,7 @@ pub const KEYBOARD: &[Group] = &[
     },
     Group {
         title: "File manager",
-        note: "After you've clicked in the file manager (not the map), in the List, Icons and Columns layouts, unless the cursor is in a text box.",
+        note: "In Storage Analysis, after you've clicked in the file manager (not the map), in the List, Icons and Columns layouts, unless the cursor is in a text box.",
         bindings: &[
             b("↑ / ↓", "", "Select the item above or below (in Icons, the row above or below).", &[(BROWSER, "return Some(Do::Move(cols));"), (BROWSER, "return Some(Do::Move(-cols));")]),
             b("← / →", "", "Icons: the previous or next item. Columns: up to the enclosing folder, or into the selected folder.", &[(BROWSER, "return Some(Do::Move(-1));"), (BROWSER, "return Some(Do::Into);")]),
@@ -76,7 +102,7 @@ pub const KEYBOARD: &[Group] = &[
     },
     Group {
         title: "Selected file or folder",
-        note: "Act on the selected item, wherever it was selected (file manager, map or a list), unless the cursor is in a text box. In the file manager they act on every selected item. The same commands are in the right-click menu.",
+        note: "In Storage Analysis. Act on the selected item, wherever it was selected (file manager, map or a list), unless the cursor is in a text box. In the file manager they act on every selected item. The same commands are in the right-click menu.",
         bindings: &[
             b("Enter", "", "Open it with its usual app (a folder opens in the file manager).", &[(MENUS, "(M::NONE, Key::Enter, TreeAction::Open)")]),
             b("Ctrl+C or Ctrl+Insert", "⌘C", "Copy it, to paste in the file manager. Its path also goes on the clipboard as text.", &[(MENUS, "egui::Event::Copy"), (MENUS, "M::CTRL, Key::Insert"), (MENUS, "return Some(TreeAction::CopyItems);")]),
@@ -121,6 +147,23 @@ pub const KEYBOARD: &[Group] = &[
 ];
 
 pub const MOUSE: &[Group] = &[
+    Group {
+        title: "Files workspace",
+        note: "",
+        bindings: &[
+            b("Click", "", "Select the item.", &[(FILES, "picks.select = Some((i, ui.input(|inp| inp.modifiers)));")]),
+            b("Ctrl+click (⌘-click on a Mac)", "", "Add the item to the selection, or take it out.", &[(FILES, "if m.command {")]),
+            b("Shift+click", "", "Select everything from the last item clicked to this one.", &[(FILES, "} else if m.shift && t.anchor.is_some() {")]),
+            b("Double-click", "", "Open a folder, or a file with its usual app.", &[(FILES, "picks.open = Some(i);")]),
+            b("Middle-click a folder, place or tab", "", "Open the folder or place in a new tab; close the tab.", &[(FILES, "if resp.middle_clicked() && e.is_dir {"), (FILES, "picks.close_tab = Some(i);")]),
+            b("Right-click", "", "The item's menu: Open, Open in New Tab, Copy Path, Show in Explorer or Finder, terminal, Pin to Sidebar, Analyse This Folder. On empty space: Refresh, Open in New Tab, Pin, Analyse.", &[(FILES, "if let Some(a) = item_menu(ui, is_dir, count, pinned) {"), (FILES, "empty.context_menu(|ui| {")]),
+            b("Click a column heading", "", "Sort by that column; click again to reverse. Folders always come first.", &[(FILES, "picks.sort = Some(col);")]),
+            b("Click a folder in the path", "", "Go there. Click the empty part of the path to type one.", &[(FILES, "go = Some(loc.clone());"), (FILES, "if bg.clicked() {")]),
+            b("Click a place or drive in the sidebar", "", "Go there. Right-click for Open in New Tab, Pin or Unpin, Copy Path and Analyse.", &[(FILES, "let resp = side_row(ui, icon, label, here == loc, ROW_F).on_hover_text(tip);"), (FILES, "place_menu(ui, &p.path, pinned, &mut picks)")]),
+            b("Back / forward mouse buttons", "", "Back and Forward.", &[(FILES, "egui::PointerButton::Extra1"), (FILES, "egui::PointerButton::Extra2")]),
+            b("Drag the sidebar's right edge", "", "Make the sidebar wider or narrower.", &[(FILES, "egui::Panel::left(\"places\")")]),
+        ],
+    },
     Group {
         title: "Treemap",
         note: "",

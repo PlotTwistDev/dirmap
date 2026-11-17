@@ -7,6 +7,22 @@ A trackpad works too: two-finger scrolling acts as the wheel, and pinching zooms
 
 <!-- BEGIN GENERATED: do not edit by hand; see src/help/reference.rs -->
 
+### Files workspace
+
+| Input | Action |
+|---|---|
+| **Click** | Select the item. |
+| **Ctrl+click (⌘-click on a Mac)** | Add the item to the selection, or take it out. |
+| **Shift+click** | Select everything from the last item clicked to this one. |
+| **Double-click** | Open a folder, or a file with its usual app. |
+| **Middle-click a folder, place or tab** | Open the folder or place in a new tab; close the tab. |
+| **Right-click** | The item's menu: Open, Open in New Tab, Copy Path, Show in Explorer or Finder, terminal, Pin to Sidebar, Analyse This Folder. On empty space: Refresh, Open in New Tab, Pin, Analyse. |
+| **Click a column heading** | Sort by that column; click again to reverse. Folders always come first. |
+| **Click a folder in the path** | Go there. Click the empty part of the path to type one. |
+| **Click a place or drive in the sidebar** | Go there. Right-click for Open in New Tab, Pin or Unpin, Copy Path and Analyse. |
+| **Back / forward mouse buttons** | Back and Forward. |
+| **Drag the sidebar's right edge** | Make the sidebar wider or narrower. |
+
 ### Treemap
 
 | Input | Action |

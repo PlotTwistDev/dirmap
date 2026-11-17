@@ -4,7 +4,14 @@ This page gets you from opening dirmap to knowing what fills your drive in a cou
 
 ## 1. Pick what to scan
 
-When dirmap opens it lists your drives with their total, free and used space.
+dirmap opens in the **Files** workspace, where you can browse your drives and folders like in
+Explorer or Finder (see [The Files workspace](../views/file-manager.md)). To find out what fills
+a drive or folder, either:
+
+- right-click it, in the list or the sidebar, and choose **Analyse This Folder…**; or
+- click **▦ Storage Analysis** at the top left and pick a drive there.
+
+Without a scan, Storage Analysis lists your drives with their total, free and used space.
 
 ![The drive list shown when dirmap starts](../images/drive-picker.png)
 

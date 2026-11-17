@@ -1,5 +1,31 @@
 # What's new
 
+## Next version
+
+### Files workspace
+
+- dirmap now opens as a **file manager**. Browse your drives, folders and network shares straight
+  away, with no scan. It has:
+  - a sidebar with Home, Desktop, Documents, Downloads and the rest, pinned folders, drives with
+    their space, and recent folders;
+  - tabs that are restored next time;
+  - Back, Forward and Up;
+  - a path you can click or type in (**Ctrl+L**), including `\\server\share` paths;
+  - a sortable Details list with a filter box and type-to-select;
+  - Shift and Ctrl selection.
+
+  See [The Files workspace](../views/file-manager.md).
+- **Analyse This Folder** scans the folder you're in and switches to **Storage Analysis**, which is
+  the dirmap you know. **Ctrl+1** and **Ctrl+3** switch between the two, and each keeps your place.
+- Folder sizes from the last scan show in the Files list.
+- Big folders and slow network drives never freeze the window: folders are read in the
+  background, and a share that takes a while says so and can be cancelled.
+
+### Fixes
+
+- **Rename** no longer replaces a different file whose name differs only in capital letters
+  (`readme` → `README`) on Linux and on case-sensitive Mac disks.
+
 ## Version 0.2.0
 
 ### File manager

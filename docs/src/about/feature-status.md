@@ -8,6 +8,7 @@ version.
 
 | Feature | Notes |
 |---|---|
+| Files workspace | Browse without scanning: sidebar (Quick access, Pinned, Drives with space, Recent), Computer view, tabs restored at start, Back/Forward/Up, clickable and typed paths (including UNC), sortable Details list, filter box, hidden files, multi-select, type to select, right-click menu, Analyse This Folder, folder sizes from the last scan. See [The Files workspace](../views/file-manager.md). |
 | Drive list and folder scanning | Parallel, with live progress and a live file manager. Windows, Linux and macOS. |
 | Directory tree | Sortable Size, % of parent, Files and Last change columns; Explorer icons on Windows. |
 | Treemap | Cushion shading on the GPU, cursor-anchored smooth zoom, pan with inertia, drill in and out, Back/Forward, zoom to selection, labels, pointer lighting. |
@@ -30,6 +31,7 @@ version.
 
 | Feature | What's missing |
 |---|---|
+| Files workspace | Opens, browses and copies paths, but doesn't yet rename, copy, move or delete files (use the file manager in Storage Analysis), has only the Details layout, and doesn't notice changes made by other apps until you press F5. No previews, Undo or dual pane yet. |
 | Right-click menus | Only in the file manager and the File types list. The treemap and sunburst have none (right-click zooms out there). WinDirStat's **Compress**, **Sparsify**, **Optimize VHD**, **Custom Cleanup**, the full **Windows Explorer** context submenu and **Group Unregistered Types** aren't available. |
 | Keyboard use | The file manager can be used entirely from the keyboard, and there are shortcuts for file commands, the Custom filter, help and the treemap, but there's no keyboard way to move between panels, and the Tree layout can't be moved through with the arrow keys. |
 | Duplicate verification | Matches use a 64-bit hash of the whole contents, not a byte-by-byte comparison. There's no "delete all but one" action; copies are deleted one at a time. |
