@@ -396,9 +396,11 @@ pub fn rename(path: &Path, new_name: &str) -> Result<PathBuf, String> {
     }
     let parent = path.parent().ok_or("Can't rename a drive.")?;
     let dest = parent.join(new_name);
-    // A change of case only is fine (the same file on case-insensitive disks).
-    let same = dest.as_os_str().to_string_lossy().to_lowercase() == path.as_os_str().to_string_lossy().to_lowercase();
-    if !same && fs::symlink_metadata(&dest).is_ok() {
+    // A change of case only is fine when the new name is the same file (case-insensitive disks).
+    // On a case-sensitive disk `README` can be a different file from `readme`: never replace it.
+    let case_only = dest.as_os_str().to_string_lossy().to_lowercase() == path.as_os_str().to_string_lossy().to_lowercase();
+    let same_file = case_only && matches!((fs::canonicalize(path), fs::canonicalize(&dest)), (Ok(a), Ok(b)) if a == b);
+    if !same_file && fs::symlink_metadata(&dest).is_ok() {
         return Err(format!("There's already something called {new_name} here."));
     }
     fs::rename(path, &dest).map_err(|e| format!("Couldn't rename: {e}"))?;
@@ -464,6 +466,24 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn rename_never_replaces_a_file_differing_only_in_case() {
+        let d = tmp("case");
+        fs::write(d.join("readme"), "mine").unwrap();
+        let case_sensitive = fs::symlink_metadata(d.join("README")).is_err();
+        if case_sensitive {
+            fs::write(d.join("README"), "theirs").unwrap();
+            assert!(rename(&d.join("readme"), "README").is_err());
+            assert_eq!(fs::read_to_string(d.join("README")).unwrap(), "theirs");
+            assert_eq!(fs::read_to_string(d.join("readme")).unwrap(), "mine");
+        } else {
+            // Case-insensitive disk: a case change of the same file is allowed.
+            let p = rename(&d.join("readme"), "README").unwrap();
+            assert_eq!(fs::read_to_string(p).unwrap(), "mine");
+        }
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]
