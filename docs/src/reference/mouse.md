@@ -19,7 +19,8 @@ A trackpad works too: two-finger scrolling acts as the wheel, and pinching zooms
 | **Right-click** | The item's menu: Open, Copy, Cut, Paste, Rename, Move to Trash, Copy Path, Add to Favourites, Show in Explorer or Finder, Properties, Analyse This Folder and, with two panes, Copy or Move to the other pane. On empty space: New, Paste, Refresh and more. |
 | **Drag onto a folder, a tab, a folder in the path, the other pane or a sidebar place** | Move the items there when it's on the same drive, copy them when it's another drive. Hold Ctrl or Alt to copy (⌥ on a Mac), Shift to move (⌘ on a Mac). The label by the pointer says which. Hold over a tab to switch to it. |
 | **Ctrl+wheel over the icons (⌘+scroll on a Mac), or pinch** | Icons view: make the icons bigger or smaller. |
-| **Click ☰ or ⊞ at the bottom right of the list** | Show the folder as Details (rows) or Icons. Each pane has its own. |
+| **Click the view buttons at the bottom right of the list** | Show the folder as Details (rows), Icons, Columns or Gallery. Each folder remembers its own view, sort and grouping (View > Remember Each Folder's View). |
+| **Click an item in a column at the left (Columns view)** | Go back to that folder with the item selected; double-click to open it. |
 | **Drag a folder onto Favourites** | Bookmark it there; nothing is moved. A line shows where it will go. Drop onto the middle of a favourite to move or copy items into that folder instead. |
 | **Drag a favourite** | Reorder it, or move it to another group. Right-click a favourite to rename or remove it; right-click a group's title for New Group, Rename and Move. |
 | **Drag the line between two panes** | Share the room between them. Double-click to make them even. |

@@ -304,13 +304,13 @@ Status: ✅ done · 🔨 in progress · ⬜ not started. "Win" means checked on 
 | 7 | New menu: folder, starter files, scripts, user templates | 6 | Advanced | ✅ | |
 | 8 | Network & Remote: mapped drives, mounts, Connect to Server (SMB), disconnect | 7 | Essential | ✅ | Not yet checked on Win |
 | 9 | Icons view with thumbnails in Files | 3b | Essential | ✅ | Per pane; Ctrl+wheel size; EXR/HDR thumbs; Windows shell icons are 32 px so big icons are drawn |
-| 10 | Gallery and column views in Files | 3b | Advanced | 🔨 | Next |
-| 11 | Grouping (by type, date, size) | 3b | Advanced | ⬜ | |
-| 12 | Remembered view per folder | 3b | Advanced | ⬜ | |
-| 13 | Audio, video and PDF previews | 3b | Advanced | ⬜ | |
+| 10 | Gallery and column views in Files | 3b | Advanced | ✅ | Columns: up to 3 folders at the left, preview of a file at the right, ←/→; Gallery: preview over a thumbnail strip |
+| 11 | Grouping (by type, date, size) | 3b | Advanced | ✅ | Details view only; View > Group By |
+| 12 | Remembered view per folder | 3b | Advanced | ✅ | View, sort and grouping; Use This View for All Folders; Reset; can be turned off |
+| 13 | Audio, video and PDF previews | 3b | Advanced | ✅ | Pictures from the system's thumbnailers (Windows shell, macOS Quick Look, Linux ffmpeg/pdftoppm); sound plays (Windows MCI, afplay, ffplay); no in-app video playback. Windows and macOS untested on device |
 | 14 | Undo for file operations | 3b | Advanced | ✅ | Ctrl+Z, last 30; restores from Recycle Bin/Trash (Windows $I parsing and macOS untested on device); no Redo yet |
-| 15 | Conflict choices (Replace, Keep Both, Skip), pause, transfer queue | 3b | Advanced | 🔨 | Replace/Keep Both/Skip/Merge/Stop done; pause and queue to do |
-| 16 | Notice changes made by other apps (file watching) | 3b | Advanced | ⬜ | Today: F5 |
+| 15 | Conflict choices (Replace, Keep Both, Skip), pause, transfer queue | 3b | Advanced | ✅ | Pause/Resume/Stop with progress in the status bar; copies and moves queue in order |
+| 16 | Notice changes made by other apps (file watching) | 3b | Advanced | ✅ | Open tabs and Columns folders; the list updates in place. Network shares depend on the server sending notices |
 | 17 | SFTP connection manager, keychain, host key checks | 4 | Advanced | ⬜ | |
 | 18 | FTP(S) (flagged insecure) and WebDAV | 4 | Specialist | ⬜ | |
 | 19 | Analysing remote folders | 4 | Specialist | ⬜ | |
@@ -323,3 +323,4 @@ Status: ✅ done · 🔨 in progress · ⬜ not started. "Win" means checked on 
 | 26 | Folder colours, tags and notes | 6 | Specialist | ⬜ | |
 | 27 | App launcher and Open With favourites | 6 | Specialist | ⬜ | |
 | 28 | Keyboard move between sidebar and list | — | Advanced | ⬜ | |
+| 29 | Archives: browse zip, 7z, tar(.gz/.xz/.bz2) as folders; extract | 3b | Advanced | ✅ | Read only (no adding to archives yet); no RAR; no password-protected archives |

@@ -97,6 +97,12 @@ fn load(ctx: &egui::Context, key: &str) -> Option<TextureHandle> {
     Some(ctx.load_texture(format!("icon:{key}"), img, egui::TextureOptions::LINEAR))
 }
 
+/// A bitmap as top-down 32-bit BGRA (for media thumbnails).
+#[cfg(windows)]
+pub(crate) fn win_dib(bmp: windows_sys::Win32::Graphics::Gdi::HBITMAP, w: usize, h: usize) -> Option<Vec<u8>> {
+    unsafe { win::dib(bmp, w, h) }
+}
+
 #[cfg(windows)]
 mod win {
     use windows_sys::Win32::Graphics::Gdi::{
@@ -174,7 +180,7 @@ mod win {
     }
 
     /// Read a bitmap as top-down 32-bit BGRA.
-    unsafe fn dib(bmp: windows_sys::Win32::Graphics::Gdi::HBITMAP, w: usize, h: usize) -> Option<Vec<u8>> {
+    pub(crate) unsafe fn dib(bmp: windows_sys::Win32::Graphics::Gdi::HBITMAP, w: usize, h: usize) -> Option<Vec<u8>> {
         unsafe {
             let mut bmi: BITMAPINFO = std::mem::zeroed();
             bmi.bmiHeader = BITMAPINFOHEADER {

@@ -720,9 +720,18 @@ impl App {
     /// Copy or move items into a folder, in the background, then select the last of them.
     pub(super) fn transfer(&mut self, sources: Vec<PathBuf>, dest: PathBuf, copy: bool) {
         if self.ops.job.is_some() {
-            self.ops.notice = Some(("Another file operation is still running.".into(), true));
+            // Wait for the one running: copies and moves run one at a time, in the order asked.
+            let n = self.ops.queued.len() + 1;
+            self.ops.queued.push_back(menus::Queued { sources, dest, copy });
+            self.ops.notice = Some((format!("Queued: starts when the {} before it finish{}.", if n == 1 { "one".to_string() } else { format!("{n} operations") }, if n == 1 { "es" } else { "" }), false));
             return;
         }
+        if crate::fsys::archive::split(&dest).is_some() {
+            self.ops.notice = Some((files::READ_ONLY_NOTE.into(), true));
+            return;
+        }
+        // Out of an archive is always a copy (a cut there can't remove anything).
+        let copy = copy || sources.iter().any(|s| crate::fsys::archive::inside(s));
         // Moving something to where it already is does nothing.
         let sources: Vec<PathBuf> = sources.into_iter().filter(|s| copy || s.parent() != Some(dest.as_path())).collect();
         if sources.is_empty() {
@@ -743,7 +752,10 @@ impl App {
         let (ask_tx, ask_rx) = mpsc::channel();
         self.ops.clash = Some(menus::ClashAsk { rx: ask_rx, current: None, all: false, copy });
         let rec = self.ops.record();
+        let ctl = Arc::new(transfer::Ctl::default());
+        let c2 = ctl.clone();
         self.run_op_select(label, move || {
+            let ctl = c2;
             let (mut for_files, mut for_dirs) = (None, None);
             let mut ask = |c: &transfer::Clash| {
                 let slot = if c.src_dir && c.dest_dir { &mut for_dirs } else { &mut for_files };
@@ -764,7 +776,7 @@ impl App {
                     Err(_) => transfer::Choice::Stop,
                 }
             };
-            let out = transfer::transfer(&sources, &dest, copy, &mut ask);
+            let out = transfer::transfer_with(&sources, &dest, copy, &mut ask, &ctl);
             *rec.lock().unwrap() = out.steps;
             let done = out.made.len();
             let mut note = match (copy, done) {
@@ -783,6 +795,9 @@ impl App {
             let r = if out.errors.is_empty() { Ok((!note.is_empty()).then_some(note)) } else { Err(out.errors.join(" ")) };
             (r, out.touched, if here { out.made } else { Vec::new() })
         });
+        if let Some(j) = &mut self.ops.job {
+            j.ctl = Some(ctl);
+        }
     }
 
     // ---------- tabs ----------

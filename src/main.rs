@@ -31,6 +31,7 @@ mod sunburst;
 mod templates;
 mod tilegpu;
 mod transfer;
+mod media;
 mod treemap;
 
 use std::path::PathBuf;

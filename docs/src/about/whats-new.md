@@ -33,9 +33,18 @@
 - **Quick Look and a preview pane.** Press **Space** for a large preview, or **Alt+P** for a
   preview pane, with zoom and pan. Images (including OpenEXR and HDR) and text files. See
   [Quick Look and the preview pane](../views/file-manager.md#quick-look-and-the-preview-pane).
-- **The Icons view.** Click **⊞** at the bottom right of the list for big icons, with pictures of
-  images (OpenEXR and HDR too). **Ctrl+wheel** changes the size. See
-  [The Icons view](../views/file-manager.md#the-icons-view).
+- **Four views.** Details, Icons, Columns (the folders above this one at the left, as in Finder)
+  and Gallery (a large preview over a strip of pictures), from the buttons at the bottom right of
+  the list. Icons and Gallery show pictures of images, videos and PDFs. Each folder remembers its
+  own view, sort and grouping.
+- **Groups.** **View > Group By** puts the Details list under headings by type, date or size.
+- **Archives.** Open zip, 7z and tar archives like folders, preview what's in them, and take
+  things out with **Extract Here**, **Extract To…**, copy and paste or a drag.
+- **Pause and queue.** Copies and moves show their progress in the status bar, can be paused,
+  resumed and stopped, and ones started while another runs wait their turn.
+- **Changes made by other programs** show up in the list by themselves, without **F5**.
+- **Video, PDF and sound previews.** A frame from a video and a PDF's first page from the
+  system's thumbnailers, and sound files play in the preview.
 - **A smarter address bar.** Suggestions as you type, **Tab** completion, `%VAR%` and `$VAR`,
   `>` for commands and `@` for favourites. Each part of the path takes drops and has a menu of
   the folders inside it. See [Typing a path](../views/file-manager.md#typing-a-path).

@@ -4,3 +4,5 @@
 pub mod history;
 pub mod listing;
 pub mod places;
+pub mod watch;
+pub mod archive;

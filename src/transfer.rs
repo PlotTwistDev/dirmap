@@ -7,9 +7,123 @@
 //! Trash first, and the bin is searched for where they went, so Undo can put them back.
 
 use crate::actions;
+use crate::fsys::archive;
 use std::fs;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, SystemTime};
+
+/// Files at least this big are copied in pieces, so a pause or a stop takes effect within the
+/// file and progress moves smoothly; smaller ones are copied by the system in one go.
+const CHUNKED_FROM: u64 = 32 << 20;
+const CHUNK: usize = 4 << 20;
+
+/// Pause, stop and progress for a running transfer, shared with the UI.
+#[derive(Default, Debug)]
+pub struct Ctl {
+    pub paused: AtomicBool,
+    pub stop: AtomicBool,
+    /// Bytes to copy and copied (copies, and moves between drives).
+    pub bytes_total: AtomicU64,
+    pub bytes_done: AtomicU64,
+    /// Top-level items to place, and placed.
+    pub items_total: AtomicU64,
+    pub items_done: AtomicU64,
+    /// Still adding up what's to be copied.
+    pub counting: AtomicBool,
+    /// The file being copied now.
+    pub current: Mutex<String>,
+}
+
+impl Ctl {
+    /// Wait while paused. False once stopped.
+    pub fn go_on(&self) -> bool {
+        while self.paused.load(Ordering::Relaxed) && !self.stop.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        !self.stop.load(Ordering::Relaxed)
+    }
+
+    fn stopped() -> io::Error {
+        io::Error::new(io::ErrorKind::Interrupted, "stopped")
+    }
+}
+
+/// Bytes in the files under `p`, stopping early if asked to.
+fn bytes_in(p: &Path, ctl: &Ctl) -> u64 {
+    if let Some((_, size, _)) = archive::item(p) {
+        return size;
+    }
+    let Ok(md) = fs::symlink_metadata(p) else { return 0 };
+    if md.is_dir() && !md.file_type().is_symlink() {
+        let Ok(rd) = fs::read_dir(p) else { return 0 };
+        let mut sum = 0;
+        for e in rd.flatten() {
+            if ctl.stop.load(Ordering::Relaxed) {
+                break;
+            }
+            sum += bytes_in(&e.path(), ctl);
+        }
+        sum
+    } else {
+        md.len()
+    }
+}
+
+/// Copy a file or folder tree, honouring pause and stop and counting progress. The copy keeps
+/// each file's permissions and modified time.
+pub fn copy_tree(src: &Path, dest: &Path, ctl: &Ctl) -> io::Result<()> {
+    if !ctl.go_on() {
+        return Err(Ctl::stopped());
+    }
+    // Out of an archive: extracted.
+    if archive::inside(src) && archive::item(src).is_some() {
+        return archive::extract_path(src, dest, ctl);
+    }
+    let md = fs::symlink_metadata(src)?;
+    if md.is_dir() && !md.file_type().is_symlink() {
+        fs::create_dir(dest)?;
+        for e in fs::read_dir(src)? {
+            let e = e?;
+            copy_tree(&e.path(), &dest.join(e.file_name()), ctl)?;
+        }
+        Ok(())
+    } else if md.is_file() {
+        if let Ok(mut c) = ctl.current.lock() {
+            *c = src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        }
+        if md.len() < CHUNKED_FROM {
+            fs::copy(src, dest)?;
+            ctl.bytes_done.fetch_add(md.len(), Ordering::Relaxed);
+            return Ok(());
+        }
+        let mut from = fs::File::open(src)?;
+        let mut to = fs::File::create(dest)?;
+        let mut buf = vec![0u8; CHUNK];
+        loop {
+            if !ctl.go_on() {
+                return Err(Ctl::stopped());
+            }
+            let n = from.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            to.write_all(&buf[..n])?;
+            ctl.bytes_done.fetch_add(n as u64, Ordering::Relaxed);
+        }
+        to.flush()?;
+        if let Ok(m) = md.modified() {
+            let _ = to.set_modified(m);
+        }
+        drop(to);
+        let _ = fs::set_permissions(dest, md.permissions());
+        Ok(())
+    } else {
+        actions::copy_all(src, dest)
+    }
+}
 
 /// Where an item went in the Recycle Bin or Trash, to put it back.
 #[derive(Clone, Debug, PartialEq)]
@@ -76,21 +190,36 @@ pub struct Outcome {
 }
 
 /// Copy or move `sources` into `dest_dir`. `ask` decides each clash.
+#[cfg(test)]
 pub fn transfer(sources: &[PathBuf], dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) -> Choice) -> Outcome {
+    transfer_with(sources, dest_dir, copy, ask, &Ctl::default())
+}
+
+/// `transfer`, which can be paused and stopped through `ctl` and reports its progress there.
+pub fn transfer_with(sources: &[PathBuf], dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) -> Choice, ctl: &Ctl) -> Outcome {
     let mut out = Outcome::default();
+    ctl.items_total.store(sources.len() as u64, Ordering::Relaxed);
+    if copy {
+        ctl.counting.store(true, Ordering::Relaxed);
+        let total = sources.iter().map(|s| bytes_in(s, ctl)).sum();
+        ctl.bytes_total.store(total, Ordering::Relaxed);
+        ctl.counting.store(false, Ordering::Relaxed);
+    }
     for s in sources {
-        if out.stopped {
+        if out.stopped || !ctl.go_on() {
+            out.stopped = true;
             break;
         }
-        if let Some(p) = place(s, dest_dir, copy, ask, &mut out) {
+        if let Some(p) = place(s, dest_dir, copy, ask, &mut out, ctl) {
             out.made.push(p);
         }
+        ctl.items_done.fetch_add(1, Ordering::Relaxed);
     }
     out
 }
 
 /// Put one item into `dest_dir`. Returns where it ended up.
-fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) -> Choice, out: &mut Outcome) -> Option<PathBuf> {
+fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) -> Choice, out: &mut Outcome, ctl: &Ctl) -> Option<PathBuf> {
     let Some(name) = src.file_name().map(|n| n.to_string_lossy().to_string()) else {
         out.errors.push(format!("Can't {} a drive.", if copy { "copy" } else { "move" }));
         return None;
@@ -107,20 +236,25 @@ fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) ->
     // A copy into the folder it's in is a duplicate: "name copy.ext", as in Finder and Explorer.
     let target = if in_place { actions::free_name(dest_dir, &name, "copy") } else { dest_dir.join(&name) };
     let Ok(existing) = fs::symlink_metadata(&target) else {
-        return put(src, &target, copy, out);
+        return put(src, &target, copy, out, ctl);
     };
-    let Ok(here) = fs::symlink_metadata(src) else {
+    // What's being placed (in an archive, from its table of contents).
+    let here = match archive::item(src) {
+        Some((dir, size, m)) => Some((dir, size, (m > 0).then(|| std::time::UNIX_EPOCH + Duration::from_secs(m as u64)))),
+        None => fs::symlink_metadata(src).ok().map(|md| (md.is_dir(), md.len(), md.modified().ok())),
+    };
+    let Some((src_dir, src_size, src_modified)) = here else {
         out.errors.push(format!("{name} isn't there any more."));
         return None;
     };
     let clash = Clash {
         src: src.to_path_buf(),
         dest: target.clone(),
-        src_dir: here.is_dir(),
+        src_dir,
         dest_dir: existing.is_dir(),
-        src_size: here.len(),
+        src_size,
         dest_size: existing.len(),
-        src_modified: here.modified().ok(),
+        src_modified,
         dest_modified: existing.modified().ok(),
     };
     match ask(&clash) {
@@ -134,7 +268,7 @@ fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) ->
         }
         Choice::KeepBoth => {
             let free = actions::free_name(dest_dir, &name, "");
-            put(src, &free, copy, out)
+            put(src, &free, copy, out, ctl)
         }
         Choice::Replace => {
             match actions::trash_keep(&target) {
@@ -145,11 +279,15 @@ fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) ->
                 }
             }
             out.touched.push(target.clone());
-            put(src, &target, copy, out)
+            put(src, &target, copy, out, ctl)
         }
         Choice::Merge if clash.src_dir && clash.dest_dir => {
-            let entries = match fs::read_dir(src) {
-                Ok(rd) => rd.flatten().map(|e| e.path()).collect::<Vec<_>>(),
+            let listed = match archive::split(src).filter(|_| archive::inside(src)) {
+                Some((a, inner)) => archive::list(&a, &inner).map(|es| es.iter().map(|e| src.join(&*e.name)).collect::<Vec<_>>()).map_err(io::Error::other),
+                None => fs::read_dir(src).map(|rd| rd.flatten().map(|e| e.path()).collect::<Vec<_>>()),
+            };
+            let entries = match listed {
+                Ok(v) => v,
                 Err(e) => {
                     out.errors.push(format!("Couldn't read {name}: {e}"));
                     return None;
@@ -159,7 +297,11 @@ fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) ->
                 if out.stopped {
                     break;
                 }
-                place(&e, &target, copy, ask, out);
+                if !ctl.go_on() {
+                    out.stopped = true;
+                    break;
+                }
+                place(&e, &target, copy, ask, out, ctl);
             }
             if !copy && fs::read_dir(src).is_ok_and(|mut d| d.next().is_none()) && fs::remove_dir(src).is_ok() {
                 out.steps.push(Step::RemovedDir(src.to_path_buf()));
@@ -176,16 +318,21 @@ fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) ->
 }
 
 /// Copy or move to a path that's free.
-fn put(src: &Path, to: &Path, copy: bool, out: &mut Outcome) -> Option<PathBuf> {
+fn put(src: &Path, to: &Path, copy: bool, out: &mut Outcome, ctl: &Ctl) -> Option<PathBuf> {
     let name = src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let r = if copy {
-        actions::copy_all(src, to).map_err(|e| {
+        copy_tree(src, to, ctl).map_err(|e| {
+            // A stopped copy leaves nothing half-made behind.
             let _ = actions::delete(to);
-            format!("Couldn't copy {name}: {e}")
+            if e.kind() == io::ErrorKind::Interrupted { String::new() } else { format!("Couldn't copy {name}: {e}") }
         })
     } else {
-        move_path(src, to)
+        move_with(src, to, ctl)
     };
+    if r.as_ref().is_err_and(|e| e.is_empty()) {
+        out.stopped = true;
+        return None;
+    }
     match r {
         Ok(()) => {
             out.steps.push(if copy { Step::Created(to.to_path_buf()) } else { Step::Moved { from: src.to_path_buf(), to: to.to_path_buf() } });
@@ -204,6 +351,11 @@ fn put(src: &Path, to: &Path, copy: bool, out: &mut Outcome) -> Option<PathBuf> 
 
 /// Move a file or folder to a free path, copying then removing the original across drives.
 pub fn move_path(from: &Path, to: &Path) -> Result<(), String> {
+    move_with(from, to, &Ctl::default())
+}
+
+/// `move_path` with pause and stop (an empty error means it was stopped; nothing moved).
+fn move_with(from: &Path, to: &Path, ctl: &Ctl) -> Result<(), String> {
     let name = from.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     if fs::symlink_metadata(to).is_ok() {
         return Err(format!("There's already something at {}.", to.display()));
@@ -211,9 +363,10 @@ pub fn move_path(from: &Path, to: &Path) -> Result<(), String> {
     match fs::rename(from, to) {
         Ok(()) => Ok(()),
         Err(e) if actions::is_cross_device(&e) => {
-            if let Err(e) = actions::copy_all(from, to) {
+            ctl.bytes_total.fetch_add(bytes_in(from, ctl), Ordering::Relaxed);
+            if let Err(e) = copy_tree(from, to, ctl) {
                 let _ = actions::delete(to);
-                return Err(format!("Couldn't move {name}: {e}"));
+                return Err(if e.kind() == io::ErrorKind::Interrupted { String::new() } else { format!("Couldn't move {name}: {e}") });
             }
             actions::delete(from).map_err(|e| format!("Moved {name}, but couldn't remove the original: {e}"))
         }
@@ -314,6 +467,41 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn pause_and_stop() {
+        let d = tmp("pause");
+        let src = d.join("big.bin");
+        let f = fs::File::create(&src).unwrap();
+        f.set_len(40 << 20).unwrap();
+        drop(f);
+        let dest = d.join("to");
+        fs::create_dir(&dest).unwrap();
+        // Paused: nothing is copied until it's resumed.
+        let ctl = std::sync::Arc::new(Ctl::default());
+        ctl.paused.store(true, Ordering::Relaxed);
+        let (c, s2, d2) = (ctl.clone(), src.clone(), dest.clone());
+        let h = std::thread::spawn(move || transfer_with(&[s2], &d2, true, &mut |_| Choice::Stop, &c));
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(ctl.bytes_done.load(Ordering::Relaxed), 0);
+        assert_eq!(ctl.bytes_total.load(Ordering::Relaxed), 40 << 20);
+        ctl.paused.store(false, Ordering::Relaxed);
+        let out = h.join().unwrap();
+        assert!(out.errors.is_empty() && !out.stopped, "{out:?}");
+        assert_eq!(fs::metadata(dest.join("big.bin")).unwrap().len(), 40 << 20);
+        assert_eq!(fs::metadata(dest.join("big.bin")).unwrap().modified().unwrap(), fs::metadata(&src).unwrap().modified().unwrap());
+        // Stopped: nothing half-made is left, and it isn't an error.
+        let ctl = Ctl::default();
+        ctl.stop.store(true, Ordering::Relaxed);
+        let out = transfer_with(&[src.clone()], &d.join("to"), true, &mut |_| Choice::KeepBoth, &ctl);
+        assert!(out.stopped && out.errors.is_empty() && out.made.is_empty(), "{out:?}");
+        let stopped_dir = d.join("to2");
+        fs::create_dir(&stopped_dir).unwrap();
+        let ctl = Ctl::default();
+        ctl.stop.store(true, Ordering::Relaxed);
+        assert!(copy_tree(&src, &stopped_dir.join("x"), &ctl).is_err());
+        fs::remove_dir_all(&d).ok();
     }
 
     #[test]

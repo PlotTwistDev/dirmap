@@ -28,6 +28,8 @@ After you've clicked in the list or the sidebar, unless the cursor is in a text 
 |---|---|---|
 | **↑ / ↓** | **↑ / ↓** | Select the item above or below. Hold Shift to extend the selection. |
 | **← / →, ↑ / ↓ (Icons view)** | **← / →, ↑ / ↓ (Icons view)** | Move along a row of icons, or to the row above or below. |
+| **← / → (Columns view)** | **← / → (Columns view)** | Up to the folder at the left, selecting the one you were in; into the selected folder. |
+| **← / → (Gallery view)** | **← / → (Gallery view)** | The previous or next item in the strip. |
 | **Home / End** | **Home / End** | Select the first or last item. |
 | **Page Up / Page Down** | **Page Up / Page Down** | Move a screenful. |
 | **Enter or Ctrl+↓** | **Enter or ⌘↓** | Open the selected folder, or the file with its usual app. |

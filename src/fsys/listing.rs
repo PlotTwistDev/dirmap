@@ -123,6 +123,20 @@ impl Drop for Listing {
 }
 
 fn read(path: &Path, cancel: &AtomicBool, tx: &mpsc::Sender<Msg>) {
+    // Inside an archive (or the archive itself): its table of contents.
+    if let Some((archive, inner)) = super::archive::split(path)
+        && archive.is_file()
+    {
+        let msg = match super::archive::list(&archive, &inner) {
+            Ok(entries) => {
+                let _ = tx.send(Msg::Batch(entries));
+                Msg::Done(None)
+            }
+            Err(e) => Msg::Done(Some(e)),
+        };
+        let _ = tx.send(msg);
+        return;
+    }
     let rd = match fs::read_dir(path) {
         Ok(rd) => rd,
         Err(e) => {

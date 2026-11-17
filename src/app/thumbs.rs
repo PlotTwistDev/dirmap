@@ -22,9 +22,10 @@ pub(super) fn stamp(size: u64, modified: i64) -> u64 {
     size.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ modified as u64
 }
 
-/// Whether a file of this name gets a thumbnail (images only, for now).
+/// Whether a file of this name gets a thumbnail: images, and videos, PDFs and sound (album
+/// covers) where the system can make a picture of them.
 pub(super) fn wants_thumb(name: &str) -> bool {
-    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage)
+    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Media(_))
 }
 
 struct Job {
@@ -186,8 +187,13 @@ impl Thumbs {
                             jobs = cv.wait(jobs).unwrap();
                         }
                     };
-                    let linear = preview::kind_of(&job.path.to_string_lossy()) == Kind::LinearImage;
-                    let img = std::panic::catch_unwind(|| preview::decode_image(&job.path, linear, job.size, THUMB_MAX).ok().map(|r| r.0)).ok().flatten();
+                    let kind = preview::kind_of(&job.path.to_string_lossy());
+                    let img = std::panic::catch_unwind(|| match kind {
+                        Kind::Media(_) => crate::media::thumbnail(&job.path, THUMB_MAX).ok().map(|(w, h, rgba)| egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
+                        _ => preview::decode_image(&job.path, kind == Kind::LinearImage, job.size, THUMB_MAX).ok().map(|r| r.0),
+                    })
+                    .ok()
+                    .flatten();
                     if tx.send((job.path, job.stamp, img)).is_err() {
                         return;
                     }
@@ -209,6 +215,7 @@ mod tests {
         assert!(wants_thumb("shot.0001.exr"));
         assert!(wants_thumb("Photo.JPG"));
         assert!(!wants_thumb("notes.txt"));
+        assert!(wants_thumb("clip.mp4"));
         assert!(!wants_thumb("folder"));
         assert_ne!(stamp(10, 5), stamp(10, 6));
         assert_ne!(stamp(10, 5), stamp(11, 5));

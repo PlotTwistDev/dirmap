@@ -66,6 +66,15 @@ pub(super) struct ItemInfo {
 pub(super) struct OpJob {
     pub label: String,
     rx: mpsc::Receiver<OpDone>,
+    /// Pause, stop and progress, for copies and moves.
+    pub ctl: Option<Arc<transfer::Ctl>>,
+}
+
+/// A copy or move asked for while another was running.
+pub(super) struct Queued {
+    pub sources: Vec<PathBuf>,
+    pub dest: PathBuf,
+    pub copy: bool,
 }
 
 struct OpDone {
@@ -137,6 +146,8 @@ pub(super) struct Ops {
     pub undo_fresh: bool,
     /// A copy or move asking what to do about a name that's taken.
     pub clash: Option<ClashAsk>,
+    /// Copies and moves waiting for the running one.
+    pub queued: std::collections::VecDeque<Queued>,
 }
 
 /// Something that can be undone: what to call it, and the steps to play back.
@@ -503,7 +514,7 @@ impl App {
         });
         self.ops.notice = None;
         self.ops.undo_fresh = false;
-        self.ops.job = Some(OpJob { label, rx });
+        self.ops.job = Some(OpJob { label, rx, ctl: None });
     }
 
     fn start_hash(&mut self, path: PathBuf, size: u64) {
@@ -565,12 +576,72 @@ impl App {
                 }
             }
         }
+        // The next copy or move in the queue.
+        if self.ops.job.is_none()
+            && let Some(q) = self.ops.queued.pop_front()
+        {
+            let notice = self.ops.notice.clone();
+            self.transfer(q.sources, q.dest, q.copy);
+            // Keep the last one's result on show until this one finishes.
+            if self.ops.notice.is_none() {
+                self.ops.notice = notice;
+            }
+        }
         self.clash_window(ctx);
         self.confirm_window(ctx);
         self.rename_window(ctx);
         self.hash_window(ctx);
         self.props_window(ctx);
         self.type_files_window(ctx);
+    }
+
+    /// The running copy or move in the status bar: how far it's got, Pause or Resume, Stop, and
+    /// what's waiting. Laid out right to left.
+    pub(super) fn transfer_strip(&mut self, ui: &mut egui::Ui) {
+        let Some(job) = &self.ops.job else { return };
+        let Some(ctl) = job.ctl.clone() else { return };
+        let label = job.label.clone();
+        let paused = ctl.paused.load(Ordering::Relaxed);
+        let stopping = ctl.stop.load(Ordering::Relaxed);
+        if !self.ops.queued.is_empty() {
+            let n = self.ops.queued.len();
+            ui.menu_button(format!("+{n} waiting"), |ui| {
+                for (k, q) in self.ops.queued.iter().enumerate() {
+                    let what = if q.sources.len() == 1 { q.sources[0].file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default() } else { format!("{} items", q.sources.len()) };
+                    ui.label(format!("{}. {} {what} to {}", k + 1, if q.copy { "Copy" } else { "Move" }, q.dest.display()));
+                }
+                ui.separator();
+                if ui.button("Cancel the Waiting Ones").clicked() {
+                    self.ops.queued.clear();
+                    ui.close();
+                }
+            })
+            .response
+            .on_hover_text("Copies and moves run one at a time, in the order you asked for them");
+        }
+        if ui.add_enabled(!stopping, egui::Button::new("Stop").small()).on_hover_text("Stop after the file being copied; what's done so far stays (Undo removes it)").clicked() {
+            ctl.stop.store(true, Ordering::Relaxed);
+            ctl.paused.store(false, Ordering::Relaxed);
+        }
+        if ui.add_enabled(!stopping, egui::Button::new(if paused { "Resume" } else { "Pause" }).small()).clicked() {
+            ctl.paused.store(!paused, Ordering::Relaxed);
+        }
+        let (bt, bd) = (ctl.bytes_total.load(Ordering::Relaxed), ctl.bytes_done.load(Ordering::Relaxed));
+        let (it, id) = (ctl.items_total.load(Ordering::Relaxed), ctl.items_done.load(Ordering::Relaxed));
+        let frac = if bt > 0 { bd as f32 / bt as f32 } else if it > 0 { id as f32 / it as f32 } else { 0.0 };
+        let text = if ctl.counting.load(Ordering::Relaxed) {
+            "Counting…".to_string()
+        } else if bt > 0 {
+            format!("{} of {}", scan::human(bd.min(bt)), scan::human(bt))
+        } else {
+            format!("{} of {}", id.min(it), it)
+        };
+        let text = if stopping { "Stopping…".to_string() } else if paused { format!("Paused · {text}") } else { text };
+        ui.add(egui::ProgressBar::new(frac.clamp(0.0, 1.0)).desired_width(170.0).text(egui::RichText::new(text).size(11.0)));
+        let current = ctl.current.lock().map(|c| c.clone()).unwrap_or_default();
+        let tip = if current.is_empty() { label.clone() } else { format!("{label}\nNow: {current}") };
+        ui.label(egui::RichText::new(&label).size(12.0)).on_hover_text(tip);
+        ui.ctx().request_repaint_after(Duration::from_millis(200));
     }
 
     /// Undo the last change (Ctrl+Z), in the background.

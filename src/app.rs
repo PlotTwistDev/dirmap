@@ -39,6 +39,7 @@ mod addr;
 mod netui;
 mod preview;
 mod thumbs;
+mod views;
 pub(crate) mod style;
 use files::Workspace;
 
@@ -2509,6 +2510,19 @@ impl eframe::App for App {
                 if let Some(op) = &self.ops.job {
                     ui.spinner();
                     ui.label(format!("{}…", op.label));
+                    if let Some(ctl) = op.ctl.clone() {
+                        let paused = ctl.paused.load(Ordering::Relaxed);
+                        if ui.small_button(if paused { "Resume" } else { "Pause" }).clicked() {
+                            ctl.paused.store(!paused, Ordering::Relaxed);
+                        }
+                        if ui.small_button("Stop").clicked() {
+                            ctl.stop.store(true, Ordering::Relaxed);
+                            ctl.paused.store(false, Ordering::Relaxed);
+                        }
+                    }
+                    if !self.ops.queued.is_empty() {
+                        ui.weak(format!("+{} waiting", self.ops.queued.len()));
+                    }
                     ui.separator();
                 } else if let Some((text, error)) = self.ops.notice.clone() {
                     if error {

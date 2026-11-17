@@ -10,6 +10,7 @@ use super::*;
 use crate::actions;
 use crate::fsys::history::{History, Location};
 use crate::fsys::listing::{Entry, Listing};
+use crate::fsys::archive;
 use crate::fsys::places::{self, Place};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as Cmp;
@@ -90,7 +91,26 @@ pub(super) struct FilesPrefs {
     /// The first pane's view (the second pane's is in `second`), and the Icons view's size.
     pub view: FView,
     pub icon_size: f32,
+    /// Remember each folder's view, sort and grouping.
+    pub remember_looks: bool,
+    /// Folders shown differently from the default, most recently changed first.
+    pub folder_looks: Vec<(PathBuf, FolderLook)>,
+    /// How folders without one of their own are shown.
+    pub base_look: Option<FolderLook>,
 }
+
+/// How a folder is shown: its view, sort and grouping.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct FolderLook {
+    pub view: FView,
+    pub sort: FSort,
+    pub reversed: bool,
+    pub group: views::FGroup,
+}
+
+/// Folders whose looks are remembered, at most.
+const LOOKS_MAX: usize = 500;
 
 /// Row height in the list and sidebar.
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
@@ -138,6 +158,9 @@ impl Default for FilesPrefs {
             preview_width: 300.0,
             view: FView::Details,
             icon_size: 96.0,
+            remember_looks: true,
+            folder_looks: Vec::new(),
+            base_look: None,
         }
     }
 }
@@ -153,10 +176,14 @@ pub(super) const DOCK_MIN: f32 = 140.0;
 pub(super) const DOCK_MIN_LIST: f32 = 110.0;
 
 /// Folder name → (bytes, files) from the scan.
-type FolderSizes = HashMap<Box<str>, (u64, u64)>;
+pub(super) type FolderSizes = HashMap<Box<str>, (u64, u64)>;
 
 /// What an order was worked out for: (listing generation, sort, reversed, hidden, filter, sizes).
-type OrderKey = (u64, FSort, bool, bool, String, usize);
+type OrderKey = (u64, FSort, bool, bool, String, usize, views::FGroup);
+/// A display order and its group headings.
+type Arranged = (Vec<u32>, Vec<views::GroupHead>);
+/// A folder read again, arranged, with what for.
+type Rearranged = (OrderKey, Arranged);
 
 /// Folders with more items than this are sorted on another thread, so the window never stalls.
 const SORT_INLINE_MAX: usize = 3_000;
@@ -171,7 +198,7 @@ pub(super) struct FTab {
     order_key: Option<OrderKey>,
     /// A big folder being sorted on another thread: what for, how many entries it covers, and
     /// where the result arrives.
-    sorting: Option<(OrderKey, usize, mpsc::Receiver<Vec<u32>>)>,
+    sorting: Option<(OrderKey, usize, mpsc::Receiver<Arranged>)>,
     pub(super) selected: BTreeSet<Box<str>>,
     /// The item the keyboard moves from (the last one clicked or moved to).
     pub(super) cursor: Option<Box<str>>,
@@ -183,7 +210,14 @@ pub(super) struct FTab {
     pub(super) rename_later: bool,
     pub(super) scroll_to_cursor: bool,
     /// (scroll offset, height) of the list last frame.
-    view: (f32, f32),
+    pub(super) view: (f32, f32),
+    /// Group headings, when the pane groups items.
+    pub(super) groups: Vec<views::GroupHead>,
+    /// Another program changed the folder (at this time): read it again shortly.
+    dirty_at: Option<f64>,
+    /// The folder being read again after a change, shown in place of the old listing once it's
+    /// read and sorted (so the list doesn't blank or jump).
+    fresh: Option<(Listing, Option<mpsc::Receiver<Rearranged>>)>,
     /// Folder sizes from the scan for this folder: (tree it came from, name → (bytes, files)).
     pub(super) sizes: Option<(usize, FolderSizes)>,
 }
@@ -203,6 +237,9 @@ impl FTab {
             rename_later: false,
             scroll_to_cursor: false,
             view: (0.0, 0.0),
+            groups: Vec::new(),
+            dirty_at: None,
+            fresh: None,
             sizes: None,
         }
     }
@@ -215,6 +252,9 @@ impl FTab {
     fn arrived(&mut self) {
         self.listing = None;
         self.order.clear();
+        self.groups.clear();
+        self.dirty_at = None;
+        self.fresh = None;
         self.order_key = None;
         self.sorting = None;
         self.selected.clear();
@@ -228,6 +268,8 @@ impl FTab {
     /// Read the folder again, keeping the selection and the cursor.
     pub(super) fn reread(&mut self) {
         let cursor = self.cursor.clone();
+        self.fresh = None;
+        self.dirty_at = None;
         self.listing = None;
         self.order_key = None;
         self.sizes = None;
@@ -275,6 +317,65 @@ pub(super) enum FView {
     Details,
     /// A grid of big icons, with thumbnails of images.
     Icons,
+    /// Finder-style columns: the folders above this one at the left, this folder, and what's
+    /// in the selected folder (or a preview of the selected file) at the right.
+    Columns,
+    /// A big preview of the selected item above a strip of thumbnails.
+    Gallery,
+}
+
+impl FView {
+    pub(super) const ALL: [FView; 4] = [FView::Details, FView::Icons, FView::Columns, FView::Gallery];
+
+    pub(super) fn title(self) -> &'static str {
+        match self {
+            FView::Details => "Details",
+            FView::Icons => "Icons",
+            FView::Columns => "Columns",
+            FView::Gallery => "Gallery",
+        }
+    }
+
+    pub(super) fn tip(self) -> &'static str {
+        match self {
+            FView::Details => "Rows with size, type and date",
+            FView::Icons => "Big icons, with pictures of images",
+            FView::Columns => "The folders above this one at the left, and what's in the selected folder at the right",
+            FView::Gallery => "A big preview of the selected item above a strip of thumbnails",
+        }
+    }
+
+    /// A small drawing of the view, for its buttons (the fonts have no glyphs for most of them).
+    pub(super) fn paint(self, p: &egui::Painter, r: Rect, c: Color32) {
+        let r = Rect::from_center_size(r.center(), vec2(12.0, 10.0));
+        let s = Stroke::new(1.2, c);
+        match self {
+            FView::Details => {
+                for k in 0..3 {
+                    let y = r.top() + 1.0 + k as f32 * 4.0;
+                    p.hline(r.left()..=r.right(), y, s);
+                }
+            }
+            FView::Icons => {
+                for (dx, dy) in [(0.0, 0.0), (7.0, 0.0), (0.0, 6.0), (7.0, 6.0)] {
+                    p.rect_filled(Rect::from_min_size(r.min + vec2(dx, dy), vec2(5.0, 4.0)), 1.0, c);
+                }
+            }
+            FView::Columns => {
+                p.rect_stroke(r, 1.0, s, egui::StrokeKind::Inside);
+                for k in 1..3 {
+                    let x = r.left() + k as f32 * r.width() / 3.0;
+                    p.vline(x, r.y_range(), s);
+                }
+            }
+            FView::Gallery => {
+                p.rect_filled(Rect::from_min_size(r.min, vec2(12.0, 6.0)), 1.0, c);
+                for k in 0..3 {
+                    p.rect_filled(Rect::from_min_size(r.min + vec2(k as f32 * 4.5, 7.5), vec2(3.0, 2.5)), 0.5, c);
+                }
+            }
+        }
+    }
 }
 
 /// Icon sizes in the Icons view, smallest and largest (Ctrl+wheel changes it).
@@ -301,6 +402,11 @@ pub(super) struct Pane {
     /// Show only items whose names contain this (or match it, with * or ?).
     pub(super) filter: String,
     pub(super) view: FView,
+    /// Group items under headings (Details view).
+    pub(super) group: views::FGroup,
+    /// The folder shown last frame and how: a change of look in the same folder is remembered
+    /// for it; arriving somewhere else brings back its own.
+    pub(super) seen: Option<(Location, FolderLook)>,
     /// The Icons view's grid last frame: (icons per row, row height), for the arrow keys.
     pub(super) grid: (usize, f32),
 }
@@ -312,15 +418,23 @@ impl Pane {
             tabs.push(FTab::new(places::home().map(Location::Dir).unwrap_or(Location::Computer)));
         }
         let active = active.min(tabs.len() - 1);
-        Self { tabs, active, sort, reversed, filter: String::new(), view, grid: (1, 100.0) }
+        Self { tabs, active, sort, reversed, filter: String::new(), view, group: Default::default(), seen: None, grid: (1, 100.0) }
     }
 
     pub(super) fn tab(&self) -> &FTab {
         &self.tabs[self.active]
     }
 
-    fn tab_mut(&mut self) -> &mut FTab {
+    pub(super) fn tab_mut(&mut self) -> &mut FTab {
         &mut self.tabs[self.active]
+    }
+
+    pub(super) fn look(&self) -> FolderLook {
+        FolderLook { view: self.view, sort: self.sort, reversed: self.reversed, group: self.group }
+    }
+
+    fn set_look(&mut self, l: FolderLook) {
+        (self.view, self.sort, self.reversed, self.group) = (l.view, l.sort, l.reversed, l.group);
     }
 
     fn save(&self) -> PaneSave {
@@ -374,6 +488,10 @@ pub(super) struct Files {
     pub(super) net_asked: bool,
     /// Thumbnails for the Icons view.
     pub(super) thumbs: thumbs::Thumbs,
+    /// Folders shown beside the current one in the Columns view.
+    pub(super) side: views::SideLists,
+    /// Notices of changes other programs make to the folders on screen.
+    watcher: crate::fsys::watch::Watcher,
 }
 
 impl Files {
@@ -385,6 +503,9 @@ impl Files {
             panes.push(Pane::new(&s.tabs, s.active, s.sort, s.reversed, s.view));
         }
         favs::migrate(&mut prefs);
+        if prefs.base_look.is_none() {
+            prefs.base_look = Some(panes[0].look());
+        }
         // The standard places are in the user's profile, but a profile folder can be
         // redirected to a server, so find them off the UI thread too.
         let (tx, rx) = mpsc::channel();
@@ -420,6 +541,8 @@ impl Files {
             net_jobs: Vec::new(),
             net_asked: false,
             thumbs: Default::default(),
+            side: Default::default(),
+            watcher: Default::default(),
         }
     }
 
@@ -639,7 +762,68 @@ impl Files {
     }
 
     pub(super) fn refresh(&mut self) {
+        self.side.clear();
         self.tab().reread();
+    }
+
+    /// Once a frame for each pane: remember a change of view, sort or grouping for the folder
+    /// it's in, or show a folder just arrived in the way it was last shown.
+    pub(super) fn keep_looks(&mut self) {
+        for pane in &mut self.panes {
+            let here = pane.tab().here().clone();
+            let now = pane.look();
+            match &pane.seen {
+                Some((loc, was)) if *loc == here => {
+                    if *was != now {
+                        if let Location::Dir(d) = &here
+                            && self.prefs.remember_looks
+                        {
+                            let looks = &mut self.prefs.folder_looks;
+                            looks.retain(|(p, _)| p != d);
+                            if Some(now) != self.prefs.base_look {
+                                looks.insert(0, (d.clone(), now));
+                                looks.truncate(LOOKS_MAX);
+                            }
+                        }
+                        pane.seen = Some((here, now));
+                    }
+                }
+                _ => {
+                    let own = match &here {
+                        Location::Dir(d) if self.prefs.remember_looks => self.prefs.folder_looks.iter().find(|(p, _)| p == d).map(|x| x.1),
+                        _ => None,
+                    };
+                    if let Some(l) = own.or(if self.prefs.remember_looks { self.prefs.base_look } else { None }) {
+                        pane.set_look(l);
+                    }
+                    pane.seen = Some((here, pane.look()));
+                }
+            }
+        }
+    }
+
+    /// Whether the folder in the focused pane has a look of its own.
+    pub(super) fn has_own_look(&self) -> bool {
+        let Location::Dir(d) = self.here() else { return false };
+        self.prefs.folder_looks.iter().any(|(p, _)| p == d)
+    }
+
+    /// Show every folder the way the focused pane's folder is shown now.
+    pub(super) fn look_for_all(&mut self) {
+        self.prefs.base_look = Some(self.pane().look());
+        self.prefs.folder_looks.clear();
+    }
+
+    /// Show the focused pane's folder the default way again.
+    pub(super) fn forget_look(&mut self) {
+        if let Location::Dir(d) = self.here().clone() {
+            self.prefs.folder_looks.retain(|(p, _)| *p != d);
+        }
+        if let Some(b) = self.prefs.base_look {
+            let p = self.pane_mut();
+            p.set_look(b);
+            p.seen = None;
+        }
     }
 
     pub(super) fn is_pinned(&self, p: &Path) -> bool {
@@ -771,6 +955,8 @@ pub(super) struct FPicks {
     pub clear: bool,
     pub drop: Option<fileops::Drop>,
     pub new_item: Option<(fileops::NewPick, PathBuf)>,
+    /// Show a folder with one item in it selected (a click in a side column).
+    pub reveal: Option<(PathBuf, Box<str>)>,
 }
 
 /// File manager commands, from menus and keys.
@@ -799,6 +985,11 @@ pub(super) enum FAction {
     MoveToOther,
     Properties,
     QuickLook,
+    /// Archives: take everything out, next to the archive or into a folder picked.
+    ExtractHere,
+    ExtractTo,
+    /// An archive in the app the system opens it with (Open goes inside it).
+    OpenWithApp,
 }
 
 impl App {
@@ -1029,12 +1220,21 @@ impl App {
             ui.separator();
             ui.weak(if two { "This pane" } else { "Layout" });
             let pane = self.files.pane_mut();
-            for (v, label, tip) in [(FView::Details, "☰ Details", "Rows with size, type and date"), (FView::Icons, "⊞ Icons", "Big icons, with pictures of images")] {
-                if ui.add(egui::Button::selectable(pane.view == v, label)).on_hover_text(tip).clicked() {
+            for v in FView::ALL {
+                if ui.add(egui::Button::selectable(pane.view == v, v.title())).on_hover_text(v.tip()).clicked() {
                     pane.view = v;
                 }
             }
-            if pane.view == FView::Icons {
+            if pane.view == FView::Details {
+                ui.menu_button("Group By", |ui| {
+                    for g in views::FGroup::ALL {
+                        if ui.add(egui::Button::selectable(pane.group == g, g.title())).clicked() {
+                            pane.group = g;
+                        }
+                    }
+                });
+            }
+            if pane.view != FView::Details {
                 ui.menu_button("Sort By", |ui| {
                     for col in [FSort::Name, FSort::Size, FSort::Type, FSort::Modified] {
                         if ui.add(egui::Button::selectable(pane.sort == col, col.title())).clicked() {
@@ -1046,12 +1246,22 @@ impl App {
                         pane.reversed = !pane.reversed;
                     }
                 });
+            }
+            if pane.view == FView::Icons {
                 let size = &mut self.files.prefs.icon_size;
                 ui.add(egui::Slider::new(size, ICON_MIN..=ICON_MAX).text("Size").show_value(false))
                     .on_hover_text(format!("Or hold {} and turn the mouse wheel over the icons", if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" }));
             }
-            ui.separator();
+            let own = self.files.has_own_look();
+            if ui.button("Use This View for All Folders").on_hover_text("Show every folder with this view, sort and grouping, forgetting the ones set for single folders").clicked() {
+                self.files.look_for_all();
+            }
+            if ui.add_enabled(own, egui::Button::new("Reset This Folder's View")).on_hover_text("Show this folder the way folders are shown by default").clicked() {
+                self.files.forget_look();
+            }
             let p = &mut self.files.prefs;
+            ui.checkbox(&mut p.remember_looks, "Remember Each Folder's View").on_hover_text("A change of view, sort or grouping applies to that folder only, and comes back when you return to it");
+            ui.separator();
             if ui.add(egui::Button::selectable(p.preview, "Preview Pane").shortcut_text(k(egui::Modifiers::ALT, egui::Key::P))).clicked() {
                 p.preview = !p.preview;
             }
@@ -1126,6 +1336,9 @@ impl App {
         // Thumbnails asked for while drawing last frame, then any that are ready.
         self.files.thumbs.flush();
         self.files.thumbs.poll(ctx);
+        self.files.side.tick();
+        self.files.keep_looks();
+        self.watch_folders(ctx);
         if let Some(rx) = &self.files.places_rx {
             if let Ok(p) = rx.try_recv() {
                 self.files.places = p;
@@ -1176,6 +1389,35 @@ impl App {
         }
     }
 
+    /// Watch the folders open in tabs and beside them, and mark the ones that changed to be read
+    /// again.
+    fn watch_folders(&mut self, ctx: &egui::Context) {
+        let mut dirs: HashSet<PathBuf> = HashSet::new();
+        for p in &self.files.panes {
+            dirs.extend(p.tabs.iter().filter_map(|t| t.here().dir().map(Path::to_path_buf)));
+        }
+        dirs.extend(self.files.side.dirs().cloned());
+        let c = ctx.clone();
+        self.files.watcher.wake_with(move || c.request_repaint());
+        self.files.watcher.set(dirs);
+        let changed = self.files.watcher.changed();
+        if changed.is_empty() {
+            return;
+        }
+        let now = ctx.input(|i| i.time);
+        for p in &mut self.files.panes {
+            for t in &mut p.tabs {
+                if t.here().dir().is_some_and(|d| changed.contains(d)) {
+                    t.dirty_at.get_or_insert(now);
+                }
+            }
+        }
+        for d in &changed {
+            self.files.side.forget(d);
+        }
+        ctx.request_repaint();
+    }
+
     /// Keep one pane's visible tab listed and sorted.
     fn poll_pane(&mut self, ctx: &egui::Context, pane: usize) {
         let tree_id = self.tree.as_ref().map(|t| Arc::as_ptr(t) as usize).unwrap_or(0);
@@ -1189,7 +1431,7 @@ impl App {
         }
         let hidden = self.files.prefs.show_hidden;
         let p = &mut self.files.panes[pane];
-        let (sort, reversed) = (p.sort, p.reversed);
+        let (sort, reversed, group) = (p.sort, p.reversed, if p.view == FView::Details { p.group } else { views::FGroup::None });
         let filter = p.filter.clone();
         let t = p.tab_mut();
         if t.listing.is_none()
@@ -1202,17 +1444,70 @@ impl App {
         if !l.done {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
-        let key: OrderKey = (l.generation, sort, reversed, hidden, filter.clone(), tree_id);
         let sizes = t.sizes.as_ref().map(|s| s.1.clone()).unwrap_or_default();
+        // Changed by another program: read it again once the changes settle (longer for big
+        // folders), sort the new listing off the UI thread, then swap it in.
+        let done = l.done;
+        let n = l.entries.len();
+        if let Some(at) = t.dirty_at
+            && t.fresh.is_none()
+            && done
+            && let Some(d) = t.here().dir()
+        {
+            let now = ctx.input(|i| i.time);
+            let wait = 0.25 + (n as f64 / 20_000.0).min(5.0);
+            if now - at >= wait {
+                t.fresh = Some((Listing::start(d.to_path_buf()), None));
+                t.dirty_at = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_secs_f64(wait - (now - at)));
+            }
+        }
+        if let Some((fl, sorting)) = &mut t.fresh {
+            fl.poll();
+            ctx.request_repaint_after(Duration::from_millis(40));
+            if fl.done && fl.error.is_some() {
+                t.fresh = None;
+            } else if fl.done && sorting.is_none() {
+                let (tx, rx) = mpsc::channel();
+                let (entries, f, sz) = (fl.entries.clone(), filter.clone(), sizes.clone());
+                let k: OrderKey = (fl.generation, sort, reversed, hidden, filter.clone(), tree_id, group);
+                std::thread::spawn(move || {
+                    let (o, g) = views::arrange(&entries, Some(&sz), sort, reversed, hidden, &f, group);
+                    let _ = tx.send((k, (o, g)));
+                });
+                *sorting = Some(rx);
+            } else if let Some(rx) = sorting {
+                match rx.try_recv() {
+                    Ok((k, (o, g))) => {
+                        let (fl, _) = t.fresh.take().unwrap();
+                        t.listing = Some(fl);
+                        t.sorting = None;
+                        t.order = o;
+                        t.groups = g;
+                        t.order_key = Some(k);
+                        // Items that went away aren't selected any more.
+                        let l = t.listing.as_ref().unwrap();
+                        let names: HashSet<&str> = l.entries.iter().map(|e| &*e.name).collect();
+                        t.selected.retain(|s| names.contains(&**s));
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => t.fresh = None,
+                }
+            }
+        }
+        let Some(l) = t.listing.as_ref() else { return };
+        let key: OrderKey = (l.generation, sort, reversed, hidden, filter.clone(), tree_id, group);
         // A sort finished on another thread: use it, adding anything listed since at the end.
         if let Some((k, covered, rx)) = &t.sorting {
             match rx.try_recv() {
-                Ok(order) => {
-                    let same = (k.1, k.2, k.3, &k.4, k.5) == (sort, reversed, hidden, &filter, tree_id);
+                Ok((order, heads)) => {
+                    let same = (k.1, k.2, k.3, &k.4, k.5, k.6) == (sort, reversed, hidden, &filter, tree_id, group);
                     let covered = *covered;
                     t.sorting = None;
                     if same {
                         t.order = order;
+                        t.groups = heads;
                         let l = t.listing.as_ref().unwrap();
                         append_new(&mut t.order, &l.entries, covered, hidden, &filter);
                         t.order_key = Some(key.clone());
@@ -1225,21 +1520,22 @@ impl App {
         if t.order_key.as_ref() != Some(&key) && t.sorting.is_none() {
             let l = t.listing.as_ref().unwrap();
             let n = l.entries.len();
-            let only_more = t.order_key.as_ref().is_some_and(|k| (k.1, k.2, k.3, &k.4, k.5) == (sort, reversed, hidden, &filter, tree_id));
+            let only_more = t.order_key.as_ref().is_some_and(|k| (k.1, k.2, k.3, &k.4, k.5, k.6) == (sort, reversed, hidden, &filter, tree_id, group));
             if n <= SORT_INLINE_MAX {
-                t.order = order_entries(&l.entries, Some(&sizes), sort, reversed, hidden, &filter);
+                (t.order, t.groups) = views::arrange(&l.entries, Some(&sizes), sort, reversed, hidden, &filter, group);
                 t.order_key = Some(key);
             } else if only_more && !l.done {
                 // A big folder still streaming in: show new items at the end, sort once it's all here.
                 let seen: usize = t.order.iter().map(|&i| i as usize + 1).max().unwrap_or(0);
                 append_new(&mut t.order, &l.entries, seen, hidden, &filter);
+                t.groups.clear();
                 t.order_key = Some(key);
             } else {
                 let entries = l.entries.clone();
                 let (tx, rx) = mpsc::channel();
                 let f = filter.clone();
                 std::thread::spawn(move || {
-                    let _ = tx.send(order_entries(&entries, Some(&sizes), sort, reversed, hidden, &f));
+                    let _ = tx.send(views::arrange(&entries, Some(&sizes), sort, reversed, hidden, &f, group));
                 });
                 t.sorting = Some((key, n, rx));
                 ctx.request_repaint_after(Duration::from_millis(30));
@@ -1677,21 +1973,24 @@ impl App {
 
     /// The Details list of a folder.
     fn details_view(&mut self, ui: &mut egui::Ui, pane: usize, pane_focused: bool, dir: &Path, picks: &mut FPicks) {
-        let width = ui.available_width();
-        let cols = Self::details_columns(width, self.files.prefs.col_widths);
+        let view = self.files.pane().view;
         let row_h = self.files.prefs.density.row();
         let pal = style::pal(ui);
         let footer_h = 22.0;
         let mut body = ui.available_rect_before_wrap();
         body.max.y -= footer_h;
         let footer = Rect::from_min_max(pos2(body.left(), body.bottom()), pos2(body.right(), body.bottom() + footer_h));
+        // In Columns, this folder is one column among others.
+        let lay = (view == FView::Columns).then(|| views::columns_layout(body, dir));
+        let list_rect = lay.as_ref().map_or(body, |l| l.mid);
+        let width = list_rect.width();
+        let cols = if view == FView::Columns { vec![(Some(FSort::Name), width)] } else { Self::details_columns(width, self.files.prefs.col_widths) };
         // The background: a click on empty space clears the selection; right-click for a menu.
-        let empty = ui.interact(body, ui.id().with("fm-files-body"), Sense::click());
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
-        child.set_clip_rect(body.intersect(ui.clip_rect()));
+        let empty = ui.interact(list_rect, ui.id().with("fm-files-body"), Sense::click());
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+        child.set_clip_rect(list_rect.intersect(ui.clip_rect()));
         let ui2 = &mut child;
 
-        let view = self.files.pane().view;
         if view == FView::Details {
             // Headings, with dividers you can drag to resize the column to their right.
             let hdr_h = 26.0;
@@ -1796,13 +2095,18 @@ impl App {
             });
         } else if view == FView::Icons {
             self.icons_grid(ui2, pane, focused, dir, picks);
+        } else if view == FView::Gallery {
+            self.gallery(ui2, pane, focused, dir, picks);
         } else {
             let sizes = t.sizes.as_ref().map(|s| &s.1);
             let cursor_row = t.cursor.as_deref().and_then(|c| t.pos_of(c));
             let mut area = egui::ScrollArea::vertical().id_salt(("flist", pane, dir)).auto_shrink(false);
             if let Some(r) = cursor_row.filter(|_| t.scroll_to_cursor) {
-                area = area.vertical_scroll_offset(browser::keep_in_view(t.view, r as f32 * row_h, row_h));
+                let line = views::line_of(&t.groups, r);
+                area = area.vertical_scroll_offset(browser::keep_in_view(t.view, line as f32 * row_h, row_h));
             }
+            let heads = &t.groups;
+            let chevrons = view == FView::Columns;
             ui2.spacing_mut().item_spacing.y = 0.0;
             let vis = ui2.visuals().clone();
             let (sel_bg, sel_fg) = if focused { (pal.sel, pal.strong) } else { (pal.sel_dim, pal.strong) };
@@ -1814,8 +2118,31 @@ impl App {
             let mut rows_drop: Vec<(egui::Response, PathBuf)> = Vec::new();
             let two_panes = self.files.panes.len() > 1;
             let can_paste = self.can_paste();
-            let out = area.show_rows(ui2, row_h, order.len(), |ui, range| {
-                for r in range {
+            let out = area.show_rows(ui2, row_h, order.len() + heads.len(), |ui, range| {
+                for line in range {
+                    let r = match views::line_at(heads, line) {
+                        views::Line::Item(pos) => pos,
+                        views::Line::Head(g) => {
+                            // A group heading: its title, how many items, and a rule.
+                            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::hover());
+                            let h = &heads[g];
+                            let end = heads.get(g + 1).map_or(order.len(), |n| n.start as usize);
+                            let p = ui.painter();
+                            let g1 = p.layout_no_wrap(h.label.clone(), FontId::proportional(12.5), pal.accent);
+                            let x = rect.left() + 10.0;
+                            let y = rect.center().y + 2.0;
+                            let w1 = g1.size().x;
+                            p.galley(pos2(x, y - g1.size().y / 2.0), g1, pal.accent);
+                            let g2 = p.layout_no_wrap(format!("({})", group((end - h.start as usize) as u64)), FontId::proportional(11.5), pal.weak);
+                            let w2 = g2.size().x;
+                            p.galley(pos2(x + w1 + 6.0, y - g2.size().y / 2.0), g2, pal.weak);
+                            let rule = x + w1 + w2 + 14.0;
+                            if rule < rect.right() - 10.0 {
+                                p.hline(rule..=rect.right() - 10.0, y, Stroke::new(1.0, pal.hairline));
+                            }
+                            continue;
+                        }
+                    };
                     let i = order[r];
                     let e = &l.entries[i as usize];
                     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
@@ -1848,7 +2175,13 @@ impl App {
                                 if e.is_link {
                                     p.text(icon.left_bottom() + vec2(-3.0, 2.0), Align2::LEFT_BOTTOM, "↪", FontId::proportional(10.0), vis.strong_text_color());
                                 }
-                                let clip = Rect::from_min_max(pos2(cell.left() + 33.0, rect.top()), pos2(cell.right() - 6.0, rect.bottom()));
+                                let end = if chevrons && e.is_dir {
+                                    views::chevron(&p, pos2(cell.right() - 11.0, cy), if selected { sel_fg } else { pal.weak });
+                                    cell.right() - 18.0
+                                } else {
+                                    cell.right() - 6.0
+                                };
+                                let clip = Rect::from_min_max(pos2(cell.left() + 33.0, rect.top()), pos2(end, rect.bottom()));
                                 p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &*e.name, font.clone(), tc);
                             }
                             Some(FSort::Size) => {
@@ -1895,6 +2228,9 @@ impl App {
             let t = self.files.tab();
             t.view = (out.state.offset.y, out.inner_rect.height());
             t.scroll_to_cursor = false;
+        }
+        if let Some(lay) = &lay {
+            self.columns_sides(ui, pane, dir, lay, picks);
         }
         if empty.clicked() {
             picks.clear = true;
@@ -1949,20 +2285,20 @@ impl App {
         if undo_now {
             self.undo_last();
         }
-        // Details or Icons, at the right of the footer as in Explorer.
-        let reserve = 52.0;
+        // The four views, at the right of the footer as in Explorer.
+        let reserve = 104.0;
         self.files_footer(ui, footer, pane, reserve);
         let mut x = footer.right() - reserve - 4.0;
-        for (v, glyph, tip) in [(FView::Details, "☰", "Details"), (FView::Icons, "⊞", "Icons")] {
+        for v in FView::ALL {
             let r = Rect::from_min_size(pos2(x + 4.0, footer.top() + 2.0), vec2(22.0, footer_h - 4.0));
             x += 26.0;
             let on = self.files.panes[pane].view == v;
-            let resp = ui.interact(r, ui.id().with(("fview", pane, glyph)), Sense::click()).on_hover_text(tip);
+            let resp = ui.interact(r, ui.id().with(("fview", pane, v.title())), Sense::click()).on_hover_text(v.title());
             let pal = style::pal(ui);
             if on || resp.hovered() {
                 ui.painter().rect_filled(r, style::RADIUS as f32, if on { pal.sel } else { pal.hover });
             }
-            ui.painter().text(r.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(13.0), if on { pal.strong } else { pal.weak });
+            v.paint(ui.painter(), r, if on { pal.strong } else { pal.weak });
             if resp.clicked() {
                 self.files.panes[pane].view = v;
             }
@@ -2147,6 +2483,7 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.activity_chip(ui);
+                self.transfer_strip(ui);
             });
         });
     }
@@ -2201,6 +2538,10 @@ impl App {
         let look = self.files.look.open;
         // In the Icons view ← and → move along a row, ↑ and ↓ a row up or down.
         let icons = self.files.pane().view == FView::Icons;
+        // In Gallery ← and → move along the strip; in Columns they go up a folder, or into one.
+        let strip = self.files.pane().view == FView::Gallery;
+        let columns = self.files.pane().view == FView::Columns;
+        let cursor_dir = self.files.cursor_entry().is_some_and(|e| e.is_dir);
         let cols = self.files.pane().grid.0.max(1) as i64;
         enum Do {
             Move(i64),
@@ -2321,10 +2662,16 @@ impl App {
             if icons && i.consume_key(m, Key::ArrowUp) {
                 return Some(Do::Move(-cols));
             }
-            if i.consume_key(m, Key::ArrowDown) || ((look || icons) && i.consume_key(m, Key::ArrowRight)) {
+            if columns && !look && i.consume_key(M::NONE, Key::ArrowLeft) {
+                return Some(Do::Up);
+            }
+            if columns && !look && cursor_dir && i.consume_key(M::NONE, Key::ArrowRight) {
+                return Some(Do::Open);
+            }
+            if i.consume_key(m, Key::ArrowDown) || ((look || icons || strip) && i.consume_key(m, Key::ArrowRight)) {
                 return Some(Do::Move(1));
             }
-            if i.consume_key(m, Key::ArrowUp) || ((look || icons) && i.consume_key(m, Key::ArrowLeft)) {
+            if i.consume_key(m, Key::ArrowUp) || ((look || icons || strip) && i.consume_key(m, Key::ArrowLeft)) {
                 return Some(Do::Move(-1));
             }
             if i.consume_key(m, Key::Home) {
@@ -2352,7 +2699,8 @@ impl App {
         let shift = ctx.input(|i| i.modifiers.shift);
         let now = ctx.input(|i| i.time);
         let page = match self.files.pane().view {
-            FView::Details => (((self.files.cur().view.1 / self.files.prefs.density.row()) as i64) - 1).max(1),
+            FView::Details | FView::Columns => (((self.files.cur().view.1 / self.files.prefs.density.row()) as i64) - 1).max(1),
+            FView::Gallery => (((self.files.cur().view.1 / 104.0) as i64) - 1).max(1),
             FView::Icons => {
                 let (cols, h) = self.files.pane().grid;
                 (((self.files.cur().view.1 / h) as i64) - 1).max(1) * cols.max(1) as i64
@@ -2510,15 +2858,19 @@ impl App {
             let t = self.files.cur();
             if let (Some(e), Some(dir)) = (t.entry(i), t.here().dir()) {
                 let path = dir.join(&*e.name);
-                if e.is_dir {
+                if e.is_dir || (archive::is_archive(&e.name) && !archive::inside(&path)) {
+                    // Archives open like folders.
                     self.files.go(Location::Dir(path));
                 } else {
-                    self.files.spawn(move || actions::open(&path));
+                    self.open_file(path);
                 }
             }
         }
         if let Some(to) = picks.go {
             self.files.go(to);
+        }
+        if let Some((dir, name)) = picks.reveal {
+            self.files.reveal(dir, vec![name]);
         }
         if let Some((pane, to)) = picks.go_other {
             self.files.go_in(pane, to);
@@ -2551,10 +2903,11 @@ impl App {
 
     /// The list's item menu for a tile on the dock's map, run through the same commands.
     pub(super) fn tile_menu(&mut self, ui: &mut egui::Ui, disk: &Path, is_dir: bool) {
-        let m = RowMenu { is_dir, count: 1, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste() };
+        let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
+        let m = RowMenu { is_dir, count: 1, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false };
         let Some(a) = item_menu(ui, &m) else { return };
         match a {
-            FAction::Open if is_dir => self.files.go(Location::Dir(disk.to_path_buf())),
+            FAction::Open if is_dir || archive => self.files.go(Location::Dir(disk.to_path_buf())),
             FAction::Open => {
                 let p = disk.to_path_buf();
                 self.files.spawn(move || actions::open(&p));
@@ -2567,11 +2920,87 @@ impl App {
     /// Is this path a folder, as far as the list on screen knows?
     fn listed_dir(&self, p: &Path) -> bool {
         let t = self.files.cur();
-        p.parent().is_none() || (t.here().dir() == p.parent() && p.file_name().and_then(|n| t.entry_named(&n.to_string_lossy())).is_some_and(|e| e.is_dir))
+        let archive = p.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy())) && !archive::inside(p);
+        archive || p.parent().is_none() || (t.here().dir() == p.parent() && p.file_name().and_then(|n| t.entry_named(&n.to_string_lossy())).is_some_and(|e| e.is_dir))
+    }
+
+    /// Open a file in its app. One inside an archive is taken out to a temporary folder first.
+    pub(super) fn open_file(&mut self, p: PathBuf) {
+        self.files.spawn(move || {
+            if archive::inside(&p) {
+                let tmp = archive_temp(&p).map_err(|e| format!("Couldn't take it out of the archive: {e}"))?;
+                actions::open(&tmp)
+            } else {
+                actions::open(&p)
+            }
+        });
+    }
+
+    /// Take archives apart into new folders named after them: beside each archive, or in `dest`.
+    pub(super) fn extract_archives(&mut self, archives: Vec<PathBuf>, dest: Option<PathBuf>) {
+        if self.ops.job.is_some() {
+            self.ops.notice = Some(("Another file operation is still running.".into(), true));
+            return;
+        }
+        let label = match archives.as_slice() {
+            [one] => format!("Extracting {}", one.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
+            many => format!("Extracting {} archives", many.len()),
+        };
+        let rec = self.ops.record();
+        let ctl = Arc::new(crate::transfer::Ctl::default());
+        let c2 = ctl.clone();
+        let here = self.files.here().dir().map(Path::to_path_buf);
+        self.run_op_select(label, move || {
+            let ctl = c2;
+            ctl.items_total.store(archives.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            let total: u64 = archives.iter().filter_map(|a| archive::index(a).ok()).map(|ix| ix.items.iter().map(|i| i.size).sum::<u64>()).sum();
+            ctl.bytes_total.store(total, std::sync::atomic::Ordering::Relaxed);
+            let (mut made, mut errors, mut steps, mut touched) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            for a in &archives {
+                let Some(dir) = dest.clone().or_else(|| a.parent().map(Path::to_path_buf)) else { continue };
+                let name = a.file_name().map(|n| archive::stem(&n.to_string_lossy())).unwrap_or_else(|| "Extracted".into());
+                let to = actions::free_name(&dir, &name, "");
+                match archive::extract_path(a, &to, &ctl) {
+                    Ok(()) => {
+                        steps.push(crate::transfer::Step::Created(to.clone()));
+                        touched.push(to.clone());
+                        made.push(to);
+                    }
+                    Err(e) => {
+                        let _ = actions::delete(&to);
+                        if e.kind() == std::io::ErrorKind::Interrupted {
+                            break;
+                        }
+                        errors.push(format!("Couldn't extract {}: {e}", a.display()));
+                    }
+                }
+                ctl.items_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            *rec.lock().unwrap() = steps;
+            let note = match made.as_slice() {
+                [] => None,
+                [one] => Some(format!("Extracted to {}", one.display())),
+                many => Some(format!("Extracted {} archives", many.len())),
+            };
+            let r = if errors.is_empty() { Ok(note) } else { Err(errors.join(" ")) };
+            // Select the new folders when they're in the folder on screen.
+            let select = made.iter().filter(|m| m.parent() == here.as_deref()).cloned().collect();
+            (r, touched, select)
+        });
+        if let Some(j) = &mut self.ops.job {
+            j.ctl = Some(ctl);
+        }
     }
 
     pub(super) fn files_action(&mut self, a: FAction, paths: Vec<PathBuf>) {
         let other_dir = self.files.other().and_then(|o| self.files.panes[o].tab().here().dir().map(Path::to_path_buf));
+        // Archives are only read: changes inside them are refused, with what to do instead.
+        let changes = matches!(a, FAction::Cut | FAction::Rename | FAction::Trash | FAction::Delete);
+        let into = matches!(a, FAction::Paste) && paths.first().is_some_and(|p| archive::split(p).is_some());
+        if (changes && paths.iter().any(|p| archive::inside(p))) || into {
+            self.ops.notice = Some((READ_ONLY_NOTE.into(), true));
+            return;
+        }
         match a {
             FAction::Open if paths.is_empty() => self.files.refresh(),
             FAction::Open => {
@@ -2584,7 +3013,7 @@ impl App {
                             went = true;
                         }
                     } else {
-                        self.files.spawn(move || actions::open(&p));
+                        self.open_file(p);
                     }
                 }
             }
@@ -2655,7 +3084,8 @@ impl App {
             FAction::Delete => self.files_delete(paths, true),
             FAction::CopyToOther | FAction::MoveToOther => match other_dir {
                 Some(dest) => {
-                    let op = if a == FAction::CopyToOther { dnd::DropOp::Copy } else { dnd::DropOp::Move };
+                    let from_archive = paths.iter().any(|p| archive::inside(p));
+                    let op = if a == FAction::CopyToOther || from_archive { dnd::DropOp::Copy } else { dnd::DropOp::Move };
                     self.files_transfer(paths, dest, op);
                 }
                 None => self.ops.notice = Some(("Open a second pane first (View > Side by Side), with a folder in it.".into(), false)),
@@ -2666,6 +3096,30 @@ impl App {
                     if !actions::shell_properties(&q) {
                         self.ops.props = Some(p);
                     }
+                }
+            }
+            FAction::ExtractHere => {
+                let archives: Vec<PathBuf> = paths.into_iter().filter(|p| !archive::inside(p)).collect();
+                self.extract_archives(archives, None);
+            }
+            FAction::ExtractTo => {
+                let start = paths.first().and_then(|p| archive::split(p)).and_then(|(a, _)| a.parent().map(Path::to_path_buf));
+                let mut d = rfd::FileDialog::new().set_title("Extract to folder");
+                if let Some(s) = start {
+                    d = d.set_directory(s);
+                }
+                if let Some(dest) = d.pick_folder() {
+                    if paths.iter().all(|p| archive::inside(p)) {
+                        // Items from inside an archive: copied out, asking about names taken.
+                        self.transfer(paths, dest, true);
+                    } else {
+                        self.extract_archives(paths.into_iter().filter(|p| !archive::inside(p)).collect(), Some(dest));
+                    }
+                }
+            }
+            FAction::OpenWithApp => {
+                if let Some(p) = paths.into_iter().next() {
+                    self.files.spawn(move || actions::open(&p));
                 }
             }
             FAction::QuickLook => {
@@ -2687,22 +3141,39 @@ pub(super) struct RowMenu {
     /// Split view is on (Copy and Move to Other Pane).
     pub two: bool,
     pub can_paste: bool,
+    /// The item is an archive (Open goes inside; Extract).
+    pub archive: bool,
+    /// The item is inside an archive: it can be copied out but not changed.
+    pub read_only: bool,
+}
+
+/// Said when something would change an archive.
+pub(super) const READ_ONLY_NOTE: &str = "That's inside an archive, which dirmap only reads. Copy or extract the items to a folder to change them.";
+
+/// A file in an archive, taken out to a temporary folder (to open it in its app or preview it).
+pub(super) fn archive_temp(p: &Path) -> std::io::Result<PathBuf> {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!("dirmap-open-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::create_dir_all(&dir)?;
+    let to = dir.join(p.file_name().unwrap_or_default());
+    archive::extract_path(p, &to, &crate::transfer::Ctl::default())?;
+    Ok(to)
 }
 
 /// The menu for an item in the list.
 /// What a row or an icon needs to know to handle clicks, drags and its menu.
-struct ItemCtx<'a> {
-    t: &'a FTab,
-    l: &'a Listing,
-    dir: &'a Path,
-    sizes: Option<&'a FolderSizes>,
-    two: bool,
-    can_paste: bool,
+pub(super) struct ItemCtx<'a> {
+    pub(super) t: &'a FTab,
+    pub(super) l: &'a Listing,
+    pub(super) dir: &'a Path,
+    pub(super) sizes: Option<&'a FolderSizes>,
+    pub(super) two: bool,
+    pub(super) can_paste: bool,
 }
 
 /// Clicks, double-clicks, middle-clicks, dragging and the right-click menu for one item (a row
 /// in Details, an icon in Icons). Folders are added to `drops` to take dropped items.
-fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &ItemCtx, pinned: bool, picks: &mut FPicks, drops: &mut Vec<(egui::Response, PathBuf)>) {
+pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &ItemCtx, pinned: bool, picks: &mut FPicks, drops: &mut Vec<(egui::Response, PathBuf)>) {
     let (t, l, dir, sizes) = (c.t, c.l, c.dir, c.sizes);
     let e = &l.entries[i as usize];
     let order = &t.order;
@@ -2738,7 +3209,8 @@ fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &ItemCtx, pinned
     if is_dir {
         drops.push((resp.clone(), path.clone()));
     }
-    let ctx_menu = RowMenu { is_dir, count, pinned, two: c.two, can_paste: c.can_paste };
+    let read_only = archive::inside(&path);
+    let ctx_menu = RowMenu { is_dir, count, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only };
     resp.context_menu(|ui| {
         if let Some(a) = item_menu(ui, &ctx_menu) {
             let paths = if selected { t.chosen_paths() } else { vec![path.clone()] };
@@ -2768,22 +3240,34 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu) -> Option<FAction> {
     } else if !many {
         item(ui, true, "Quick Look", k(M::NONE, Key::Space), FAction::QuickLook);
     }
+    if m.archive {
+        if !many {
+            item(ui, true, "Open with Its App", String::new(), FAction::OpenWithApp);
+        }
+        ui.separator();
+        item(ui, true, "Extract Here", String::new(), FAction::ExtractHere);
+        item(ui, true, "Extract To…", String::new(), FAction::ExtractTo);
+    } else if m.read_only {
+        ui.separator();
+        item(ui, true, "Extract To…", String::new(), FAction::ExtractTo);
+    }
+    let rw = !m.read_only;
     ui.separator();
-    item(ui, true, "Cut", k(M::COMMAND, Key::X), FAction::Cut);
+    item(ui, rw, "Cut", k(M::COMMAND, Key::X), FAction::Cut);
     item(ui, true, "Copy", k(M::COMMAND, Key::C), FAction::Copy);
     if m.is_dir && !many {
-        item(ui, m.can_paste, "Paste Into Folder", String::new(), FAction::Paste);
+        item(ui, m.can_paste && rw, "Paste Into Folder", String::new(), FAction::Paste);
     }
     if m.two {
         item(ui, true, "Copy to Other Pane", k(M::SHIFT, Key::F5), FAction::CopyToOther);
-        item(ui, true, "Move to Other Pane", k(M::SHIFT, Key::F6), FAction::MoveToOther);
+        item(ui, rw, "Move to Other Pane", k(M::SHIFT, Key::F6), FAction::MoveToOther);
     }
     ui.separator();
-    item(ui, !many, "Rename…", k(M::NONE, Key::F2), FAction::Rename);
+    item(ui, !many && rw, "Rename…", k(M::NONE, Key::F2), FAction::Rename);
     let bin = if cfg!(windows) { "Delete (to Recycle Bin)…" } else { "Move to Trash…" };
     let bin_key = if cfg!(target_os = "macos") { k(M::COMMAND, Key::Backspace) } else { k(M::NONE, Key::Delete) };
-    item(ui, true, bin, bin_key, FAction::Trash);
-    item(ui, true, "Delete Permanently…", k(M::SHIFT, Key::Delete), FAction::Delete);
+    item(ui, rw, bin, bin_key, FAction::Trash);
+    item(ui, rw, "Delete Permanently…", k(M::SHIFT, Key::Delete), FAction::Delete);
     ui.separator();
     item(ui, true, if many { "Copy Paths" } else { "Copy Path" }, k(M::COMMAND | M::SHIFT, Key::C), FAction::CopyPath);
     if cfg!(windows) {

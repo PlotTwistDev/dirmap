@@ -664,7 +664,8 @@ impl App {
         if self.filter_job.is_some() {
             items.push("Applying the filter".into());
         }
-        if let Some(op) = &self.ops.job {
+        // A copy or move has its own progress beside this.
+        if let Some(op) = self.ops.job.as_ref().filter(|o| o.ctl.is_none()) {
             items.push(op.label.clone());
         }
         if items.is_empty() {

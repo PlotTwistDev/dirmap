@@ -26,7 +26,11 @@ pub(super) enum Content {
         /// Full size, and a line about the pixels ("RGBA, 16 bits per channel").
         size: [u32; 2],
         info: String,
+        /// A picture the system made of a video or document (its size isn't the file's).
+        poster: bool,
     },
+    /// Sound: played with the controls in the preview.
+    Sound,
     Text {
         text: String,
         truncated: bool,
@@ -51,6 +55,8 @@ pub(super) struct Look {
     pub pan: Vec2,
     /// The file the zoom and pan are for.
     view_of: Option<PathBuf>,
+    /// A sound playing (or paused) in the preview.
+    pub player: Option<crate::media::Player>,
 }
 
 /// The kind of preview a file gets, from its extension.
@@ -60,6 +66,8 @@ pub(super) enum Kind {
     /// Linear-light images, shown through an sRGB display transform.
     LinearImage,
     Text,
+    /// Video, sound or PDF: a picture or sound from the system.
+    Media(crate::media::Media),
     Other,
 }
 
@@ -75,15 +83,65 @@ pub(super) fn kind_of(name: &str) -> Kind {
         | "tex" | "bib" | "r" | "jl" | "dart" | "zig" | "nim" | "ex" | "exs" | "erl" | "hs" | "ml" | "clj" | "scala" | "pl" | "pm" | "tcl" | "diff" | "patch"
         | "lock" | "svg" => Kind::Text,
         "" if matches!(name.to_ascii_lowercase().as_str(), "readme" | "license" | "makefile" | "dockerfile" | "changelog" | "authors") => Kind::Text,
-        _ => Kind::Other,
+        _ => match crate::media::media_of(name) {
+            Some(m) => Kind::Media(m),
+            None => Kind::Other,
+        },
     }
 }
 
 /// Read a file for its preview. Runs on a worker thread.
 fn load(path: &Path, kind: Kind, size: u64) -> Content {
+    // Inside an archive: taken out to a temporary file first (not huge ones).
+    if crate::fsys::archive::inside(path) {
+        if size > IMAGE_MAX_FILE {
+            return Content::Error("Too big to preview from inside the archive".into());
+        }
+        return match files::archive_temp(path) {
+            Ok(tmp) => {
+                let c = load(&tmp, kind, size);
+                if let Some(d) = tmp.parent() {
+                    let _ = std::fs::remove_dir_all(d);
+                }
+                c
+            }
+            Err(e) => Content::Error(format!("Couldn't read it from the archive: {e}")),
+        };
+    }
+    // An archive: what's in it.
+    if path.file_name().is_some_and(|n| crate::fsys::archive::is_archive(&n.to_string_lossy())) {
+        return match crate::fsys::archive::index(path) {
+            Ok(ix) => {
+                let files = ix.items.iter().filter(|i| !i.is_dir).count();
+                let bytes: u64 = ix.items.iter().map(|i| i.size).sum();
+                let mut text = format!("{} files, {} when extracted\n\n", group(files as u64), crate::scan::human(bytes));
+                for it in ix.items.iter().take(2000) {
+                    if it.is_dir {
+                        text.push_str(&format!("{}/\n", it.path));
+                    } else {
+                        text.push_str(&format!("{}  ({})\n", it.path, crate::scan::human(it.size)));
+                    }
+                }
+                let truncated = ix.items.len() > 2000;
+                Content::Text { text, truncated }
+            }
+            Err(e) => Content::Error(e),
+        };
+    }
     match kind {
         Kind::Image | Kind::LinearImage => load_image(path, kind == Kind::LinearImage, size),
         Kind::Text => load_text(path),
+        Kind::Media(crate::media::Media::Audio) => Content::Sound,
+        Kind::Media(m) => match crate::media::thumbnail(path, 1024) {
+            Ok((w, h, rgba)) => Content::Image {
+                pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
+                tex: None,
+                size: [w as u32, h as u32],
+                info: if m == crate::media::Media::Pdf { "The first page".into() } else { "A frame from the video".into() },
+                poster: true,
+            },
+            Err(_) => Content::Error(if m == crate::media::Media::Pdf { "No picture of this PDF: the system has no thumbnailer for it".into() } else { "No picture of this video: the system has no thumbnailer for it".into() }),
+        },
         Kind::Other => {
             // Unknown extension: show it as text if it looks like text.
             match load_text(path) {
@@ -97,7 +155,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
 
 fn load_image(path: &Path, linear: bool, size: u64) -> Content {
     match decode_image(path, linear, size, SHOW_MAX) {
-        Ok((pixels, size, info)) => Content::Image { pixels: Some(pixels), tex: None, size, info },
+        Ok((pixels, size, info)) => Content::Image { pixels: Some(pixels), tex: None, size, info, poster: false },
         Err(e) => Content::Error(e),
     }
 }
@@ -336,7 +394,7 @@ impl App {
                 ui.label(fmt_time(e.modified));
                 ui.end_row();
             }
-            if let Some(Content::Image { size, info, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+            if let Some(Content::Image { size, info, poster: false, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
                 ui.weak("Dimensions");
                 ui.label(format!("{} × {}", size[0], size[1]));
                 ui.end_row();
@@ -361,7 +419,7 @@ impl App {
     }
 
     /// The preview itself: an image, text, or a large icon.
-    fn preview_body(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, size: Vec2) {
+    pub(super) fn preview_body(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, size: Vec2) {
         let pal = style::pal(ui);
         if e.is_dir {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -370,6 +428,10 @@ impl App {
         }
         let ctx = ui.ctx().clone();
         let tint = self.colors.get(e.ext()).copied().unwrap_or(Color32::GRAY);
+        // A sound stops when the preview moves on to another file.
+        if self.files.look.player.as_ref().is_some_and(|p| p.path != path) {
+            self.files.look.player = None;
+        }
         if self.files.look.view_of.as_deref() != Some(path) {
             self.files.look.view_of = Some(path.to_path_buf());
             self.files.look.zoom = None;
@@ -443,6 +505,12 @@ impl App {
                     });
                 });
             }
+            Content::Sound => {
+                let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+                let icon = Rect::from_center_size(r.center() - vec2(0.0, 30.0), vec2(80.0, 80.0));
+                self.icons.paint_big(ui, icon, false, e.ext(), tint);
+                sound_controls(ui, &mut self.files.look.player, path, Rect::from_center_size(r.center() + vec2(0.0, 44.0), vec2((r.width() - 24.0).min(360.0), 28.0)));
+            }
             Content::Binary | Content::None | Content::Error(_) => {
                 let note = match c {
                     Content::Error(e) => e.clone(),
@@ -461,8 +529,47 @@ impl App {
     }
 }
 
+/// Play or pause, how far through, and a bar to jump about (where the player can).
+fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, path: &Path, r: Rect) {
+    let pal = style::pal(ui);
+    let st = player.as_ref().map(|p| p.state()).unwrap_or_default();
+    // Just the button and the time when there's no bar to show: keep them centred.
+    let r = if st.length.is_some() { r } else { Rect::from_center_size(r.center(), vec2(130.0, r.height())) };
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let ui = &mut child;
+    let label = if st.playing { "⏸ Pause" } else { "▶ Play" };
+    if ui.button(label).on_hover_text("Play the sound here").clicked() {
+        match player {
+            Some(p) if st.playing => p.pause(),
+            Some(p) => p.play(),
+            None => *player = Some(crate::media::Player::start(path)),
+        }
+    }
+    if let Some(e) = &st.error {
+        ui.label(egui::RichText::new(e).color(pal.weak).size(12.0));
+        return;
+    }
+    let time = match st.length {
+        Some(l) => format!("{} / {}", crate::media::clock(st.position), crate::media::clock(l)),
+        None => crate::media::clock(st.position),
+    };
+    if let (Some(l), Some(p)) = (st.length.filter(|l| *l > 0.0), player.as_ref().filter(|p| p.can_seek())) {
+        let mut at = st.position.min(l);
+        let w = (ui.available_width() - 90.0).max(40.0);
+        ui.spacing_mut().slider_width = w;
+        let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
+        if s.drag_stopped() || (s.clicked() && !s.dragged()) {
+            p.seek(at);
+        }
+    }
+    ui.label(egui::RichText::new(time).monospace().size(12.0).color(pal.weak));
+    if st.playing {
+        ui.ctx().request_repaint_after(Duration::from_millis(200));
+    }
+}
+
 /// "12.4 MB · PNG image · 3 Nov 2026"
-fn facts_line(e: &Entry) -> String {
+pub(super) fn facts_line(e: &Entry) -> String {
     let mut s = browser::kind_for(&e.name, e.is_dir);
     if !e.is_dir {
         s = format!("{} · {s}", crate::scan::human(e.size));
@@ -506,7 +613,8 @@ mod tests {
         assert_eq!(kind_of("beauty.0001.exr"), Kind::LinearImage);
         assert_eq!(kind_of("main.rs"), Kind::Text);
         assert_eq!(kind_of("README"), Kind::Text);
-        assert_eq!(kind_of("movie.mov"), Kind::Other);
+        assert_eq!(kind_of("movie.mov"), Kind::Media(crate::media::Media::Video));
+        assert_eq!(kind_of("data.xyz"), Kind::Other);
     }
 
     #[test]

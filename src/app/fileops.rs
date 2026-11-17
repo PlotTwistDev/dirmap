@@ -45,11 +45,18 @@ impl App {
     }
 
     pub(super) fn can_paste(&self) -> bool {
-        self.browser.clip.is_some() && self.ops.job.is_none()
+        // While another copy or move runs, a paste waits its turn.
+        self.browser.clip.is_some()
     }
 
     /// Copy or move items into a folder, unless that makes no sense (into themselves).
     pub(super) fn files_transfer(&mut self, items: Vec<PathBuf>, dest: PathBuf, op: DropOp) {
+        if crate::fsys::archive::split(&dest).is_some() {
+            self.ops.notice = Some((files::READ_ONLY_NOTE.into(), true));
+            return;
+        }
+        // Out of an archive is always a copy.
+        let op = if items.iter().any(|p| crate::fsys::archive::inside(p)) { DropOp::Copy } else { op };
         if dnd::pointless(&items, &dest, op) {
             if items.iter().any(|s| dest.starts_with(s)) {
                 self.ops.notice = Some(("Can't put a folder inside itself.".into(), true));
@@ -93,6 +100,10 @@ impl App {
 
     /// A new folder in `dir`, then the Rename box for it.
     pub(super) fn files_new_folder(&mut self, dir: PathBuf) {
+        if crate::fsys::archive::split(&dir).is_some() {
+            self.ops.notice = Some((files::READ_ONLY_NOTE.into(), true));
+            return;
+        }
         if self.busy_note() {
             return;
         }
@@ -215,6 +226,10 @@ impl App {
     }
 
     pub(super) fn apply_new(&mut self, pick: NewPick, dir: PathBuf) {
+        if crate::fsys::archive::split(&dir).is_some() {
+            self.ops.notice = Some((files::READ_ONLY_NOTE.into(), true));
+            return;
+        }
         match pick {
             NewPick::Folder => self.files_new_folder(dir),
             NewPick::Builtin(b) => self.files_new_builtin(dir, b),

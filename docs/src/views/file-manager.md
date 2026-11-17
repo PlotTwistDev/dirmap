@@ -177,11 +177,53 @@ The bar under the list counts the items and adds up the size of what's selected.
 - **View > Hidden Items** (**Ctrl+Shift+.**) shows hidden files and folders: names starting with
   a dot, and items marked hidden on Windows.
 
-## The Icons view
+### Groups
 
-Click **⊞** at the bottom right of the list (or choose **View > ⊞ Icons**) to see the folder as
-big icons. Images show a small picture of themselves, so you can find a render or a photo at a
-glance. **☰** goes back to Details. Each pane remembers its own choice.
+**View > Group By** puts the items under headings, in the Details view: by **Type** (Folders,
+then each kind of file), **Date Modified** (Today, Yesterday, Earlier this week, Last week, and so
+on back by year) or **Size** (from Gigantic, over 4 GB, down to Empty). Within each group the
+items keep the sort order. **None** turns grouping off.
+
+## Four ways to see a folder
+
+The four buttons at the bottom right of the list (and **View > Layout**) switch between
+**Details**, **Icons**, **Columns** and **Gallery**. Each pane has its own.
+
+### Each folder remembers its view
+
+When you change the view, the sort or the grouping, dirmap remembers it for that folder, and
+shows the folder that way when you come back, as Finder and Explorer do. Folders you haven't
+changed use the default.
+
+- **View > Use This View for All Folders** makes the way this folder looks the default, and
+  forgets the ones set for single folders.
+- **View > Reset This Folder's View** shows this folder the default way again.
+- Turn off **View > Remember Each Folder's View** to have one view that follows you everywhere.
+
+### Columns
+
+Columns shows where you are as well as what's here, as in Finder: the folders above this one at
+the left (as many as fit, up to three), each with the folder below it highlighted; this folder;
+and at the right what's in the selected folder, or a preview of the selected file.
+
+![The Columns view, with a preview of the selected image at the right](../images/file-manager-columns.png)
+
+- **←** goes up to the folder at the left, selecting the one you were in, and **→** goes into the
+  selected folder. **↑** and **↓** move as usual.
+- Click an item in a column at the left to go back there with that item selected; double-click
+  to open it. Items can be dropped on the folders in every column.
+
+### Gallery
+
+Gallery shows the selected item large, with a strip of small pictures underneath. **←** and **→**
+(or **↑** and **↓**) step through the folder; click a picture to show it. The large view zooms and
+pans like the [preview](#quick-look-and-the-preview-pane), and a sound file can be played there.
+
+### The Icons view
+
+Click the Icons button at the bottom right of the list (or choose **View > Icons**) to see the
+folder as big icons. Images, videos and PDFs show a small picture of themselves, so you can find
+a render or a photo at a glance.
 
 ![The Icons view, with pictures of images and the preview pane](../images/file-manager-icons.png)
 
@@ -195,7 +237,7 @@ glance. **☰** goes back to Details. Each pane remembers its own choice.
 - Clicking, dragging, dropping onto folders and the right-click menu work as in Details.
 
 Pictures are made for the same image types as the [preview](#quick-look-and-the-preview-pane),
-including OpenEXR and HDR, in the background and only for the icons on screen. Scrolling quickly
+including OpenEXR and HDR, and for videos and PDFs where the system can make one. This happens in the background and only for the icons on screen. Scrolling quickly
 through thousands of images never freezes the window, and dirmap keeps the pictures within a
 fixed amount of memory, dropping the ones you haven't seen for a while. A file that can't be
 read shows its type's icon instead.
@@ -258,7 +300,20 @@ format. Drag its edge to make it wider.
 |---|---|
 | Images | PNG, JPEG, GIF, WebP, TIFF, BMP, TGA, ICO, QOI, PNM, and HDR and OpenEXR (shown with a standard display curve). Transparent areas show a checkerboard. |
 | Text | Text and source files, the first 256 KB. |
+| Videos | A frame from the video, made by the system (see below). **Open** plays it in your usual player. |
+| PDFs | The first page, made by the system. |
+| Sound | MP3, WAV, FLAC, M4A, AAC, OGG and others: **▶ Play** plays it here, **⏸ Pause** pauses it, and on Windows the bar under it jumps to any point. It stops when you move to another file. |
+| Archives | What's inside: every file and folder, with sizes. |
 | Other files | The file's details, and **Open**. |
+
+Pictures of videos and PDFs, and sound, come from your system, so they work for whatever it
+supports:
+
+- **Windows:** the same thumbnails as File Explorer (videos, and PDFs when a PDF app provides
+  them), and sound through Windows' own player.
+- **macOS:** Quick Look's thumbnails, and sound through `afplay`.
+- **Linux:** `ffmpegthumbnailer` or `ffmpeg` for videos, `pdftoppm` for PDFs, and `ffplay`,
+  `gst-play-1.0`, `paplay` or `aplay` for sound, whichever is installed.
 
 On an image, scroll to zoom towards the pointer, drag to pan, and double-click to switch between
 fitting the image and showing it at 1:1.
@@ -364,8 +419,22 @@ on the dock's toolbar switches to colouring by age, or by change since a snapsho
 - **Rename** with **F2**, and **Delete** to send items to the Recycle Bin or Trash. dirmap asks
   first. **Ctrl+Z** undoes any of these.
 
-Copies and moves run in the background with a progress bar in the status bar, and the open
-folders are read again when they finish. One file operation runs at a time.
+Copies and moves run in the background. The status bar shows what's being copied and how far it
+has got, with:
+
+- **Pause** and **Resume**. A big file pauses part way through.
+- **Stop**. The file being copied is removed rather than left half-made. What was finished stays,
+  and **Undo** takes it away.
+- **+N waiting**. If you start another copy or move (a paste, a drop, Copy to Other Pane) while
+  one is running, it waits its turn, and they run one after another in the order you asked. Click
+  it to see them, or to cancel the ones still waiting.
+
+### Changes made by other programs
+
+The folders open in tabs are watched, so when another program adds, removes, renames or rewrites
+a file there, the list updates by itself after a moment, keeping your selection and scroll
+position. **F5** still reads the folder again. On a network share this depends on the server
+reporting changes; most Windows servers and NAS boxes do.
 
 ### When a name is already taken
 
@@ -397,6 +466,29 @@ right-click menu of empty space in the list has **Undo**.
   can't be found there (it was emptied, or the drive has no bin, as on a network share), dirmap
   says so and you can restore it yourself.
 - **Delete Permanently** can't be undone, which is why it asks first.
+
+## Archives
+
+dirmap opens zip, 7z, tar, tar.gz (`.tgz`), tar.xz and tar.bz2 archives like folders. Double-click
+an archive (or press **Enter**) to look inside, and go into its folders as usual: every view,
+Quick Look and the preview work there. **Open with Its App** on the right-click menu opens the
+archive in the program the system uses for it instead.
+
+To take things out:
+
+- **Extract Here** (right-click an archive) makes a folder named after the archive beside it, with
+  everything in it. **Extract To…** asks where to put that folder.
+- Inside an archive, copy items (**Ctrl+C**) and paste them in a folder, drag them to a folder or
+  the other pane, or right-click and choose **Extract To…**. Taking items out of an archive always
+  copies them, and asks as usual if a name is taken.
+- Double-clicking a file inside an archive opens it in its app, from a temporary copy.
+
+Extracting shows its progress in the status bar, can be paused and stopped, and **Undo** removes
+what it made. Names in an archive that would put files outside the folder you extract to (such as
+`../`) are refused.
+
+Archives are only read: dirmap doesn't add to them, rename or delete inside them, and says so if
+you try. Password-protected archives and RAR aren't supported yet.
 
 ## Slow and unreachable drives
 
