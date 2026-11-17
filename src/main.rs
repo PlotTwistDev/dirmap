@@ -16,6 +16,7 @@ mod categories;
 mod drives;
 mod dupes;
 mod elevate;
+mod fsys;
 mod help;
 mod icons;
 mod mapview;
