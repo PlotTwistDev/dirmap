@@ -6,7 +6,7 @@
 
 - dirmap now opens as a **file manager**. Browse your drives, folders and network shares straight
   away, with no scan. It has:
-  - a sidebar with Home, Desktop, Documents, Downloads and the rest, pinned folders, drives with
+  - a sidebar with Home, Desktop, Documents, Downloads and the rest, favourites, drives with
     their space, and recent folders;
   - tabs that are restored next time;
   - Back, Forward and Up;
@@ -15,6 +15,29 @@
   - Shift and Ctrl selection.
 
   See [The Files workspace](../views/file-manager.md).
+- **A full file manager.** Copy, cut and paste (**Ctrl+C**, **Ctrl+X**, **Ctrl+V**), drag and
+  drop, **F2** to rename and **Delete** to send to the Recycle Bin or Trash now work in Files.
+  Drops move items on the same drive and copy them to another, as in Explorer and Finder, and the
+  label by the pointer says which. See
+  [Copying, moving and deleting](../views/file-manager.md#copying-moving-and-deleting).
+- **Two panes** (**Ctrl+\\**): two folders side by side or one above the other, each with its own
+  tabs, sort and filter. Drag between them, or press **Shift+F5** to copy and **Shift+F6** to move
+  to the other one. See [Two panes](../views/file-manager.md#two-panes).
+- **Favourites.** Drag a folder onto the sidebar to bookmark it; nothing is moved. Reorder them by
+  dragging, rename them, and sort them into groups. Pinned folders become favourites. See
+  [Favourites](../views/file-manager.md#favourites).
+- **Quick Look and a preview pane.** Press **Space** for a large preview, or **Alt+P** for a
+  preview pane, with zoom and pan. Images (including OpenEXR and HDR) and text files. See
+  [Quick Look and the preview pane](../views/file-manager.md#quick-look-and-the-preview-pane).
+- **A smarter address bar.** Suggestions as you type, **Tab** completion, `%VAR%` and `$VAR`,
+  `>` for commands and `@` for favourites. Each part of the path takes drops and has a menu of
+  the folders inside it. See [Typing a path](../views/file-manager.md#typing-a-path).
+- **New menu.** New folders and small valid starter files (text, Markdown, JSON, XML, CSV,
+  scripts), plus your own templates: put any file or folder in the templates folder and New
+  copies it. See [New folders and files](../views/file-manager.md#new-folders-and-files).
+- **Network & Remote.** Mapped drives (including offline ones), network mounts, saved servers and
+  **Connect to Server…** for SMB shares. The system asks for passwords; dirmap never sees them.
+  See [Network & Remote](../views/file-manager.md#network--remote).
 - **The analysis dock** (**Ctrl+J**) shows the treemap or sunburst of the folder you're in, under
   the list. Once a folder or drive is analysed, every folder inside it shows its treemap
   straight away as you browse, with no rescanning.

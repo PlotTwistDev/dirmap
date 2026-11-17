@@ -83,6 +83,8 @@ pub(super) struct Confirm {
     pub is_dir: bool,
     pub size: u64,
     pub files: u64,
+    /// The size is known (folders from the Files list have no size until they're analysed).
+    pub sized: bool,
 }
 
 /// The Rename box.
@@ -121,7 +123,7 @@ pub(super) struct Ops {
     pub then_rename: bool,
     hash: Option<HashJob>,
     /// Item shown in dirmap's own Properties window (where the system has none).
-    props: Option<PathBuf>,
+    pub props: Option<PathBuf>,
     type_files: Option<TypeFiles>,
     /// Last result, shown in the status bar: (text, is an error).
     pub notice: Option<(String, bool)>,
@@ -345,7 +347,7 @@ impl App {
                 Ok(())
             }
             TreeAction::Delete | TreeAction::Recycle | TreeAction::Empty => {
-                self.ops.confirm = Some(Confirm { action: a, paths: vec![disk], is_dir: n.is_dir, size: n.size, files: n.files });
+                self.ops.confirm = Some(Confirm { action: a, paths: vec![disk], is_dir: n.is_dir, size: n.size, files: n.files, sized: true });
                 Ok(())
             }
             TreeAction::Refresh if path.is_empty() => {
@@ -449,10 +451,14 @@ impl App {
             return;
         }
         let opts = self.options_for(self.scanned_with.as_ref().unwrap_or(&self.settings));
+        // Only what's inside the analysis is read again for the tree; the Files lists re-read
+        // their folders themselves.
+        let root = self.tree.is_some().then(|| self.scanned_path.clone());
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let (r, affected, select) = work();
-            let updates = affected.into_iter().map(|p| {
+            let inside = |p: &PathBuf| root.as_ref().is_some_and(|r| p.starts_with(r));
+            let updates = affected.into_iter().filter(inside).map(|p| {
                 let n = reread(&p, &opts);
                 (p, n)
             });
@@ -495,14 +501,16 @@ impl App {
                     let mut then = done.select;
                     then.extend(self.ops.then_select.take());
                     let rename = std::mem::take(&mut self.ops.then_rename);
-                    if let Some(p) = then.last().cloned() {
-                        if let Some(tp) = self.tree_path_of(&p) {
-                            self.select(tp);
-                            if rename {
-                                self.start_rename(p);
-                            }
+                    let in_files = self.files.prefs.workspace == files::Workspace::Files;
+                    if let Some(p) = then.last().cloned()
+                        && let Some(tp) = self.tree_path_of(&p)
+                    {
+                        self.select(tp);
+                        if rename && !in_files {
+                            self.start_rename(p);
                         }
                     }
+                    self.files_after_op(&then, rename && in_files);
                     self.browser_pick_later(then);
                 }
                 Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
@@ -526,7 +534,13 @@ impl App {
             _ => ("Empty folder", "Empty Folder", format!("Everything inside this folder will be deleted for good. It won't go to the {}.", actions::BIN)),
         };
         let warn = if many { warn.replacen("This ", "These ", 1) } else { warn };
-        let amount = if c.is_dir || many { format!("{} in {}", scan::human(c.size), files_text(c.files)) } else { scan::human(c.size) };
+        let amount = if !c.sized {
+            String::new()
+        } else if c.is_dir || many {
+            format!("{} in {}", scan::human(c.size), files_text(c.files))
+        } else {
+            scan::human(c.size)
+        };
         let mut go = false;
         let mut cancel = false;
         egui::Modal::new(egui::Id::new("confirm-delete")).show(ctx, |ui| {
@@ -539,7 +553,9 @@ impl App {
             if c.paths.len() > 8 {
                 ui.label(format!("and {} more", c.paths.len() - 8));
             }
-            ui.label(&amount);
+            if !amount.is_empty() {
+                ui.label(&amount);
+            }
             ui.add_space(6.0);
             ui.colored_label(if c.action == TreeAction::Recycle { ui.visuals().text_color() } else { ui.visuals().warn_fg_color }, warn);
             ui.add_space(10.0);
@@ -548,6 +564,12 @@ impl App {
                 cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
             });
         });
+        if cancel || go {
+            ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            });
+        }
         if cancel {
             self.ops.confirm = None;
         } else if go {
@@ -610,6 +632,13 @@ impl App {
                 cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
             });
         });
+        // The Enter or Escape that closed the box mustn't also reach the list behind it.
+        if cancel || go {
+            ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            });
+        }
         if cancel {
             self.ops.rename = None;
         } else if go {

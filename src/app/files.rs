@@ -58,8 +58,13 @@ pub(super) struct FilesPrefs {
     pub workspace: Workspace,
     pub tabs: Vec<Location>,
     pub active: usize,
-    /// Folders pinned to the sidebar, in the user's order.
+    /// Folders pinned to the sidebar before Favourites had groups; moved into the first group
+    /// on load.
     pub pinned: Vec<PathBuf>,
+    /// The Favourites section: the user's groups of bookmarked folders.
+    pub favourites: Vec<favs::FavGroup>,
+    /// Saved network locations (UNC paths, mount points) shown under Network & Remote.
+    pub servers: Vec<PathBuf>,
     /// Folders opened most recently, newest first.
     pub recent: Vec<PathBuf>,
     pub sort: FSort,
@@ -72,6 +77,16 @@ pub(super) struct FilesPrefs {
     pub col_widths: [f32; 3],
     /// The analysis dock under the list.
     pub dock: super::dock::DockPrefs,
+    /// One pane or two, and how the space is shared (the first pane's fraction).
+    pub split: Split,
+    /// The split used last, for Ctrl+\ to bring back.
+    pub last_split: Split,
+    pub split_ratio: f32,
+    /// The second pane's tabs, kept while it's hidden too.
+    pub second: PaneSave,
+    /// The preview pane at the right.
+    pub preview: bool,
+    pub preview_width: f32,
 }
 
 /// Row height in the list and sidebar.
@@ -102,6 +117,8 @@ impl Default for FilesPrefs {
             tabs: Vec::new(),
             active: 0,
             pinned: Vec::new(),
+            favourites: Vec::new(),
+            servers: Vec::new(),
             recent: Vec::new(),
             sort: FSort::Name,
             reversed: false,
@@ -110,6 +127,12 @@ impl Default for FilesPrefs {
             density: Density::Comfortable,
             col_widths: COL_WIDTHS,
             dock: Default::default(),
+            split: Split::Single,
+            last_split: Split::Vertical,
+            split_ratio: 0.5,
+            second: PaneSave::default(),
+            preview: false,
+            preview_width: 300.0,
         }
     }
 }
@@ -135,27 +158,29 @@ const SORT_INLINE_MAX: usize = 3_000;
 
 /// One tab: where it is, where it's been, what's in it and what's selected there.
 pub(super) struct FTab {
-    hist: History,
-    listing: Option<Listing>,
+    pub(super) hist: History,
+    pub(super) listing: Option<Listing>,
     /// Indices into the listing's entries, in display order.
-    order: Vec<u32>,
+    pub(super) order: Vec<u32>,
     /// What `order` was worked out for: (listing generation, sort, reversed, hidden, filter, sizes).
     order_key: Option<OrderKey>,
     /// A big folder being sorted on another thread: what for, how many entries it covers, and
     /// where the result arrives.
     sorting: Option<(OrderKey, usize, mpsc::Receiver<Vec<u32>>)>,
-    selected: BTreeSet<Box<str>>,
+    pub(super) selected: BTreeSet<Box<str>>,
     /// The item the keyboard moves from (the last one clicked or moved to).
-    cursor: Option<Box<str>>,
+    pub(super) cursor: Option<Box<str>>,
     /// Where Shift-selection ranges start.
-    anchor: Option<Box<str>>,
+    pub(super) anchor: Option<Box<str>>,
     /// Select this item once it's listed (coming up from a folder, or from another workspace).
-    select_later: Option<Box<str>>,
-    scroll_to_cursor: bool,
+    pub(super) select_later: Option<Box<str>>,
+    /// …and open the Rename box on it (a new folder or file).
+    pub(super) rename_later: bool,
+    pub(super) scroll_to_cursor: bool,
     /// (scroll offset, height) of the list last frame.
     view: (f32, f32),
     /// Folder sizes from the scan for this folder: (tree it came from, name → (bytes, files)).
-    sizes: Option<(usize, FolderSizes)>,
+    pub(super) sizes: Option<(usize, FolderSizes)>,
 }
 
 impl FTab {
@@ -170,13 +195,14 @@ impl FTab {
             cursor: None,
             anchor: None,
             select_later: None,
+            rename_later: false,
             scroll_to_cursor: false,
             view: (0.0, 0.0),
             sizes: None,
         }
     }
 
-    fn here(&self) -> &Location {
+    pub(super) fn here(&self) -> &Location {
         &self.hist.here
     }
 
@@ -194,30 +220,104 @@ impl FTab {
         self.view = (0.0, 0.0);
     }
 
+    /// Read the folder again, keeping the selection and the cursor.
+    pub(super) fn reread(&mut self) {
+        let cursor = self.cursor.clone();
+        self.listing = None;
+        self.order_key = None;
+        self.sizes = None;
+        if self.select_later.is_none() {
+            self.select_later = cursor;
+        }
+    }
+
     fn entry(&self, i: u32) -> Option<&Entry> {
         self.listing.as_ref()?.entries.get(i as usize)
     }
 
-    fn pos_of(&self, name: &str) -> Option<usize> {
+    pub(super) fn entry_named(&self, name: &str) -> Option<&Entry> {
+        self.listing.as_ref()?.entries.iter().find(|e| &*e.name == name)
+    }
+
+    pub(super) fn pos_of(&self, name: &str) -> Option<usize> {
         let l = self.listing.as_ref()?;
         self.order.iter().position(|&i| &*l.entries[i as usize].name == name)
+    }
+
+    /// Paths of the selected items, in display order.
+    pub(super) fn chosen_paths(&self) -> Vec<PathBuf> {
+        let (Some(dir), Some(l)) = (self.here().dir(), self.listing.as_ref()) else { return Vec::new() };
+        self.order.iter().map(|&i| &l.entries[i as usize]).filter(|e| self.selected.contains(&e.name)).map(|e| dir.join(&*e.name)).collect()
+    }
+}
+
+/// How the centre is divided.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+pub(super) enum Split {
+    #[default]
+    Single,
+    /// Two panes side by side.
+    Vertical,
+    /// One pane above the other.
+    Horizontal,
+}
+
+/// What's remembered of the second pane.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct PaneSave {
+    pub tabs: Vec<Location>,
+    pub active: usize,
+    pub sort: FSort,
+    pub reversed: bool,
+}
+
+/// One side of the window: its tabs, sort and filter.
+pub(super) struct Pane {
+    pub(super) tabs: Vec<FTab>,
+    pub(super) active: usize,
+    pub(super) sort: FSort,
+    pub(super) reversed: bool,
+    /// Show only items whose names contain this (or match it, with * or ?).
+    pub(super) filter: String,
+}
+
+impl Pane {
+    fn new(tabs: &[Location], active: usize, sort: FSort, reversed: bool) -> Self {
+        let mut tabs: Vec<FTab> = tabs.iter().cloned().map(FTab::new).collect();
+        if tabs.is_empty() {
+            tabs.push(FTab::new(places::home().map(Location::Dir).unwrap_or(Location::Computer)));
+        }
+        let active = active.min(tabs.len() - 1);
+        Self { tabs, active, sort, reversed, filter: String::new() }
+    }
+
+    pub(super) fn tab(&self) -> &FTab {
+        &self.tabs[self.active]
+    }
+
+    fn tab_mut(&mut self) -> &mut FTab {
+        &mut self.tabs[self.active]
+    }
+
+    fn save(&self) -> PaneSave {
+        PaneSave { tabs: self.tabs.iter().map(|t| t.here().clone()).collect(), active: self.active, sort: self.sort, reversed: self.reversed }
     }
 }
 
 /// The File Manager's state.
 pub(super) struct Files {
     pub prefs: FilesPrefs,
-    tabs: Vec<FTab>,
-    active: usize,
+    /// One pane, or two in split view; `focus` is the one the toolbar and keys work on.
+    pub(super) panes: Vec<Pane>,
+    pub(super) focus: usize,
     /// Recently closed tabs, to reopen with Ctrl+Shift+T.
     closed: Vec<Location>,
-    places: Vec<Place>,
+    pub(super) places: Vec<Place>,
     places_rx: Option<mpsc::Receiver<Vec<Place>>>,
     /// The path being typed in the path bar (it shows breadcrumbs otherwise).
-    path_edit: Option<String>,
-    focus_path: bool,
-    /// Show only items whose names contain this (or match it, with * or ?).
-    filter: String,
+    pub(super) path_edit: Option<String>,
+    pub(super) focus_path: bool,
     focus_filter: bool,
     typed: String,
     typed_at: f64,
@@ -225,15 +325,41 @@ pub(super) struct Files {
     pub(super) focused: bool,
     /// Results of commands run in the background (open, reveal, terminal).
     results: Vec<mpsc::Receiver<Result<(), String>>>,
+    /// While dragging over a tab: which one (pane, tab) and since when, to switch to it.
+    pub(super) drag_hover_tab: Option<((usize, usize), f64)>,
+    /// A drop target under the pointer this frame already shows what a drop will do.
+    pub(super) drop_claimed: bool,
+    /// The user's templates for the New menu, and the background read of them.
+    pub(super) user_templates: Vec<crate::templates::UserTemplate>,
+    pub(super) user_templates_rx: Option<mpsc::Receiver<Vec<crate::templates::UserTemplate>>>,
+    /// A favourite or group being renamed in the sidebar.
+    pub(super) fav_edit: Option<favs::FavEdit>,
+    /// The address bar's suggestions while typing a path.
+    pub(super) suggest: addr::Suggest,
+    /// Quick Look and the preview pane.
+    pub(super) look: preview::Look,
+    /// Where the address bar's suggestion list was drawn.
+    pub(super) suggest_rect: Option<Rect>,
+    /// Text worked out in the background for the clipboard (UNC paths).
+    pub(super) text_rx: Option<mpsc::Receiver<String>>,
+    /// Network & Remote: what the system reports, the background read, the Connect box, and
+    /// connections or disconnections running.
+    pub(super) net: Vec<crate::netdrives::NetPlace>,
+    pub(super) net_rx: Option<mpsc::Receiver<Vec<crate::netdrives::NetPlace>>>,
+    pub(super) connect: Option<netui::ConnectBox>,
+    pub(super) net_jobs: Vec<mpsc::Receiver<Result<Option<PathBuf>, String>>>,
+    pub(super) net_asked: bool,
 }
 
 impl Files {
-    pub fn new(prefs: FilesPrefs) -> Self {
-        let mut tabs: Vec<FTab> = prefs.tabs.iter().cloned().map(FTab::new).collect();
-        if tabs.is_empty() {
-            tabs.push(FTab::new(places::home().map(Location::Dir).unwrap_or(Location::Computer)));
+    pub fn new(mut prefs: FilesPrefs) -> Self {
+        let first = Pane::new(&prefs.tabs, prefs.active, prefs.sort, prefs.reversed);
+        let mut panes = vec![first];
+        if prefs.split != Split::Single {
+            let s = &prefs.second;
+            panes.push(Pane::new(&s.tabs, s.active, s.sort, s.reversed));
         }
-        let active = prefs.active.min(tabs.len() - 1);
+        favs::migrate(&mut prefs);
         // The standard places are in the user's profile, but a profile folder can be
         // redirected to a server, so find them off the UI thread too.
         let (tx, rx) = mpsc::channel();
@@ -242,36 +368,112 @@ impl Files {
         });
         Self {
             prefs,
-            tabs,
-            active,
+            panes,
+            focus: 0,
             closed: Vec::new(),
             places: Vec::new(),
             places_rx: Some(rx),
             path_edit: None,
             focus_path: false,
-            filter: String::new(),
             focus_filter: false,
             typed: String::new(),
             typed_at: 0.0,
             focused: true,
             results: Vec::new(),
+            drag_hover_tab: None,
+            drop_claimed: false,
+            user_templates: Vec::new(),
+            user_templates_rx: None,
+            fav_edit: None,
+            suggest: Default::default(),
+            look: Default::default(),
+            suggest_rect: None,
+            text_rx: None,
+            net: Vec::new(),
+            net_rx: None,
+            connect: None,
+            net_jobs: Vec::new(),
+            net_asked: false,
         }
     }
 
     /// The state to save: the open tabs and everything in `prefs`.
     pub fn to_save(&self) -> FilesPrefs {
         let mut p = self.prefs.clone();
-        p.tabs = self.tabs.iter().map(|t| t.here().clone()).collect();
-        p.active = self.active;
+        let first = self.panes[0].save();
+        p.tabs = first.tabs;
+        p.active = first.active;
+        p.sort = first.sort;
+        p.reversed = first.reversed;
+        if let Some(second) = self.panes.get(1) {
+            p.second = second.save();
+        }
         p
     }
 
-    fn tab(&mut self) -> &mut FTab {
-        &mut self.tabs[self.active]
+    pub(super) fn pane(&self) -> &Pane {
+        &self.panes[self.focus]
+    }
+
+    pub(super) fn pane_mut(&mut self) -> &mut Pane {
+        &mut self.panes[self.focus]
+    }
+
+    /// The focused pane's active tab.
+    pub(super) fn cur(&self) -> &FTab {
+        self.pane().tab()
+    }
+
+    pub(super) fn tab(&mut self) -> &mut FTab {
+        self.pane_mut().tab_mut()
     }
 
     pub fn here(&self) -> &Location {
-        self.tabs[self.active].here()
+        self.cur().here()
+    }
+
+    /// The pane that isn't focused, in split view.
+    pub(super) fn other(&self) -> Option<usize> {
+        (self.panes.len() > 1).then_some(1 - self.focus)
+    }
+
+    /// Show one pane or two.
+    pub(super) fn set_split(&mut self, s: Split) {
+        self.prefs.split = s;
+        if s == Split::Single {
+            if self.panes.len() > 1 {
+                self.prefs.second = self.panes[1].save();
+                // Keep the pane that has the focus.
+                let keep = self.panes.swap_remove(self.focus);
+                self.panes = vec![keep];
+                self.focus = 0;
+            }
+        } else if self.panes.len() == 1 {
+            let s = self.prefs.second.clone();
+            let mut p = if s.tabs.is_empty() {
+                let here = self.here().clone();
+                Pane::new(&[here], 0, self.pane().sort, self.pane().reversed)
+            } else {
+                Pane::new(&s.tabs, s.active, s.sort, s.reversed)
+            };
+            p.filter.clear();
+            self.panes.push(p);
+        }
+    }
+
+    /// Exchange the two panes' places.
+    pub(super) fn swap_panes(&mut self) {
+        if self.panes.len() == 2 {
+            self.panes.swap(0, 1);
+            self.focus = 1 - self.focus;
+        }
+    }
+
+    pub(super) fn set_focus(&mut self, pane: usize) {
+        if pane < self.panes.len() && pane != self.focus {
+            self.focus = pane;
+            self.path_edit = None;
+        }
     }
 
     /// Go somewhere in the current tab, remembering where we were.
@@ -283,9 +485,17 @@ impl Files {
         self.after_move();
     }
 
+    /// Go somewhere in a pane's current tab.
+    pub(super) fn go_in(&mut self, pane: usize, to: Location) {
+        let old = self.focus;
+        self.focus = pane.min(self.panes.len() - 1);
+        self.go(to);
+        self.focus = old;
+    }
+
     fn after_move(&mut self) {
         self.tab().arrived();
-        self.filter.clear();
+        self.pane_mut().filter.clear();
         self.path_edit = None;
         if let Location::Dir(p) = self.here().clone() {
             let r = &mut self.prefs.recent;
@@ -295,7 +505,7 @@ impl Files {
         }
     }
 
-    fn back(&mut self) {
+    pub(super) fn back(&mut self) {
         let from = self.here().clone();
         if self.tab().hist.back() {
             self.after_move();
@@ -303,14 +513,14 @@ impl Files {
         }
     }
 
-    fn forward(&mut self) {
+    pub(super) fn forward(&mut self) {
         if self.tab().hist.forward() {
             self.after_move();
         }
     }
 
     /// Up one level, selecting the folder we came from.
-    fn up(&mut self) {
+    pub(super) fn up(&mut self) {
         let from = self.here().clone();
         if let Some(to) = from.up() {
             self.go(to);
@@ -338,102 +548,90 @@ impl Files {
     }
 
     pub fn new_tab(&mut self, at: Location) {
-        self.tabs.insert(self.active + 1, FTab::new(at));
-        self.active += 1;
+        let p = self.pane_mut();
+        p.tabs.insert(p.active + 1, FTab::new(at));
+        p.active += 1;
         self.after_move();
     }
 
     fn close_tab(&mut self, i: usize) {
-        if self.tabs.len() < 2 || i >= self.tabs.len() {
+        let p = self.pane_mut();
+        if p.tabs.len() < 2 || i >= p.tabs.len() {
             return;
         }
-        let t = self.tabs.remove(i);
+        let t = p.tabs.remove(i);
+        if p.active > i || p.active == p.tabs.len() {
+            p.active = p.active.saturating_sub(1);
+        }
+        p.filter.clear();
         self.closed.push(t.hist.here);
         if self.closed.len() > 20 {
             self.closed.remove(0);
         }
-        if self.active > i || self.active == self.tabs.len() {
-            self.active = self.active.saturating_sub(1);
-        }
         self.path_edit = None;
-        self.filter.clear();
     }
 
     /// Swap tab `i` with its neighbour `j` (dragging), keeping the same tab active.
     fn move_tab(&mut self, i: usize, j: usize) {
-        if i >= self.tabs.len() || j >= self.tabs.len() || i == j {
+        let p = self.pane_mut();
+        if i >= p.tabs.len() || j >= p.tabs.len() || i == j {
             return;
         }
-        self.tabs.swap(i, j);
-        if self.active == i {
-            self.active = j;
-        } else if self.active == j {
-            self.active = i;
+        p.tabs.swap(i, j);
+        if p.active == i {
+            p.active = j;
+        } else if p.active == j {
+            p.active = i;
         }
     }
 
     fn close_others(&mut self, keep: usize) {
-        for i in (0..self.tabs.len()).rev() {
+        let p = self.pane_mut();
+        let mut gone = Vec::new();
+        for i in (0..p.tabs.len()).rev() {
             if i != keep {
-                let t = self.tabs.remove(i);
-                self.closed.push(t.hist.here);
+                gone.push(p.tabs.remove(i).hist.here);
             }
         }
+        p.active = 0;
+        p.filter.clear();
+        self.closed.extend(gone);
         let excess = self.closed.len().saturating_sub(20);
         self.closed.drain(..excess);
-        self.active = 0;
         self.path_edit = None;
-        self.filter.clear();
     }
 
-    fn switch_tab(&mut self, i: usize) {
-        if i < self.tabs.len() && i != self.active {
-            self.active = i;
+    pub(super) fn switch_tab(&mut self, i: usize) {
+        let p = self.pane_mut();
+        if i < p.tabs.len() && i != p.active {
+            p.active = i;
+            p.filter.clear();
             self.path_edit = None;
-            self.filter.clear();
             self.tab().scroll_to_cursor = true;
         }
     }
 
-    fn refresh(&mut self) {
-        let t = self.tab();
-        let keep: Vec<Box<str>> = t.selected.iter().cloned().collect();
-        let cursor = t.cursor.clone();
-        t.listing = None;
-        t.order_key = None;
-        t.sizes = None;
-        t.selected = keep.into_iter().collect();
-        t.select_later = cursor;
+    pub(super) fn refresh(&mut self) {
+        self.tab().reread();
     }
 
-    fn pin(&mut self, p: PathBuf) {
-        if !self.prefs.pinned.contains(&p) {
-            self.prefs.pinned.push(p);
-        }
-    }
-
-    fn unpin(&mut self, p: &Path) {
-        self.prefs.pinned.retain(|q| q != p);
-    }
-
-    fn is_pinned(&self, p: &Path) -> bool {
-        self.prefs.pinned.iter().any(|q| q == p)
+    pub(super) fn is_pinned(&self, p: &Path) -> bool {
+        self.prefs.favourites.iter().any(|g| g.items.iter().any(|f| f.path == p))
     }
 
     // ---- for the analysis dock ----
 
-    /// What the dock follows changes when any of this does: the tab, its folder, the item the
-    /// keyboard is on, and how many are selected.
+    /// What the dock follows changes when any of this does: the pane and tab, its folder, the
+    /// item the keyboard is on, and how many are selected.
     pub(super) fn selection_key(&self) -> (usize, Location, Option<Box<str>>, usize) {
-        let t = &self.tabs[self.active];
-        (self.active, t.here().clone(), t.cursor.clone(), t.selected.len())
+        let t = self.cur();
+        (self.focus * 1000 + self.pane().active, t.here().clone(), t.cursor.clone(), t.selected.len())
     }
 
     /// The item the keyboard is on (the last one clicked), if it's listed.
     pub(super) fn cursor_entry(&self) -> Option<Entry> {
-        let t = &self.tabs[self.active];
-        let c = t.cursor.as_deref()?;
-        t.listing.as_ref()?.entries.iter().find(|e| &*e.name == c).cloned()
+        let t = self.cur();
+        t.entry_named(t.cursor.as_deref()?).cloned()
     }
 
     /// Select one item of the folder on screen by name, and scroll to it.
@@ -448,53 +646,24 @@ impl Files {
 
     /// The finished listing of the folder on screen: (folder, listing generation, entries).
     pub(super) fn finished_listing(&self) -> Option<(PathBuf, u64, Arc<Vec<Entry>>)> {
-        let t = &self.tabs[self.active];
+        let t = self.cur();
         let l = t.listing.as_ref().filter(|l| l.done && l.error.is_none())?;
         Some((t.here().dir()?.to_path_buf(), l.generation, l.entries.clone()))
     }
 
     /// Paths of the selected items, in display order.
     pub(super) fn chosen_paths(&self) -> Vec<PathBuf> {
-        let t = &self.tabs[self.active];
-        let (Some(dir), Some(l)) = (t.here().dir(), t.listing.as_ref()) else { return Vec::new() };
-        t.order
-            .iter()
-            .map(|&i| &l.entries[i as usize])
-            .filter(|e| t.selected.contains(&e.name))
-            .map(|e| dir.join(&*e.name))
-            .collect()
+        self.cur().chosen_paths()
     }
 
     /// Run a command that might wait on the disk or another program, off the UI thread.
-    fn spawn(&mut self, f: impl FnOnce() -> Result<(), String> + Send + 'static) {
+    pub(super) fn spawn(&mut self, f: impl FnOnce() -> Result<(), String> + Send + 'static) {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(f());
         });
         self.results.push(rx);
     }
-}
-
-/// The folder at the end of the path the user typed: `D:` means the whole drive, `~` home.
-pub(super) fn parse_typed_path(s: &str) -> Option<Location> {
-    let s = s.trim().trim_matches('"');
-    if s.is_empty() {
-        return None;
-    }
-    if s.eq_ignore_ascii_case(places::computer_name()) {
-        return Some(Location::Computer);
-    }
-    let mut p = s.to_string();
-    if cfg!(windows) && p.len() == 2 && p.ends_with(':') {
-        p.push('\\');
-    }
-    if let Some(rest) = p.strip_prefix('~')
-        && (rest.is_empty() || rest.starts_with(['/', '\\']))
-        && let Some(h) = places::home()
-    {
-        return Some(Location::Dir(h.join(rest.trim_start_matches(['/', '\\']))));
-    }
-    Some(Location::Dir(PathBuf::from(p)))
 }
 
 /// Does a name pass the "filter this folder" box?
@@ -559,34 +728,50 @@ fn append_new(order: &mut Vec<u32>, entries: &[Entry], from: usize, show_hidden:
 
 /// Things clicked while drawing, acted on afterwards.
 #[derive(Default)]
-struct FPicks {
-    go: Option<Location>,
-    open: Option<u32>,
-    select: Option<(u32, egui::Modifiers)>,
-    menu: Option<(FAction, Vec<PathBuf>)>,
-    sort: Option<FSort>,
-    new_tab: Option<Location>,
-    switch_tab: Option<usize>,
-    close_tab: Option<usize>,
-    close_others: Option<usize>,
-    move_tab: Option<(usize, usize)>,
-    clear: bool,
-    unpin: Option<PathBuf>,
-    move_pin: Option<(usize, bool)>,
+pub(super) struct FPicks {
+    pub go: Option<Location>,
+    /// Go somewhere in a given pane.
+    pub go_other: Option<(usize, Location)>,
+    pub open: Option<u32>,
+    pub select: Option<(u32, egui::Modifiers)>,
+    pub menu: Option<(FAction, Vec<PathBuf>)>,
+    pub sort: Option<FSort>,
+    pub new_tab: Option<Location>,
+    pub switch_tab: Option<usize>,
+    pub close_tab: Option<usize>,
+    pub close_others: Option<usize>,
+    pub move_tab: Option<(usize, usize)>,
+    pub clear: bool,
+    pub drop: Option<fileops::Drop>,
+    pub new_item: Option<(fileops::NewPick, PathBuf)>,
 }
 
-/// File manager menu commands (Phase 1: the ones that don't change anything on disk).
+/// File manager commands, from menus and keys.
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum FAction {
+pub(super) enum FAction {
     Open,
     OpenInNewTab,
+    OpenInOtherPane,
     Pin,
     Unpin,
     CopyPath,
+    /// The \\server\share form of a path on a mapped drive.
+    CopyUnc,
     CopyName,
     Reveal,
     Terminal(actions::Terminal),
     Analyse,
+    Copy,
+    Cut,
+    /// Into the folder given (the first path).
+    Paste,
+    Rename,
+    Trash,
+    Delete,
+    CopyToOther,
+    MoveToOther,
+    Properties,
+    QuickLook,
 }
 
 impl App {
@@ -705,8 +890,8 @@ impl App {
 
     // ---------- drawing ----------
 
-    /// Toolbar of the File Manager, in groups: workspaces, navigation, the path, analysis, and
-    /// on the right the filter, View, Help and Settings.
+    /// Toolbar of the File Manager, in groups: workspaces, navigation, New, the path, analysis,
+    /// and on the right the filter, View, Help and Settings. It works on the focused pane.
     pub(super) fn files_toolbar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
@@ -715,7 +900,7 @@ impl App {
             style::roomy(ui);
             self.workspace_switch(ui);
             let (can_back, can_fwd) = {
-                let h = &self.files.tabs[self.files.active].hist;
+                let h = &self.files.cur().hist;
                 (h.can_back(), h.can_forward())
             };
             let up = self.files.here().up();
@@ -734,6 +919,23 @@ impl App {
                 }
             });
             ui.add_space(2.0);
+            let dir = self.files.here().dir().map(Path::to_path_buf);
+            let mut pick = None;
+            style::tool_group(ui, |ui| {
+                ui.add_enabled_ui(dir.is_some(), |ui| {
+                    ui.menu_button(egui::RichText::new("✚ New").size(13.0), |ui| {
+                        if let Some(d) = &dir {
+                            pick = self.new_menu_items(ui, d);
+                        }
+                    })
+                    .response
+                    .on_hover_text("Make a new folder or file here");
+                });
+            });
+            if let (Some(p), Some(d)) = (pick, dir) {
+                self.apply_new(p, d);
+            }
+            ui.add_space(2.0);
             // Right-hand controls first, so the path takes whatever width is left.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if style::icon_button(ui, true, "⚙", "Settings: appearance, scan filters, treemap look").clicked() {
@@ -741,19 +943,25 @@ impl App {
                 }
                 self.help_menu(ui);
                 self.files_view_menu(ui);
-                let f = ui.add(
-                    egui::TextEdit::singleline(&mut self.files.filter)
-                        .id(egui::Id::new("files-filter"))
-                        .desired_width(160.0)
-                        .hint_text(format!("🔍 Filter ({})", k(egui::Modifiers::COMMAND, egui::Key::F))),
-                );
-                f.on_hover_text("Show only items whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
+                style::tool_group(ui, |ui| {
+                    let split = self.files.prefs.split != Split::Single;
+                    if style::toggle_button(ui, self.files.prefs.preview, "👁", format!("Preview pane ({})", k(egui::Modifiers::ALT, egui::Key::P))).clicked() {
+                        self.files.prefs.preview = !self.files.prefs.preview;
+                    }
+                    if style::toggle_button(ui, split, "⬌", format!("Two panes side by side ({})", k(egui::Modifiers::COMMAND, egui::Key::Backslash))).clicked() {
+                        self.toggle_split();
+                    }
+                });
+                let fid = egui::Id::new("files-filter");
+                let hint = format!("🔍 Filter ({})", k(egui::Modifiers::COMMAND, egui::Key::F));
+                let f = ui.add(egui::TextEdit::singleline(&mut self.files.pane_mut().filter).id(fid).desired_width(150.0).hint_text(hint));
+                f.on_hover_text("Show only items in this folder whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
                 if std::mem::take(&mut self.files.focus_filter) {
-                    ctx.memory_mut(|m| m.request_focus(egui::Id::new("files-filter")));
+                    ctx.memory_mut(|m| m.request_focus(fid));
                 }
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) && ctx.memory(|m| m.has_focus(egui::Id::new("files-filter"))) {
-                    self.files.filter.clear();
-                    ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("files-filter")));
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) && ctx.memory(|m| m.has_focus(fid)) {
+                    self.files.pane_mut().filter.clear();
+                    ctx.memory_mut(|m| m.surrender_focus(fid));
                 }
                 ui.add_space(6.0);
                 self.dock_toolbar_buttons(ui);
@@ -769,12 +977,33 @@ impl App {
         }
     }
 
-    /// The View menu: hidden items, row density and column widths.
+    /// The View menu: panes, preview, hidden items, row density and column widths.
     fn files_view_menu(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
+        let mut split_to = None;
+        let mut swap = false;
+        let mut same = false;
         ui.menu_button("View ⏷", |ui| {
+            let split = self.files.prefs.split;
+            ui.weak("Panes");
+            for (s, label, keys) in [(Split::Single, "One Pane", String::new()), (Split::Vertical, "Side by Side", k(egui::Modifiers::COMMAND, egui::Key::Backslash)), (Split::Horizontal, "One Above the Other", String::new())] {
+                if ui.add(egui::Button::selectable(split == s, label).shortcut_text(keys)).clicked() {
+                    split_to = Some(s);
+                }
+            }
+            let two = split != Split::Single;
+            if ui.add_enabled(two, egui::Button::new("Swap Panes").shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::U))).clicked() {
+                swap = true;
+            }
+            if ui.add_enabled(two, egui::Button::new("Same Folder in Other Pane")).on_hover_text("Open this pane's folder in the other pane too").clicked() {
+                same = true;
+            }
+            ui.separator();
             let p = &mut self.files.prefs;
+            if ui.add(egui::Button::selectable(p.preview, "Preview Pane").shortcut_text(k(egui::Modifiers::ALT, egui::Key::P))).clicked() {
+                p.preview = !p.preview;
+            }
             if ui
                 .add(egui::Button::selectable(p.show_hidden, "Hidden Items").shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Period)))
                 .on_hover_text("Show hidden files and folders: names starting with a dot, and items marked hidden on Windows")
@@ -797,92 +1026,30 @@ impl App {
             }
         })
         .response
-        .on_hover_text("Hidden items, row size, columns and the analysis dock");
-    }
-
-    /// The path as clickable breadcrumbs; click the empty part (or Ctrl+L) to type a path.
-    fn path_bar(&mut self, ui: &mut egui::Ui) -> Option<Location> {
-        let id = egui::Id::new("files-path");
-        let rect = ui.available_rect_before_wrap();
-        let frame = Rect::from_min_size(rect.min, vec2(rect.width(), ui.spacing().interact_size.y));
-        if let Some(text) = &mut self.files.path_edit {
-            let resp = ui.add(egui::TextEdit::singleline(text).id(id).desired_width(frame.width()).hint_text("Type a folder, e.g. ~/Projects, D:\\ or \\\\server\\share"));
-            if std::mem::take(&mut self.files.focus_path) {
-                resp.request_focus();
-                if let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), id) {
-                    let end = egui::text::CCursor::new(text.chars().count());
-                    st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), end)));
-                    st.store(ui.ctx(), id);
-                }
+        .on_hover_text("Panes, preview, hidden items, row size, columns and the analysis dock");
+        if let Some(s) = split_to {
+            if s != Split::Single {
+                self.files.prefs.last_split = s;
             }
-            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if enter {
-                let to = parse_typed_path(text);
-                self.files.path_edit = None;
-                return to;
-            }
-            if resp.lost_focus() {
-                self.files.path_edit = None;
-            }
-            return None;
+            self.files.set_split(s);
         }
-        // Breadcrumbs.
-        let bg = ui.interact(frame, id.with("bg"), Sense::click());
-        let pal = style::pal(ui);
-        let border = if bg.hovered() { pal.weak } else { pal.hairline };
-        ui.painter().rect(frame, style::RADIUS as f32, pal.well, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-        let mut go = None;
-        let here = self.files.here().clone();
-        let crumbs = crumbs_of(&here);
-        let last = crumbs.len().saturating_sub(1);
-        ui.add_space(4.0);
-        ui.spacing_mut().item_spacing.x = 2.0;
-        // Keep the end of a long path visible: drop leading crumbs that don't fit.
-        let font = egui::TextStyle::Button.resolve(ui.style());
-        let width_of = |s: &str| ui.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x) + 16.0;
-        let mut total: f32 = crumbs.iter().map(|c| width_of(&c.0)).sum();
-        let mut skip = 0;
-        while total > frame.width() - 40.0 && skip + 1 < crumbs.len() {
-            total -= width_of(&crumbs[skip].0);
-            skip += 1;
+        if swap {
+            self.files.swap_panes();
         }
-        if skip > 0 {
-            ui.weak("…");
+        if same && let Some(o) = self.files.other() {
+            let here = self.files.here().clone();
+            self.files.go_in(o, here);
         }
-        for (k, (label, loc)) in crumbs.into_iter().enumerate().skip(skip) {
-            if k > skip {
-                ui.weak("›");
-            }
-            let text = if k == last { egui::RichText::new(label).strong() } else { egui::RichText::new(label) };
-            let resp = ui.add(egui::Button::new(text).frame(false));
-            if resp.clicked() && k != last {
-                go = Some(loc.clone());
-            }
-            if resp.middle_clicked() {
-                self.files.new_tab(loc);
-            }
-        }
-        if bg.clicked() {
-            self.start_path_edit();
-        }
-        bg.on_hover_text("Click to type a path");
-        go
-    }
-
-    fn start_path_edit(&mut self) {
-        let text = match self.files.here() {
-            Location::Dir(p) => p.display().to_string(),
-            Location::Computer => String::new(),
-        };
-        self.files.path_edit = Some(text);
-        self.files.focus_path = true;
     }
 
     /// Everything below the toolbar in the File Manager workspace.
     pub(super) fn files_workspace(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        self.files.drop_claimed = false;
         self.files_poll(&ctx);
         self.dock_poll(&ctx);
+        self.connect_window(&ctx);
+        self.quick_look(&ctx);
         let pal = style::pal(ui);
 
         let status = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::symmetric(10, 3));
@@ -930,19 +1097,47 @@ impl App {
         if !self.files.results.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
+        if let Some(rx) = &self.files.text_rx
+            && let Ok(t) = rx.try_recv()
+        {
+            self.ops.notice = Some((format!("Copied {}", t.lines().next().unwrap_or_default()), false));
+            self.ctx_copy = Some(t);
+            self.files.text_rx = None;
+        }
+        self.net_poll(ctx);
+        for pane in 0..self.files.panes.len() {
+            self.poll_pane(ctx, pane);
+        }
+        // A new folder or file is listed: open the Rename box on it.
+        let t = self.files.cur();
+        if t.rename_later
+            && t.select_later.is_none()
+            && let (Some(dir), Some(c)) = (t.here().dir(), t.cursor.as_deref())
+        {
+            let p = dir.join(c);
+            self.files.tab().rename_later = false;
+            if !self.ops.modal() {
+                self.start_rename(p);
+            }
+        }
+    }
 
+    /// Keep one pane's visible tab listed and sorted.
+    fn poll_pane(&mut self, ctx: &egui::Context, pane: usize) {
         let tree_id = self.tree.as_ref().map(|t| Arc::as_ptr(t) as usize).unwrap_or(0);
         let need_sizes = {
-            let t = &self.files.tabs[self.files.active];
+            let t = self.files.panes[pane].tab();
             t.sizes.as_ref().map(|s| s.0) != Some(tree_id)
         };
         if need_sizes {
-            let sizes = self.files.here().dir().and_then(|d| self.scanned_sizes(d)).unwrap_or_default();
-            self.files.tab().sizes = Some((tree_id, sizes));
+            let sizes = self.files.panes[pane].tab().here().dir().and_then(|d| self.scanned_sizes(d)).unwrap_or_default();
+            self.files.panes[pane].tab_mut().sizes = Some((tree_id, sizes));
         }
-        let (sort, reversed, hidden) = (self.files.prefs.sort, self.files.prefs.reversed, self.files.prefs.show_hidden);
-        let filter = self.files.filter.clone();
-        let t = self.files.tab();
+        let hidden = self.files.prefs.show_hidden;
+        let p = &mut self.files.panes[pane];
+        let (sort, reversed) = (p.sort, p.reversed);
+        let filter = p.filter.clone();
+        let t = p.tab_mut();
         if t.listing.is_none()
             && let Location::Dir(p) = t.here().clone()
         {
@@ -1008,6 +1203,7 @@ impl App {
                 t.scroll_to_cursor = true;
             } else if t.listing.as_ref().is_some_and(|l| l.done) {
                 t.select_later = None;
+                t.rename_later = false;
             }
         }
     }
@@ -1015,8 +1211,6 @@ impl App {
     // ---------- sidebar ----------
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        let mut go: Option<Location> = None;
-        let mut new_tab = None;
         let mut picks = FPicks::default();
         let here = self.files.here().clone();
         ui.spacing_mut().item_spacing.y = 1.0;
@@ -1025,114 +1219,70 @@ impl App {
             self.files.focused = true;
         }
 
-        let mut entry = |ui: &mut egui::Ui, icon: &str, label: &str, loc: Location, tip: String| -> egui::Response {
-            let resp = side_row(ui, icon, label, here == loc, ROW_F).on_hover_text(tip);
-            if resp.clicked() {
-                go = Some(loc.clone());
-            }
-            if resp.middle_clicked() {
-                new_tab = Some(loc);
-            }
-            resp
-        };
-        let drive_entry = |ui: &mut egui::Ui, icon: &str, label: &str, loc: Location, tip: String, frac: Option<f32>| -> egui::Response {
-            let resp = side_row(ui, icon, label, here == loc, 30.0).on_hover_text(tip);
-            // A thin capacity bar under the name, red when nearly full.
-            if let Some(frac) = frac {
-                let r = resp.rect;
-                let bar = Rect::from_min_size(pos2(r.left() + 28.0, r.bottom() - 7.0), vec2((r.width() - 38.0).max(10.0), 3.0));
-                let p = ui.painter();
-                p.rect_filled(bar, 1.5, ui.visuals().extreme_bg_color);
-                let mut fill = bar;
-                fill.set_width(bar.width() * frac.clamp(0.0, 1.0));
-                let c = if frac > 0.9 { Color32::from_rgb(210, 70, 60) } else { Color32::from_rgb(70, 130, 210) };
-                p.rect_filled(fill, 1.5, c);
-            }
-            resp
-        };
-
         side_section(ui, "fm-quick", "Quick access", true, |ui| {
             if self.files.places.is_empty() && self.files.places_rx.is_some() {
                 ui.weak("…");
             }
             for p in self.files.places.clone() {
-                let resp = entry(ui, p.kind.icon(), &p.name, Location::Dir(p.path.clone()), p.path.display().to_string());
-                let pinned = self.files.is_pinned(&p.path);
-                resp.context_menu(|ui| place_menu(ui, &p.path, pinned, &mut picks));
+                let loc = Location::Dir(p.path.clone());
+                let resp = side_row(ui, p.kind.icon(), &p.name, here == loc, ROW_F).on_hover_text(p.path.display().to_string());
+                self.place_row(ui, &resp, &p.path, &mut picks);
             }
         });
-        if !self.files.prefs.pinned.is_empty() {
-            side_section(ui, "fm-pinned", "Pinned", true, |ui| {
-                let pinned = self.files.prefs.pinned.clone();
-                let n = pinned.len();
-                for (i, p) in pinned.iter().enumerate() {
-                    let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.display().to_string());
-                    let resp = entry(ui, "★", &name, Location::Dir(p.clone()), p.display().to_string());
-                    resp.context_menu(|ui| {
-                        place_menu(ui, p, true, &mut picks);
-                        ui.separator();
-                        if ui.add_enabled(i > 0, egui::Button::new("Move Up")).clicked() {
-                            picks.move_pin = Some((i, true));
-                        }
-                        if ui.add_enabled(i + 1 < n, egui::Button::new("Move Down")).clicked() {
-                            picks.move_pin = Some((i, false));
-                        }
-                    });
-                }
-            });
-        }
+        self.favourites_sections(ui, &mut picks);
         let computer = places::computer_name();
         side_section(ui, "fm-drives", "Drives", true, |ui| {
-            entry(ui, "🖳", computer, Location::Computer, format!("All drives and volumes ({computer})"));
+            let resp = side_row(ui, "🖳", computer, here == Location::Computer, ROW_F).on_hover_text(format!("All drives and volumes ({computer})"));
+            if resp.clicked() {
+                picks.go = Some(Location::Computer);
+            }
             if self.drives.is_empty() && self.drives_rx.is_some() {
                 ui.weak("Looking for drives…");
             }
-            let drives: Vec<(PathBuf, String, u64, u64, bool)> = self.drives.iter().map(|d| (d.root.clone(), d.label.clone(), d.total, d.free, d.network)).collect();
-            for (root, label, total, free, network) in drives {
+            let drives: Vec<(PathBuf, String, u64, u64, bool)> = self.drives.iter().filter(|d| !d.network).map(|d| (d.root.clone(), d.label.clone(), d.total, d.free, d.network)).collect();
+            for (root, label, total, free, _) in drives {
                 let name = drive_label(&root, &label);
-                let icon = if network { "🖧" } else { "🖴" };
                 let used = total.saturating_sub(free);
-                let tip = format!("{}\n{} free of {}{}", root.display(), scan::human(free), scan::human(total), if network { "\nNetwork drive" } else { "" });
+                let tip = format!("{}\n{} free of {}", root.display(), scan::human(free), scan::human(total));
                 let frac = (total > 0).then(|| used as f32 / total as f32);
-                let resp = drive_entry(ui, icon, &name, Location::Dir(root.clone()), tip, frac);
-                if resp.clicked() {
-                    picks.go = Some(Location::Dir(root.clone()));
-                }
-                if resp.middle_clicked() {
-                    picks.new_tab = Some(Location::Dir(root.clone()));
-                }
-                let pinned = self.files.is_pinned(&root);
-                resp.context_menu(|ui| place_menu(ui, &root, pinned, &mut picks));
+                let resp = side_row(ui, "🖴", &name, here == Location::Dir(root.clone()), 30.0).on_hover_text(tip);
+                capacity_bar(ui, resp.rect, frac);
+                self.place_row(ui, &resp, &root, &mut picks);
             }
             ui.add_space(2.0);
             if ui.add(egui::Button::new(egui::RichText::new("⟳ Refresh drives").small().color(style::pal(ui).weak)).frame_when_inactive(false)).clicked() {
                 self.refresh_drives();
+                self.net_refresh();
             }
         });
+        self.network_section(ui, &here, &mut picks);
         if !self.files.prefs.recent.is_empty() {
             side_section(ui, "fm-recent", "Recent", false, |ui| {
                 for p in self.files.prefs.recent.clone() {
                     let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.display().to_string());
-                    let resp = entry(ui, "🕘", &name, Location::Dir(p.clone()), p.display().to_string());
-                    let pinned = self.files.is_pinned(&p);
-                    resp.context_menu(|ui| place_menu(ui, &p, pinned, &mut picks));
+                    let resp = side_row(ui, "🕘", &name, here == Location::Dir(p.clone()), ROW_F).on_hover_text(p.display().to_string());
+                    self.place_row(ui, &resp, &p, &mut picks);
                 }
             });
         }
-        if let Some(l) = go {
-            self.files.go(l);
-        }
-        if let Some(l) = new_tab.or(picks.new_tab.take()) {
-            self.files.new_tab(l);
-        }
-        if let Some(p) = picks.unpin.take() {
-            self.files.unpin(&p);
-        }
-        if let Some((i, up)) = picks.move_pin {
-            let j = if up { i - 1 } else { i + 1 };
-            self.files.prefs.pinned.swap(i, j);
-        }
         self.files_apply(picks);
+    }
+
+    /// A folder row in the sidebar: click to go, middle-click for a tab, a menu, and drops.
+    pub(super) fn place_row(&mut self, ui: &egui::Ui, resp: &egui::Response, path: &Path, picks: &mut FPicks) {
+        let loc = Location::Dir(path.to_path_buf());
+        if resp.clicked() {
+            picks.go = Some(loc.clone());
+        }
+        if resp.middle_clicked() {
+            picks.new_tab = Some(loc);
+        }
+        if let Some(d) = self.folder_drop(ui, resp, path) {
+            picks.drop = Some(d);
+        }
+        let pinned = self.files.is_pinned(path);
+        let other = self.files.other();
+        resp.context_menu(|ui| place_menu(ui, path, pinned, other.is_some(), picks));
     }
 
     // ---------- main area ----------
@@ -1140,18 +1290,12 @@ impl App {
 
 
     fn files_main(&mut self, ui: &mut egui::Ui) {
-        let rect = ui.max_rect();
-        let mut picks = FPicks::default();
-        ui.spacing_mut().item_spacing.y = 0.0;
-        self.files_tabs_row(ui, &mut picks);
         let pal = style::pal(ui);
-        // The page under the tabs: the list, and the analysis dock below it when it's open.
-        let page = ui.available_rect_before_wrap();
-        ui.painter().rect_filled(page, 0.0, pal.paper);
-        let mut page_ui = ui.new_child(egui::UiBuilder::new().max_rect(page).layout(egui::Layout::top_down(egui::Align::Min)));
-        let ui = &mut page_ui;
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let area = ui.max_rect();
+        // The analysis dock under everything, full width.
         if self.files.prefs.dock.open {
-            let max = (page.height() - DOCK_MIN_LIST).max(DOCK_MIN);
+            let max = (area.height() - TAB_STRIP_H - DOCK_MIN_LIST).max(DOCK_MIN);
             let mut panel = egui::Panel::bottom("files-dock")
                 .resizable(true)
                 .size_range(DOCK_MIN..=max)
@@ -1164,77 +1308,154 @@ impl App {
             if !self.files.prefs.dock.maximised {
                 self.files.prefs.dock.height = r.response.rect.height();
             }
-            // A hairline above the dock, over the panel's own separator.
             let top = r.response.rect.top();
             ui.painter().hline(r.response.rect.x_range(), top, Stroke::new(1.0, pal.hairline));
             self.help_regions.push((r.response.rect, topics::ANALYSIS_DOCK));
         }
-        let list = ui.available_rect_before_wrap();
+        // The preview pane at the right.
+        if self.files.prefs.preview {
+            let r = egui::Panel::right("files-preview")
+                .resizable(true)
+                .size_range(220.0..=(area.width() * 0.5).max(240.0))
+                .default_size(self.files.prefs.preview_width)
+                .frame(egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 8 }))
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().id_salt("preview-scroll").auto_shrink(false).show(ui, |ui| self.preview_pane(ui));
+                });
+            self.files.prefs.preview_width = r.response.rect.width();
+            ui.painter().vline(r.response.rect.left(), r.response.rect.y_range(), Stroke::new(1.0, pal.hairline));
+        }
+        // One pane or two.
+        let rest = ui.available_rect_before_wrap();
+        let rects = self.pane_rects(ui, rest);
+        let pointer_in = rects.iter().any(|r| ui.rect_contains_pointer(*r));
+        let mut picks = FPicks::default();
+        self.files_keys(ui.ctx(), pointer_in, &mut picks);
+        self.files_apply(picks);
+        for (pane, r) in rects.into_iter().enumerate() {
+            let mut cui = ui.new_child(egui::UiBuilder::new().id_salt(("pane", pane)).max_rect(r).layout(egui::Layout::top_down(egui::Align::Min)));
+            cui.set_clip_rect(r.intersect(ui.clip_rect()));
+            self.pane_ui(&mut cui, pane);
+        }
+        ui.allocate_rect(rest, Sense::hover());
+    }
+
+    /// Where each pane goes, with a divider to drag between two.
+    fn pane_rects(&mut self, ui: &mut egui::Ui, rest: Rect) -> Vec<Rect> {
+        if self.files.panes.len() < 2 {
+            return vec![rest];
+        }
+        let pal = style::pal(ui);
+        let vertical = self.files.prefs.split != Split::Horizontal;
+        let ratio = self.files.prefs.split_ratio.clamp(0.15, 0.85);
+        let gap = 5.0;
+        let (a, b, line) = if vertical {
+            let x = rest.left() + rest.width() * ratio;
+            (Rect::from_min_max(rest.min, pos2(x - gap / 2.0, rest.bottom())), Rect::from_min_max(pos2(x + gap / 2.0, rest.top()), rest.max), Rect::from_center_size(pos2(x, rest.center().y), vec2(gap + 2.0, rest.height())))
+        } else {
+            let y = rest.top() + rest.height() * ratio;
+            (Rect::from_min_max(rest.min, pos2(rest.right(), y - gap / 2.0)), Rect::from_min_max(pos2(rest.left(), y + gap / 2.0), rest.max), Rect::from_center_size(pos2(rest.center().x, y), vec2(rest.width(), gap + 2.0)))
+        };
+        let resp = ui.interact(line, ui.id().with("pane-divider"), Sense::click_and_drag()).on_hover_cursor(if vertical { egui::CursorIcon::ResizeColumn } else { egui::CursorIcon::ResizeRow });
+        ui.painter().rect_filled(line, 0.0, if resp.hovered() || resp.dragged() { pal.hairline } else { pal.chrome });
+        if resp.dragged()
+            && let Some(p) = ui.ctx().pointer_interact_pos()
+        {
+            let r = if vertical { (p.x - rest.left()) / rest.width() } else { (p.y - rest.top()) / rest.height() };
+            self.files.prefs.split_ratio = r.clamp(0.15, 0.85);
+        }
+        if resp.double_clicked() {
+            self.files.prefs.split_ratio = 0.5;
+        }
+        resp.on_hover_text("Drag to share the space; double-click to make the panes equal");
+        vec![a, b]
+    }
+
+    /// One pane: its tabs, and the folder or Computer view under them.
+    fn pane_ui(&mut self, ui: &mut egui::Ui, pane: usize) {
+        let rect = ui.max_rect();
+        let pal = style::pal(ui);
         let pressed = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
-        if pressed.is_some_and(|p| list.contains(p) || rect.top() + TAB_STRIP_H > p.y && rect.contains(p)) {
+        if pressed.is_some_and(|p| rect.contains(p)) {
+            self.files.set_focus(pane);
             self.files.focused = true;
         }
-        self.files_keys(ui.ctx(), ui.rect_contains_pointer(list), &mut picks);
-        self.files_apply(std::mem::take(&mut picks));
-
+        // Everything this pane does applies to it, even while the other one has the focus.
+        let keep = self.files.focus;
+        self.files.focus = pane;
+        let mut picks = FPicks::default();
+        self.files_tabs_row(ui, pane, keep == pane, &mut picks);
+        let page = ui.available_rect_before_wrap();
+        ui.painter().rect_filled(page, 0.0, pal.paper);
+        if self.files.panes.len() > 1 && keep == pane {
+            // The focused pane: a thin accent line along the top of its page.
+            ui.painter().hline(page.x_range(), page.top() + 0.5, Stroke::new(1.0, style::blend(pal.paper, pal.accent, 0.6)));
+        }
+        let mut page_ui = ui.new_child(egui::UiBuilder::new().max_rect(page).layout(egui::Layout::top_down(egui::Align::Min)));
+        page_ui.set_clip_rect(page.intersect(ui.clip_rect()));
         match self.files.here().clone() {
             Location::Computer => {
-                egui::Frame::new().inner_margin(egui::Margin::same(14)).show(ui, |ui| self.computer_view(ui, &mut picks));
+                egui::Frame::new().inner_margin(egui::Margin::same(14)).show(&mut page_ui, |ui| self.computer_view(ui, &mut picks));
             }
-            Location::Dir(dir) => self.details_view(ui, &dir, &mut picks),
+            Location::Dir(dir) => self.details_view(&mut page_ui, pane, keep == pane, &dir, &mut picks),
         }
         self.files_apply(picks);
+        self.files.focus = keep.min(self.files.panes.len() - 1);
     }
 
     /// The tabs: each with its folder icon, the active one joined to the page below; drag one
     /// to reorder, middle-click or ✖ to close. Too many to fit: the strip scrolls sideways.
-    fn files_tabs_row(&mut self, ui: &mut egui::Ui, picks: &mut FPicks) {
+    /// Dragging items over a tab opens it after a moment; dropping puts them in its folder.
+    fn files_tabs_row(&mut self, ui: &mut egui::Ui, pane: usize, focused: bool, picks: &mut FPicks) {
         let ctx = ui.ctx().clone();
         let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
         let pal = style::pal(ui);
         let strip = Rect::from_min_size(ui.available_rect_before_wrap().min, vec2(ui.available_width(), TAB_STRIP_H));
         ui.allocate_rect(strip, Sense::hover());
         ui.painter().hline(strip.x_range(), strip.bottom() - 0.5, Stroke::new(1.0, pal.hairline));
-        let n = self.files.tabs.len();
+        let n = self.files.panes[pane].tabs.len();
+        let active = self.files.panes[pane].active;
+        let focused_pane = self.files.panes.len() < 2 || focused;
         let plus_w = 30.0;
         let avail = (strip.width() - plus_w - 8.0).max(80.0);
-        // Tabs share the width, between a minimum and a maximum.
-        let tab_w = (avail / n as f32).clamp(TAB_MIN_W, TAB_MAX_W);
+        let tab_w = (avail / n as f32).clamp(TAB_MIN_W.min(avail), TAB_MAX_W);
         let total = tab_w * n as f32;
         let mut strip_ui = ui.new_child(egui::UiBuilder::new().max_rect(strip.shrink2(vec2(6.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Max)));
         let mut drag_to = None;
+        let mut hover_tab = None;
+        let mut fav_to_tab = None;
+        let now = ctx.input(|i| i.time);
         egui::ScrollArea::horizontal()
-            .id_salt("fm-tabs")
+            .id_salt(("fm-tabs", pane))
             .max_width(avail)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(&mut strip_ui, |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 let mut rects = Vec::with_capacity(n);
                 for i in 0..n {
-                    let here = self.files.tabs[i].here().clone();
-                    let on = i == self.files.active;
+                    let here = self.files.panes[pane].tabs[i].here().clone();
+                    let on = i == active;
                     let (r, resp) = ui.allocate_exact_size(vec2(tab_w, TAB_STRIP_H - 4.0), Sense::click_and_drag());
                     rects.push(r);
                     let hovered = resp.hovered() || resp.dragged();
                     let p = ui.painter();
                     let shape = egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 };
                     if on {
-                        // Joined to the page: paper colour, a hairline round it, an accent line on top.
                         let body = Rect::from_min_max(r.min, pos2(r.right(), r.bottom() + 1.0));
                         p.rect(body, shape, pal.paper, Stroke::new(1.0, pal.hairline), egui::StrokeKind::Inside);
                         p.rect_filled(Rect::from_min_max(pos2(r.left() + 1.0, r.bottom() - 1.0), pos2(r.right() - 1.0, r.bottom() + 1.5)), 0.0, pal.paper);
-                        p.rect_filled(Rect::from_min_size(r.min + vec2(6.0, 0.0), vec2(r.width() - 12.0, 2.0)), 1.0, pal.accent);
+                        let line = if focused_pane { pal.accent } else { pal.hairline };
+                        p.rect_filled(Rect::from_min_size(r.min + vec2(6.0, 0.0), vec2(r.width() - 12.0, 2.0)), 1.0, line);
                     } else if hovered {
                         p.rect_filled(r.shrink2(vec2(1.0, 2.0)), shape, pal.hover);
-                    } else if i + 1 != self.files.active && i + 1 < n {
-                        // Separators between inactive tabs.
+                    } else if i + 1 != active && i + 1 < n {
                         p.vline(r.right() - 0.5, r.y_range().shrink(7.0), Stroke::new(1.0, pal.hairline));
                     }
                     let title = location_title(&here);
                     let tc = if on { pal.strong } else { pal.text };
                     let icon = if matches!(here, Location::Computer) { "🖳" } else { "🗀" };
                     let cy = r.center().y + 1.0;
-                    p.text(pos2(r.left() + 10.0, cy), Align2::LEFT_CENTER, icon, FontId::proportional(13.0), if on { pal.accent } else { pal.weak });
+                    p.text(pos2(r.left() + 10.0, cy), Align2::LEFT_CENTER, icon, FontId::proportional(13.0), if on && focused_pane { pal.accent } else { pal.weak });
                     let show_x = n > 1 && (on || hovered);
                     let clip = Rect::from_min_max(pos2(r.left() + 28.0, r.top()), pos2(r.right() - if show_x { 24.0 } else { 8.0 }, r.bottom()));
                     p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &title, FontId::proportional(12.5), tc);
@@ -1245,7 +1466,7 @@ impl App {
                     let mut closed = false;
                     if show_x {
                         let xr = Rect::from_center_size(pos2(r.right() - 13.0, cy), vec2(16.0, 16.0));
-                        let x = ui.interact(xr, ui.id().with(("tab-x", i)), Sense::click());
+                        let x = ui.interact(xr, ui.id().with(("tab-x", pane, i)), Sense::click());
                         if x.hovered() {
                             ui.painter().rect_filled(xr, 3.0, pal.hover);
                         }
@@ -1259,6 +1480,18 @@ impl App {
                         && let Some(p) = ctx.pointer_interact_pos()
                     {
                         drag_to = Some((i, p.x));
+                    }
+                    // Items dragged over another tab: open it after a moment; a drop goes there.
+                    if resp.dnd_hover_payload::<dnd::DragItems>().is_some() && !on {
+                        hover_tab = Some(i);
+                    }
+                    if let Location::Dir(d) = &here
+                        && let Some(drop) = self.folder_drop(ui, &resp, d)
+                    {
+                        picks.drop = Some(drop);
+                    }
+                    if let Some(p) = self.fav_dropped(&resp) {
+                        fav_to_tab = Some((i, p));
                     }
                     let resp = resp.on_hover_text(tip);
                     if !closed && resp.clicked() && !on {
@@ -1279,7 +1512,6 @@ impl App {
                         }
                     });
                 }
-                // Dragging a tab past the middle of its neighbour swaps them.
                 if let Some((i, x)) = drag_to {
                     if i > 0 && x < rects[i - 1].center().x {
                         picks.move_tab = Some((i, i - 1));
@@ -1288,15 +1520,34 @@ impl App {
                     }
                 }
             });
+        match hover_tab {
+            Some(i) => match self.files.drag_hover_tab {
+                Some((key, since)) if key == (pane, i) => {
+                    if now - since > 0.6 {
+                        picks.switch_tab = Some(i);
+                        self.files.drag_hover_tab = None;
+                    } else {
+                        ctx.request_repaint_after(Duration::from_millis(50));
+                    }
+                }
+                _ => self.files.drag_hover_tab = Some(((pane, i), now)),
+            },
+            None if self.files.drag_hover_tab.is_some_and(|((p, _), _)| p == pane) => self.files.drag_hover_tab = None,
+            None => {}
+        }
+        if let Some((i, p)) = fav_to_tab {
+            self.files.panes[pane].active = i;
+            picks.go = Some(Location::Dir(p));
+        }
         let plus_at = pos2((strip.left() + 6.0 + total.min(avail) + 4.0).min(strip.right() - plus_w), strip.top() + 4.0);
         let plus_r = Rect::from_min_size(plus_at, vec2(26.0, TAB_STRIP_H - 8.0));
-        let plus = ui.interact(plus_r, ui.id().with("tab-plus"), Sense::click());
+        let plus = ui.interact(plus_r, ui.id().with(("tab-plus", pane)), Sense::click());
         if plus.hovered() {
             ui.painter().rect_filled(plus_r, 5.0, pal.hover);
         }
         ui.painter().text(plus_r.center(), Align2::CENTER_CENTER, "+", FontId::proportional(17.0), if plus.hovered() { pal.strong } else { pal.weak });
         if plus.on_hover_text(format!("New tab ({})", k(egui::Modifiers::COMMAND, egui::Key::T))).clicked() {
-            picks.new_tab = Some(self.files.here().clone());
+            picks.new_tab = Some(self.files.panes[pane].tab().here().clone());
         }
     }
 
@@ -1348,7 +1599,7 @@ impl App {
                             picks.menu = Some((FAction::Analyse, vec![root.clone()]));
                         }
                         ui.separator();
-                        place_menu(ui, &root, pinned, picks);
+                        place_menu(ui, &root, pinned, false, picks);
                     });
                 }
             });
@@ -1371,7 +1622,7 @@ impl App {
     }
 
     /// The Details list of a folder.
-    fn details_view(&mut self, ui: &mut egui::Ui, dir: &Path, picks: &mut FPicks) {
+    fn details_view(&mut self, ui: &mut egui::Ui, pane: usize, pane_focused: bool, dir: &Path, picks: &mut FPicks) {
         let width = ui.available_width();
         let cols = Self::details_columns(width, self.files.prefs.col_widths);
         let row_h = self.files.prefs.density.row();
@@ -1391,7 +1642,7 @@ impl App {
         let (hdr, _) = ui2.allocate_exact_size(vec2(width, hdr_h), Sense::hover());
         ui2.painter().hline(hdr.x_range(), hdr.bottom() - 0.5, Stroke::new(1.0, pal.hairline));
         let mut x = hdr.left();
-        let (sort, reversed) = (self.files.prefs.sort, self.files.prefs.reversed);
+        let (sort, reversed) = (self.files.pane().sort, self.files.pane().reversed);
         let mut resized = None;
         for (i, (col, w)) in cols.iter().enumerate() {
             let cell = Rect::from_min_size(pos2(x, hdr.top()), vec2(*w, hdr_h));
@@ -1447,9 +1698,9 @@ impl App {
             *w = if dx.is_nan() { COL_WIDTHS[k] } else { (*w + dx).clamp(COL_MIN, 600.0) };
         }
 
-        let focused = self.files.focused;
+        let focused = self.files.focused && pane_focused;
         let stripes = self.view().stripes;
-        let t = &self.files.tabs[self.files.active];
+        let t = self.files.cur();
         let Some(l) = t.listing.as_ref() else { return };
         let (done, error, slow, total) = (l.done, l.error.clone(), l.slow(), l.entries.len());
         if t.order.is_empty() {
@@ -1475,7 +1726,7 @@ impl App {
                     if ui.button("Go up").clicked() {
                         picks.go = Location::Dir(dir.to_path_buf()).up();
                     }
-                } else if total > 0 && !self.files.filter.trim().is_empty() {
+                } else if total > 0 && !self.files.pane().filter.trim().is_empty() {
                     big(ui, "🔍");
                     ui.label(egui::RichText::new("Nothing here matches the filter").color(pal.weak));
                 } else if total > 0 {
@@ -1489,7 +1740,7 @@ impl App {
         } else {
             let sizes = t.sizes.as_ref().map(|s| &s.1);
             let cursor_row = t.cursor.as_deref().and_then(|c| t.pos_of(c));
-            let mut area = egui::ScrollArea::vertical().id_salt(("flist", dir)).auto_shrink(false);
+            let mut area = egui::ScrollArea::vertical().id_salt(("flist", pane, dir)).auto_shrink(false);
             if let Some(r) = cursor_row.filter(|_| t.scroll_to_cursor) {
                 area = area.vertical_scroll_offset(browser::keep_in_view(t.view, r as f32 * row_h, row_h));
             }
@@ -1501,11 +1752,14 @@ impl App {
             let colors = &self.colors;
             let color_for = |ext: &str| colors.get(ext).or_else(|| colors.get(&ext.to_lowercase())).copied().unwrap_or(Color32::GRAY);
             let mut hovered_row = None;
+            let mut rows_drop: Vec<(egui::Response, PathBuf)> = Vec::new();
+            let two_panes = self.files.panes.len() > 1;
+            let can_paste = self.can_paste();
             let out = area.show_rows(ui2, row_h, order.len(), |ui, range| {
                 for r in range {
                     let i = order[r];
                     let e = &l.entries[i as usize];
-                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
+                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
                     let selected = t.selected.contains(&e.name);
                     let p = ui.painter().clone();
                     if selected {
@@ -1587,17 +1841,35 @@ impl App {
                     let count = if selected { t.selected.len() } else { 1 };
                     let path = dir.join(&*e.name);
                     let is_dir = e.is_dir;
+                    // Drag what's selected (or just this row, if it isn't).
+                    if resp.drag_started() {
+                        let (items, dirs): (Vec<PathBuf>, Vec<bool>) = if selected {
+                            order.iter().map(|&k| &l.entries[k as usize]).filter(|x| t.selected.contains(&x.name)).map(|x| (dir.join(&*x.name), x.is_dir)).unzip()
+                        } else {
+                            (vec![path.clone()], vec![is_dir])
+                        };
+                        egui::DragAndDrop::set_payload(ui.ctx(), dnd::DragItems(items, dirs));
+                    }
+                    if is_dir {
+                        rows_drop.push((resp.clone(), path.clone()));
+                    }
                     let pinned = self.files.is_pinned(&path);
+                    let ctx_menu = RowMenu { is_dir, count, pinned, two: two_panes, can_paste };
                     resp.context_menu(|ui| {
-                        if let Some(a) = item_menu(ui, is_dir, count, pinned) {
-                            let paths = if selected { self.files.chosen_paths() } else { vec![path.clone()] };
+                        if let Some(a) = item_menu(ui, &ctx_menu) {
+                            let paths = if selected { t.chosen_paths() } else { vec![path.clone()] };
                             picks.menu = Some((a, paths));
                         }
                     });
                 }
             });
             let _ = hovered_row;
-            let t = &mut self.files.tabs[self.files.active];
+            for (resp, p) in rows_drop {
+                if let Some(d) = self.folder_drop(ui, &resp, &p) {
+                    picks.drop = Some(d);
+                }
+            }
+            let t = self.files.tab();
             t.view = (out.state.offset.y, out.inner_rect.height());
             t.scroll_to_cursor = false;
         }
@@ -1605,30 +1877,56 @@ impl App {
             picks.clear = true;
         }
         let here = dir.to_path_buf();
+        // A drop on the empty part of the list goes into this folder; a favourite opens here.
+        if !self.files.drop_claimed
+            && let Some(d) = self.folder_drop(ui, &empty, &here)
+        {
+            picks.drop = Some(d);
+        }
+        if let Some(p) = self.fav_dropped(&empty) {
+            picks.go = Some(Location::Dir(p));
+        }
         let pinned = self.files.is_pinned(&here);
+        let can_paste = self.can_paste();
+        let mut new_pick = None;
         empty.context_menu(|ui| {
-            if ui.button("Refresh").clicked() {
+            let ctx = ui.ctx().clone();
+            let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
+            ui.menu_button("New", |ui| {
+                new_pick = self.new_menu_items(ui, &here);
+            });
+            if ui.add_enabled(can_paste, egui::Button::new("Paste").shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::V))).clicked() {
+                picks.menu = Some((FAction::Paste, vec![here.clone()]));
+            }
+            ui.separator();
+            if ui.add(egui::Button::new("Refresh").shortcut_text(k(egui::Modifiers::NONE, egui::Key::F5))).clicked() {
                 picks.menu = Some((FAction::Open, Vec::new()));
             }
             if ui.button("Open in New Tab").clicked() {
                 picks.new_tab = Some(Location::Dir(here.clone()));
             }
             ui.separator();
+            if ui.button("Copy Path").clicked() {
+                picks.menu = Some((FAction::CopyPath, vec![here.clone()]));
+            }
             if let Some(a) = folder_menu(ui, pinned) {
                 picks.menu = Some((a, vec![here.clone()]));
             }
         });
-        self.files_footer(ui, footer);
+        if let Some(p) = new_pick {
+            picks.new_item = Some((p, here.clone()));
+        }
+        self.files_footer(ui, footer, pane);
         ui.allocate_rect(Rect::from_min_max(body.min, footer.max), Sense::hover());
     }
 
     /// Count of items, what's selected, and how the listing is going.
-    fn files_footer(&self, ui: &egui::Ui, rect: Rect) {
+    fn files_footer(&self, ui: &egui::Ui, rect: Rect, pane: usize) {
         let p = ui.painter();
         let pal = style::pal(ui);
         p.rect_filled(rect, 0.0, pal.paper);
         p.hline(rect.x_range(), rect.top() + 0.5, Stroke::new(1.0, pal.hairline));
-        let t = &self.files.tabs[self.files.active];
+        let t = self.files.panes[pane].tab();
         let Some(l) = t.listing.as_ref() else { return };
         let shown = t.order.len();
         let mut text = format!("{} item{}", group(shown as u64), if shown == 1 { "" } else { "s" });
@@ -1636,7 +1934,7 @@ impl App {
         let current = t.order_key.as_ref().is_some_and(|k| k.0 == l.generation);
         let left_out = if current { l.entries.len() - shown } else { 0 };
         if left_out > 0 {
-            let why = if self.files.filter.trim().is_empty() { "hidden" } else { "filtered out" };
+            let why = if self.files.panes[pane].filter.trim().is_empty() { "hidden" } else { "filtered out" };
             text.push_str(&format!(" ({} {why})", group(left_out as u64)));
         }
         if !l.done {
@@ -1654,7 +1952,19 @@ impl App {
         if let Some(e) = &l.error {
             text.push_str(&format!("  ·  {e}"));
         }
-        p.text(pos2(rect.left() + 10.0, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(12.0), pal.weak);
+        // In split view each pane says where it is, at the right of its footer.
+        let mut right = rect.right() - 10.0;
+        if self.files.panes.len() > 1
+            && let Some(d) = t.here().dir()
+        {
+            let g = p.layout_no_wrap(d.display().to_string(), FontId::proportional(11.5), pal.weak);
+            let w = g.size().x.min(rect.width() * 0.5);
+            let clip = Rect::from_min_max(pos2(rect.right() - 10.0 - w, rect.top()), pos2(rect.right() - 10.0, rect.bottom()));
+            p.with_clip_rect(clip).galley(pos2(rect.right() - 10.0 - g.size().x.min(w), rect.center().y - g.size().y / 2.0), g, pal.weak);
+            right -= w + 12.0;
+        }
+        let clip = Rect::from_min_max(rect.min, pos2(right, rect.bottom()));
+        p.with_clip_rect(clip).text(pos2(rect.left() + 10.0, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(12.0), pal.weak);
     }
 
     /// The status bar: notices on the left, the folder, and background activity on the right.
@@ -1704,7 +2014,10 @@ impl App {
             None => {}
         }
         // Shortcuts that work even while typing in the filter box.
-        let (find, path, dock) = ctx.input_mut(|i| (i.consume_key(M::COMMAND, Key::F), i.consume_key(M::COMMAND, Key::L), i.consume_key(M::COMMAND, Key::J)));
+        let (find, path, dock, split, preview) = ctx.input_mut(|i| {
+            let path = i.consume_key(M::COMMAND, Key::L) || (!cfg!(target_os = "macos") && (i.consume_key(M::ALT, Key::D) || i.consume_key(M::NONE, Key::F4)));
+            (i.consume_key(M::COMMAND, Key::F), path, i.consume_key(M::COMMAND, Key::J), i.consume_key(M::COMMAND, Key::Backslash), i.consume_key(M::ALT, Key::P))
+        });
         if dock {
             self.files.prefs.dock.open = !self.files.prefs.dock.open;
         }
@@ -1714,9 +2027,17 @@ impl App {
         if path {
             self.start_path_edit();
         }
+        if split {
+            self.toggle_split();
+        }
+        if preview {
+            self.files.prefs.preview = !self.files.prefs.preview;
+        }
         if ctx.egui_wants_keyboard_input() || !self.files.focused {
             return;
         }
+        // Quick Look takes the arrow keys while it's open; Space and Escape close it there.
+        let look = self.files.look.open;
         enum Do {
             Move(i64),
             To(i64),
@@ -1733,10 +2054,55 @@ impl App {
             NextTab(bool),
             Refresh,
             Hidden,
-            CopyPath,
+            Act(FAction),
+            NewFolder,
+            OtherPane,
+            Swap,
             Find(String),
         }
         let act = ctx.input_mut(|i| {
+            // Ctrl+C, X and V arrive as Copy, Cut and Paste events (Paste only when the
+            // clipboard holds text, so Ctrl+V is checked as a key too). Shift+Ctrl+C copies paths;
+            // on Windows Shift+Delete can arrive as Cut.
+            let copy = i.events.iter().any(|e| matches!(e, egui::Event::Copy));
+            let cut = i.events.iter().any(|e| matches!(e, egui::Event::Cut));
+            let paste = i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))) || i.consume_key(M::COMMAND, Key::V);
+            if cut {
+                return Some(Do::Act(if i.modifiers.shift && !i.modifiers.command { FAction::Delete } else { FAction::Cut }));
+            }
+            if copy {
+                return Some(Do::Act(if i.modifiers.shift { FAction::CopyPath } else { FAction::Copy }));
+            }
+            if paste {
+                return Some(Do::Act(FAction::Paste));
+            }
+            if !look && i.consume_key(M::NONE, Key::Space) {
+                return Some(Do::Act(FAction::QuickLook));
+            }
+            if i.consume_key(M::SHIFT, Key::Delete) {
+                return Some(Do::Act(FAction::Delete));
+            }
+            if i.consume_key(M::NONE, Key::Delete) || (cfg!(target_os = "macos") && i.consume_key(M::COMMAND, Key::Backspace)) {
+                return Some(Do::Act(FAction::Trash));
+            }
+            if i.consume_key(M::NONE, Key::F2) {
+                return Some(Do::Act(FAction::Rename));
+            }
+            if i.consume_key(M::ALT, Key::Enter) {
+                return Some(Do::Act(FAction::Properties));
+            }
+            if i.consume_key(M::SHIFT, Key::F5) {
+                return Some(Do::Act(FAction::CopyToOther));
+            }
+            if i.consume_key(M::SHIFT, Key::F6) {
+                return Some(Do::Act(FAction::MoveToOther));
+            }
+            if i.consume_key(M::COMMAND | M::SHIFT, Key::N) {
+                return Some(Do::NewFolder);
+            }
+            if i.consume_key(M::COMMAND, Key::U) {
+                return Some(Do::Swap);
+            }
             if i.consume_key(M::ALT, Key::ArrowLeft) {
                 return Some(Do::Back);
             }
@@ -1752,7 +2118,7 @@ impl App {
             if i.consume_key(M::COMMAND, Key::A) {
                 return Some(Do::All);
             }
-            if i.consume_key(M::NONE, Key::Escape) {
+            if !look && i.consume_key(M::NONE, Key::Escape) {
                 return Some(Do::Clear);
             }
             if i.consume_key(M::COMMAND | M::SHIFT, Key::T) {
@@ -1770,21 +2136,21 @@ impl App {
             if i.consume_key(M::CTRL, Key::Tab) {
                 return Some(Do::NextTab(true));
             }
+            if i.consume_key(M::NONE, Key::Tab) {
+                return Some(Do::OtherPane);
+            }
             if i.consume_key(M::NONE, Key::F5) || i.consume_key(M::COMMAND, Key::R) {
                 return Some(Do::Refresh);
             }
             if i.consume_key(M::COMMAND | M::SHIFT, Key::Period) {
                 return Some(Do::Hidden);
             }
-            if i.consume_key(M::COMMAND | M::SHIFT, Key::C) {
-                return Some(Do::CopyPath);
-            }
             let shift = i.modifiers.shift;
             let m = if shift { M::SHIFT } else { M::NONE };
-            if i.consume_key(m, Key::ArrowDown) {
+            if i.consume_key(m, Key::ArrowDown) || (look && i.consume_key(m, Key::ArrowRight)) {
                 return Some(Do::Move(1));
             }
-            if i.consume_key(m, Key::ArrowUp) {
+            if i.consume_key(m, Key::ArrowUp) || (look && i.consume_key(m, Key::ArrowLeft)) {
                 return Some(Do::Move(-1));
             }
             if i.consume_key(m, Key::Home) {
@@ -1811,13 +2177,14 @@ impl App {
         let Some(act) = act else { return };
         let shift = ctx.input(|i| i.modifiers.shift);
         let now = ctx.input(|i| i.time);
-        let page = (((self.files.tabs[self.files.active].view.1 / self.files.prefs.density.row()) as i64) - 1).max(1);
+        let page = (((self.files.cur().view.1 / self.files.prefs.density.row()) as i64) - 1).max(1);
+        let here = self.files.here().dir().map(Path::to_path_buf);
         match act {
             Do::Back => self.files.back(),
             Do::Forward => self.files.forward(),
             Do::Up => self.files.up(),
             Do::Open => {
-                let t = &self.files.tabs[self.files.active];
+                let t = self.files.cur();
                 if let Some(i) = t.cursor.as_deref().and_then(|c| t.pos_of(c)).map(|r| t.order[r]) {
                     picks.open = Some(i);
                 }
@@ -1830,23 +2197,37 @@ impl App {
             }
             Do::Clear => self.files.tab().selected.clear(),
             Do::NewTab => picks.new_tab = Some(self.files.here().clone()),
-            Do::CloseTab => picks.close_tab = Some(self.files.active),
+            Do::CloseTab => picks.close_tab = Some(self.files.pane().active),
             Do::Reopen => {
                 if let Some(l) = self.files.closed.pop() {
                     self.files.new_tab(l);
                 }
             }
             Do::NextTab(fwd) => {
-                let n = self.files.tabs.len();
-                let i = if fwd { (self.files.active + 1) % n } else { (self.files.active + n - 1) % n };
-                picks.switch_tab = Some(i);
+                let n = self.files.pane().tabs.len();
+                let a = self.files.pane().active;
+                picks.switch_tab = Some(if fwd { (a + 1) % n } else { (a + n - 1) % n });
             }
+            Do::OtherPane => {
+                if let Some(o) = self.files.other() {
+                    self.files.set_focus(o);
+                }
+            }
+            Do::Swap => self.files.swap_panes(),
             Do::Refresh => self.files.refresh(),
             Do::Hidden => self.files.prefs.show_hidden = !self.files.prefs.show_hidden,
-            Do::CopyPath => {
-                let paths = self.files.chosen_paths();
-                if !paths.is_empty() {
-                    picks.menu = Some((FAction::CopyPath, paths));
+            Do::NewFolder => {
+                if let Some(d) = here {
+                    self.files_new_folder(d);
+                }
+            }
+            Do::Act(a) => {
+                let paths = match a {
+                    FAction::Paste => here.into_iter().collect(),
+                    _ => self.files.chosen_paths(),
+                };
+                if !paths.is_empty() || a == FAction::QuickLook {
+                    picks.menu = Some((a, paths));
                 }
             }
             Do::Move(d) => self.files_move_cursor(|pos, _| pos.map(|p| p as i64 + d).unwrap_or(0), shift),
@@ -1859,7 +2240,7 @@ impl App {
                 self.files.typed_at = now;
                 self.files.typed.push_str(&s.to_lowercase());
                 let typed = self.files.typed.clone();
-                let t = &self.files.tabs[self.files.active];
+                let t = self.files.cur();
                 let found = t.listing.as_ref().and_then(|l| t.order.iter().position(|&i| l.entries[i as usize].name.to_lowercase().starts_with(&typed)));
                 if let Some(r) = found {
                     self.files_move_cursor(|_, _| r as i64, false);
@@ -1897,7 +2278,7 @@ impl App {
 
     fn files_apply(&mut self, picks: FPicks) {
         if let Some(k) = picks.sort {
-            let p = &mut self.files.prefs;
+            let p = self.files.pane_mut();
             if p.sort == k {
                 p.reversed = !p.reversed;
             } else {
@@ -1945,7 +2326,7 @@ impl App {
             }
         }
         if let Some(i) = picks.open {
-            let t = &self.files.tabs[self.files.active];
+            let t = self.files.cur();
             if let (Some(e), Some(dir)) = (t.entry(i), t.here().dir()) {
                 let path = dir.join(&*e.name);
                 if e.is_dir {
@@ -1957,6 +2338,9 @@ impl App {
         }
         if let Some(to) = picks.go {
             self.files.go(to);
+        }
+        if let Some((pane, to)) = picks.go_other {
+            self.files.go_in(pane, to);
         }
         if let Some((a, paths)) = picks.menu {
             self.files_action(a, paths);
@@ -1976,15 +2360,18 @@ impl App {
         if let Some(i) = picks.switch_tab {
             self.files.switch_tab(i);
         }
-        if let Some(p) = picks.unpin {
-            self.files.unpin(&p);
+        if let Some((items, dest, op)) = picks.drop {
+            self.files_transfer(items, dest, op);
+        }
+        if let Some((p, dir)) = picks.new_item {
+            self.apply_new(p, dir);
         }
     }
 
     /// The list's item menu for a tile on the dock's map, run through the same commands.
     pub(super) fn tile_menu(&mut self, ui: &mut egui::Ui, disk: &Path, is_dir: bool) {
-        let pinned = self.files.is_pinned(disk);
-        let Some(a) = item_menu(ui, is_dir, 1, pinned) else { return };
+        let m = RowMenu { is_dir, count: 1, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste() };
+        let Some(a) = item_menu(ui, &m) else { return };
         match a {
             FAction::Open if is_dir => self.files.go(Location::Dir(disk.to_path_buf())),
             FAction::Open => {
@@ -1996,16 +2383,21 @@ impl App {
         ui.close();
     }
 
-    fn files_action(&mut self, a: FAction, paths: Vec<PathBuf>) {
+    /// Is this path a folder, as far as the list on screen knows?
+    fn listed_dir(&self, p: &Path) -> bool {
+        let t = self.files.cur();
+        p.parent().is_none() || (t.here().dir() == p.parent() && p.file_name().and_then(|n| t.entry_named(&n.to_string_lossy())).is_some_and(|e| e.is_dir))
+    }
+
+    pub(super) fn files_action(&mut self, a: FAction, paths: Vec<PathBuf>) {
+        let other_dir = self.files.other().and_then(|o| self.files.panes[o].tab().here().dir().map(Path::to_path_buf));
         match a {
             FAction::Open if paths.is_empty() => self.files.refresh(),
             FAction::Open => {
                 // Folders open here (the first one); files open in their apps.
                 let mut went = false;
                 for p in paths {
-                    let t = &self.files.tabs[self.files.active];
-                    let is_dir = t.listing.as_ref().and_then(|l| p.file_name().and_then(|n| l.entries.iter().find(|e| *e.name == *n.to_string_lossy()))).is_some_and(|e| e.is_dir);
-                    if is_dir || p.parent().is_none() {
+                    if self.listed_dir(&p) {
                         if !went {
                             self.files.go(Location::Dir(p));
                             went = true;
@@ -2020,17 +2412,29 @@ impl App {
                     self.files.new_tab(Location::Dir(p));
                 }
             }
-            FAction::Pin => {
-                for p in paths {
-                    self.files.pin(p);
+            FAction::OpenInOtherPane => {
+                if self.files.other().is_none() {
+                    self.files.set_split(if self.files.prefs.last_split == Split::Single { Split::Vertical } else { self.files.prefs.last_split });
+                }
+                if let (Some(o), Some(p)) = (self.files.other(), paths.into_iter().next()) {
+                    self.files.go_in(o, Location::Dir(p));
                 }
             }
+            FAction::Pin => self.add_favourites(paths),
             FAction::Unpin => {
                 for p in paths {
-                    self.files.unpin(&p);
+                    self.remove_favourite(&p);
                 }
             }
             FAction::CopyPath => self.ctx_copy = Some(paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n")),
+            FAction::CopyUnc => {
+                // Asking Windows can wait on the network, so it's done in the background.
+                let (tx, rx) = mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(paths.iter().map(|p| crate::netdrives::unc_path(p).unwrap_or_else(|| p.clone()).display().to_string()).collect::<Vec<_>>().join("\n"));
+                });
+                self.files.text_rx = Some(rx);
+            }
             FAction::CopyName => {
                 self.ctx_copy = Some(paths.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).collect::<Vec<_>>().join("\n"))
             }
@@ -2049,30 +2453,105 @@ impl App {
                     self.analyse(p);
                 }
             }
+            FAction::Copy => self.files_clip(paths, false),
+            FAction::Cut => self.files_clip(paths, true),
+            FAction::Paste => {
+                // Into the folder given, or into a selected folder when that's all that's chosen.
+                if let Some(dest) = paths.into_iter().next() {
+                    if self.can_paste() {
+                        self.paste_into(dest);
+                    } else if self.browser.clip.is_none() {
+                        self.ops.notice = Some(("Nothing to paste: copy or cut something first.".into(), false));
+                    }
+                }
+            }
+            FAction::Rename => {
+                if let Some(p) = paths.into_iter().next().filter(|p| p.parent().is_some()) {
+                    self.start_rename(p);
+                }
+            }
+            FAction::Trash => self.files_delete(paths, false),
+            FAction::Delete => self.files_delete(paths, true),
+            FAction::CopyToOther | FAction::MoveToOther => match other_dir {
+                Some(dest) => {
+                    let op = if a == FAction::CopyToOther { dnd::DropOp::Copy } else { dnd::DropOp::Move };
+                    self.files_transfer(paths, dest, op);
+                }
+                None => self.ops.notice = Some(("Open a second pane first (View > Side by Side), with a folder in it.".into(), false)),
+            },
+            FAction::Properties => {
+                if let Some(p) = paths.into_iter().next() {
+                    let q = p.clone();
+                    if !actions::shell_properties(&q) {
+                        self.ops.props = Some(p);
+                    }
+                }
+            }
+            FAction::QuickLook => {
+                if self.files.cursor_entry().is_some_and(|e| !e.is_dir) {
+                    self.files.look.open = true;
+                } else if let Some(p) = paths.into_iter().next().filter(|p| self.listed_dir(p)) {
+                    self.files.go(Location::Dir(p));
+                }
+            }
         }
     }
 }
 
+/// What the item menu needs to know.
+pub(super) struct RowMenu {
+    pub is_dir: bool,
+    pub count: usize,
+    pub pinned: bool,
+    /// Split view is on (Copy and Move to Other Pane).
+    pub two: bool,
+    pub can_paste: bool,
+}
+
 /// The menu for an item in the list.
-fn item_menu(ui: &mut egui::Ui, is_dir: bool, count: usize, pinned: bool) -> Option<FAction> {
+fn item_menu(ui: &mut egui::Ui, m: &RowMenu) -> Option<FAction> {
+    use egui::{Key, Modifiers as M};
     let ctx = ui.ctx().clone();
     let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
     let mut out = None;
-    let many = count > 1;
-    let open = if many { format!("Open {count} Items") } else { "Open".to_string() };
-    if ui.add(egui::Button::new(open).shortcut_text(k(egui::Modifiers::NONE, egui::Key::Enter))).clicked() {
-        out = Some(FAction::Open);
-    }
-    if is_dir && ui.button(if many { "Open in New Tabs" } else { "Open in New Tab" }).clicked() {
-        out = Some(FAction::OpenInNewTab);
+    let mut item = |ui: &mut egui::Ui, enabled: bool, label: &str, keys: String, a: FAction| {
+        if ui.add_enabled(enabled, egui::Button::new(label).shortcut_text(keys)).clicked() {
+            out = Some(a);
+        }
+    };
+    let many = m.count > 1;
+    let open = if many { format!("Open {} Items", m.count) } else { "Open".to_string() };
+    item(ui, true, &open, k(M::NONE, Key::Enter), FAction::Open);
+    if m.is_dir {
+        item(ui, true, if many { "Open in New Tabs" } else { "Open in New Tab" }, String::new(), FAction::OpenInNewTab);
+        if !many {
+            item(ui, true, "Open in Other Pane", String::new(), FAction::OpenInOtherPane);
+        }
+    } else if !many {
+        item(ui, true, "Quick Look", k(M::NONE, Key::Space), FAction::QuickLook);
     }
     ui.separator();
-    if ui.add(egui::Button::new(if many { "Copy Paths" } else { "Copy Path" }).shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::C))).clicked() {
-        out = Some(FAction::CopyPath);
+    item(ui, true, "Cut", k(M::COMMAND, Key::X), FAction::Cut);
+    item(ui, true, "Copy", k(M::COMMAND, Key::C), FAction::Copy);
+    if m.is_dir && !many {
+        item(ui, m.can_paste, "Paste Into Folder", String::new(), FAction::Paste);
     }
-    if ui.button(if many { "Copy Names" } else { "Copy Name" }).clicked() {
-        out = Some(FAction::CopyName);
+    if m.two {
+        item(ui, true, "Copy to Other Pane", k(M::SHIFT, Key::F5), FAction::CopyToOther);
+        item(ui, true, "Move to Other Pane", k(M::SHIFT, Key::F6), FAction::MoveToOther);
     }
+    ui.separator();
+    item(ui, !many, "Rename…", k(M::NONE, Key::F2), FAction::Rename);
+    let bin = if cfg!(windows) { "Delete (to Recycle Bin)…" } else { "Move to Trash…" };
+    let bin_key = if cfg!(target_os = "macos") { k(M::COMMAND, Key::Backspace) } else { k(M::NONE, Key::Delete) };
+    item(ui, true, bin, bin_key, FAction::Trash);
+    item(ui, true, "Delete Permanently…", k(M::SHIFT, Key::Delete), FAction::Delete);
+    ui.separator();
+    item(ui, true, if many { "Copy Paths" } else { "Copy Path" }, k(M::COMMAND | M::SHIFT, Key::C), FAction::CopyPath);
+    if cfg!(windows) {
+        item(ui, true, "Copy Network (UNC) Path", String::new(), FAction::CopyUnc);
+    }
+    item(ui, true, if many { "Copy Names" } else { "Copy Name" }, String::new(), FAction::CopyName);
     if !many {
         let reveal = if cfg!(windows) {
             "Show in Explorer"
@@ -2081,32 +2560,29 @@ fn item_menu(ui: &mut egui::Ui, is_dir: bool, count: usize, pinned: bool) -> Opt
         } else {
             "Show in System File Manager"
         };
-        if ui.button(reveal).clicked() {
-            out = Some(FAction::Reveal);
-        }
+        item(ui, true, reveal, String::new(), FAction::Reveal);
         for (label, which) in actions::terminals() {
-            if ui.button(*label).clicked() {
-                out = Some(FAction::Terminal(*which));
-            }
+            item(ui, true, label, String::new(), FAction::Terminal(*which));
         }
+        item(ui, true, "Properties", k(M::ALT, Key::Enter), FAction::Properties);
     }
-    if is_dir && !many {
+    if m.is_dir && !many {
         ui.separator();
-        if let Some(a) = folder_menu(ui, pinned) {
+        if let Some(a) = folder_menu(ui, m.pinned) {
             out = Some(a);
         }
     }
     out
 }
 
-/// Pin / Unpin and Analyse, for a folder.
+/// Add to Favourites (or remove) and Analyse, for a folder.
 fn folder_menu(ui: &mut egui::Ui, pinned: bool) -> Option<FAction> {
     let mut out = None;
     if pinned {
-        if ui.button("Unpin from Sidebar").clicked() {
+        if ui.button("Remove from Favourites").clicked() {
             out = Some(FAction::Unpin);
         }
-    } else if ui.button("Pin to Sidebar").clicked() {
+    } else if ui.button("Add to Favourites").on_hover_text("A bookmark in the sidebar. You can also drag the folder there.").clicked() {
         out = Some(FAction::Pin);
     }
     if ui.button("Analyse This Folder").on_hover_text("Scan it and show its treemap in the analysis dock, while you keep browsing").clicked() {
@@ -2116,15 +2592,18 @@ fn folder_menu(ui: &mut egui::Ui, pinned: bool) -> Option<FAction> {
 }
 
 /// The menu for a place in the sidebar.
-fn place_menu(ui: &mut egui::Ui, path: &Path, pinned: bool, picks: &mut FPicks) {
+fn place_menu(ui: &mut egui::Ui, path: &Path, pinned: bool, two: bool, picks: &mut FPicks) {
     if ui.button("Open in New Tab").clicked() {
         picks.new_tab = Some(Location::Dir(path.to_path_buf()));
     }
+    if two && ui.button("Open in Other Pane").clicked() {
+        picks.menu = Some((FAction::OpenInOtherPane, vec![path.to_path_buf()]));
+    }
     if pinned {
-        if ui.button("Unpin from Sidebar").clicked() {
-            picks.unpin = Some(path.to_path_buf());
+        if ui.button("Remove from Favourites").clicked() {
+            picks.menu = Some((FAction::Unpin, vec![path.to_path_buf()]));
         }
-    } else if ui.button("Pin to Sidebar").clicked() {
+    } else if ui.button("Add to Favourites").clicked() {
         picks.menu = Some((FAction::Pin, vec![path.to_path_buf()]));
     }
     if ui.button("Copy Path").clicked() {
@@ -2135,10 +2614,27 @@ fn place_menu(ui: &mut egui::Ui, path: &Path, pinned: bool, picks: &mut FPicks) 
     }
 }
 
+/// A thin capacity bar under a drive's name, red when nearly full.
+pub(super) fn capacity_bar(ui: &egui::Ui, r: Rect, frac: Option<f32>) {
+    let Some(frac) = frac else { return };
+    let bar = Rect::from_min_size(pos2(r.left() + 28.0, r.bottom() - 7.0), vec2((r.width() - 38.0).max(10.0), 3.0));
+    let p = ui.painter();
+    p.rect_filled(bar, 1.5, ui.visuals().extreme_bg_color);
+    let mut fill = bar;
+    fill.set_width(bar.width() * frac.clamp(0.0, 1.0));
+    let c = if frac > 0.9 { Color32::from_rgb(210, 70, 60) } else { Color32::from_rgb(70, 130, 210) };
+    p.rect_filled(fill, 1.5, c);
+}
+
 /// A sidebar line: icon and label, left-aligned. Where we are gets the selection tint and an
 /// accent bar at its left edge.
-fn side_row(ui: &mut egui::Ui, icon: &str, label: &str, on: bool, h: f32) -> egui::Response {
-    let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::click());
+pub(super) fn side_row(ui: &mut egui::Ui, icon: &str, label: &str, on: bool, h: f32) -> egui::Response {
+    side_row_sense(ui, icon, label, on, h, Sense::click())
+}
+
+/// `side_row` that can also be dragged.
+pub(super) fn side_row_sense(ui: &mut egui::Ui, icon: &str, label: &str, on: bool, h: f32, sense: Sense) -> egui::Response {
+    let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), sense);
     let pal = style::pal(ui);
     let p = ui.painter();
     if on {
@@ -2156,7 +2652,7 @@ fn side_row(ui: &mut egui::Ui, icon: &str, label: &str, on: bool, h: f32) -> egu
 }
 
 /// A sidebar group: a small-caps title that folds the group away when clicked.
-fn side_section(ui: &mut egui::Ui, salt: &str, title: &str, default_open: bool, add: impl FnOnce(&mut egui::Ui)) {
+pub(super) fn side_section(ui: &mut egui::Ui, salt: &str, title: &str, default_open: bool, add: impl FnOnce(&mut egui::Ui)) {
     let id = ui.id().with(salt);
     let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(default_open);
     ui.add_space(6.0);
@@ -2294,20 +2790,6 @@ mod tests {
         let _ = order_entries(&l.entries, None, FSort::Size, false, true, "");
         let by_size = t.elapsed();
         println!("{} entries: first batch {:?}, all {:?}; sort by name {:?}, by size {:?}", o.len(), first.unwrap_or_default(), all, by_name, by_size);
-    }
-
-    #[test]
-    fn typed_paths() {
-        assert_eq!(parse_typed_path("  "), None);
-        assert_eq!(parse_typed_path(places::computer_name()), Some(Location::Computer));
-        assert_eq!(parse_typed_path("\"/tmp/x\""), Some(Location::Dir(PathBuf::from("/tmp/x"))));
-        if let Some(h) = places::home() {
-            assert_eq!(parse_typed_path("~"), Some(Location::Dir(h.join(""))));
-            assert_eq!(parse_typed_path("~/Docs"), Some(Location::Dir(h.join("Docs"))));
-        }
-        if cfg!(windows) {
-            assert_eq!(parse_typed_path("d:"), Some(Location::Dir(PathBuf::from("d:\\"))));
-        }
     }
 
     #[test]

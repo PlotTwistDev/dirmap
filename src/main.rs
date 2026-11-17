@@ -20,6 +20,7 @@ mod fsys;
 mod help;
 mod icons;
 mod mapview;
+mod netdrives;
 mod pattern;
 mod settings;
 mod subset;
@@ -27,6 +28,7 @@ mod scan;
 mod sequences;
 mod snapshot;
 mod sunburst;
+mod templates;
 mod tilegpu;
 mod treemap;
 

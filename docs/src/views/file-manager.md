@@ -36,12 +36,33 @@ click it for details.
 | Group | What's in it |
 |---|---|
 | **Quick access** | Home, Desktop, Documents, Downloads, Pictures, Music and Videos (and Applications on a Mac). These are your real folders, including ones that have been moved, such as Documents on OneDrive. |
-| **Pinned** | Folders you've pinned. Right-click any folder, place or drive and choose **Pin to Sidebar**. Right-click a pinned folder to unpin it or move it up or down. |
-| **Drives** | **This PC** (Windows) or **Computer** (Linux and macOS), then each drive or mounted volume, network drives included. Each has a bar showing how full it is, red when over 90%. Hover for the free space. |
+| **Favourites** | Folders you've bookmarked, in as many groups as you like. See [Favourites](#favourites). |
+| **Drives** | **This PC** (Windows) or **Computer** (Linux and macOS), then each local drive or mounted volume. Each has a bar showing how full it is, red when over 90%. Hover for the free space. |
+| **Network & Remote** | Network drives and shares, saved servers, and **Connect to Server…**. See [Network & Remote](#network--remote). |
 | **Recent** | The last ten folders you opened. |
 
 Click an entry to go there. Middle-click opens it in a new tab. Click a group's title to fold it
-away. Drag the sidebar's edge to make it wider.
+away. Drag the sidebar's edge to make it wider. Every entry also takes dropped files: drop items
+on a drive or a favourite to copy or move them there.
+
+## Favourites
+
+Drag a folder from the list, a tab or the path onto **Favourites** to bookmark it. A line shows
+where it will go, and the label by the pointer says *a bookmark: nothing is moved*. The folder
+stays where it is. You can drop several folders at once. **Add to Favourites** on any folder's
+right-click menu does the same.
+
+- **Reorder** a favourite by dragging it up or down, or into another group.
+- **Drop files onto the middle of a favourite** to copy or move them into that folder, as with
+  any other folder. Near the top or bottom edge of a row, a drop adds a bookmark instead.
+- **Right-click a favourite** for **Rename…** (the name shown in the sidebar; the folder isn't
+  renamed), **Remove from Favourites**, Open in New Tab, Copy Path and Analyse.
+- **Right-click a group's title** for **New Group**, **Rename Group…**, **Move Group Up/Down** and
+  **Remove Group**. Click the title to fold the group away.
+- A favourite whose folder has gone (a drive that isn't plugged in, a renamed folder) stays in
+  the list; opening it says the folder can't be found.
+
+Folders pinned in earlier versions of dirmap appear in the first group.
 
 ## Moving around
 
@@ -50,13 +71,32 @@ away. Drag the sidebar's edge to make it wider.
 - **⏶** (or **Backspace**) goes up a level. Above a drive is the **Computer** view, which shows
   every drive with its space.
 - **⟳** (or **F5**) reads the folder again.
-- **The path.** Click any part of it to go there. Click the empty space after it, or press
-  **Ctrl+L**, to type a path:
-  - `D:` means the whole drive;
-  - `~/Projects` is in your home folder;
-  - `\\server\share` opens a Windows share.
+- **The path.** Click any part of it to go there, or the small arrow after a part for the
+  folders inside it. Drop files on a part to move or copy them there. Click the empty space
+  after it, or press **Ctrl+L** (also **Alt+D** or **F4** on Windows and Linux), to
+  [type a path](#typing-a-path).
 - **Double-click** a folder to open it, or a file to open it with its usual app. **Enter** does
   the same for the selected item.
+
+## Typing a path
+
+While you type, a list under the path suggests folders that match, then recent folders and
+favourites. **↑**/**↓** choose one, **Tab** completes the name, **Enter** goes there and
+**Escape** puts the path back.
+
+| You type | You get |
+|---|---|
+| `D:` | The whole drive. |
+| `~/Projects` | A folder in your home folder. |
+| `%USERPROFILE%\Downloads`, `$HOME/Downloads`, `${HOME}` | Environment variables are filled in. |
+| `\\server\share` | A Windows share, opened directly. |
+| `smb://server/share` | The same share on Windows. On a Mac or Linux, connect to it first with **Connect to Server…**. |
+| `file:///home/me` | A file URL. |
+| `>` then a word | A command, for example `>split`, `>new folder`, `>hidden`, `>connect` or `>preview`. The list shows each command with its shortcut. |
+| `@` then a name | Your favourites whose names match. |
+
+The path box never runs programs or shell commands. SFTP, FTP and WebDAV addresses aren't built
+in yet: the box says so instead of trying.
 
 ## The toolbar
 
@@ -64,10 +104,13 @@ From left to right:
 
 - the workspaces;
 - **⏴ ⏵ ⏶ ⟳**: Back, Forward, Up and Refresh;
+- **✚ New**, the [New menu](#new-folders-and-files);
 - the path;
 - **⚡ Analyse Folder**, which becomes **⟳ Refresh Analysis** when the folder is already
   analysed, or **■ Cancel Scan** while a scan runs (see [the analysis dock](#the-analysis-dock));
 - **⊞ Analysis**, which shows or hides the dock;
+- **👁** shows or hides the [preview pane](#quick-look-and-the-preview-pane), and **⬌** splits
+  the view into [two panes](#two-panes);
 - the filter, the **View** menu, Help and Settings.
 
 The **View** menu has:
@@ -75,6 +118,9 @@ The **View** menu has:
 - **Hidden Items**, which shows hidden files and folders;
 - **Comfortable** or **Compact** rows;
 - **Reset Column Widths**;
+- **Panes**: **One Pane**, **Side by Side** or **One Above the Other**, then **Swap Panes** and
+  **Same Folder in Other Pane**;
+- **Preview Pane**;
 - **Analysis Dock**.
 
 ## Tabs
@@ -84,6 +130,22 @@ Each tab has its own folder and history. **Ctrl+T** opens a tab, **Ctrl+W** clos
 Middle-click a folder to open it in a new tab. Drag a tab to move it along the strip, and
 right-click one for **Close Other Tabs**. When there are more tabs than fit, they get narrower,
 then the strip scrolls. Your tabs are there again the next time you start dirmap.
+
+## Two panes
+
+Press **Ctrl+\\** (**⌘\\** on a Mac), click **⬌**, or choose **View > Panes > Side by Side** to show
+two folders at once. **One Above the Other** stacks them instead.
+
+- Each pane has its own tabs, history, sort order, filter and selection.
+- The pane you're working in has a thin coloured line along its top, and the toolbar, the path
+  and the keyboard work on it. Click in a pane, or press **Tab**, to switch.
+- Drag items from one pane onto the other, onto a folder in it, or onto one of its tabs.
+- **Shift+F5** copies the selected items to the other pane's folder, and **Shift+F6** moves them.
+  The right-click menu has **Copy to Other Pane** and **Move to Other Pane** too.
+- **Ctrl+U** swaps the panes. Drag the line between them to share the room, and double-click it
+  to make them even.
+- Press **Ctrl+\\** again to go back to one pane. dirmap keeps the other pane's tabs for next
+  time, and remembers the split when you quit.
 
 ## The list
 
@@ -117,12 +179,68 @@ The bar under the list counts the items and adds up the size of what's selected.
 
 | Command | What it does |
 |---|---|
-| **Open** / **Open in New Tab** | Opens folders here or in a new tab, and files in their apps. |
-| **Copy Path** (**Ctrl+Shift+C**) / **Copy Name** | Puts the full paths, or just the names, on the clipboard, one per line. |
+| **Open** / **Open in New Tab** / **Open in Other Pane** | Opens folders here, in a new tab or in the other pane, and files in their apps. |
+| **Quick Look** (**Space**) | A [large preview](#quick-look-and-the-preview-pane) of the file. |
+| **Copy** / **Cut** / **Paste** (**Ctrl+C**, **Ctrl+X**, **Ctrl+V**) | See [Copying, moving and deleting](#copying-moving-and-deleting). |
+| **Copy to Other Pane** / **Move to Other Pane** (**Shift+F5**, **Shift+F6**) | With two panes. |
+| **Rename…** (**F2**) | Renames the item. Only the name is selected at first, not the extension. |
+| **Move to Trash…** (**Delete (to Recycle Bin)…** on Windows; **Delete** key) / **Delete Permanently…** (**Shift+Delete**) | Asks first, saying how much is involved. |
+| **Copy Path** (**Ctrl+Shift+C**) / **Copy Name** | Puts the full paths, or just the names, on the clipboard, one per line. On a mapped network drive, **Copy Network (UNC) Path** gives the `\\server\share\…` form. |
+| **Add to Favourites** | Bookmarks the folder in [Favourites](#favourites). |
 | **Show in Explorer** (Finder, or the system file manager) | Opens the system's file manager with the item selected. |
 | **Open in Terminal…** (Command Prompt or PowerShell on Windows) | Opens a terminal in the folder. |
-| **Pin to Sidebar** / **Unpin from Sidebar** | Adds the folder to **Pinned**, or takes it off. |
+| **Properties** (**Alt+Enter**) | Size, number of files and dates. |
 | **Analyse This Folder** | Scans the folder and shows it in the [analysis dock](#the-analysis-dock). You stay in Files. |
+
+Right-click empty space in the list for **New**, **Paste**, **Refresh**, Open in New Tab, Add to
+Favourites and Analyse.
+
+## New folders and files
+
+**✚ New** on the toolbar (or on the right-click menu of empty space) makes something new in the
+folder you're in, then opens the Rename box so you can name it straight away. It never replaces
+a file that's already there: the new one is called `New folder 2`, `README 2.md` and so on.
+
+| Item | What you get |
+|---|---|
+| **Folder** (**Ctrl+Shift+N**) | An empty folder. |
+| **Text Document**, **Markdown**, **JSON**, **XML**, **CSV** | A small valid file of that kind, for example `{}` for JSON, never an empty file pretending to be something it isn't. Hover an item to see what it will hold. |
+| **Script** | A shell or Python script on a Mac or Linux (marked as runnable), or PowerShell, batch or Python on Windows. |
+| Your templates | Anything you put in the templates folder, file or folder, copied as it is. |
+| **Open Templates Folder** | Opens the folder in a new tab, making it first. |
+
+Put any file or folder in the templates folder (a `.blend` scene, a project folder with its
+subfolders, a document with your letterhead) and it appears in the New menu. The folder is:
+
+- Windows: `%APPDATA%\dirmap\Templates`;
+- macOS: `~/Library/Application Support/dirmap/Templates`;
+- Linux: `~/.local/share/dirmap/Templates`, plus your desktop's own Templates folder.
+
+dirmap doesn't make Word, Excel, Photoshop or other formats it can't write correctly. Save one
+from the app into the templates folder and New copies it.
+
+## Quick Look and the preview pane
+
+Select a file and press **Space** for Quick Look: a large preview over the window. **↑**/**↓**
+move to the next file while it stays open, and **Space** or **Escape** closes it. **Open** opens
+the file in its usual app.
+
+**👁** on the toolbar, or **Alt+P**, shows the preview pane at the right of the window. It shows
+the selected item with its details: kind, size, dates and, for images, the dimensions and pixel
+format. Drag its edge to make it wider.
+
+| Kind | What you see |
+|---|---|
+| Images | PNG, JPEG, GIF, WebP, TIFF, BMP, TGA, ICO, QOI, PNM, and HDR and OpenEXR (shown with a standard display curve). Transparent areas show a checkerboard. |
+| Text | Text and source files, the first 256 KB. |
+| Other files | The file's details, and **Open**. |
+
+On an image, scroll to zoom towards the pointer, drag to pan, and double-click to switch between
+fitting the image and showing it at 1:1.
+
+Previews are made in the background, so a big file never freezes the window. To keep memory in
+check, dirmap shrinks large images to 2048 pixels across for display, and doesn't preview images
+over 256 MB.
 
 ## The analysis dock
 
@@ -210,9 +328,19 @@ on the dock's toolbar switches to colouring by age, or by change since a snapsho
 
 ## Copying, moving and deleting
 
-Rename, copy, move and delete aren't in the Files workspace yet. They're planned for the next
-stage, with a progress window, conflict handling and Undo. Until then, use the
-[file manager in Storage Analysis](file-browser.md), which has all of them.
+- **Copy and paste.** Select items, press **Ctrl+C** (or **Ctrl+X** to move them), open another
+  folder and press **Ctrl+V**. The clipboard is shared with Storage Analysis.
+- **Drag and drop.** Drag items onto a folder in the list, a tab, a part of the path, the other
+  pane, a drive or a favourite. Hold the items over a tab for a moment to switch to it. Within the
+  same drive a drop moves the items, and onto another drive it copies them, as in Explorer and
+  Finder. Hold **Ctrl** or **Alt** while you let go to copy, or **Shift** to move (on a Mac,
+  **⌥** copies and **⌘** moves). The label by the pointer always says which will happen, and a
+  folder can't be dropped inside itself.
+- **Rename** with **F2**, and **Delete** to send items to the Recycle Bin or Trash. dirmap asks
+  first.
+
+Copies and moves run in the background with a progress bar in the status bar, and the open
+folders are read again when they finish. One file operation runs at a time.
 
 ## Slow and unreachable drives
 
@@ -225,6 +353,32 @@ If a folder can't be opened, the list says why, for example because it doesn't e
 don't have permission, and offers **Go up**.
 
 ![The Computer view, with every drive and its space](../images/file-manager-computer.png)
+
+## Network & Remote
+
+The **Network & Remote** group in the sidebar lists:
+
+- **network drives** that are connected, with how full they are;
+- **connections the system remembers**: mapped drives on Windows, including ones that are offline
+  (marked *offline*; click to reconnect), and network mounts made by your desktop on Linux;
+- **saved servers** you added.
+
+Right-click a network drive for **Disconnect**, and a saved server for **Remove from This List**.
+
+**Connect to Server…** opens a box for a share address:
+
+- **Windows:** type `\\server\share` (or `smb://server/share`), choose a drive letter or leave it
+  empty for the last free one, and tick **Reconnect when I sign in** to keep it mapped.
+- **macOS:** type `smb://server/share`. It's mounted in `/Volumes`.
+- **Linux:** type `smb://server/share`. It's mounted through GVFS, as your desktop's file
+  manager does.
+
+If the share needs a password, the system asks for it and can keep it in Credential Manager, the
+Keychain or your keyring. dirmap never sees or stores passwords. Connecting happens in the
+background, so a server that doesn't answer shows an error instead of freezing the window.
+
+SFTP, FTP and WebDAV connections aren't built in yet. You can mount them with your system and
+open the folder in dirmap.
 
 ## Related topics
 

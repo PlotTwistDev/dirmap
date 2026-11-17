@@ -35,14 +35,26 @@ After you've clicked in the list or the sidebar, unless the cursor is in a text 
 | **Ctrl+A** | **⌘A** | Select everything shown. |
 | **Escape** | **Escape** | Select nothing. |
 | **Type a name** | **Type a name** | Jump to the first item whose name starts with what you type. |
-| **Ctrl+L** | **⌘L** | Type a path (works while typing elsewhere too). |
+| **Ctrl+L, Alt+D or F4** | **⌘L** | Type a path (works while typing elsewhere too). Start with > for commands or @ for favourites. |
 | **Ctrl+T** | **⌘T** | New tab, showing the same folder. |
 | **Ctrl+W** | **⌘W** | Close the tab. |
 | **Ctrl+Shift+T** | **⌘⇧T** | Reopen the tab you closed last. |
 | **Ctrl+Tab / Ctrl+Shift+Tab** | **⌃Tab / ⌃⇧Tab** | Next or previous tab. |
 | **F5 or Ctrl+R** | **F5 or ⌘R** | Read the folder again. |
 | **Ctrl+Shift+.** | **⌘⇧.** | Show or hide hidden files and folders. |
-| **Ctrl+Shift+C** | **⌘⇧C** | Copy the full paths of the selected items. |
+| **Ctrl+C / Ctrl+X / Ctrl+V** | **⌘C / ⌘X / ⌘V** | Copy or cut the selected items, then paste them into the folder you're in. |
+| **Ctrl+Shift+C** | **⌘⇧C** | Copy the full paths of the selected items as text. |
+| **F2** | **F2** | Rename the selected item. |
+| **Delete** | **Delete or ⌘Backspace** | Move the selected items to the Recycle Bin or Trash (it asks first). |
+| **Shift+Delete** | **⇧Delete** | Delete the selected items for good (it asks first). |
+| **Ctrl+Shift+N** | **⌘⇧N** | New folder here, with its name ready to type. |
+| **Alt+Enter** | **⌥Enter** | Properties: size, contents and dates. |
+| **Space** | **Space** | Quick Look: a large preview of the selected file. ↑ / ↓ move to the next file while it's open; Space or Escape closes it. |
+| **Alt+P** | **⌥P** | Show or hide the preview pane (works while typing elsewhere too). |
+| **Ctrl+\** | **⌘\** | One pane or two side by side (works while typing elsewhere too). |
+| **Tab** | **Tab** | Two panes: work in the other pane. |
+| **Shift+F5 / Shift+F6** | **⇧F5 / ⇧F6** | Two panes: copy or move the selected items to the other pane's folder. |
+| **Ctrl+U** | **⌘U** | Two panes: swap them. |
 | **Ctrl+J** | **⌘J** | Show or hide the analysis dock (works while typing elsewhere too). |
 
 ### Treemap
@@ -117,6 +129,17 @@ While typing in them.
 | Input | Action |
 |---|---|
 | **Escape** | Cancel a Delete or Empty Folder confirmation. |
+
+### Address bar
+
+While typing a path in the Files workspace.
+
+| Input | Action |
+|---|---|
+| **↑ / ↓** | Move through the suggestions. |
+| **Tab** | Complete the name: the chosen suggestion, or as much as the matching folders share. |
+| **Enter** | Go there, or run the chosen command. |
+| **Escape** | Stop typing and show the path again. |
 
 ### Help window
 

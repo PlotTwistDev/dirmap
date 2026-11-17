@@ -1,0 +1,545 @@
+//! Previews: Quick Look (Space) and the preview pane (Alt+P) show the item under the cursor.
+//!
+//! Each format has a provider: images (PNG, JPEG, GIF, WebP, TIFF, BMP, TGA, EXR, HDR…),
+//! text and source code, and a fallback of facts. Files are read on a worker thread with hard
+//! limits, so a huge or malformed file can't freeze or exhaust dirmap: images over 256 MB
+//! aren't decoded, decoders are capped at 512 MB and 16k×16k, text reads stop at 256 KB, and
+//! what's shown is scaled to at most 2048 px.
+
+use super::*;
+use eframe::egui::Vec2;
+use crate::fsys::listing::Entry;
+use std::collections::VecDeque;
+use std::io::Read;
+use std::path::Path;
+
+const IMAGE_MAX_FILE: u64 = 256 << 20;
+const TEXT_MAX: usize = 256 << 10;
+const SHOW_MAX: u32 = 2048;
+const CACHE: usize = 8;
+
+/// What a file decoded to.
+pub(super) enum Content {
+    Image {
+        pixels: Option<egui::ColorImage>,
+        tex: Option<egui::TextureHandle>,
+        /// Full size, and a line about the pixels ("RGBA, 16 bits per channel").
+        size: [u32; 2],
+        info: String,
+    },
+    Text {
+        text: String,
+        truncated: bool,
+    },
+    Binary,
+    /// Nothing to show beyond the facts.
+    None,
+    Error(String),
+}
+
+/// What Quick Look and the preview pane are showing.
+#[derive(Default)]
+pub(super) struct Look {
+    /// Quick Look is open.
+    pub open: bool,
+    /// Recently decoded files: (path, modified, content).
+    cache: VecDeque<(PathBuf, i64, Content)>,
+    /// Being read: (path, modified, result).
+    pending: Option<(PathBuf, i64, mpsc::Receiver<Content>)>,
+    /// Image view: None fits the window; Some(scale) is 1.0 for actual pixels.
+    pub zoom: Option<f32>,
+    pub pan: Vec2,
+    /// The file the zoom and pan are for.
+    view_of: Option<PathBuf>,
+}
+
+/// The kind of preview a file gets, from its extension.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum Kind {
+    Image,
+    /// Linear-light images, shown through an sRGB display transform.
+    LinearImage,
+    Text,
+    Other,
+}
+
+pub(super) fn kind_of(name: &str) -> Kind {
+    let ext = crate::scan::ext_of(name).to_ascii_lowercase();
+    match ext.as_str() {
+        "png" | "jpg" | "jpeg" | "jpe" | "gif" | "webp" | "tif" | "tiff" | "bmp" | "tga" | "ico" | "qoi" | "pbm" | "pgm" | "ppm" | "pnm" => Kind::Image,
+        "exr" | "hdr" => Kind::LinearImage,
+        "txt" | "md" | "markdown" | "rst" | "log" | "csv" | "tsv" | "json" | "jsonl" | "xml" | "yaml" | "yml" | "toml" | "ini" | "cfg" | "conf" | "rs" | "py" | "js"
+        | "mjs" | "ts" | "tsx" | "jsx" | "c" | "h" | "cpp" | "hpp" | "cc" | "cs" | "java" | "kt" | "go" | "rb" | "php" | "swift" | "m" | "mm" | "sh" | "bash" | "zsh"
+        | "fish" | "ps1" | "psm1" | "bat" | "cmd" | "lua" | "sql" | "html" | "htm" | "css" | "scss" | "less" | "vue" | "svelte" | "glsl" | "hlsl" | "wgsl" | "osl"
+        | "vex" | "mel" | "nk" | "usda" | "obj" | "mtl" | "gitignore" | "dockerfile" | "makefile" | "cmake" | "gradle" | "properties" | "env" | "srt" | "vtt"
+        | "tex" | "bib" | "r" | "jl" | "dart" | "zig" | "nim" | "ex" | "exs" | "erl" | "hs" | "ml" | "clj" | "scala" | "pl" | "pm" | "tcl" | "diff" | "patch"
+        | "lock" | "svg" => Kind::Text,
+        "" if matches!(name.to_ascii_lowercase().as_str(), "readme" | "license" | "makefile" | "dockerfile" | "changelog" | "authors") => Kind::Text,
+        _ => Kind::Other,
+    }
+}
+
+/// Read a file for its preview. Runs on a worker thread.
+fn load(path: &Path, kind: Kind, size: u64) -> Content {
+    match kind {
+        Kind::Image | Kind::LinearImage => load_image(path, kind == Kind::LinearImage, size),
+        Kind::Text => load_text(path),
+        Kind::Other => {
+            // Unknown extension: show it as text if it looks like text.
+            match load_text(path) {
+                Content::Text { text, truncated } if size <= TEXT_MAX as u64 * 4 => Content::Text { text, truncated },
+                Content::Error(e) => Content::Error(e),
+                _ => Content::None,
+            }
+        }
+    }
+}
+
+fn load_image(path: &Path, linear: bool, size: u64) -> Content {
+    if size > IMAGE_MAX_FILE {
+        return Content::Error(format!("Too big to preview ({}).", crate::scan::human(size)));
+    }
+    let reader = match image::ImageReader::open(path).and_then(|r| r.with_guessed_format()) {
+        Ok(r) => r,
+        Err(e) => return Content::Error(format!("Couldn't open it: {e}")),
+    };
+    let mut reader = reader;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(512 << 20);
+    reader.limits(limits);
+    let img = match reader.decode() {
+        Ok(i) => i,
+        Err(image::ImageError::Limits(_)) => return Content::Error("Too large to preview safely.".into()),
+        Err(e) => return Content::Error(format!("Couldn't read the image: {e}")),
+    };
+    let (w, h) = (img.width(), img.height());
+    let info = describe(img.color());
+    let small = if w > SHOW_MAX || h > SHOW_MAX { img.thumbnail(SHOW_MAX, SHOW_MAX) } else { img };
+    let pixels = if linear || matches!(small.color(), image::ColorType::Rgb32F | image::ColorType::Rgba32F) {
+        // Scene-linear floats: through the sRGB transfer curve for display.
+        let f = small.to_rgba32f();
+        let px: Vec<Color32> = f
+            .pixels()
+            .map(|p| {
+                let c = |v: f32| (srgb(v) * 255.0).round().clamp(0.0, 255.0) as u8;
+                Color32::from_rgba_unmultiplied(c(p[0]), c(p[1]), c(p[2]), (p[3].clamp(0.0, 1.0) * 255.0).round() as u8)
+            })
+            .collect();
+        egui::ColorImage::new([f.width() as usize, f.height() as usize], px)
+    } else {
+        let rgba = small.to_rgba8();
+        egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw())
+    };
+    let info = if linear { format!("{info} · linear, shown as sRGB") } else { info };
+    Content::Image { pixels: Some(pixels), tex: None, size: [w, h], info }
+}
+
+/// Linear light to the sRGB display curve.
+fn srgb(v: f32) -> f32 {
+    let v = v.max(0.0);
+    if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.min(1.0).powf(1.0 / 2.4) - 0.055 }
+}
+
+fn describe(c: image::ColorType) -> String {
+    use image::ColorType as C;
+    let (ch, bits) = match c {
+        C::L8 => ("Grey", "8-bit"),
+        C::La8 => ("Grey + alpha", "8-bit"),
+        C::Rgb8 => ("RGB", "8-bit"),
+        C::Rgba8 => ("RGBA", "8-bit"),
+        C::L16 => ("Grey", "16-bit"),
+        C::La16 => ("Grey + alpha", "16-bit"),
+        C::Rgb16 => ("RGB", "16-bit"),
+        C::Rgba16 => ("RGBA", "16-bit"),
+        C::Rgb32F => ("RGB", "32-bit float"),
+        C::Rgba32F => ("RGBA", "32-bit float"),
+        _ => ("Colour", "other"),
+    };
+    format!("{ch}, {bits}")
+}
+
+fn load_text(path: &Path) -> Content {
+    let mut f = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => return Content::Error(crate::fsys::listing::describe(&e)),
+    };
+    let mut buf = Vec::with_capacity(16 << 10);
+    if let Err(e) = (&mut f).take(TEXT_MAX as u64 + 1).read_to_end(&mut buf) {
+        return Content::Error(crate::fsys::listing::describe(&e));
+    }
+    let truncated = buf.len() > TEXT_MAX;
+    buf.truncate(TEXT_MAX);
+    if is_binary(&buf) {
+        return Content::Binary;
+    }
+    let mut text = String::from_utf8_lossy(&buf).into_owned();
+    if text.starts_with('\u{feff}') {
+        text.remove(0);
+    }
+    Content::Text { text, truncated }
+}
+
+/// NUL bytes near the start, or UTF-16 without a BOM, mean it isn't text we can show.
+pub(super) fn is_binary(b: &[u8]) -> bool {
+    b.iter().take(8192).any(|&c| c == 0)
+}
+
+impl Look {
+    /// The content for a file, starting to read it if needed. None while it's being read.
+    fn get(&mut self, ctx: &egui::Context, path: &Path, e: &Entry) -> Option<&mut Content> {
+        if let Some((p, m, rx)) = &self.pending {
+            match rx.try_recv() {
+                Ok(c) => {
+                    let (p, m) = (p.clone(), *m);
+                    self.pending = None;
+                    self.cache.push_front((p, m, c));
+                    self.cache.truncate(CACHE);
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(40)),
+                Err(mpsc::TryRecvError::Disconnected) => self.pending = None,
+            }
+        }
+        let at = self.cache.iter().position(|(p, m, _)| p == path && *m == e.modified);
+        match at {
+            Some(i) => {
+                let item = self.cache.remove(i).unwrap();
+                self.cache.push_front(item);
+                Some(&mut self.cache[0].2)
+            }
+            None => {
+                if self.pending.as_ref().is_none_or(|(p, m, _)| p != path || *m != e.modified) {
+                    let (tx, rx) = mpsc::channel();
+                    let (p, kind, size) = (path.to_path_buf(), kind_of(&e.name), e.size);
+                    std::thread::Builder::new()
+                        .name("dirmap-preview".into())
+                        .spawn(move || {
+                            // A decoder bug shows as an error here, not a crash of the window.
+                            let c = std::panic::catch_unwind(|| load(&p, kind, size)).unwrap_or_else(|_| Content::Error("This file couldn't be read.".into()));
+                            let _ = tx.send(c);
+                        })
+                        .ok();
+                    self.pending = Some((path.to_path_buf(), e.modified, rx));
+                    ctx.request_repaint_after(Duration::from_millis(40));
+                }
+                None
+            }
+        }
+    }
+}
+
+impl App {
+    /// The item a preview shows: the cursor's item in the focused pane.
+    fn look_target(&self) -> Option<(PathBuf, Entry)> {
+        let e = self.files.cursor_entry()?;
+        Some((self.files.here().dir()?.join(&*e.name), e))
+    }
+
+    /// Quick Look: a floating preview of the item under the cursor. Arrow keys move through the
+    /// list behind it; Space or Escape close it.
+    pub(super) fn quick_look(&mut self, ctx: &egui::Context) {
+        if !self.files.look.open {
+            return;
+        }
+        let Some((path, e)) = self.look_target() else {
+            self.files.look.open = false;
+            return;
+        };
+        let close = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) || i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+        if close {
+            self.files.look.open = false;
+            return;
+        }
+        let screen = ctx.content_rect();
+        let size = vec2((screen.width() * 0.72).max(420.0), (screen.height() * 0.78).max(320.0));
+        let mut open = true;
+        egui::Window::new(egui::RichText::new(format!("{}", e.name)).strong())
+            .id(egui::Id::new("quick-look"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_size(size)
+            .pivot(Align2::CENTER_CENTER)
+            .default_pos(screen.center())
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.weak(facts_line(&e));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Open").clicked() {
+                            let p = path.clone();
+                            self.files.spawn(move || crate::actions::open(&p));
+                        }
+                        ui.weak(if cfg!(target_os = "macos") { "⏶⏷ next · Space closes" } else { "⏶⏷ next · Space or Esc closes" });
+                    });
+                });
+                ui.separator();
+                let avail = ui.available_size();
+                self.preview_body(ui, &path, &e, avail);
+            });
+        if !open {
+            self.files.look.open = false;
+        }
+    }
+
+    /// The preview pane at the right of the list.
+    pub(super) fn preview_pane(&mut self, ui: &mut egui::Ui) {
+        let pal = style::pal(ui);
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            style::section_title(ui, "Preview");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if style::icon_button(ui, true, "✖", "Close the preview pane (Alt+P)").clicked() {
+                    self.files.prefs.preview = false;
+                }
+            });
+        });
+        let Some((path, e)) = self.look_target() else {
+            ui.add_space(30.0);
+            ui.vertical_centered(|ui| ui.label(egui::RichText::new("Select a file to preview it").color(pal.weak)));
+            return;
+        };
+        ui.add_space(4.0);
+        let w = ui.available_width();
+        let h = (ui.available_height() * 0.55).clamp(120.0, w * 1.2);
+        if e.is_dir {
+            let (r, _) = ui.allocate_exact_size(vec2(w, 96.0), Sense::hover());
+            self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(64.0, 64.0)), true, "", Color32::GRAY);
+        } else {
+            self.preview_body(ui, &path, &e, vec2(w, h));
+        }
+        ui.add_space(8.0);
+        ui.add(egui::Label::new(egui::RichText::new(&*e.name).strong()).wrap());
+        ui.add_space(4.0);
+        egui::Grid::new("preview-facts").num_columns(2).spacing([10.0, 3.0]).show(ui, |ui| {
+            ui.weak("Kind");
+            ui.label(browser::kind_for(&e.name, e.is_dir));
+            ui.end_row();
+            if !e.is_dir {
+                ui.weak("Size");
+                ui.label(format!("{} ({} bytes)", crate::scan::human(e.size), group(e.size)));
+                ui.end_row();
+            } else if let Some(&(b, f)) = self.files.cur().sizes.as_ref().and_then(|s| s.1.get(&e.name)) {
+                ui.weak("Size");
+                ui.label(format!("{} in {} files (analysed)", crate::scan::human(b), group(f)));
+                ui.end_row();
+            }
+            if e.modified > 0 {
+                ui.weak("Modified");
+                ui.label(fmt_time(e.modified));
+                ui.end_row();
+            }
+            if let Some(Content::Image { size, info, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+                ui.weak("Dimensions");
+                ui.label(format!("{} × {}", size[0], size[1]));
+                ui.end_row();
+                ui.weak("Pixels");
+                ui.label(info);
+                ui.end_row();
+            }
+            ui.weak("Where");
+            ui.add(egui::Label::new(path.parent().map(|p| p.display().to_string()).unwrap_or_default()).wrap());
+            ui.end_row();
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if ui.button("Open").clicked() {
+                let p = path.clone();
+                self.files.spawn(move || crate::actions::open(&p));
+            }
+            if !e.is_dir && ui.button("Quick Look").on_hover_text("Space").clicked() {
+                self.files.look.open = true;
+            }
+        });
+    }
+
+    /// The preview itself: an image, text, or a large icon.
+    fn preview_body(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, size: Vec2) {
+        let pal = style::pal(ui);
+        if e.is_dir {
+            let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+            self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), true, "", Color32::GRAY);
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        let tint = self.colors.get(e.ext()).copied().unwrap_or(Color32::GRAY);
+        if self.files.look.view_of.as_deref() != Some(path) {
+            self.files.look.view_of = Some(path.to_path_buf());
+            self.files.look.zoom = None;
+            self.files.look.pan = Vec2::ZERO;
+        }
+        let (zoom, pan) = (self.files.look.zoom, self.files.look.pan);
+        let Some(c) = self.files.look.get(&ctx, path, e) else {
+            let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+            ui.put(Rect::from_center_size(r.center(), vec2(24.0, 24.0)), egui::Spinner::new());
+            return;
+        };
+        let mut new_view = None;
+        match c {
+            Content::Image { pixels, tex, size: full, .. } => {
+                if let Some(px) = pixels.take() {
+                    *tex = Some(ctx.load_texture(format!("look:{}", path.display()), px, egui::TextureOptions::LINEAR));
+                }
+                let Some(tex) = tex else { return };
+                let (r, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
+                let ts = tex.size_vec2();
+                // Scale against the full image, so 1:1 means actual pixels even when shown smaller.
+                let fit = (r.width() / full[0] as f32).min(r.height() / full[1] as f32).min(1.0);
+                let scale = zoom.unwrap_or(fit);
+                let shown = vec2(full[0] as f32, full[1] as f32) * scale;
+                let img_rect = Rect::from_center_size(r.center() + pan, shown);
+                let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
+                checkerboard(&p, img_rect.intersect(r), pal);
+                p.image(tex.id(), img_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                let _ = ts;
+                // Wheel zooms about the pointer, drag pans, double-click toggles fit / 1:1.
+                let mut z = scale;
+                let mut pn = pan;
+                if resp.hovered() {
+                    let wheel = ui.input(|i| i.smooth_scroll_delta.y);
+                    if wheel != 0.0 {
+                        let f = (wheel / 200.0).exp();
+                        let nz = (z * f).clamp(0.02, 32.0);
+                        if let Some(m) = ui.ctx().pointer_hover_pos() {
+                            let rel = m - (r.center() + pn);
+                            pn += rel - rel * (nz / z);
+                        }
+                        z = nz;
+                        new_view = Some((Some(z), pn));
+                    }
+                }
+                if resp.dragged() {
+                    pn += resp.drag_delta();
+                    new_view = Some((Some(z), pn));
+                }
+                if resp.double_clicked() {
+                    new_view = Some(if zoom.is_some() { (None, Vec2::ZERO) } else { (Some(1.0), Vec2::ZERO) });
+                }
+                let label = format!("{} × {}  ·  {:.0}%", full[0], full[1], scale * 100.0);
+                let g = ui.painter().layout_no_wrap(label, FontId::proportional(11.0), Color32::WHITE);
+                let lr = Rect::from_min_size(r.left_bottom() + vec2(6.0, -g.size().y - 10.0), g.size() + vec2(10.0, 4.0));
+                ui.painter().rect_filled(lr, 3.0, Color32::from_black_alpha(150));
+                ui.painter().galley(lr.min + vec2(5.0, 2.0), g, Color32::WHITE);
+                resp.on_hover_text("Scroll to zoom, drag to move, double-click for actual pixels or fit");
+            }
+            Content::Text { text, truncated } => {
+                let truncated = *truncated;
+                let text = text.clone();
+                egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+                    ui.set_min_size(size - vec2(16.0, 16.0));
+                    ui.set_max_size(size - vec2(16.0, 16.0));
+                    egui::ScrollArea::both().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
+                        ui.add(egui::Label::new(egui::RichText::new(&text).monospace().size(12.0)).extend());
+                        if truncated {
+                            ui.weak("… (only the first 256 KB is shown)");
+                        }
+                    });
+                });
+            }
+            Content::Binary | Content::None | Content::Error(_) => {
+                let note = match c {
+                    Content::Error(e) => e.clone(),
+                    Content::Binary => "No preview for this kind of file".into(),
+                    _ => String::new(),
+                };
+                let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+                self.icons.paint(ui, Rect::from_center_size(r.center() - vec2(0.0, 14.0), vec2(80.0, 80.0)), false, e.ext(), tint);
+                ui.painter().text(r.center() + vec2(0.0, 44.0), Align2::CENTER_CENTER, note, FontId::proportional(12.0), pal.weak);
+            }
+        }
+        if let Some((z, p)) = new_view {
+            self.files.look.zoom = z;
+            self.files.look.pan = p;
+        }
+    }
+}
+
+/// "12.4 MB · PNG image · 3 Nov 2026"
+fn facts_line(e: &Entry) -> String {
+    let mut s = browser::kind_for(&e.name, e.is_dir);
+    if !e.is_dir {
+        s = format!("{} · {s}", crate::scan::human(e.size));
+    }
+    if e.modified > 0 {
+        s.push_str(&format!(" · {}", fmt_time(e.modified)));
+    }
+    s
+}
+
+/// Grey squares behind an image, so transparency shows.
+fn checkerboard(p: &egui::Painter, r: Rect, pal: style::Pal) {
+    if !r.is_positive() {
+        return;
+    }
+    let a = style::blend(pal.paper, pal.weak, 0.12);
+    let b = style::blend(pal.paper, pal.weak, 0.26);
+    p.rect_filled(r, 0.0, a);
+    let s = 10.0;
+    let (nx, ny) = ((r.width() / s).ceil() as i32, (r.height() / s).ceil() as i32);
+    if nx * ny > 40_000 {
+        return;
+    }
+    for y in 0..ny {
+        for x in 0..nx {
+            if (x + y) % 2 == 0 {
+                let c = Rect::from_min_size(r.min + vec2(x as f32 * s, y as f32 * s), vec2(s, s)).intersect(r);
+                p.rect_filled(c, 0.0, b);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kinds_by_extension() {
+        assert_eq!(kind_of("a.PNG"), Kind::Image);
+        assert_eq!(kind_of("beauty.0001.exr"), Kind::LinearImage);
+        assert_eq!(kind_of("main.rs"), Kind::Text);
+        assert_eq!(kind_of("README"), Kind::Text);
+        assert_eq!(kind_of("movie.mov"), Kind::Other);
+    }
+
+    #[test]
+    fn previews_read_safely() {
+        let d = std::env::temp_dir().join(format!("dirmap-look-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        // Text, cut at the limit.
+        let t = d.join("big.txt");
+        std::fs::write(&t, "x".repeat(TEXT_MAX + 10)).unwrap();
+        match load(&t, Kind::Text, 0) {
+            Content::Text { text, truncated } => assert!(truncated && text.len() == TEXT_MAX),
+            _ => panic!("text"),
+        }
+        // Binary is recognised.
+        let b = d.join("blob.dat");
+        std::fs::write(&b, [1u8, 0, 2, 3]).unwrap();
+        assert!(matches!(load(&b, Kind::Text, 4), Content::Binary));
+        // A real PNG decodes with its size; a broken one is an error, not a panic.
+        let png = d.join("p.png");
+        image::RgbaImage::from_pixel(3, 2, image::Rgba([255, 0, 0, 128])).save(&png).unwrap();
+        match load(&png, Kind::Image, 100) {
+            Content::Image { size, info, pixels, .. } => {
+                assert_eq!(size, [3, 2]);
+                assert!(info.starts_with("RGBA"));
+                assert_eq!(pixels.unwrap().size, [3, 2]);
+            }
+            _ => panic!("png"),
+        }
+        let bad = d.join("bad.png");
+        std::fs::write(&bad, b"\x89PNG\r\n\x1a\nnonsense").unwrap();
+        assert!(matches!(load(&bad, Kind::Image, 20), Content::Error(_)));
+        assert!(matches!(load(&png, Kind::Image, IMAGE_MAX_FILE + 1), Content::Error(_)));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn display_curve() {
+        assert_eq!(srgb(0.0), 0.0);
+        assert!((srgb(1.0) - 1.0).abs() < 1e-4);
+        assert!((srgb(0.18) - 0.46).abs() < 0.01);
+        assert_eq!(srgb(-1.0), 0.0);
+    }
+}

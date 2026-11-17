@@ -16,10 +16,15 @@ A trackpad works too: two-finger scrolling acts as the wheel, and pinching zooms
 | **Shift+click** | Select everything from the last item clicked to this one. |
 | **Double-click** | Open a folder, or a file with its usual app. |
 | **Middle-click a folder, place or tab** | Open the folder or place in a new tab; close the tab. |
-| **Right-click** | The item's menu: Open, Open in New Tab, Copy Path, Show in Explorer or Finder, terminal, Pin to Sidebar, Analyse This Folder. On empty space: Refresh, Open in New Tab, Pin, Analyse. |
+| **Right-click** | The item's menu: Open, Copy, Cut, Paste, Rename, Move to Trash, Copy Path, Add to Favourites, Show in Explorer or Finder, Properties, Analyse This Folder and, with two panes, Copy or Move to the other pane. On empty space: New, Paste, Refresh and more. |
+| **Drag onto a folder, a tab, a folder in the path, the other pane or a sidebar place** | Move the items there when it's on the same drive, copy them when it's another drive. Hold Ctrl or Alt to copy (⌥ on a Mac), Shift to move (⌘ on a Mac). The label by the pointer says which. Hold over a tab to switch to it. |
+| **Drag a folder onto Favourites** | Bookmark it there; nothing is moved. A line shows where it will go. Drop onto the middle of a favourite to move or copy items into that folder instead. |
+| **Drag a favourite** | Reorder it, or move it to another group. Right-click a favourite to rename or remove it; right-click a group's title for New Group, Rename and Move. |
+| **Drag the line between two panes** | Share the room between them. Double-click to make them even. |
+| **Wheel, drag or double-click on a preview** | Zoom, pan, and switch between fitting the image and showing it 1:1. |
 | **Click a column heading** | Sort by that column; click again to reverse. Folders always come first. |
-| **Click a folder in the path** | Go there. Click the empty part of the path to type one. |
-| **Click a place or drive in the sidebar** | Go there. Right-click for Open in New Tab, Pin or Unpin, Copy Path and Analyse. |
+| **Click a folder in the path** | Go there. Click the empty part of the path to type one. Click the arrow after a folder for the folders inside it. |
+| **Click a place or drive in the sidebar** | Go there. Right-click for Open in New Tab, Open in Other Pane, Add to Favourites, Copy Path and Analyse. |
 | **Back / forward mouse buttons** | Back and Forward. |
 | **Drag the sidebar's right edge** | Make the sidebar wider or narrower. |
 | **Drag a tab** | Move it along the tab strip. Right-click a tab for New Tab, Close Tab and Close Other Tabs. |
@@ -72,7 +77,7 @@ The treemap or sunburst under the list in the Files workspace. Wheel, drag and t
 | **Double-click** | Open a folder (the map follows), or a file with its usual app. |
 | **Middle-click a folder** | Open it in a new tab. |
 | **Right-click** | Select the item and open the right-click menu. On empty space: New Folder, Paste, Open in New Tab. |
-| **Drag onto a folder, a folder in the path, a tab or empty space** | Move the selected items there. Hold Alt (⌥ on a Mac) when you let go to copy them instead. |
+| **Drag onto a folder, a folder in the path, a tab or empty space** | Move the selected items there when it's on the same drive, copy them when it's another drive. Hold Ctrl or Alt to copy (⌥ on a Mac), Shift to move (⌘ on a Mac). |
 | **Click a column heading (List)** | Sort by that column; click again to reverse. |
 | **Click a folder in the path** | Go to that folder. |
 | **Click a tab, or middle-click it** | Switch to that tab, or close it. |

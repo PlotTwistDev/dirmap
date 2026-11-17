@@ -32,6 +32,12 @@ mod custom;
 mod browser;
 mod files;
 mod dock;
+mod dnd;
+mod favs;
+mod fileops;
+mod addr;
+mod netui;
+mod preview;
 pub(crate) mod style;
 use files::Workspace;
 

@@ -415,6 +415,34 @@ pub fn new_folder(dir: &Path) -> Result<PathBuf, String> {
     Ok(p)
 }
 
+/// Make a new file in `dir` called `name` (or "name 2.ext"… if taken) holding `contents`.
+/// `executable` sets the execute bits on Unix (scripts). Never replaces anything. Returns its path.
+pub fn new_file(dir: &Path, name: &str, contents: &[u8], executable: bool) -> Result<PathBuf, String> {
+    use std::io::Write;
+    let p = free_name(dir, name, "");
+    let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&p).map_err(|e| format!("Couldn't make {name}: {e}"))?;
+    f.write_all(contents).map_err(|e| format!("Couldn't write {name}: {e}"))?;
+    #[cfg(unix)]
+    if executable {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = f.metadata().map(|m| m.permissions().mode()).unwrap_or(0o644);
+        let _ = fs::set_permissions(&p, fs::Permissions::from_mode(mode | ((mode & 0o444) >> 2)));
+    }
+    #[cfg(not(unix))]
+    let _ = executable;
+    Ok(p)
+}
+
+/// Copy a template file into `dir` under `name` (numbered if taken). Returns its path.
+pub fn new_from_template(dir: &Path, template: &Path, name: &str) -> Result<PathBuf, String> {
+    let p = free_name(dir, name, "");
+    copy_all(template, &p).map_err(|e| {
+        let _ = delete(&p);
+        format!("Couldn't make {name}: {e}")
+    })?;
+    Ok(p)
+}
+
 fn is_cross_device(e: &io::Error) -> bool {
     // EXDEV on Unix, ERROR_NOT_SAME_DEVICE on Windows.
     e.kind() == io::ErrorKind::CrossesDevices || e.raw_os_error() == Some(if cfg!(windows) { 17 } else { 18 })
@@ -545,6 +573,25 @@ mod tests {
         let sub = copy_into(&f1, &f2).unwrap();
         assert!(sub.join("in.txt").is_file());
         assert!(copy_into(&f1, &f1).is_err(), "into itself");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn new_files_never_replace() {
+        let d = tmp("newfile");
+        let a = new_file(&d, "notes.md", b"# Notes\n", false).unwrap();
+        let b = new_file(&d, "notes.md", b"x", false).unwrap();
+        assert_eq!(a.file_name().unwrap(), "notes.md");
+        assert_eq!(b.file_name().unwrap(), "notes 2.md");
+        assert_eq!(fs::read(&a).unwrap(), b"# Notes\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let s = new_file(&d, "run.sh", b"#!/bin/sh\n", true).unwrap();
+            assert_ne!(fs::metadata(&s).unwrap().permissions().mode() & 0o100, 0);
+        }
+        let t = new_from_template(&d, &a, "copy.md").unwrap();
+        assert_eq!(fs::read(&t).unwrap(), b"# Notes\n");
         let _ = fs::remove_dir_all(&d);
     }
 
