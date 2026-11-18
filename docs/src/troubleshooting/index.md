@@ -72,6 +72,8 @@ by default, which Explorer may hide. See [How sizes are calculated](../disk-usag
 - **Turn off effects** in **⚙ Settings > Treemap**: **Interactive lighting**, **Block depth
   effect** and **File names on tiles** all cost a little time per frame.
 - **Turn off Smooth zoom** if animations feel sluggish on a slow computer.
+- **Panels shake while you resize the window** (Windows): dirmap draws with OpenGL on Windows
+  because DirectX 12 and Vulkan do this. If you set `DIRMAP_RENDERER=wgpu`, remove it.
 - **Remote desktop and virtual machines** may have no GPU acceleration. dirmap falls back to
   OpenGL automatically; if the window is blank, garbled or very slow, start dirmap with the
   environment variable `DIRMAP_RENDERER=glow` set (see [Command line](../reference/command-line.md)).

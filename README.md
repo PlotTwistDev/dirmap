@@ -138,5 +138,5 @@ Flags: `--all-fs` descends into other mounted filesystems, `--top N` sets the CL
 `--save-snapshot FILE` (with `--cli`) saves the scan for comparing later, `--compare FILE` opens the GUI
 comparing against a saved snapshot.
 
-The GUI uses the GPU (wgpu) and falls back to OpenGL automatically. On macOS, scanning `/` covers the
+The GUI draws with OpenGL on Windows and wgpu elsewhere, and falls back to the other automatically. On macOS, scanning `/` covers the
 system and data volumes together (they are one disk in Finder) without counting anything twice.

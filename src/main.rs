@@ -86,7 +86,7 @@ fn main() -> eframe::Result {
         return Ok(());
     }
 
-    // Try the default GPU renderer first and fall back to OpenGL (old GPUs, VMs, remote desktops).
+    // Try one renderer and fall back to the other (old GPUs, VMs, remote desktops).
     let run = |renderer, path: Option<PathBuf>| {
         let native = eframe::NativeOptions {
             viewport: eframe::egui::ViewportBuilder::default()
@@ -100,9 +100,26 @@ fn main() -> eframe::Result {
         let compare = compare.clone();
         eframe::run_native("dirmap", native, Box::new(move |cc| Ok(Box::new(app::App::new(cc, path, all_fs, compare)))))
     };
-    // DIRMAP_RENDERER=glow forces OpenGL (for testing that path).
-    if std::env::var("DIRMAP_RENDERER").is_ok_and(|r| r.eq_ignore_ascii_case("glow")) {
-        return run(eframe::Renderer::Glow, path);
+    // On Windows, OpenGL comes first: with DirectX 12 and Vulkan the panels shake while the
+    // window edge is dragged (Rich, 18 Nov 2026). DIRMAP_RENDERER=glow or wgpu picks one.
+    let choice = std::env::var("DIRMAP_RENDERER").unwrap_or_default().to_ascii_lowercase();
+    let glow_first = match choice.as_str() {
+        "glow" | "opengl" => true,
+        "wgpu" => false,
+        _ => cfg!(windows),
+    };
+    if glow_first {
+        return match run(eframe::Renderer::Glow, path.clone()) {
+            Err(eframe::Error::Glutin(e)) if choice.is_empty() => {
+                eprintln!("OpenGL unavailable ({e}), trying wgpu");
+                run(eframe::Renderer::Wgpu, path)
+            }
+            Err(eframe::Error::NoGlutinConfigs(_, e)) if choice.is_empty() => {
+                eprintln!("OpenGL unavailable ({e}), trying wgpu");
+                run(eframe::Renderer::Wgpu, path)
+            }
+            r => r,
+        };
     }
     match run(eframe::Renderer::Wgpu, path.clone()) {
         Err(eframe::Error::Wgpu(e)) => {
@@ -147,7 +164,7 @@ fn report(root: &std::path::Path, opts: scan::Options, top: usize, save_snapshot
     }
 }
 
-/// The GPU setup. On Windows, use DirectX 12 rather than letting wgpu pick: its Vulkan path
+/// The wgpu setup (used when DIRMAP_RENDERER=wgpu on Windows). Use DirectX 12 rather than letting wgpu pick: its Vulkan path
 /// presents several frames late on many machines, so highlights trail behind the mouse.
 /// `WGPU_BACKEND` (vulkan, dx12, gl) still overrides it, for testing.
 fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {

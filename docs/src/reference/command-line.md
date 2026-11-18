@@ -70,7 +70,8 @@ dirmap --cli --top 20 ~
 
 | Variable | Effect |
 |---|---|
-| `DIRMAP_RENDERER=glow` | Draw with OpenGL instead of the default GPU renderer. Try it if the window is blank or garbled. |
+| `DIRMAP_RENDERER=glow` | Draw with OpenGL. This is already the default on Windows. Elsewhere, try it if the window is blank or garbled. |
+| `DIRMAP_RENDERER=wgpu` | Draw with wgpu (DirectX 12 on Windows, Vulkan or Metal elsewhere). This is the default on Linux and macOS. On Windows the panels can shake while you resize the window. |
 | `TERMINAL` | Linux: the terminal program used by **Open in Terminal…**. |
 
 ## Related topics

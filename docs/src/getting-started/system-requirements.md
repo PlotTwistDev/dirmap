@@ -5,7 +5,7 @@
 | **Windows** | 64-bit Windows 10 or 11. No installer or runtime needed. |
 | **Linux** | 64-bit x86 with X11 or Wayland, and `libxkbcommon-x11` (desktop installs already have it). |
 | **macOS** | macOS 11 Big Sur or later, Apple silicon or Intel. |
-| **Graphics** | Any GPU supported by Vulkan, Direct3D 12, Metal or OpenGL 3.3. dirmap uses the GPU first and falls back to OpenGL automatically, which also covers most virtual machines and remote desktops. |
+| **Graphics** | Any GPU supported by Vulkan, Direct3D 12, Metal or OpenGL 3.3. dirmap draws with OpenGL on Windows and wgpu (Vulkan or Metal) elsewhere. It falls back to the other automatically, which also covers most virtual machines and remote desktops. |
 | **Memory** | Depends on how many files you scan: see below. |
 | **Disk space** | About 25 MB for the program. dirmap writes nothing else except its settings and any snapshots you save. |
 

@@ -116,6 +116,8 @@
 
 ### Fixes
 
+- **Resizing the window on Windows** no longer makes the panels shake. dirmap now draws with
+  OpenGL there. `DIRMAP_RENDERER=wgpu` brings back DirectX 12.
 - **Rename** no longer replaces a different file whose name differs only in capital letters
   (`readme` → `README`) on Linux and on case-sensitive Mac disks.
 
