@@ -37,7 +37,8 @@ apart.
 
 **File names on tiles** (in the filter bar, and under Settings > Treemap > Labels) writes the name
 on any tile at least about 44 × 15 points, and the size as well on taller tiles. Names fade in as
-tiles grow while you zoom.
+tiles grow while you zoom, and get larger on large tiles. They're written in white on a dark
+backing so they read on any colour of tile.
 
 ## Selection border
 

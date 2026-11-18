@@ -121,6 +121,11 @@
 
 ### Fixes
 
+- **Menus have icons**, in a column of their own so the names line up.
+- **File names on map tiles are easier to read.** They sit on a dark backing and get bigger as
+  you zoom in.
+- **`pagefile.sys`, `swapfile.sys` and `hiberfil.sys` aren't counted as Programs** any more.
+  They're Windows' memory saved to disk, and now count as Other.
 - **Previews of UTF-16 text files**, such as PowerShell output, show the text instead of "No
   preview". **PDFs on Windows** show their first page without needing a PDF app's thumbnails.
 - **The File Manager toolbar no longer overlaps itself on a narrow window.** Back, Forward, Up,

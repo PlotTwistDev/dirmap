@@ -62,7 +62,6 @@ pub struct Label {
     pub rect: DRect,
     /// Path from the scene's folder.
     pub path: Vec<u32>,
-    pub color: Color32,
 }
 
 /// Tiles built for one scene over `cover`, at `ppu` physical pixels per world unit.
@@ -1302,7 +1301,7 @@ fn build_set(req: &Req) -> Option<TileSet> {
                     raster.push(RasterTile { rect: l.rect, surface: l.surface, color: dark, flat: true });
                 }
             }
-            Some((fill, label)) => {
+            Some((fill, _)) => {
                 let (w, h) = (l.rect.w() * pt_per_unit, l.rect.h() * pt_per_unit);
                 if req.paint.hidden.is_some() {
                     // Filtering: a match only a pixel or two across would be a speck of noise
@@ -1321,7 +1320,7 @@ fn build_set(req: &Req) -> Option<TileSet> {
                     raster.push(RasterTile { rect: l.rect, surface: l.surface, color: fill, flat: false });
                 }
                 if w >= 26.0 && h >= 9.0 {
-                    labels.push(Label { rect: l.rect, path: l.path.to_vec(), color: label });
+                    labels.push(Label { rect: l.rect, path: l.path.to_vec() });
                 }
             }
         }

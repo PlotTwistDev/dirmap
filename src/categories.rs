@@ -74,6 +74,11 @@ pub fn of(name: &str) -> Category {
     if ext == "bin" && (lower.starts_with("pytorch_model") || lower.starts_with("model") || lower.contains("weights")) {
         return Category::Models;
     }
+    // Windows' paging, swap and hibernation files are memory on disk, not programs (other
+    // `.sys` files are drivers).
+    if matches!(lower.as_str(), "pagefile.sys" | "swapfile.sys" | "hiberfil.sys") {
+        return Category::Other;
+    }
     match ext {
         "mp3" | "wav" | "flac" | "aac" | "ogg" | "oga" | "m4a" | "wma" | "opus" | "aif" | "aiff" | "alac" | "ape"
         | "mid" | "midi" | "amr" | "dsf" => Category::Audio,
@@ -117,5 +122,8 @@ mod tests {
         assert_eq!(of("firmware.bin"), Category::Other);
         assert_eq!(of("Win11.iso"), Category::DiskImages);
         assert_eq!(of("README"), Category::Other);
+        assert_eq!(of("pagefile.sys"), Category::Other);
+        assert_eq!(of("HIBERFIL.SYS"), Category::Other);
+        assert_eq!(of("nvlddmkm.sys"), Category::Programs);
     }
 }

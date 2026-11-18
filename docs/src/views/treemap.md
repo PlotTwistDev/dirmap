@@ -34,7 +34,8 @@ swatches in the **File types** list. Other colour modes show age or change since
   to see at the current zoom, the smallest folder around it that is big enough is outlined
   instead.
 - With **File names on tiles** turned on, names (and sizes, on taller tiles) are written on
-  rectangles big enough to hold them. They fade in as you zoom in.
+  rectangles big enough to hold them, in white on a dark backing so they read on any colour.
+  They fade in as you zoom in, and get bigger on bigger tiles.
 
 ## Very small files
 

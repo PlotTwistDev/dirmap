@@ -2110,20 +2110,24 @@ impl App {
 
         // File names on tiles with room for them, fading in with size.
         if self.view().show_labels {
-            let font = FontId::proportional(11.0);
             let labels = self.map.labels(bounds);
             for (r, l, a) in labels.into_iter().take(2500) {
                 let Some(n) = zroot.at(&l.path) else { continue };
-                let dark_text = luma(l.color) > 140.0;
-                let tc = if dark_text { Color32::from_black_alpha(220) } else { Color32::from_white_alpha(235) };
-                let shadow = if dark_text { Color32::from_white_alpha(60) } else { Color32::from_black_alpha(110) };
+                // Bigger tiles get bigger names, so zooming in helps.
+                let font = FontId::proportional((r.width().min(r.height() * 2.0) / 10.0).clamp(11.0, 17.0));
                 let p = painter.with_clip_rect(r.shrink(1.0).intersect(painter.clip_rect()));
                 let at = r.min + vec2(3.0, 2.0);
-                p.text(at + vec2(0.0, 1.0), Align2::LEFT_TOP, &*n.name, font.clone(), shadow.gamma_multiply(a));
-                p.text(at, Align2::LEFT_TOP, &*n.name, font.clone(), tc.gamma_multiply(a));
-                let sa = a * mapview_smooth(26.0, 32.0, r.height());
-                if sa > 0.02 {
-                    p.text(r.min + vec2(3.0, 15.0), Align2::LEFT_TOP, scan::human(n.size), font.clone(), tc.gamma_multiply(0.8 * sa));
+                // White text on a dark chip reads on any tile, however it's coloured or lit.
+                let name = p.layout_no_wrap(n.name.to_string(), font.clone(), Color32::WHITE);
+                let sa = a * mapview_smooth(font.size * 2.4, font.size * 2.9, r.height());
+                let size = (sa > 0.02).then(|| p.layout_no_wrap(scan::human(n.size), font.clone(), Color32::WHITE));
+                let w = name.size().x.max(size.as_ref().map_or(0.0, |g| g.size().x));
+                let h = name.size().y + size.as_ref().map_or(0.0, |g| g.size().y * sa);
+                let chip = Rect::from_min_size(at - vec2(2.0, 1.0), vec2(w + 4.0, h + 2.0));
+                p.rect_filled(chip, 3.0, Color32::from_black_alpha((120.0 * a) as u8));
+                p.galley_with_override_text_color(at, name.clone(), Color32::from_white_alpha(245).gamma_multiply(a));
+                if let Some(g) = size {
+                    p.galley_with_override_text_color(at + vec2(0.0, name.size().y), g, Color32::from_white_alpha(215).gamma_multiply(sa));
                 }
             }
         }
