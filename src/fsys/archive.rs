@@ -66,6 +66,10 @@ pub fn is_archive(name: &str) -> bool {
 /// otherwise names joined with '/'). Decided by the names alone; a real folder named like an
 /// archive is told apart when it's read.
 pub fn split(path: &Path) -> Option<(PathBuf, String)> {
+    // An archive on a server is a file like any other there.
+    if super::remote::is_remote(path) {
+        return None;
+    }
     let mut prefix = PathBuf::new();
     let mut comps = path.components();
     while let Some(c) = comps.next() {

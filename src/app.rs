@@ -1,5 +1,6 @@
 //! The desktop GUI: directory tree, extension list and treemap.
 
+use crate::fsys::PathShow;
 use crate::categories::{self, Category};
 use crate::drives::{self, Drive};
 use crate::dupes;
@@ -307,7 +308,7 @@ impl App {
             path_input: path
                 .clone()
                 .or_else(|| std::env::current_dir().ok())
-                .map(|p| p.display().to_string())
+                .map(|p| p.shown())
                 .unwrap_or_default(),
             scanned_path: PathBuf::new(),
             scanned_with: None,
@@ -456,7 +457,7 @@ impl App {
         let (tx, rx) = mpsc::channel();
         let (p, l, opts, root) = (progress.clone(), live.clone(), self.scan_options(), path.clone());
         std::thread::spawn(move || {
-            let tree = scan::scan(&root, &opts, &p, &l);
+            let tree = if crate::fsys::remote::is_remote(&root) { scan::scan_remote(&root, &p) } else { scan::scan(&root, &opts, &p, &l) };
             // Summarise here too, so the window doesn't stall when a big scan lands.
             let exts = scan::ext_stats(&tree);
             let _ = tx.send((tree, exts));
@@ -691,7 +692,7 @@ impl App {
             ui.end_row();
             for d in &self.drives {
                 let name = if d.label.is_empty() {
-                    d.root.display().to_string()
+                    d.root.shown()
                 } else {
                     format!("{}  ({})", d.root.display(), d.label)
                 };
@@ -721,7 +722,7 @@ impl App {
     }
 
     fn scan_root(&mut self, root: PathBuf) {
-        self.path_input = root.display().to_string();
+        self.path_input = root.shown();
         self.show_drives = false;
         self.start_scan();
     }
@@ -740,7 +741,7 @@ impl App {
             let edit = ui.add(egui::TextEdit::singleline(&mut self.path_input).desired_width(380.0).hint_text("Folder to scan"));
             if ui.button("Browse…").clicked() {
                 if let Some(dir) = rfd::FileDialog::new().set_directory(self.path_input.trim()).pick_folder() {
-                    self.path_input = dir.display().to_string();
+                    self.path_input = dir.shown();
                     self.start_scan();
                 }
             }
@@ -1659,7 +1660,7 @@ impl App {
                         let name = f.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                         let icon = Rect::from_min_size(pos2(rect.left() + 14.0, cy - 8.0), vec2(16.0, 16.0));
                         self.icons.paint(ui, icon, false, scan::ext_of(&name), Color32::GRAY);
-                        let shown = f.path.strip_prefix(&self.scanned_path).unwrap_or(&f.path).display().to_string();
+                        let shown = f.path.strip_prefix(&self.scanned_path).unwrap_or(&f.path).shown();
                         let tc = if selected { vis.selection.stroke.color } else { vis.text_color() };
                         let clip = Rect::from_min_max(pos2(rect.left() + 34.0, rect.top()), pos2(rect.right() - 4.0, rect.bottom()));
                         ui.painter().with_clip_rect(clip.intersect(ui.clip_rect())).text(
@@ -1669,7 +1670,7 @@ impl App {
                             font.clone(),
                             tc,
                         );
-                        if resp.on_hover_text(f.path.display().to_string()).clicked() {
+                        if resp.on_hover_text(f.path.shown()).clicked() {
                             clicked = Some(f.tree_path.clone());
                         }
                     }
@@ -2583,13 +2584,13 @@ impl eframe::App for App {
                 }
                 if let Some(sel) = self.selected.as_ref().filter(|_| self.job.is_none() && self.hover_status.is_none()) {
                     ui.separator();
-                    ui.label(self.full_path(sel).display().to_string());
+                    ui.label(self.full_path(sel).shown());
                 }
             });
         });
         self.help_regions.push((r.response.rect, if self.scan_errors > 0 { topics::UNREADABLE } else { topics::RESULTS }));
         if rescan {
-            self.path_input = self.scanned_path.display().to_string();
+            self.path_input = self.scanned_path.shown();
             self.start_scan();
         }
 
@@ -2688,7 +2689,7 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
         secs as u64 / 60,
         secs as u64 % 60,
     );
-    let current = p.current.lock().map(|c| c.display().to_string()).unwrap_or_default();
+    let current = p.current.lock().map(|c| c.shown()).unwrap_or_default();
 
     if compact {
         ui.horizontal(|ui| {

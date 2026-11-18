@@ -7,6 +7,7 @@
 //! folder isn't covered or has changed. Folders are matched by their path on disk and turned
 //! into tree positions only here, at the boundary.
 
+use crate::fsys::PathShow;
 use super::*;
 use crate::fsys::history::Location;
 use crate::fsys::listing::Entry;
@@ -431,8 +432,8 @@ impl App {
             if follow == Follow::Pinned
                 && let Some(p) = &self.files.prefs.dock.pinned
             {
-                let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.display().to_string());
-                ui.label(egui::RichText::new(format!("📌 {name}")).color(style::pal(ui).weak)).on_hover_text(p.display().to_string());
+                let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.shown());
+                ui.label(egui::RichText::new(format!("📌 {name}")).color(style::pal(ui).weak)).on_hover_text(p.shown());
             }
             let has_diff = self.diff.is_some();
             let mode = self.color_mode;

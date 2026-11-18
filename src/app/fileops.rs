@@ -2,6 +2,7 @@
 //! items onto folders. They run through the same background operations (`menus::Ops`) as
 //! Storage Analysis, so both workspaces behave the same and share one clipboard.
 
+use crate::fsys::PathShow;
 use super::browser::Clip;
 use super::dnd::{self, DragItems, DropOp};
 use super::*;
@@ -38,7 +39,7 @@ impl App {
         if paths.is_empty() || (cut && paths.iter().any(|p| p.parent().is_none())) {
             return;
         }
-        self.ctx_copy = Some(paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"));
+        self.ctx_copy = Some(paths.iter().map(|p| p.shown()).collect::<Vec<_>>().join("\n"));
         let keys = if cfg!(target_os = "macos") { "⌘V" } else { "Ctrl+V" };
         self.ops.notice = Some((format!("{} {}. Open a folder and press {keys} to paste.", if cut { "Cut" } else { "Copied" }, dnd::what(&paths)), false));
         self.browser.clip = Some(Clip { paths, cut });
@@ -94,6 +95,8 @@ impl App {
                 None => sized = false,
             }
         }
+        // Servers have no bin.
+        let permanent = permanent || paths.iter().any(|p| crate::fsys::remote::is_remote(p));
         let action = if permanent { menus::TreeAction::Delete } else { menus::TreeAction::Recycle };
         self.ops.confirm = Some(menus::Confirm { action, paths, is_dir: any_dir, size, files, sized });
     }

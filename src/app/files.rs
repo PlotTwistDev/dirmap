@@ -6,11 +6,13 @@
 //! the network. File commands use the same `actions` functions as the Storage Analysis
 //! workspace; when a scan covers the folder on screen, its folder sizes are shown too.
 
+use crate::fsys::PathShow;
 use super::*;
 use crate::actions;
 use crate::fsys::history::{History, Location};
 use crate::fsys::listing::{Entry, Listing};
 use crate::fsys::archive;
+use crate::fsys::remote;
 use crate::fsys::places::{self, Place};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as Cmp;
@@ -66,6 +68,8 @@ pub(super) struct FilesPrefs {
     pub favourites: Vec<favs::FavGroup>,
     /// Saved network locations (UNC paths, mount points) shown under Network & Remote.
     pub servers: Vec<PathBuf>,
+    /// Saved SFTP, FTP and WebDAV servers, under Network & Remote.
+    pub sites: Vec<netui::SavedSite>,
     /// Folders opened most recently, newest first.
     pub recent: Vec<PathBuf>,
     pub sort: FSort,
@@ -142,6 +146,7 @@ impl Default for FilesPrefs {
             pinned: Vec::new(),
             favourites: Vec::new(),
             servers: Vec::new(),
+            sites: Vec::new(),
             recent: Vec::new(),
             sort: FSort::Name,
             reversed: false,
@@ -486,6 +491,9 @@ pub(super) struct Files {
     pub(super) connect: Option<netui::ConnectBox>,
     pub(super) net_jobs: Vec<mpsc::Receiver<Result<Option<PathBuf>, String>>>,
     pub(super) net_asked: bool,
+    /// Questions from server connections, and the one on screen.
+    pub(super) asks: Option<netui::AskRx>,
+    pub(super) asking: Option<netui::AskBox>,
     /// Thumbnails for the Icons view.
     pub(super) thumbs: thumbs::Thumbs,
     /// Folders shown beside the current one in the Columns view.
@@ -540,6 +548,8 @@ impl Files {
             connect: None,
             net_jobs: Vec::new(),
             net_asked: false,
+            asks: None,
+            asking: None,
             thumbs: Default::default(),
             side: Default::default(),
             watcher: Default::default(),
@@ -683,7 +693,7 @@ impl Files {
         if let Location::Dir(p) = from {
             let name = match p.file_name() {
                 Some(n) => n.to_string_lossy().into(),
-                None => p.display().to_string().into(),
+                None => p.shown().into(),
             };
             self.tab().select_later = Some(name);
         }
@@ -1087,7 +1097,7 @@ impl App {
     /// Analyse `dir` without leaving the File Manager: the dock opens and shows the scan, and
     /// the treemap once it's done. A folder inside the current analysis is refreshed in place.
     pub(super) fn analyse(&mut self, dir: PathBuf) {
-        self.path_input = dir.display().to_string();
+        self.path_input = dir.shown();
         let inside = self.tree.is_some() && self.job.is_none() && dir.starts_with(&self.scanned_path);
         self.start_scan_of(dir, inside);
         self.files.prefs.dock.open = true;
@@ -1397,6 +1407,8 @@ impl App {
             dirs.extend(p.tabs.iter().filter_map(|t| t.here().dir().map(Path::to_path_buf)));
         }
         dirs.extend(self.files.side.dirs().cloned());
+        // Servers send no change notices, and archives don't change.
+        dirs.retain(|d| !remote::is_remote(d) && archive::split(d).is_none());
         let c = ctx.clone();
         self.files.watcher.wake_with(move || c.request_repaint());
         self.files.watcher.set(dirs);
@@ -1575,7 +1587,7 @@ impl App {
             }
             for p in self.files.places.clone() {
                 let loc = Location::Dir(p.path.clone());
-                let resp = side_row(ui, p.kind.icon(), &p.name, here == loc, ROW_F).on_hover_text(p.path.display().to_string());
+                let resp = side_row(ui, p.kind.icon(), &p.name, here == loc, ROW_F).on_hover_text(p.path.shown());
                 self.place_row(ui, &resp, &p.path, &mut picks);
             }
         });
@@ -1609,8 +1621,8 @@ impl App {
         if !self.files.prefs.recent.is_empty() {
             side_section(ui, "fm-recent", "Recent", false, |ui| {
                 for p in self.files.prefs.recent.clone() {
-                    let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.display().to_string());
-                    let resp = side_row(ui, "🕘", &name, here == Location::Dir(p.clone()), ROW_F).on_hover_text(p.display().to_string());
+                    let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.shown());
+                    let resp = side_row(ui, "🕘", &name, here == Location::Dir(p.clone()), ROW_F).on_hover_text(p.shown());
                     self.place_row(ui, &resp, &p, &mut picks);
                 }
             });
@@ -1810,7 +1822,7 @@ impl App {
                     let clip = Rect::from_min_max(pos2(r.left() + 28.0, r.top()), pos2(r.right() - if show_x { 24.0 } else { 8.0 }, r.bottom()));
                     p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &title, FontId::proportional(12.5), tc);
                     let tip = match &here {
-                        Location::Dir(p) => p.display().to_string(),
+                        Location::Dir(p) => p.shown(),
                         Location::Computer => places::computer_name().to_string(),
                     };
                     let mut closed = false;
@@ -1936,7 +1948,7 @@ impl App {
                         FontId::proportional(12.0),
                         vis.weak_text_color(),
                     );
-                    let resp = resp.on_hover_text(root.display().to_string());
+                    let resp = resp.on_hover_text(root.shown());
                     if resp.double_clicked() || resp.clicked() {
                         picks.go = Some(Location::Dir(root.clone()));
                     }
@@ -2446,7 +2458,7 @@ impl App {
         if self.files.panes.len() > 1
             && let Some(d) = t.here().dir()
         {
-            let g = p.layout_no_wrap(d.display().to_string(), FontId::proportional(11.5), pal.weak);
+            let g = p.layout_no_wrap(d.shown(), FontId::proportional(11.5), pal.weak);
             let w = g.size().x.min(rect.width() * 0.5);
             let clip = Rect::from_min_max(pos2(right - w, rect.top()), pos2(right, rect.bottom()));
             p.with_clip_rect(clip).galley(pos2(right - g.size().x.min(w), rect.center().y - g.size().y / 2.0), g, pal.weak);
@@ -2479,7 +2491,7 @@ impl App {
                     self.ops.undo_fresh = false;
                 }
             } else if let Some(dir) = self.files.here().dir() {
-                ui.label(egui::RichText::new(dir.display().to_string()).size(12.0).color(pal.weak));
+                ui.label(egui::RichText::new(dir.shown()).size(12.0).color(pal.weak));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.activity_chip(ui);
@@ -2492,7 +2504,8 @@ impl App {
 
     fn files_keys(&mut self, ctx: &egui::Context, pointer_in: bool, picks: &mut FPicks) {
         use egui::{Key, Modifiers as M};
-        if self.ops.modal() {
+        // Not while a box is open over the list (Connect to Server, a server's question).
+        if self.ops.modal() || self.files.connect.is_some() || self.files.asking.is_some() {
             return;
         }
         // The mouse's side buttons go to the file manager when the pointer is over it.
@@ -2930,6 +2943,10 @@ impl App {
             if archive::inside(&p) {
                 let tmp = archive_temp(&p).map_err(|e| format!("Couldn't take it out of the archive: {e}"))?;
                 actions::open(&tmp)
+            } else if remote::is_remote(&p) {
+                // A copy fetched from the server (changes to it aren't sent back).
+                let tmp = remote::fetch(&p, 4 << 30).map_err(|e| format!("Couldn't fetch it from the server: {}", remote::describe(&e)))?;
+                actions::open(&tmp)
             } else {
                 actions::open(&p)
             }
@@ -3036,12 +3053,12 @@ impl App {
                     self.remove_favourite(&p);
                 }
             }
-            FAction::CopyPath => self.ctx_copy = Some(paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n")),
+            FAction::CopyPath => self.ctx_copy = Some(paths.iter().map(|p| p.shown()).collect::<Vec<_>>().join("\n")),
             FAction::CopyUnc => {
                 // Asking Windows can wait on the network, so it's done in the background.
                 let (tx, rx) = mpsc::channel();
                 std::thread::spawn(move || {
-                    let _ = tx.send(paths.iter().map(|p| crate::netdrives::unc_path(p).unwrap_or_else(|| p.clone()).display().to_string()).collect::<Vec<_>>().join("\n"));
+                    let _ = tx.send(paths.iter().map(|p| crate::netdrives::unc_path(p).unwrap_or_else(|| p.clone()).shown()).collect::<Vec<_>>().join("\n"));
                 });
                 self.files.text_rx = Some(rx);
             }
@@ -3398,7 +3415,7 @@ pub(super) fn side_section(ui: &mut egui::Ui, salt: &str, title: &str, default_o
 
 /// "C: (Windows)", "/home", "Backup (/media/rich/Backup)".
 fn drive_label(root: &Path, label: &str) -> String {
-    let r = root.display().to_string();
+    let r = root.shown();
     if cfg!(windows) {
         let r = r.trim_end_matches('\\');
         if label.is_empty() { r.to_string() } else { format!("{label} ({r})") }
@@ -3414,7 +3431,8 @@ fn drive_label(root: &Path, label: &str) -> String {
 fn location_title(l: &Location) -> String {
     match l {
         Location::Computer => places::computer_name().into(),
-        Location::Dir(p) => p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.display().to_string()),
+        Location::Dir(p) if remote::is_root(p) => remote::split(p).map(|(s, _)| s.short()).unwrap_or_default(),
+        Location::Dir(p) => p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.shown()),
     }
 }
 
@@ -3422,6 +3440,17 @@ fn location_title(l: &Location) -> String {
 pub(super) fn crumbs_of(l: &Location) -> Vec<(String, Location)> {
     let mut out = vec![(format!("🖳 {}", places::computer_name()), Location::Computer)];
     let Location::Dir(p) = l else { return out };
+    if let Some((site, rest)) = remote::split(p) {
+        // A server: its address, then the folders on it.
+        out.push((format!("🌐 {}", site.short()), Location::Dir(remote::path_of(&site, "/"))));
+        let mut acc = String::new();
+        for n in rest.split('/').filter(|n| !n.is_empty()) {
+            acc.push('/');
+            acc.push_str(n);
+            out.push((n.to_string(), Location::Dir(remote::path_of(&site, &acc))));
+        }
+        return out;
+    }
     let mut acc = PathBuf::new();
     for c in p.components() {
         use std::path::Component as C;
@@ -3432,7 +3461,7 @@ pub(super) fn crumbs_of(l: &Location) -> Vec<(String, Location)> {
             }
             C::RootDir => {
                 acc.push(c.as_os_str());
-                let label = if acc.as_os_str().len() <= 1 { "/".to_string() } else { acc.display().to_string().trim_end_matches('\\').to_string() };
+                let label = if acc.as_os_str().len() <= 1 { "/".to_string() } else { acc.shown().trim_end_matches('\\').to_string() };
                 out.push((format!("🖴 {label}"), Location::Dir(acc.clone())));
             }
             C::Normal(n) => {

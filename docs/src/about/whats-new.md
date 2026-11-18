@@ -24,6 +24,12 @@
   Trash, putting deleted items back from the bin. When a copy or move meets a name that's taken,
   dirmap asks: Replace, Keep Both, Skip, or Merge for folders. See
   [Undo](../views/file-manager.md#undo).
+- **Servers: SFTP, FTP and WebDAV.** Browse, copy to and from, rename and delete on servers as if
+  they were drives, and analyse their folders. **Connect to Server…** saves them in the sidebar.
+  SFTP checks the server's identity and signs in with your SSH agent, key files or a password;
+  passwords are only ever kept in the system keychain, and only if you ask. FTP and plain-http
+  WebDAV are marked as not encrypted. See
+  [Servers: SFTP, FTP and WebDAV](../views/file-manager.md#servers-sftp-ftp-and-webdav).
 - **Two panes** (**Ctrl+\\**): two folders side by side or one above the other, each with its own
   tabs, sort and filter. Drag between them, or press **Shift+F5** to copy and **Shift+F6** to move
   to the other one. See [Two panes](../views/file-manager.md#two-panes).

@@ -193,6 +193,59 @@ pub fn scan(root: &Path, opts: &Options, progress: &Progress, live: &LiveDir) ->
     freeze(live)
 }
 
+/// Analyse a folder on a server (SFTP, FTP, WebDAV): read every folder below it there, then
+/// build the tree. Nothing shows until it's done, but the counts move as it goes.
+pub fn scan_remote(root: &Path, progress: &Progress) -> Node {
+    use crate::fsys::remote;
+    use std::collections::HashMap;
+    let mut by_dir: HashMap<String, Vec<(String, remote::Meta)>> = HashMap::new();
+    let walked = remote::walk(root, &progress.cancel, &mut |rel, items| {
+        progress.dirs.fetch_add(1, Ordering::Relaxed);
+        for (_, m) in items {
+            if !m.is_dir {
+                progress.files.fetch_add(1, Ordering::Relaxed);
+                progress.bytes.fetch_add(m.len, Ordering::Relaxed);
+            }
+        }
+        if let Ok(mut c) = progress.current.lock() {
+            *c = if rel.is_empty() { root.to_path_buf() } else { root.join(rel) };
+        }
+        by_dir.insert(rel.to_string(), items.to_vec());
+    });
+    if walked.is_err() {
+        progress.errors.fetch_add(1, Ordering::Relaxed);
+    }
+    progress.finishing.store(true, Ordering::Relaxed);
+    fn build(name: Box<str>, rel: &str, by_dir: &HashMap<String, Vec<(String, remote::Meta)>>) -> Node {
+        let mut children: Vec<Node> = by_dir
+            .get(rel)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|(n, m)| {
+                        if m.is_dir && !m.is_link {
+                            let r = if rel.is_empty() { n.clone() } else { format!("{rel}/{n}") };
+                            build(n.as_str().into(), &r, by_dir)
+                        } else {
+                            Node { name: n.as_str().into(), size: if m.is_dir { 0 } else { m.len }, files: u64::from(!m.is_dir), modified: m.modified, is_dir: m.is_dir, children: Vec::new() }
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        children.sort_unstable_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
+        Node {
+            name,
+            size: children.iter().map(|c| c.size).sum(),
+            files: children.iter().map(|c| c.files).sum(),
+            modified: children.iter().map(|c| c.modified).max().unwrap_or(0),
+            is_dir: true,
+            children,
+        }
+    }
+    build(root_name(root), "", &by_dir)
+}
+
 pub fn root_name(root: &Path) -> Box<str> {
     root.file_name()
         .map(|s| s.to_string_lossy().into_owned())

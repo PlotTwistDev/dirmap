@@ -4,6 +4,7 @@
 //! adds a bookmark and moves nothing. Dropping items *onto* a favourite moves or copies them
 //! into that folder, as with any folder. The label by the pointer always says which.
 
+use crate::fsys::PathShow;
 use super::dnd::{self, DragFav, DragItems};
 use super::files::FPicks;
 use super::*;
@@ -193,7 +194,7 @@ impl App {
                     if resp.drag_started() {
                         egui::DragAndDrop::set_payload(ui.ctx(), DragFav(g, i));
                     }
-                    let tip = if f.label.trim().is_empty() { f.path.display().to_string() } else { format!("{}\n{}", f.label, f.path.display()) };
+                    let tip = if f.label.trim().is_empty() { f.path.shown() } else { format!("{}\n{}", f.label, f.path.display()) };
                     let resp = resp.on_hover_text(tip);
                     if resp.clicked() {
                         picks.go = Some(loc.clone());
@@ -434,7 +435,7 @@ mod tests {
     }
 
     fn paths(g: &FavGroup) -> Vec<String> {
-        g.items.iter().map(|f| f.path.display().to_string()).collect()
+        g.items.iter().map(|f| f.path.shown()).collect()
     }
 
     #[test]

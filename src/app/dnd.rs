@@ -5,6 +5,7 @@
 //! network location) it copies. Ctrl (⌥ on macOS) forces a copy, Shift (⌘ on macOS) a move.
 //! Alt still copies on Windows and Linux, as it did in dirmap before.
 
+use crate::fsys::PathShow;
 use super::*;
 use crate::drives::Drive;
 use std::path::Path;
@@ -27,6 +28,10 @@ pub(super) enum DropOp {
 /// Windows, or the longest mount point that contains it elsewhere. Worked out from the path
 /// and the drive list only, so it never touches the disk (or a slow share) while dragging.
 pub(super) fn volume_of(path: &Path, drives: &[Drive]) -> PathBuf {
+    // A server is a volume of its own.
+    if let Some((site, _)) = crate::fsys::remote::split(path) {
+        return crate::fsys::remote::path_of(&site, "/");
+    }
     #[cfg(windows)]
     {
         let _ = drives;
@@ -69,14 +74,14 @@ pub(super) fn pointless(sources: &[PathBuf], dest: &Path, op: DropOp) -> bool {
 /// "report.pdf" or "3 items".
 pub(super) fn what(items: &[PathBuf]) -> String {
     match items {
-        [one] => one.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| one.display().to_string()),
+        [one] => one.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| one.shown()),
         many => format!("{} items", many.len()),
     }
 }
 
 /// A folder's name for labels: "Projects", or "D:\" for a drive.
 pub(super) fn folder_name(p: &Path) -> String {
-    p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.display().to_string())
+    p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.shown())
 }
 
 /// The keys that change a drop, for the label.

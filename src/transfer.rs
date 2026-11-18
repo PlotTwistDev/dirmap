@@ -7,7 +7,7 @@
 //! Trash first, and the bin is searched for where they went, so Undo can put them back.
 
 use crate::actions;
-use crate::fsys::archive;
+use crate::fsys::{archive, remote};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -53,6 +53,9 @@ impl Ctl {
 
 /// Bytes in the files under `p`, stopping early if asked to.
 fn bytes_in(p: &Path, ctl: &Ctl) -> u64 {
+    if remote::is_remote(p) {
+        return remote::bytes_in(p, ctl);
+    }
     if let Some((_, size, _)) = archive::item(p) {
         return size;
     }
@@ -77,6 +80,10 @@ fn bytes_in(p: &Path, ctl: &Ctl) -> u64 {
 pub fn copy_tree(src: &Path, dest: &Path, ctl: &Ctl) -> io::Result<()> {
     if !ctl.go_on() {
         return Err(Ctl::stopped());
+    }
+    // To or from a server.
+    if remote::is_remote(src) || remote::is_remote(dest) {
+        return remote::copy_tree(src, dest, ctl);
     }
     // Out of an archive: extracted.
     if archive::inside(src) && archive::item(src).is_some() {
@@ -146,6 +153,20 @@ pub enum Step {
     /// An empty folder removed after its contents were moved into another (Merge). Undo makes
     /// it again.
     RemovedDir(PathBuf),
+    /// Deleted for good (replaced on a server, which has no bin). Can't be undone.
+    Deleted(PathBuf),
+}
+
+/// What's at a path, on disk or on a server: (folder, bytes, modified). Links aren't followed.
+fn stat(p: &Path) -> io::Result<(bool, u64, Option<SystemTime>)> {
+    if remote::is_remote(p) {
+        return remote::meta(p).map(|m| (m.is_dir, m.len, m.modified_time()));
+    }
+    fs::symlink_metadata(p).map(|md| (md.is_dir(), md.len(), md.modified().ok()))
+}
+
+fn exists(p: &Path) -> bool {
+    stat(p).is_ok()
 }
 
 /// What to do when an item would land on one with the same name.
@@ -235,13 +256,13 @@ fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) ->
     }
     // A copy into the folder it's in is a duplicate: "name copy.ext", as in Finder and Explorer.
     let target = if in_place { actions::free_name(dest_dir, &name, "copy") } else { dest_dir.join(&name) };
-    let Ok(existing) = fs::symlink_metadata(&target) else {
+    let Ok((existing_dir, existing_len, existing_modified)) = stat(&target) else {
         return put(src, &target, copy, out, ctl);
     };
     // What's being placed (in an archive, from its table of contents).
     let here = match archive::item(src) {
         Some((dir, size, m)) => Some((dir, size, (m > 0).then(|| std::time::UNIX_EPOCH + Duration::from_secs(m as u64)))),
-        None => fs::symlink_metadata(src).ok().map(|md| (md.is_dir(), md.len(), md.modified().ok())),
+        None => stat(src).ok(),
     };
     let Some((src_dir, src_size, src_modified)) = here else {
         out.errors.push(format!("{name} isn't there any more."));
@@ -251,11 +272,11 @@ fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) ->
         src: src.to_path_buf(),
         dest: target.clone(),
         src_dir,
-        dest_dir: existing.is_dir(),
+        dest_dir: existing_dir,
         src_size,
-        dest_size: existing.len(),
+        dest_size: existing_len,
         src_modified,
-        dest_modified: existing.modified().ok(),
+        dest_modified: existing_modified,
     };
     match ask(&clash) {
         Choice::Skip => {
@@ -269,6 +290,16 @@ fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) ->
         Choice::KeepBoth => {
             let free = actions::free_name(dest_dir, &name, "");
             put(src, &free, copy, out, ctl)
+        }
+        Choice::Replace if remote::is_remote(&target) => {
+            // A server has no bin: what's there is deleted.
+            if let Err(e) = remote::delete(&target) {
+                out.errors.push(format!("Couldn't replace {name}: {}", remote::describe(&e)));
+                return None;
+            }
+            out.steps.push(Step::Deleted(target.clone()));
+            out.touched.push(target.clone());
+            put(src, &target, copy, out, ctl)
         }
         Choice::Replace => {
             match actions::trash_keep(&target) {
@@ -284,6 +315,7 @@ fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) ->
         Choice::Merge if clash.src_dir && clash.dest_dir => {
             let listed = match archive::split(src).filter(|_| archive::inside(src)) {
                 Some((a, inner)) => archive::list(&a, &inner).map(|es| es.iter().map(|e| src.join(&*e.name)).collect::<Vec<_>>()).map_err(io::Error::other),
+                None if remote::is_remote(src) => remote::read_dir(src),
                 None => fs::read_dir(src).map(|rd| rd.flatten().map(|e| e.path()).collect::<Vec<_>>()),
             };
             let entries = match listed {
@@ -303,7 +335,12 @@ fn place(src: &Path, dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) ->
                 }
                 place(&e, &target, copy, ask, out, ctl);
             }
-            if !copy && fs::read_dir(src).is_ok_and(|mut d| d.next().is_none()) && fs::remove_dir(src).is_ok() {
+            let emptied = if remote::is_remote(src) {
+                remote::read_dir(src).is_ok_and(|d| d.is_empty()) && remote::remove_dir(src).is_ok()
+            } else {
+                fs::read_dir(src).is_ok_and(|mut d| d.next().is_none()) && fs::remove_dir(src).is_ok()
+            };
+            if !copy && emptied {
                 out.steps.push(Step::RemovedDir(src.to_path_buf()));
                 out.touched.push(src.to_path_buf());
             }
@@ -357,10 +394,18 @@ pub fn move_path(from: &Path, to: &Path) -> Result<(), String> {
 /// `move_path` with pause and stop (an empty error means it was stopped; nothing moved).
 fn move_with(from: &Path, to: &Path, ctl: &Ctl) -> Result<(), String> {
     let name = from.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    if fs::symlink_metadata(to).is_ok() {
-        return Err(format!("There's already something at {}.", to.display()));
+    if exists(to) {
+        return Err(format!("There's already something at {}.", crate::fsys::PathShow::shown(to)));
     }
-    match fs::rename(from, to) {
+    let renamed = if remote::same_site(from, to) {
+        remote::rename(from, to)
+    } else if remote::is_remote(from) || remote::is_remote(to) {
+        // Between a server and here, or two servers: copied, then the original removed.
+        Err(io::Error::new(io::ErrorKind::CrossesDevices, "between servers"))
+    } else {
+        fs::rename(from, to)
+    };
+    match renamed {
         Ok(()) => Ok(()),
         Err(e) if actions::is_cross_device(&e) => {
             ctl.bytes_total.fetch_add(bytes_in(from, ctl), Ordering::Relaxed);
@@ -383,8 +428,10 @@ pub fn undo(steps: &[Step]) -> (Vec<String>, Vec<PathBuf>) {
         let r = match s {
             Step::Created(p) => {
                 touched.push(p.clone());
-                if fs::symlink_metadata(p).is_err() {
+                if !exists(p) {
                     Ok(())
+                } else if remote::is_remote(p) {
+                    remote::delete(p).map_err(|e| format!("Couldn't remove {}: {}", crate::fsys::PathShow::shown(p.as_path()), remote::describe(&e)))
                 } else {
                     actions::trash(p).map_err(|e| format!("Couldn't remove {}: {e}", p.display()))
                 }
@@ -392,8 +439,8 @@ pub fn undo(steps: &[Step]) -> (Vec<String>, Vec<PathBuf>) {
             Step::Moved { from, to } => {
                 touched.push(from.clone());
                 touched.push(to.clone());
-                if fs::symlink_metadata(to).is_err() {
-                    Err(format!("{} isn't there any more.", to.display()))
+                if !exists(to) {
+                    Err(format!("{} isn't there any more.", crate::fsys::PathShow::shown(to.as_path())))
                 } else {
                     move_path(to, from)
                 }
@@ -411,7 +458,17 @@ pub fn undo(steps: &[Step]) -> (Vec<String>, Vec<PathBuf>) {
             }
             Step::RemovedDir(p) => {
                 touched.push(p.clone());
-                if p.exists() { Ok(()) } else { fs::create_dir_all(p).map_err(|e| format!("Couldn't make {} again: {e}", p.display())) }
+                if exists(p) {
+                    Ok(())
+                } else if remote::is_remote(p) {
+                    remote::create_dir_all(p).map_err(|e| format!("Couldn't make {} again: {e}", crate::fsys::PathShow::shown(p.as_path())))
+                } else {
+                    fs::create_dir_all(p).map_err(|e| format!("Couldn't make {} again: {e}", p.display()))
+                }
+            }
+            Step::Deleted(p) => {
+                touched.push(p.clone());
+                Err(format!("{} was deleted on the server when it was replaced, and can't be brought back.", p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()))
             }
         };
         if let Err(e) = r {

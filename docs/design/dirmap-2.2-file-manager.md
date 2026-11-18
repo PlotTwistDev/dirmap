@@ -311,9 +311,9 @@ Status: ✅ done · 🔨 in progress · ⬜ not started. "Win" means checked on 
 | 14 | Undo for file operations | 3b | Advanced | ✅ | Ctrl+Z, last 30; restores from Recycle Bin/Trash (Windows $I parsing and macOS untested on device); no Redo yet |
 | 15 | Conflict choices (Replace, Keep Both, Skip), pause, transfer queue | 3b | Advanced | ✅ | Pause/Resume/Stop with progress in the status bar; copies and moves queue in order |
 | 16 | Notice changes made by other apps (file watching) | 3b | Advanced | ✅ | Open tabs and Columns folders; the list updates in place. Network shares depend on the server sending notices |
-| 17 | SFTP connection manager, keychain, host key checks | 4 | Advanced | ⬜ | |
-| 18 | FTP(S) (flagged insecure) and WebDAV | 4 | Specialist | ⬜ | |
-| 19 | Analysing remote folders | 4 | Specialist | ⬜ | |
+| 17 | SFTP connection manager, keychain, host key checks | 4 | Advanced | ✅ | russh + russh-sftp; agent, key files, passwords (keychain only on request); new keys shown before connecting, changed keys refused. Untested on a Windows or Mac device (agent, Credential Manager, Keychain) |
+| 18 | FTP(S) (flagged insecure) and WebDAV | 4 | Specialist | ✅ | suppaftp and ureq; certificates checked against the system's store. No per-server certificate exceptions, no Digest sign-in for WebDAV |
+| 19 | Analysing remote folders | 4 | Specialist | ✅ | Reads every folder over the connection, then draws; no live map while it runs |
 | 20 | Image sequence grouping in Files | 5 | Specialist | ⬜ | |
 | 21 | RAM sequence player: cache, timeline, A/B | 5 | Specialist | ⬜ | |
 | 22 | DPX decode, OCIO colour | 5 | Specialist | ⬜ | |

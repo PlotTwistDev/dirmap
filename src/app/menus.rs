@@ -1,6 +1,7 @@
 //! Right-click menus for the directory tree and the extension list, their keyboard shortcuts,
 //! and the windows and background jobs behind them (confirmations, hashing, properties).
 
+use crate::fsys::PathShow;
 use super::*;
 use crate::actions::{self, Terminal};
 use std::path::Path;
@@ -373,7 +374,7 @@ impl App {
             }
             TreeAction::Open => actions::open(&disk),
             TreeAction::CopyPath => {
-                self.ctx_copy = Some(disk.display().to_string());
+                self.ctx_copy = Some(disk.shown());
                 self.ops.notice = Some((format!("Copied {}", disk.display()), false));
                 Ok(())
             }
@@ -391,7 +392,7 @@ impl App {
             }
             TreeAction::Exclude => {
                 let (list, entry) = if n.is_dir {
-                    (&mut self.settings.exclude_folders, disk.display().to_string())
+                    (&mut self.settings.exclude_folders, disk.shown())
                 } else {
                     (&mut self.settings.exclude_files, n.name.to_string())
                 };
@@ -404,7 +405,7 @@ impl App {
                 Ok(())
             }
             TreeAction::Refresh if path.is_empty() => {
-                self.path_input = self.scanned_path.display().to_string();
+                self.path_input = self.scanned_path.shown();
                 self.start_scan();
                 Ok(())
             }
@@ -674,7 +675,7 @@ impl App {
         }
         let Some((clash, _)) = &c.current else { return };
         let name = clash.dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let folder = clash.dest.parent().map(|p| p.display().to_string()).unwrap_or_default();
+        let folder = clash.dest.parent().map(|p| p.shown()).unwrap_or_default();
         let both_dirs = clash.src_dir && clash.dest_dir;
         let what = |d: bool| if d { "folder" } else { "file" };
         let mut pick = None;
@@ -759,7 +760,7 @@ impl App {
             ui.heading(title);
             ui.add_space(6.0);
             for p in c.paths.iter().take(8) {
-                ui.label(egui::RichText::new(p.display().to_string()).strong());
+                ui.label(egui::RichText::new(p.shown()).strong());
             }
             if c.paths.len() > 8 {
                 ui.label(format!("and {} more", c.paths.len() - 8));
@@ -831,7 +832,7 @@ impl App {
             ui.set_min_width(380.0);
             ui.heading("Rename");
             ui.add_space(6.0);
-            ui.weak(r.path.parent().map(|p| p.display().to_string()).unwrap_or_default());
+            ui.weak(r.path.parent().map(|p| p.shown()).unwrap_or_default());
             let resp = ui.add(egui::TextEdit::singleline(&mut r.text).desired_width(360.0).id(egui::Id::new("rename-box")));
             if r.fresh {
                 r.fresh = false;
@@ -907,7 +908,7 @@ impl App {
         let mut open = true;
         let mut copy = None;
         egui::Window::new("SHA-256").open(&mut open).pivot(Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).collapsible(false).resizable(false).show(ctx, |ui| {
-            ui.label(h.path.display().to_string());
+            ui.label(h.path.shown());
             ui.add_space(4.0);
             match &h.result {
                 None => {
@@ -942,12 +943,12 @@ impl App {
         let mut open = true;
         egui::Window::new("Properties").open(&mut open).pivot(Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).collapsible(false).resizable(false).show(ctx, |ui| {
             egui::Grid::new("props").num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
-                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.display().to_string());
+                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.shown());
                 ui.label("Name");
                 ui.strong(name);
                 ui.end_row();
                 ui.label("Location");
-                ui.label(path.parent().map(|p| p.display().to_string()).unwrap_or_default());
+                ui.label(path.parent().map(|p| p.shown()).unwrap_or_default());
                 ui.end_row();
                 if let Some((size, files, modified, is_dir)) = node {
                     ui.label("Type");
@@ -1039,9 +1040,9 @@ impl App {
                     let clip = Rect::from_min_max(rect.min, pos2(rect.right() - 90.0, rect.bottom()));
                     ui.painter()
                         .with_clip_rect(clip.intersect(ui.clip_rect()))
-                        .text(pos2(rect.left() + 4.0, cy), Align2::LEFT_CENTER, rel.display().to_string(), font.clone(), tc);
+                        .text(pos2(rect.left() + 4.0, cy), Align2::LEFT_CENTER, rel.shown(), font.clone(), tc);
                     ui.painter().text(pos2(rect.right() - 4.0, cy), Align2::RIGHT_CENTER, scan::human(*size), font, tc);
-                    if resp.on_hover_text(root.join(&rel).display().to_string()).clicked() {
+                    if resp.on_hover_text(root.join(&rel).shown()).clicked() {
                         pick = Some(path.clone());
                     }
                 }
@@ -1158,6 +1159,14 @@ fn add_line(list: &mut String, line: &str) {
 
 /// Read one item from disk again, as the scan would see it. `None` if it's gone.
 fn reread(path: &Path, opts: &Options) -> Option<Node> {
+    if crate::fsys::remote::is_remote(path) {
+        let m = crate::fsys::remote::meta(path).ok()?;
+        return Some(if m.is_dir && !m.is_link {
+            scan::scan_remote(path, &Progress::default())
+        } else {
+            Node { name: scan::root_name(path), size: m.len, files: 1, modified: m.modified, is_dir: false, children: Vec::new() }
+        });
+    }
     let md = std::fs::symlink_metadata(path).ok()?;
     if md.is_dir() {
         Some(scan::scan(path, opts, &Progress::default(), &scan::new_live(path)))

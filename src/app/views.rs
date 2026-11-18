@@ -7,6 +7,7 @@
 //!
 //! Gallery shows a large preview of the item under the cursor above a strip of thumbnails.
 
+use crate::fsys::PathShow;
 use super::files::{order_entries, FAction, FPicks, FSort, ItemCtx, item_actions};
 use super::*;
 use crate::fsys::listing::{Entry, Listing};
@@ -313,7 +314,7 @@ pub(super) fn columns_layout(body: Rect, dir: &Path) -> ColLayout {
     let mut left = Vec::new();
     for k in (0..n).rev() {
         let child = if k == 0 { dir } else { above[k - 1] };
-        let mark: Box<str> = child.file_name().map(|n| n.to_string_lossy().into()).unwrap_or_else(|| child.display().to_string().into());
+        let mark: Box<str> = child.file_name().map(|n| n.to_string_lossy().into()).unwrap_or_else(|| child.shown().into());
         left.push((Rect::from_min_size(pos2(x, body.top()), vec2(colw, body.height())), above[k].to_path_buf(), mark));
         x += colw;
     }

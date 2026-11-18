@@ -13,6 +13,8 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 /// Thumbnails are decoded no larger than this across; the Icons view's largest size.
 pub(super) const THUMB_MAX: u32 = 256;
 /// GPU memory the thumbnails may use (RGBA, 4 bytes a pixel).
+/// Pictures on a server are fetched for thumbnails up to this size.
+const REMOTE_MAX: u64 = 24 << 20;
 const BUDGET: usize = 160 << 20;
 /// Decoded thumbnails turned into textures per frame, so a burst doesn't stall a frame.
 const UPLOADS_PER_FRAME: usize = 12;
@@ -188,12 +190,18 @@ impl Thumbs {
                         }
                     };
                     let kind = preview::kind_of(&job.path.to_string_lossy());
-                    let img = std::panic::catch_unwind(|| match kind {
-                        Kind::Media(_) => crate::media::thumbnail(&job.path, THUMB_MAX).ok().map(|(w, h, rgba)| egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
-                        _ => preview::decode_image(&job.path, kind == Kind::LinearImage, job.size, THUMB_MAX).ok().map(|r| r.0),
+                    // On a server: only pictures, fetched when they're small enough.
+                    let local = if crate::fsys::remote::is_remote(&job.path) {
+                        if matches!(kind, Kind::Image | Kind::LinearImage) && job.size <= REMOTE_MAX { crate::fsys::remote::fetch(&job.path, REMOTE_MAX).ok() } else { None }
+                    } else {
+                        Some(job.path.clone())
+                    };
+                    let img = local.and_then(|local| std::panic::catch_unwind(|| match kind {
+                        Kind::Media(_) => crate::media::thumbnail(&local, THUMB_MAX).ok().map(|(w, h, rgba)| egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
+                        _ => preview::decode_image(&local, kind == Kind::LinearImage, job.size, THUMB_MAX).ok().map(|r| r.0),
                     })
                     .ok()
-                    .flatten();
+                    .flatten());
                     if tx.send((job.path, job.stamp, img)).is_err() {
                         return;
                     }

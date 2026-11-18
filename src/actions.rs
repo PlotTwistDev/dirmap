@@ -29,8 +29,14 @@ fn wide(s: &std::ffi::OsStr) -> Vec<u16> {
     s.encode_wide().chain(std::iter::once(0)).collect()
 }
 
+/// What the system's own tools say about an item on a server.
+const ON_SERVER: &str = "That's on a server, which your system's apps can't open directly. Copy it here first.";
+
 /// Open with the default app (a folder opens in the file manager).
 pub fn open(path: &Path) -> Result<(), String> {
+    if crate::fsys::remote::is_remote(path) {
+        return Err(ON_SERVER.into());
+    }
     #[cfg(windows)]
     {
         use windows_sys::Win32::UI::Shell::ShellExecuteW;
@@ -52,6 +58,9 @@ pub fn open(path: &Path) -> Result<(), String> {
 
 /// Show the item selected in its folder in the file manager.
 pub fn reveal(path: &Path) -> Result<(), String> {
+    if crate::fsys::remote::is_remote(path) {
+        return Err(ON_SERVER.into());
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -118,6 +127,9 @@ pub enum Terminal {
 }
 
 pub fn terminal(path: &Path, which: Terminal) -> Result<(), String> {
+    if crate::fsys::remote::is_remote(path) {
+        return Err(ON_SERVER.into());
+    }
     let dir = folder_of(path);
     #[cfg(windows)]
     {
@@ -159,6 +171,9 @@ pub fn terminal(path: &Path, which: Terminal) -> Result<(), String> {
 
 /// Windows' own Properties dialog. Returns false where there is none (the app shows its own).
 pub fn shell_properties(path: &Path) -> bool {
+    if crate::fsys::remote::is_remote(path) {
+        return false;
+    }
     #[cfg(windows)]
     {
         use windows_sys::Win32::UI::Shell::{SEE_MASK_INVOKEIDLIST, SHELLEXECUTEINFOW, ShellExecuteExW};
@@ -200,6 +215,9 @@ pub fn trash_keep(path: &Path) -> Result<Option<crate::transfer::Receipt>, Strin
 
 /// Trash, returning where it went when the system says (Finder does).
 fn trash_inner(path: &Path) -> Result<Option<PathBuf>, String> {
+    if crate::fsys::remote::is_remote(path) {
+        return Err("Servers have no bin: items there can only be deleted permanently.".into());
+    }
     #[cfg(windows)]
     {
         use windows_sys::Win32::UI::Shell::{FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHFILEOPSTRUCTW, SHFileOperationW};
@@ -260,6 +278,9 @@ fn trash_inner(path: &Path) -> Result<Option<PathBuf>, String> {
 
 /// Delete for good, folder contents and all. Never follows links out of the folder.
 pub fn delete(path: &Path) -> io::Result<()> {
+    if crate::fsys::remote::is_remote(path) {
+        return crate::fsys::remote::delete(path);
+    }
     let md = fs::symlink_metadata(path)?;
     if md.is_dir() && !is_link(&md) {
         for e in fs::read_dir(path)? {
@@ -307,6 +328,9 @@ fn remove(path: &Path, f: fn(&Path) -> io::Result<()>) -> io::Result<()> {
 
 /// Delete everything inside a folder, keeping the folder.
 pub fn empty_folder(dir: &Path) -> io::Result<()> {
+    if crate::fsys::remote::is_remote(dir) {
+        return crate::fsys::remote::read_dir(dir)?.iter().try_for_each(|p| crate::fsys::remote::delete(p));
+    }
     for e in fs::read_dir(dir)? {
         delete(&e?.path())?;
     }
@@ -341,7 +365,7 @@ pub fn remove_empty_folders(dir: &Path) -> io::Result<u64> {
 /// A name in `dir` that isn't taken yet: `name`, else "stem copy.ext", "stem copy 2.ext", …
 /// (`first` is the first suffix to try, e.g. "copy"; for new folders the plain name gets numbers).
 pub fn free_name(dir: &Path, name: &str, first: &str) -> PathBuf {
-    let taken = |p: &Path| fs::symlink_metadata(p).is_ok();
+    let taken = |p: &Path| if crate::fsys::remote::is_remote(p) { crate::fsys::remote::meta(p).is_ok() } else { fs::symlink_metadata(p).is_ok() };
     let plain = dir.join(name);
     if !taken(&plain) {
         return plain;
@@ -373,6 +397,14 @@ pub fn rename(path: &Path, new_name: &str) -> Result<PathBuf, String> {
     if new_name.contains('/') || (cfg!(windows) && new_name.contains(['\\', ':', '*', '?', '"', '<', '>', '|'])) {
         return Err(if cfg!(windows) { "A name can't contain any of \\ / : * ? \" < > |".into() } else { "A name can't contain /.".into() });
     }
+    if let Some(parent) = crate::fsys::remote::parent(path) {
+        let dest = parent.join(new_name);
+        if crate::fsys::remote::meta(&dest).is_ok() {
+            return Err(format!("There's already something called {new_name} here."));
+        }
+        crate::fsys::remote::rename(path, &dest).map_err(|e| format!("Couldn't rename: {}", crate::fsys::remote::describe(&e)))?;
+        return Ok(dest);
+    }
     let parent = path.parent().ok_or("Can't rename a drive.")?;
     let dest = parent.join(new_name);
     // A change of case only is fine when the new name is the same file (case-insensitive disks).
@@ -390,6 +422,10 @@ pub fn rename(path: &Path, new_name: &str) -> Result<PathBuf, String> {
 pub fn new_folder(dir: &Path) -> Result<PathBuf, String> {
     let base = if cfg!(target_os = "macos") { "untitled folder" } else { "New folder" };
     let p = free_name(dir, base, "");
+    if crate::fsys::remote::is_remote(&p) {
+        crate::fsys::remote::create_dir(&p).map_err(|e| format!("Couldn't make a folder: {}", crate::fsys::remote::describe(&e)))?;
+        return Ok(p);
+    }
     fs::create_dir(&p).map_err(|e| format!("Couldn't make a folder: {e}"))?;
     Ok(p)
 }
@@ -399,6 +435,10 @@ pub fn new_folder(dir: &Path) -> Result<PathBuf, String> {
 pub fn new_file(dir: &Path, name: &str, contents: &[u8], executable: bool) -> Result<PathBuf, String> {
     use std::io::Write;
     let p = free_name(dir, name, "");
+    if crate::fsys::remote::is_remote(&p) {
+        crate::fsys::remote::write_new(&p, contents).map_err(|e| format!("Couldn't make {name}: {}", crate::fsys::remote::describe(&e)))?;
+        return Ok(p);
+    }
     let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&p).map_err(|e| format!("Couldn't make {name}: {e}"))?;
     f.write_all(contents).map_err(|e| format!("Couldn't write {name}: {e}"))?;
     #[cfg(unix)]
@@ -415,6 +455,13 @@ pub fn new_file(dir: &Path, name: &str, contents: &[u8], executable: bool) -> Re
 /// Copy a template file into `dir` under `name` (numbered if taken). Returns its path.
 pub fn new_from_template(dir: &Path, template: &Path, name: &str) -> Result<PathBuf, String> {
     let p = free_name(dir, name, "");
+    if crate::fsys::remote::is_remote(&p) {
+        crate::fsys::remote::copy_tree(template, &p, &crate::transfer::Ctl::default()).map_err(|e| {
+            let _ = delete(&p);
+            format!("Couldn't make {name}: {}", crate::fsys::remote::describe(&e))
+        })?;
+        return Ok(p);
+    }
     copy_all(template, &p).map_err(|e| {
         let _ = delete(&p);
         format!("Couldn't make {name}: {e}")

@@ -3,6 +3,7 @@
 //! usual file commands. It follows the map: opening a folder here zooms the map to it, zooming
 //! the map moves it here, and the selection is shared.
 
+use crate::fsys::PathShow;
 use super::*;
 use crate::actions;
 use crate::transfer;
@@ -737,7 +738,7 @@ impl App {
         if sources.is_empty() {
             return;
         }
-        let name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| dest.display().to_string());
+        let name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| dest.shown());
         let what = if sources.len() == 1 {
             sources[0].file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
         } else {
@@ -849,7 +850,7 @@ impl App {
                 return n;
             }
         }
-        t.folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| t.folder.display().to_string())
+        t.folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| t.folder.shown())
     }
 
     // ---------- the panel ----------
@@ -1023,7 +1024,7 @@ impl App {
                 let short = if title.chars().count() > 24 { format!("{short}…") } else { short };
                 let on = i == self.browser.active;
                 let text = if on { egui::RichText::new(short.clone()).strong() } else { egui::RichText::new(short) };
-                let resp = ui.add(egui::Button::selectable(on, text)).on_hover_text(self.browser.tabs[i].folder.display().to_string());
+                let resp = ui.add(egui::Button::selectable(on, text)).on_hover_text(self.browser.tabs[i].folder.shown());
                 if resp.clicked() && !on {
                     picks.switch_tab = Some(i);
                 }
@@ -1829,7 +1830,7 @@ impl App {
 
 /// Paths as clipboard text, one per line.
 fn text_of(paths: &[PathBuf]) -> String {
-    paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n")
+    paths.iter().map(|p| p.shown()).collect::<Vec<_>>().join("\n")
 }
 
 fn fs_exists(p: &Path) -> bool {

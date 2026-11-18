@@ -95,8 +95,10 @@ favourites. **↑**/**↓** choose one, **Tab** completes the name, **Enter** go
 | `>` then a word | A command, for example `>split`, `>icons`, `>new folder`, `>hidden`, `>connect` or `>preview`. The list shows each command with its shortcut. |
 | `@` then a name | Your favourites whose names match. |
 
-The path box never runs programs or shell commands. SFTP, FTP and WebDAV addresses aren't built
-in yet: the box says so instead of trying.
+The path box never runs programs or shell commands. It also opens servers: type an address such
+as `sftp://rich@render01/mnt/shots`, `ftp://nas.local`, or `davs://cloud.example.com/remote.php/dav`
+(`https://` works too). An address with no folder opens your own folder there. See
+[Servers: SFTP, FTP and WebDAV](#servers-sftp-ftp-and-webdav).
 
 ## The toolbar
 
@@ -509,11 +511,14 @@ The **Network & Remote** group in the sidebar lists:
 - **network drives** that are connected, with how full they are;
 - **connections the system remembers**: mapped drives on Windows, including ones that are offline
   (marked *offline*; click to reconnect), and network mounts made by your desktop on Linux;
-- **saved servers** you added.
+- **saved shares** you added;
+- **your SFTP, FTP and WebDAV servers**, with a dot by the ones connected now.
 
-Right-click a network drive for **Disconnect**, and a saved server for **Remove from This List**.
+Right-click a network drive for **Disconnect**, and a saved share for **Remove from This List**.
 
-**Connect to Server…** opens a box for a share address:
+**Connect to Server…** opens a box. Pick the kind of connection at the top: a network share
+(SMB, through your system), or one of dirmap's own server connections (see
+[Servers](#servers-sftp-ftp-and-webdav)). For a share, type its address:
 
 - **Windows:** type `\\server\share` (or `smb://server/share`), choose a drive letter or leave it
   empty for the last free one, and tick **Reconnect when I sign in** to keep it mapped.
@@ -525,8 +530,61 @@ If the share needs a password, the system asks for it and can keep it in Credent
 Keychain or your keyring. dirmap never sees or stores passwords. Connecting happens in the
 background, so a server that doesn't answer shows an error instead of freezing the window.
 
-SFTP, FTP and WebDAV connections aren't built in yet. You can mount them with your system and
-open the folder in dirmap.
+## Servers: SFTP, FTP and WebDAV
+
+dirmap connects to servers itself, so you can browse, copy, rename and delete on them as on a
+drive:
+
+| Kind | Use it for | Security |
+|---|---|---|
+| **SFTP (SSH)** | Linux and Mac machines, render nodes, most NAS boxes | Encrypted. dirmap checks the server's identity. |
+| **FTPS** | FTP servers that offer TLS | Encrypted. The certificate must be one your system trusts. |
+| **WebDAV (https)** | Nextcloud, ownCloud, a NAS, SharePoint-style shares | Encrypted. The certificate must be one your system trusts. |
+| **FTP** and **WebDAV (http)** | Old or local servers only | **Not encrypted:** the password and files can be read on the network. dirmap says so. |
+
+In **Connect to Server…**, choose the kind, then type the **Server** (or paste a whole address
+there and the rest fills in), and the **Port**, **User name** and **Folder** if they aren't the
+usual ones. For SFTP you can choose a **Key file**. Give it a **Name** for the sidebar, and leave
+**Add to Network & Remote** ticked to keep it there. Right-click a saved server for **Open in New
+Tab**, **Edit…**, **Disconnect**, **Forget Saved Password** and **Remove from This List**.
+
+![Connect to Server, set up for an FTP server, with the warning that FTP isn't encrypted](../images/file-manager-connect.png)
+
+**Signing in.** For SFTP, dirmap tries your SSH agent first (ssh-agent, Windows' OpenSSH agent or
+Pageant), then your key files (the one you chose, else `id_ed25519`, `id_ecdsa` and `id_rsa` in
+your `.ssh` folder), then a password. When it needs a password or a key's passphrase it asks, and
+**Remember** keeps it in Windows Credential Manager, your macOS Keychain or your desktop's
+keyring. dirmap never writes a password into its own files. FTP and WebDAV sign in with a password
+the same way (an FTP server with no user name is used anonymously).
+
+**The server's identity (SFTP).** The first time you connect, dirmap shows the server's key
+fingerprint before sending anything. Check it with whoever runs the server, then choose
+**Connect and Remember** or **Connect Once**. Remembered keys are kept beside your
+`.ssh/known_hosts` (which dirmap reads but never changes), in dirmap's own `known_hosts` file. If a
+server's key ever changes, dirmap refuses to connect and says which file holds the old key.
+
+**What works on a server:**
+
+- browsing, sorting, filtering, two panes and tabs;
+- copy and move in both directions and between servers, with progress, pause and stop;
+- rename, new folder, new files from templates, and delete;
+- Quick Look and the preview pane, for files up to 256 MB (videos up to 64 MB): the file is
+  fetched to a temporary copy first;
+- thumbnails of pictures up to 24 MB in the Icons and Gallery views;
+- **Open** fetches a copy and opens it in its app. Changes you make to that copy are not sent
+  back: save it and copy it to the server.
+- **Analyse Folder** reads every folder below and draws the map, as for a drive. On a big tree
+  this takes a while, since each folder is a request to the server.
+
+**What's different:** a server has no bin, so **Delete** always deletes permanently (dirmap asks
+first), and replacing an item in a name clash deletes the old one. **Undo** can move things back
+and remove copies, but can't bring back something deleted on a server. Changes other programs
+make on a server aren't noticed: press **F5** to read the folder again. Archives on a server
+open as files, not folders. **Open in Terminal**, **Show in Explorer/Finder** and the system's
+Properties don't apply to items on a server.
+
+Connections stay open while dirmap runs and reconnect by themselves if the server drops them.
+A server that doesn't answer shows an error after 20 seconds instead of freezing the window.
 
 ## Related topics
 

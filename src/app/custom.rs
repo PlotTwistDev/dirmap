@@ -2,6 +2,7 @@
 //! background job that counts matches or builds the "Show matches only" tree, and the optional
 //! sequence finder.
 
+use crate::fsys::PathShow;
 use super::*;
 use crate::pattern::{self, Filter};
 use crate::sequences::{self, Sequence};
@@ -730,7 +731,7 @@ impl App {
                 );
                 ui.painter().text(pos2(rect.right() - 4.0, top), Align2::RIGHT_CENTER, scan::human(s.bytes), font.clone(), vis.text_color());
                 let resp = resp.on_hover_ui(|ui| {
-                    ui.label(self.full_path_of_full(&s.folder).display().to_string());
+                    ui.label(self.full_path_of_full(&s.folder).shown());
                     let pad = s.padding.map_or("not padded".to_string(), |w| format!("{w} digits"));
                     ui.label(format!(".{} · {pad}", s.extension()));
                     if s.missing > 0 {

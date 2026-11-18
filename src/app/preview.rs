@@ -6,6 +6,7 @@
 //! aren't decoded, decoders are capped at 512 MB and 16k×16k, text reads stop at 256 KB, and
 //! what's shown is scaled to at most 2048 px.
 
+use crate::fsys::PathShow;
 use super::*;
 use eframe::egui::Vec2;
 use crate::fsys::listing::Entry;
@@ -29,8 +30,9 @@ pub(super) enum Content {
         /// A picture the system made of a video or document (its size isn't the file's).
         poster: bool,
     },
-    /// Sound: played with the controls in the preview.
-    Sound,
+    /// Sound: played with the controls in the preview, from this file (a fetched copy for one
+    /// on a server).
+    Sound(PathBuf),
     Text {
         text: String,
         truncated: bool,
@@ -92,6 +94,22 @@ pub(super) fn kind_of(name: &str) -> Kind {
 
 /// Read a file for its preview. Runs on a worker thread.
 fn load(path: &Path, kind: Kind, size: u64) -> Content {
+    // On a server: fetched to a temporary copy first (not huge ones).
+    if crate::fsys::remote::is_remote(path) {
+        let archive = path.file_name().is_some_and(|n| crate::fsys::archive::is_archive(&n.to_string_lossy()));
+        let limit = match kind {
+            Kind::Other if !archive => 1 << 20,
+            Kind::Media(crate::media::Media::Video) => 64 << 20,
+            _ => IMAGE_MAX_FILE,
+        };
+        if size > limit {
+            return Content::Error(format!("Too big to preview from the server ({})", crate::scan::human(size)));
+        }
+        return match crate::fsys::remote::fetch(path, limit) {
+            Ok(tmp) => load(&tmp, kind, size),
+            Err(e) => Content::Error(format!("Couldn't fetch it from the server: {}", crate::fsys::remote::describe(&e))),
+        };
+    }
     // Inside an archive: taken out to a temporary file first (not huge ones).
     if crate::fsys::archive::inside(path) {
         if size > IMAGE_MAX_FILE {
@@ -131,7 +149,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
     match kind {
         Kind::Image | Kind::LinearImage => load_image(path, kind == Kind::LinearImage, size),
         Kind::Text => load_text(path),
-        Kind::Media(crate::media::Media::Audio) => Content::Sound,
+        Kind::Media(crate::media::Media::Audio) => Content::Sound(path.to_path_buf()),
         Kind::Media(m) => match crate::media::thumbnail(path, 1024) {
             Ok((w, h, rgba)) => Content::Image {
                 pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
@@ -403,7 +421,7 @@ impl App {
                 ui.end_row();
             }
             ui.weak("Where");
-            ui.add(egui::Label::new(path.parent().map(|p| p.display().to_string()).unwrap_or_default()).wrap());
+            ui.add(egui::Label::new(path.parent().map(|p| p.shown()).unwrap_or_default()).wrap());
             ui.end_row();
         });
         ui.add_space(8.0);
@@ -505,11 +523,12 @@ impl App {
                     });
                 });
             }
-            Content::Sound => {
+            Content::Sound(play) => {
+                let play = play.clone();
                 let (r, _) = ui.allocate_exact_size(size, Sense::hover());
                 let icon = Rect::from_center_size(r.center() - vec2(0.0, 30.0), vec2(80.0, 80.0));
                 self.icons.paint_big(ui, icon, false, e.ext(), tint);
-                sound_controls(ui, &mut self.files.look.player, path, Rect::from_center_size(r.center() + vec2(0.0, 44.0), vec2((r.width() - 24.0).min(360.0), 28.0)));
+                sound_controls(ui, &mut self.files.look.player, &play, path, Rect::from_center_size(r.center() + vec2(0.0, 44.0), vec2((r.width() - 24.0).min(360.0), 28.0)));
             }
             Content::Binary | Content::None | Content::Error(_) => {
                 let note = match c {
@@ -530,7 +549,7 @@ impl App {
 }
 
 /// Play or pause, how far through, and a bar to jump about (where the player can).
-fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, path: &Path, r: Rect) {
+fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, play: &Path, path: &Path, r: Rect) {
     let pal = style::pal(ui);
     let st = player.as_ref().map(|p| p.state()).unwrap_or_default();
     // Just the button and the time when there's no bar to show: keep them centred.
@@ -542,7 +561,12 @@ fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, 
         match player {
             Some(p) if st.playing => p.pause(),
             Some(p) => p.play(),
-            None => *player = Some(crate::media::Player::start(path)),
+            None => {
+                let mut p = crate::media::Player::start(play);
+                // Known by the file shown, even when a fetched copy plays.
+                p.path = path.to_path_buf();
+                *player = Some(p);
+            }
         }
     }
     if let Some(e) = &st.error {

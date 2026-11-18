@@ -123,6 +123,18 @@ impl Drop for Listing {
 }
 
 fn read(path: &Path, cancel: &AtomicBool, tx: &mpsc::Sender<Msg>) {
+    // A folder on a server.
+    if super::remote::is_remote(path) {
+        let msg = match super::remote::list(path) {
+            Ok(entries) => {
+                let _ = tx.send(Msg::Batch(entries));
+                Msg::Done(None)
+            }
+            Err(e) => Msg::Done(Some(e)),
+        };
+        let _ = tx.send(msg);
+        return;
+    }
     // Inside an archive (or the archive itself): its table of contents.
     if let Some((archive, inner)) = super::archive::split(path)
         && archive.is_file()

@@ -22,6 +22,10 @@ impl Location {
     /// One level up: the parent folder, or Computer above a drive or volume root.
     pub fn up(&self) -> Option<Location> {
         let p = self.dir()?;
+        if super::remote::is_remote(p) {
+            // A server's top folder goes up to Computer.
+            return Some(super::remote::parent(p).map(Location::Dir).unwrap_or(Location::Computer));
+        }
         match p.parent() {
             Some(parent) if !parent.as_os_str().is_empty() => Some(Location::Dir(parent.to_path_buf())),
             _ => Some(Location::Computer),

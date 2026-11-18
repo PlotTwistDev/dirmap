@@ -7,6 +7,7 @@
 //! `>` lists dirmap commands and `@` searches favourites. Nothing typed here is ever run as a
 //! shell command.
 
+use crate::fsys::PathShow;
 use super::files::{self, FAction};
 use super::*;
 use crate::fsys::history::Location;
@@ -128,7 +129,7 @@ pub(super) fn expand(s: &str) -> String {
     // ~ at the start: home.
     let rest = if let Some(r) = s.strip_prefix('~').filter(|r| r.is_empty() || r.starts_with(['/', '\\'])) {
         if let Some(h) = places::home() {
-            out.push_str(&h.display().to_string());
+            out.push_str(&h.shown());
             r
         } else {
             s
@@ -182,8 +183,11 @@ pub(super) fn resolve(s: &str) -> Result<Location, String> {
         return Ok(Location::Computer);
     }
     let lower = t.to_lowercase();
-    if lower.starts_with("sftp://") || lower.starts_with("ftp://") || lower.starts_with("ftps://") || lower.starts_with("webdav://") || lower.starts_with("dav://") {
-        return Err("Remote connections (SFTP, FTP, WebDAV) aren't built in yet. Mount the server with your system and open its folder, or use Connect to Server for SMB.".into());
+    if let Some(p) = crate::fsys::remote::parse(t) {
+        return Ok(Location::Dir(p));
+    }
+    if lower.contains("://") && !lower.starts_with("smb://") && !lower.starts_with("file://") {
+        return Err("dirmap opens sftp://, ftp://, ftps://, dav:// and davs:// (or https://) addresses, smb:// shares and file:// paths.".into());
     }
     if lower.starts_with("smb://") {
         let Some((server, share, rest)) = crate::netdrives::parse_smb(t) else { return Err("Type smb://server/share.".into()) };
@@ -262,8 +266,8 @@ impl App {
             for g in &self.files.prefs.favourites {
                 for f in &g.items {
                     let shown = f.shown();
-                    if q.is_empty() || shown.to_lowercase().contains(&q) || f.path.display().to_string().to_lowercase().contains(&q) {
-                        items.push(Suggestion { label: format!("★ {shown}"), note: f.path.display().to_string(), pick: Pick::Text(f.path.display().to_string()) });
+                    if q.is_empty() || shown.to_lowercase().contains(&q) || f.path.shown().to_lowercase().contains(&q) {
+                        items.push(Suggestion { label: format!("★ {shown}"), note: f.path.shown(), pick: Pick::Text(f.path.shown()) });
                     }
                 }
             }
@@ -302,7 +306,7 @@ impl App {
                 more.push((p.clone(), "Recent"));
             }
             for (p, note) in more {
-                let d = p.display().to_string();
+                let d = p.shown();
                 if d.to_lowercase().contains(&q) && !items.iter().any(|i: &Suggestion| i.pick == Pick::Text(d.clone())) && items.len() < 60 {
                     items.push(Suggestion { label: d.clone(), note: note.into(), pick: Pick::Text(d) });
                 }
@@ -539,6 +543,11 @@ impl App {
         self.files.path_edit = None;
         self.files.suggest = Default::default();
         match resolve(t) {
+            // A server address with no folder: connect, then open the account's own folder.
+            Ok(Location::Dir(p)) if crate::fsys::remote::is_root(&p) && !t.trim().split_once("://").is_some_and(|(_, r)| r.trim_end_matches('/').contains('/')) => {
+                self.open_server(p);
+                None
+            }
             Ok(l) => Some(l),
             Err(e) if e.is_empty() => None,
             Err(e) => {
@@ -597,7 +606,7 @@ impl App {
 
     pub(super) fn start_path_edit(&mut self) {
         let text = match self.files.here() {
-            Location::Dir(p) => p.display().to_string(),
+            Location::Dir(p) => p.shown(),
             Location::Computer => String::new(),
         };
         self.files.path_edit = Some(text);
@@ -663,9 +672,9 @@ mod tests {
     #[test]
     fn expands_home_and_variables() {
         if let Some(h) = places::home() {
-            assert_eq!(expand("~"), h.display().to_string());
+            assert_eq!(expand("~"), h.shown());
             assert!(expand("~/x").ends_with("x"));
-            assert!(expand("~/x").starts_with(&h.display().to_string()));
+            assert!(expand("~/x").starts_with(&h.shown()));
         }
         // SAFETY: tests in this module don't read DIRMAP_T_VAR concurrently.
         unsafe { std::env::set_var("DIRMAP_T_VAR", "/data") };
@@ -687,8 +696,8 @@ mod tests {
         assert_eq!(resolve("\"/tmp/x\""), Ok(Location::Dir(PathBuf::from("/tmp/x"))));
         assert_eq!(resolve("/tmp/x/"), Ok(Location::Dir(PathBuf::from("/tmp/x"))));
         assert_eq!(resolve("/"), Ok(Location::Dir(PathBuf::from("/"))));
-        assert!(resolve("sftp://box/home").is_err());
-        assert!(resolve("ftp://box").unwrap_err().contains("aren't built in"));
+        assert_eq!(resolve("sftp://rich@box/home"), Ok(Location::Dir(PathBuf::from("sftp://rich@box/home"))));
+        assert!(resolve("gopher://box").is_err());
         if cfg!(windows) {
             assert_eq!(resolve("d:"), Ok(Location::Dir(PathBuf::from("d:\\"))));
             assert_eq!(resolve("smb://nas/media/tv"), Ok(Location::Dir(PathBuf::from(r"\\nas\media\tv"))));
