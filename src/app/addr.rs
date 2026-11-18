@@ -321,10 +321,10 @@ impl App {
 
     /// The address bar: breadcrumbs, or the path field while typing.
     pub(super) fn path_bar(&mut self, ui: &mut egui::Ui) -> Option<Location> {
-        let id = egui::Id::new("files-path");
+        let id = egui::Id::new(("files-path", self.files.focus));
         let rect = ui.available_rect_before_wrap();
         let frame = Rect::from_min_size(rect.min, vec2(rect.width(), ui.spacing().interact_size.y));
-        if self.files.path_edit.is_some() {
+        if self.files.path_edit.is_some() && self.files.path_pane == self.files.focus {
             return self.path_field(ui, id, frame);
         }
         // Breadcrumbs.
@@ -610,6 +610,7 @@ impl App {
             Location::Computer => String::new(),
         };
         self.files.path_edit = Some(text);
+        self.files.path_pane = self.files.focus;
         self.files.focus_path = true;
         self.files.suggest = Default::default();
     }

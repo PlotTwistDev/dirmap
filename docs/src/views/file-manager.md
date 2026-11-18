@@ -113,7 +113,8 @@ From left to right:
 - the workspaces;
 - **⏴ ⏵ ⏶ ⟳**: Back, Forward, Up and Refresh;
 - **✚ New**, the [New menu](#new-folders-and-files);
-- the path;
+- the path (with two panes, each pane has its own Back, Forward, Up, Refresh, path and filter
+  instead: see [Two panes](#two-panes));
 - **⚡ Analyse Folder**, which becomes **⟳ Refresh Analysis** when the folder is already
   analysed, or **■ Cancel Scan** while a scan runs (see [the analysis dock](#the-analysis-dock));
 - **⊞ Analysis**, which shows or hides the dock;
@@ -148,9 +149,11 @@ then the strip scrolls. Your tabs are there again the next time you start dirmap
 Press **Ctrl+\\** (**⌘\\** on a Mac), click **⬌**, or choose **View > Panes > Side by Side** to show
 two folders at once. **One Above the Other** stacks them instead.
 
-- Each pane has its own tabs, history, sort order, filter and selection.
-- The pane you're working in has a thin coloured line along its top, and the toolbar, the path
-  and the keyboard work on it. Click in a pane, or press **Tab**, to switch.
+- Each pane has its own tabs, history, sort order, filter and selection, and its own bar above
+  its tabs with **⏴ ⏵ ⏶ ⟳**, the path and the filter (with **🗐** and **☆**). The main toolbar
+  keeps what isn't tied to a pane: New, Analysis, the view buttons, View, Help and Settings.
+- The pane you're working in has a thin coloured line along its top, and the keyboard and the
+  main toolbar work on it. Click in a pane, or press **Tab**, to switch.
 - Drag items from one pane onto the other, onto a folder in it, or onto one of its tabs.
 - **Shift+F5** copies the selected items to the other pane's folder, and **Shift+F6** moves them.
   The right-click menu has **Copy to Other Pane** and **Move to Other Pane** too.

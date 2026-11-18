@@ -520,6 +520,8 @@ pub(super) struct Files {
     places_rx: Option<mpsc::Receiver<Vec<Place>>>,
     /// The path being typed in the path bar (it shows breadcrumbs otherwise).
     pub(super) path_edit: Option<String>,
+    /// The pane whose path is being typed.
+    pub(super) path_pane: usize,
     pub(super) focus_path: bool,
     focus_filter: bool,
     typed: String,
@@ -599,6 +601,7 @@ impl Files {
             places: Vec::new(),
             places_rx: Some(rx),
             path_edit: None,
+            path_pane: 0,
             focus_path: false,
             focus_filter: false,
             typed: String::new(),
@@ -1203,26 +1206,12 @@ impl App {
         ui.horizontal(|ui| {
             style::roomy(ui);
             self.workspace_switch(ui);
-            let (can_back, can_fwd) = {
-                let h = &self.files.cur().hist;
-                (h.can_back(), h.can_forward())
-            };
-            let up = self.files.here().up();
-            style::tool_group(ui, |ui| {
-                if style::icon_button(ui, can_back, "⏴", format!("Back ({})", k(egui::Modifiers::ALT, egui::Key::ArrowLeft))).clicked() {
-                    self.files.back();
-                }
-                if style::icon_button(ui, can_fwd, "⏵", format!("Forward ({})", k(egui::Modifiers::ALT, egui::Key::ArrowRight))).clicked() {
-                    self.files.forward();
-                }
-                if style::icon_button(ui, up.is_some(), "⏶", format!("Up to the enclosing folder (Backspace or {})", k(egui::Modifiers::ALT, egui::Key::ArrowUp))).clicked() {
-                    self.files.up();
-                }
-                if style::icon_button(ui, true, "⟳", "Read the folder again (F5)").clicked() {
-                    self.files.refresh();
-                }
-            });
-            ui.add_space(2.0);
+            // With two panes, each has its own navigation, path and filter (`pane_bar`).
+            let one = self.files.panes.len() < 2;
+            if one {
+                self.nav_buttons(ui);
+                ui.add_space(2.0);
+            }
             let dir = self.files.here().dir().map(Path::to_path_buf);
             let mut pick = None;
             style::tool_group(ui, |ui| {
@@ -1256,38 +1245,98 @@ impl App {
                         self.toggle_split();
                     }
                 });
-                let fid = egui::Id::new("files-filter");
-                let hint = format!("🔍 Filter ({})", k(egui::Modifiers::COMMAND, egui::Key::F));
-                let f = ui.add(egui::TextEdit::singleline(&mut self.files.pane_mut().filter).id(fid).desired_width(150.0).hint_text(hint));
-                f.on_hover_text("Show only items whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
-                let deep = self.files.pane().deep;
-                if style::toggle_button(ui, deep, "🗐", "Search subfolders too: the filter looks in this folder and every folder below it").clicked() {
-                    self.files.pane_mut().deep = !deep;
-                }
-                let query = self.files.pane().filter.trim().to_string();
-                if deep
-                    && !query.is_empty()
-                    && let Some(dir) = self.files.here().dir().map(Path::to_path_buf)
-                {
-                    let saved = self.files.prefs.searches.iter().any(|s| s.dir == dir && s.query == query);
-                    if style::icon_button(ui, !saved, "☆", if saved { "This search is in the sidebar" } else { "Save this search in the sidebar" }).clicked() {
-                        let name = format!("{query} in {}", dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| dir.shown()));
-                        self.files.prefs.searches.push(SavedSearch { name, dir, query });
-                    }
-                }
-                if std::mem::take(&mut self.files.focus_filter) {
-                    ctx.memory_mut(|m| m.request_focus(fid));
-                }
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) && ctx.memory(|m| m.has_focus(fid)) {
-                    self.files.pane_mut().filter.clear();
-                    ctx.memory_mut(|m| m.surrender_focus(fid));
+                if one {
+                    self.filter_box(ui, true);
                 }
                 ui.add_space(6.0);
                 self.dock_toolbar_buttons(ui);
                 ui.add_space(4.0);
-                let w = ui.available_width();
-                ui.allocate_ui_with_layout(vec2(w, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    go = self.path_bar(ui);
+                if one {
+                    let w = ui.available_width();
+                    ui.allocate_ui_with_layout(vec2(w, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        go = self.path_bar(ui);
+                    });
+                }
+            });
+        });
+        if let Some(to) = go {
+            self.files.go(to);
+        }
+    }
+
+    /// Back, Forward, Up and Refresh, for the pane being drawn.
+    fn nav_buttons(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
+        let (can_back, can_fwd) = {
+            let h = &self.files.cur().hist;
+            (h.can_back(), h.can_forward())
+        };
+        let up = self.files.here().up();
+        style::tool_group(ui, |ui| {
+            if style::icon_button(ui, can_back, "⏴", format!("Back ({})", k(egui::Modifiers::ALT, egui::Key::ArrowLeft))).clicked() {
+                self.files.back();
+            }
+            if style::icon_button(ui, can_fwd, "⏵", format!("Forward ({})", k(egui::Modifiers::ALT, egui::Key::ArrowRight))).clicked() {
+                self.files.forward();
+            }
+            if style::icon_button(ui, up.is_some(), "⏶", format!("Up to the enclosing folder (Backspace or {})", k(egui::Modifiers::ALT, egui::Key::ArrowUp))).clicked() {
+                self.files.up();
+            }
+            if style::icon_button(ui, true, "⟳", "Read the folder again (F5)").clicked() {
+                self.files.refresh();
+            }
+        });
+    }
+
+    /// The filter box (and subfolder search and Save) for the pane being drawn. `focused`: it's
+    /// the pane with the keyboard, which Ctrl+F puts the cursor in. Laid out right to left.
+    fn filter_box(&mut self, ui: &mut egui::Ui, focused: bool) {
+        let ctx = ui.ctx().clone();
+        let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
+        let fid = egui::Id::new(("files-filter", self.files.focus));
+        let hint = format!("🔍 Filter ({})", k(egui::Modifiers::COMMAND, egui::Key::F));
+        let f = ui.add(egui::TextEdit::singleline(&mut self.files.pane_mut().filter).id(fid).desired_width(150.0).hint_text(hint));
+        f.on_hover_text("Show only items whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
+        let deep = self.files.pane().deep;
+        if style::toggle_button(ui, deep, "🗐", "Search subfolders too: the filter looks in this folder and every folder below it").clicked() {
+            self.files.pane_mut().deep = !deep;
+        }
+        let query = self.files.pane().filter.trim().to_string();
+        if deep
+            && !query.is_empty()
+            && let Some(dir) = self.files.here().dir().map(Path::to_path_buf)
+        {
+            let saved = self.files.prefs.searches.iter().any(|s| s.dir == dir && s.query == query);
+            if style::icon_button(ui, !saved, "☆", if saved { "This search is in the sidebar" } else { "Save this search in the sidebar" }).clicked() {
+                let name = format!("{query} in {}", dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| dir.shown()));
+                self.files.prefs.searches.push(SavedSearch { name, dir, query });
+            }
+        }
+        if focused && std::mem::take(&mut self.files.focus_filter) {
+            ctx.memory_mut(|m| m.request_focus(fid));
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) && ctx.memory(|m| m.has_focus(fid)) {
+            self.files.pane_mut().filter.clear();
+            ctx.memory_mut(|m| m.surrender_focus(fid));
+        }
+    }
+
+    /// With two panes: the pane's own Back, Forward, Up, Refresh, path and filter, above its tabs.
+    fn pane_bar(&mut self, ui: &mut egui::Ui, focused: bool) {
+        let mut go = None;
+        egui::Frame::new().inner_margin(egui::Margin { left: 6, right: 6, top: 4, bottom: 2 }).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                style::roomy(ui);
+                self.nav_buttons(ui);
+                ui.add_space(2.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.filter_box(ui, focused);
+                    ui.add_space(4.0);
+                    let w = ui.available_width();
+                    ui.allocate_ui_with_layout(vec2(w, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        go = self.path_bar(ui);
+                    });
                 });
             });
         });
@@ -1972,6 +2021,9 @@ impl App {
         let keep = self.files.focus;
         self.files.focus = pane;
         let mut picks = FPicks::default();
+        if self.files.panes.len() > 1 {
+            self.pane_bar(ui, keep == pane);
+        }
         self.files_tabs_row(ui, pane, keep == pane, &mut picks);
         let page = ui.available_rect_before_wrap();
         ui.painter().rect_filled(page, 0.0, pal.paper);
