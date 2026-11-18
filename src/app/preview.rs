@@ -158,7 +158,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                 info: if m == crate::media::Media::Pdf { "The first page".into() } else { "A frame from the video".into() },
                 poster: true,
             },
-            Err(_) => Content::Error(if m == crate::media::Media::Pdf { "No picture of this PDF: the system has no thumbnailer for it".into() } else { "No picture of this video: the system has no thumbnailer for it".into() }),
+            Err(_) => Content::Error(if m == crate::media::Media::Pdf { "No picture of this PDF: it couldn't be drawn (it may be damaged or password-protected, or the system can't draw PDFs)".into() } else { "No picture of this video: the system has no thumbnailer for it".into() }),
         },
         Kind::Other => {
             // Unknown extension: show it as text if it looks like text.
@@ -254,14 +254,41 @@ fn load_text(path: &Path) -> Content {
     }
     let truncated = buf.len() > TEXT_MAX;
     buf.truncate(TEXT_MAX);
-    if is_binary(&buf) {
+    let Some(text) = decode_text(&buf) else {
         return Content::Binary;
-    }
-    let mut text = String::from_utf8_lossy(&buf).into_owned();
-    if text.starts_with('\u{feff}') {
-        text.remove(0);
-    }
+    };
     Content::Text { text, truncated }
+}
+
+/// The text in `b`: UTF-8, or UTF-16 (what PowerShell and many Windows tools write), with or
+/// without a byte-order mark. None if it looks binary.
+pub(super) fn decode_text(b: &[u8]) -> Option<String> {
+    let utf16 = |le: bool, b: &[u8]| -> String {
+        let units = b.chunks_exact(2).map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) });
+        char::decode_utf16(units).map(|c| c.unwrap_or('\u{fffd}')).collect()
+    };
+    let text = if let Some(rest) = b.strip_prefix(&[0xff, 0xfe]) {
+        utf16(true, rest)
+    } else if let Some(rest) = b.strip_prefix(&[0xfe, 0xff]) {
+        utf16(false, rest)
+    } else if !is_binary(b) {
+        let t = String::from_utf8_lossy(b);
+        t.strip_prefix('\u{feff}').unwrap_or(&t).to_string()
+    } else {
+        // No mark: UTF-16 if nearly every other byte is zero and the rest aren't.
+        let head = &b[..b.len().min(8192) & !1];
+        let (even, odd) = head.chunks_exact(2).fold((0, 0), |(e, o), c| (e + (c[0] == 0) as usize, o + (c[1] == 0) as usize));
+        let n = head.len() / 2;
+        if n >= 2 && odd * 10 >= n * 9 && even * 10 < n {
+            utf16(true, b)
+        } else if n >= 2 && even * 10 >= n * 9 && odd * 10 < n {
+            utf16(false, b)
+        } else {
+            return None;
+        }
+    };
+    // Control characters other than tabs and line ends mean it wasn't text after all.
+    (!text.chars().take(4096).any(|c| c == '\0')).then_some(text)
 }
 
 /// NUL bytes near the start, or UTF-16 without a BOM, mean it isn't text we can show.
@@ -656,6 +683,12 @@ mod tests {
         let b = d.join("blob.dat");
         std::fs::write(&b, [1u8, 0, 2, 3]).unwrap();
         assert!(matches!(load(&b, Kind::Text, 4), Content::Binary));
+        // UTF-16 text, as PowerShell writes it, with and without a byte-order mark.
+        let le: Vec<u8> = "Handle  Name\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        assert_eq!(decode_text(&[&[0xff, 0xfe][..], &le].concat()).as_deref(), Some("Handle  Name\r\n"));
+        assert_eq!(decode_text(&le).as_deref(), Some("Handle  Name\r\n"));
+        let be: Vec<u8> = "abc".encode_utf16().flat_map(u16::to_be_bytes).collect();
+        assert_eq!(decode_text(&[&[0xfe, 0xff][..], &be].concat()).as_deref(), Some("abc"));
         // A real PNG decodes with its size; a broken one is an error, not a panic.
         let png = d.join("p.png");
         image::RgbaImage::from_pixel(3, 2, image::Rgba([255, 0, 0, 128])).save(&png).unwrap();

@@ -142,6 +142,42 @@ mod imp {
     }
 
     pub fn thumbnail(path: &Path, max: u32) -> Result<Picture, String> {
+        shell_thumbnail(path, max).or_else(|e| {
+            // Windows has no PDF thumbnail handler of its own (Acrobat and others add one), but
+            // it can draw PDF pages itself.
+            if media_of(&path.to_string_lossy()) == Some(Media::Pdf) { pdf_page(path, max) } else { Err(e) }
+        })
+    }
+
+    /// The first page of a PDF, drawn by Windows.Data.Pdf, no larger than `max` across.
+    fn pdf_page(path: &Path, max: u32) -> Result<Picture, String> {
+        use windows::Data::Pdf::{PdfDocument, PdfPageRenderOptions};
+        use windows::Storage::StorageFile;
+        use windows::Storage::Streams::{DataReader, InMemoryRandomAccessStream};
+        let fail = |e: windows::core::Error| format!("Couldn't draw the PDF: {}", e.message());
+        let file = StorageFile::GetFileFromPathAsync(&windows::core::HSTRING::from(path.as_os_str())).and_then(|op| op.join()).map_err(fail)?;
+        let doc = PdfDocument::LoadFromFileAsync(&file).and_then(|op| op.join()).map_err(fail)?;
+        let page = doc.GetPage(0).map_err(fail)?;
+        let size = page.Size().map_err(fail)?;
+        let opts = PdfPageRenderOptions::new().map_err(fail)?;
+        // The longer side gets `max` pixels; PNG is the default encoding.
+        if size.Height > size.Width {
+            opts.SetDestinationHeight(max).map_err(fail)?;
+        } else {
+            opts.SetDestinationWidth(max).map_err(fail)?;
+        }
+        let stream = InMemoryRandomAccessStream::new().map_err(fail)?;
+        page.RenderWithOptionsToStreamAsync(&stream, &opts).and_then(|op| op.join()).map_err(fail)?;
+        let len = stream.Size().map_err(fail)? as u32;
+        let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0).map_err(fail)?).map_err(fail)?;
+        reader.LoadAsync(len).and_then(|op| op.join()).map_err(fail)?;
+        let mut png = vec![0u8; len as usize];
+        reader.ReadBytes(&mut png).map_err(fail)?;
+        let img = image::load_from_memory_with_format(&png, image::ImageFormat::Png).map_err(|e| format!("Couldn't draw the PDF: {e}"))?.to_rgba8();
+        Ok((img.width() as usize, img.height() as usize, img.into_raw()))
+    }
+
+    fn shell_thumbnail(path: &Path, max: u32) -> Result<Picture, String> {
         let wide: Vec<u16> = path.as_os_str().encode_wide_z();
         unsafe {
             // Each worker thread joins COM once; repeated calls just return S_FALSE.

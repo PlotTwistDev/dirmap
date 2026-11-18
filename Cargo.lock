@@ -1286,6 +1286,7 @@ dependencies = [
  "tar",
  "tokio",
  "ureq",
+ "windows",
  "windows-sys 0.61.2",
  "zip",
 ]

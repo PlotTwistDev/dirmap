@@ -121,6 +121,8 @@
 
 ### Fixes
 
+- **Previews of UTF-16 text files**, such as PowerShell output, show the text instead of "No
+  preview". **PDFs on Windows** show their first page without needing a PDF app's thumbnails.
 - **The File Manager toolbar no longer overlaps itself on a narrow window.** Back, Forward, Up,
   the path and the filter now sit on the pane's own bar above the tabs, and on a narrow window
   the toolbar's buttons show only their symbols.

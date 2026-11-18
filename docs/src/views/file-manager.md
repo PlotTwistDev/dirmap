@@ -429,7 +429,7 @@ format. Drag its edge to make it wider.
 | Kind | What you see |
 |---|---|
 | Images | PNG, JPEG, GIF, WebP, TIFF, BMP, TGA, ICO, QOI, PNM, and HDR and OpenEXR (shown with a standard display curve). Transparent areas show a checkerboard. |
-| Text | Text and source files, the first 256 KB. |
+| Text | Text and source files, the first 256 KB, in UTF-8 or UTF-16 (as PowerShell and many Windows tools write). |
 | Videos | A frame from the video, made by the system (see below). **Open** plays it in your usual player. |
 | PDFs | The first page, made by the system. |
 | Sound | MP3, WAV, FLAC, M4A, AAC, OGG and others: **▶ Play** plays it here, **⏸ Pause** pauses it, and on Windows the bar under it jumps to any point. It stops when you move to another file. |
@@ -439,8 +439,9 @@ format. Drag its edge to make it wider.
 Pictures of videos and PDFs, and sound, come from your system, so they work for whatever it
 supports:
 
-- **Windows:** the same thumbnails as File Explorer (videos, and PDFs when a PDF app provides
-  them), and sound through Windows' own player.
+- **Windows:** the same thumbnails as File Explorer for videos, Windows' own PDF renderer for
+  PDFs (or a PDF app's thumbnails, when one provides them), and sound through Windows' own
+  player.
 - **macOS:** Quick Look's thumbnails, and sound through `afplay`.
 - **Linux:** `ffmpegthumbnailer` or `ffmpeg` for videos, `pdftoppm` for PDFs, and `ffplay`,
   `gst-play-1.0`, `paplay` or `aplay` for sound, whichever is installed.
