@@ -346,6 +346,9 @@ impl App {
         let scanning_here = self.job.as_ref().is_some_and(|j| self.dock.target.as_ref().is_some_and(|t| t.starts_with(&j.root) || j.root.starts_with(t)));
         egui::Frame::new().inner_margin(egui::Margin { left: 10, right: 10, top: 0, bottom: 4 }).show(ui, |ui| {
             self.dock_strip(ui, &cover, scanning_here);
+            if matches!(cover, Cover::In(_)) && !scanning_here {
+                self.dock_filters(ui);
+            }
         });
         let body = ui.available_rect_before_wrap();
         let legend_h = if matches!(cover, Cover::In(_)) && !scanning_here && self.color_mode == ColorMode::Type { 24.0 } else { 0.0 };
@@ -544,6 +547,58 @@ impl App {
                 });
             }
         });
+    }
+
+    /// The map's filters, which are shared with Storage Analysis: what they are, and a way to
+    /// clear them here, so a map that's mostly dimmed or empty says why.
+    fn dock_filters(&mut self, ui: &mut egui::Ui) {
+        let mut parts = Vec::new();
+        if self.filter.kinds != 0 {
+            parts.push(Category::ALL.iter().filter(|c| self.filter.kinds & c.bit() != 0).map(|c| c.label()).collect::<Vec<_>>().join(", "));
+        }
+        if let Some(f) = &self.filter.custom {
+            parts.push(format!("Custom: {}", f.source().trim()));
+        }
+        if self.filter.larger > 0 {
+            parts.push(format!("larger than {}", scan::human(self.filter.larger)));
+        }
+        if self.filter.smaller > 0 {
+            parts.push(format!("smaller than {}", scan::human(self.filter.smaller)));
+        }
+        if self.dupes_only {
+            parts.push("duplicates only".into());
+        }
+        if parts.is_empty() {
+            return;
+        }
+        let only = self.filter.active() && self.custom.prefs.mode == custom::FilterMode::Only;
+        let pal = style::pal(ui);
+        let warn = ui.visuals().warn_fg_color;
+        ui.add_space(3.0);
+        egui::Frame::new()
+            .fill(style::blend(pal.paper, warn, 0.12))
+            .corner_radius(5)
+            .inner_margin(egui::Margin::symmetric(8, 3))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.label(egui::RichText::new("Filtered").size(12.0).strong().color(warn));
+                    let what = parts.join(" · ");
+                    let how = if only { "the map is built from matching files only" } else { "other files are blanked out, the layout is kept" };
+                    ui.add(egui::Label::new(egui::RichText::new(format!("{what}: {how}")).size(12.0).color(pal.text)).truncate())
+                        .on_hover_text("This filter is set in Storage Analysis and applies to both maps.");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Clear Filter").on_hover_text("Show every file on the maps again").clicked() {
+                            self.filter = ViewFilter::default();
+                            self.clear_custom();
+                            self.dupes_only = false;
+                        }
+                        if ui.small_button("Change…").on_hover_text("Open Storage Analysis, where the filter is set (Ctrl+3)").clicked() {
+                            self.set_workspace(Workspace::Analysis);
+                        }
+                    });
+                });
+            });
     }
 
     /// The map itself, in the shared renderer, plus what clicking it does to the list.

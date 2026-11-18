@@ -493,6 +493,11 @@ Choose with the menu on the dock's toolbar:
 Moving between a folder and its subfolders zooms the map in or out, so you can see where you
 went.
 
+The dock's map uses the same filter as [Storage Analysis](../filtering/overview.md): file kinds,
+a Custom pattern, sizes or duplicates only. While one is on, a **Filtered** line under the dock's
+toolbar says what it is. **Clear Filter** turns it off on both maps, and **Change…** opens Storage
+Analysis, where it's set.
+
 ### The list and the map together
 
 - **Selecting in the list** outlines the item on the map. With several selected, each one is
