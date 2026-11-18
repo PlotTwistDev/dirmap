@@ -822,13 +822,13 @@ impl App {
                 ("What's New", "", topics::WHATS_NEW),
             ];
             for (label, key, topic) in pages {
-                if ui.add(egui::Button::new(label).shortcut_text(key)).clicked() {
+                if ui.add(egui::Button::new(style::mi(label)).shortcut_text(key)).clicked() {
                     self.help.show_topic(topic);
                     ui.close();
                 }
             }
             ui.separator();
-            if ui.button("About dirmap").clicked() {
+            if ui.add(egui::Button::new(style::mi("About dirmap"))).clicked() {
                 self.help.about_open = true;
                 ui.close();
             }

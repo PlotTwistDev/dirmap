@@ -219,3 +219,196 @@ mod tests {
         }
     }
 }
+
+// ---------- menu items with icons ----------
+
+/// Width of the icon column in menus, so labels line up whether or not an item has an icon.
+const MENU_ICON_W: f32 = 20.0;
+
+/// The icon for a menu label, by what the item does. Checked in order, so longer phrases
+/// come before the words they contain.
+const MENU_ICONS: &[(&str, &str)] = &[
+    // Opening and viewing.
+    ("Open in New Tab", "🗗"),
+    ("Open in Other Pane", "⬌"),
+    ("Open With", "🗖"),
+    ("Open with", "🗖"),
+    ("Open in Command Prompt", "🖵"),
+    ("Open in PowerShell", "🖵"),
+    ("Open in Terminal", "🖵"),
+    ("Open Terminal", "🖵"),
+    ("Open Folder", "🗁"),
+    ("Open", "🗁"),
+    ("Play", "▶"),
+    ("Quick Look", "👁"),
+    ("Expand", "⊞"),
+    ("Collapse", "⊟"),
+    // Archives.
+    ("Extract", "📤"),
+    ("Compress", "📦"),
+    // Clipboard and moving.
+    ("Cut", "✂"),
+    ("Copy Path", "🔗"),
+    ("Copy Paths", "🔗"),
+    ("Copy Network", "🔗"),
+    ("Copy Name", "🔤"),
+    ("Copy Extension", "🔤"),
+    ("Copy to Other Pane", "➡"),
+    ("Move to Other Pane", "➡"),
+    ("Copy Address", "🔗"),
+    ("Copy", "🗐"),
+    ("Paste", "📋"),
+    ("Move to Group", "➡"),
+    ("Move to", "➡"),
+    ("Duplicate", "🗐"),
+    // Changing.
+    ("Rename", "✏"),
+    ("Edit", "✏"),
+    ("New Folder", "🗀"),
+    ("New Tab", "🗗"),
+    ("New Group", "🗀"),
+    ("New", "🗋"),
+    ("Delete Permanently", "❌"),
+    ("Delete", "🗑"),
+    ("Move to Trash", "🗑"),
+    ("Remove Empty Folders", "🗑"),
+    ("Empty Folder", "🗑"),
+    ("Remove", "✖"),
+    ("Forget", "🔑"),
+    ("Clear", "✖"),
+    ("Cancel", "■"),
+    ("Close Other Tabs", "✖"),
+    ("Close Tabs", "✖"),
+    ("Close", "✖"),
+    ("Reopen", "⟲"),
+    // Marks and favourites.
+    ("Colour", "🎨"),
+    ("Tags", "🏷"),
+    ("Add to Favourites", "☆"),
+    ("Remove from Favourites", "★"),
+    ("Favourites", "☆"),
+    ("Pin", "📌"),
+    ("Unpin", "📌"),
+    // Finding out.
+    ("Show in", "🔍"),
+    ("Select in", "🔍"),
+    ("Reveal", "🔍"),
+    ("Find", "🔍"),
+    ("Search", "🔍"),
+    ("Highlight", "🖊"),
+    ("Properties", "ℹ"),
+    ("Compute Hash", "#"),
+    ("Analyse", "⚡"),
+    ("Refresh", "⟳"),
+    ("Rescan", "⟳"),
+    ("Reconnect", "⟳"),
+    ("Connect", "🖧"),
+    ("Disconnect", "⏏"),
+    ("Eject", "⏏"),
+    ("Exclusion Filter", "🚫"),
+    ("Add to Exclusion", "🚫"),
+    ("Compare", "⚖"),
+    ("Swap", "↔"),
+    ("Same Folder", "⬌"),
+    ("Sort", "↕"),
+    ("Group By", "☰"),
+    ("Hidden", "👁"),
+    ("Preview", "👁"),
+    ("Reset", "↺"),
+    ("Undo", "⟲"),
+    ("Redo", "⟳"),
+    ("Settings", "⚙"),
+    ("Help", "❓"),
+    ("Keyboard", "⌨"),
+    ("About", "ℹ"),
+    ("What's New", "✨"),
+    ("Save", "💾"),
+    ("Load", "🗁"),
+    ("Export", "📤"),
+    ("Import", "📥"),
+    ("Script", "📜"),
+    ("Run", "▶"),
+    ("Help Centre", "❓"),
+    ("Getting Started", "🚀"),
+    ("Mouse", "🖱"),
+    ("Troubleshooting", "🔧"),
+    ("Use Folder", "🔤"),
+    ("Move Group Up", "⏶"),
+    ("Move Group Down", "⏷"),
+    ("Choose an App", "🗖"),
+    ("Manage", "⚙"),
+    ("No Colour", "✖"),
+    ("Use This View", "☰"),
+    ("Remember", "☰"),
+    ("Edit", "✏"),
+    ("One Pane", "🗖"),
+    ("Side by Side", "⬌"),
+    ("One Above the Other", "⬍"),
+    ("Details", "☰"),
+    ("Icons", "⊞"),
+    ("Columns", "🗐"),
+    ("Gallery", "🖼"),
+    ("Group Image Sequences", "🎞"),
+    ("Analysis Dock", "🗠"),
+    ("Reverse", "↕"),
+];
+
+/// The icon for `label`: one already at its start ("⚡ Analyse") or from the table above.
+/// Returns the icon and the label without it.
+pub(crate) fn menu_icon(label: &str) -> (&str, &str) {
+    let t = label.trim_start();
+    if let Some((first, rest)) = t.split_once(' ')
+        && !first.is_empty()
+        && first.chars().count() <= 2
+        && !first.chars().any(char::is_alphanumeric)
+        && !first.starts_with(['(', '.', '+', '"', '\''])
+    {
+        return (first, rest);
+    }
+    // "Open 3 Items", "Copy 3 Items", "Rename 3 Items…": match on the words.
+    let icon = MENU_ICONS.iter().find(|(k, _)| t.starts_with(k)).map_or("", |(_, i)| *i);
+    (icon, label)
+}
+
+/// A menu entry's content: an icon in a fixed column, then the label.
+pub(crate) fn mi<'a>(label: impl Into<egui::WidgetText>) -> (egui::Atom<'a>, egui::Atom<'a>) {
+    use egui::AtomExt;
+    let label: egui::WidgetText = label.into();
+    let text = label.text().to_string();
+    let (icon, rest) = menu_icon(&text);
+    // A styled label keeps its own icon (its styling can't be moved to new text).
+    let (icon, label) = match label {
+        _ if rest.len() == text.len() => (icon, label),
+        egui::WidgetText::RichText(_) => ("", label),
+        _ => (icon, rest.to_string().into()),
+    };
+    let h = 14.0;
+    (egui::RichText::new(icon).atom_size(egui::vec2(MENU_ICON_W, h)), label.into())
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::*;
+
+    #[test]
+    fn menu_icons_are_in_the_font() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let font = egui::FontId::proportional(14.0);
+        // `has_glyph` is wrong for glyphs in the font that also holds the replacement mark, so
+        // compare with how a character no font has is drawn.
+        let uv = |s: &str| ctx.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).rows[0].glyphs[0].uv_rect);
+        let none = uv("\u{e000}");
+        let missing: Vec<_> = MENU_ICONS.iter().filter(|(_, i)| i.chars().any(|c| uv(&c.to_string()) == none)).collect();
+        assert!(missing.is_empty(), "no glyph for {missing:?}");
+    }
+
+    #[test]
+    fn menu_icon_lookup() {
+        assert_eq!(menu_icon("Open in New Tab"), ("🗗", "Open in New Tab"));
+        assert_eq!(menu_icon("Open 3 Items"), ("🗁", "Open 3 Items"));
+        assert_eq!(menu_icon("Delete Permanently…"), ("❌", "Delete Permanently…"));
+        assert_eq!(menu_icon("⚡ Analyse Folder"), ("⚡", "Analyse Folder"));
+        assert_eq!(menu_icon("(none)"), ("", "(none)"));
+    }
+}

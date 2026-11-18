@@ -207,7 +207,7 @@ fn shortcut(ctx: &egui::Context, mods: egui::Modifiers, key: egui::Key) -> Strin
 
 /// A menu item with its shortcut on the right; true when clicked.
 fn item(ui: &mut egui::Ui, enabled: bool, text: impl Into<egui::WidgetText>, keys: &str) -> bool {
-    ui.add_enabled(enabled, egui::Button::new(text).shortcut_text(keys)).clicked()
+    ui.add_enabled(enabled, egui::Button::new(super::style::mi(text)).shortcut_text(keys)).clicked()
 }
 
 impl App {
@@ -274,18 +274,18 @@ impl App {
         let mut pick = None;
         ui.set_min_width(220.0);
         let name = if ext.is_empty() { "files without an extension".to_string() } else { format!(".{ext} files") };
-        if ui.button(egui::RichText::new(format!("🔍 Find all {name}")).strong()).clicked() {
+        if ui.add(egui::Button::new(crate::app::style::mi(egui::RichText::new(format!("Find All {name}")).strong()))).clicked() {
             pick = Some(ExtAction::Find);
         }
-        if ui.button(if highlighted { "Clear Highlight" } else { "Highlight in Map" }).clicked() {
+        if ui.add(egui::Button::new(crate::app::style::mi(if highlighted { "Clear Highlight" } else { "Highlight in Map" }))).clicked() {
             pick = Some(ExtAction::Highlight);
         }
         ui.separator();
-        if ui.add_enabled(!ext.is_empty(), egui::Button::new("Copy Extension")).clicked() {
+        if ui.add_enabled(!ext.is_empty(), egui::Button::new(crate::app::style::mi("Copy Extension"))).clicked() {
             pick = Some(ExtAction::Copy);
         }
         let ex = ui
-            .add_enabled(!ext.is_empty(), egui::Button::new("Add to Exclusion Filter"))
+            .add_enabled(!ext.is_empty(), egui::Button::new(crate::app::style::mi("Add to Exclusion Filter")))
             .on_hover_text(format!("Skip *.{ext} files from the next scan on"));
         if ex.clicked() {
             pick = Some(ExtAction::Exclude);

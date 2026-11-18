@@ -1359,46 +1359,46 @@ impl App {
             let split = self.files.prefs.split;
             ui.weak("Panes");
             for (s, label, keys) in [(Split::Single, "One Pane", String::new()), (Split::Vertical, "Side by Side", k(egui::Modifiers::COMMAND, egui::Key::Backslash)), (Split::Horizontal, "One Above the Other", String::new())] {
-                if ui.add(egui::Button::selectable(split == s, label).shortcut_text(keys)).clicked() {
+                if ui.add(egui::Button::selectable(split == s, style::mi(label)).shortcut_text(keys)).clicked() {
                     split_to = Some(s);
                 }
             }
             let two = split != Split::Single;
-            if ui.add_enabled(two, egui::Button::new("Swap Panes").shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::U))).clicked() {
+            if ui.add_enabled(two, egui::Button::new(style::mi("Swap Panes")).shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::U))).clicked() {
                 swap = true;
             }
-            if ui.add_enabled(two, egui::Button::new("Same Folder in Other Pane")).on_hover_text("Open this pane's folder in the other pane too").clicked() {
+            if ui.add_enabled(two, egui::Button::new(style::mi("Same Folder in Other Pane"))).on_hover_text("Open this pane's folder in the other pane too").clicked() {
                 same = true;
             }
-            if ui.add_enabled(two, egui::Button::new("Compare Folders…")).on_hover_text("Compare the two panes' folders, and sync them").clicked() {
+            if ui.add_enabled(two, egui::Button::new(style::mi("Compare Folders…"))).on_hover_text("Compare the two panes' folders, and sync them").clicked() {
                 compare = true;
             }
             ui.separator();
             ui.weak(if two { "This pane" } else { "Layout" });
             let pane = self.files.pane_mut();
             for v in FView::ALL {
-                if ui.add(egui::Button::selectable(pane.view == v, v.title())).on_hover_text(v.tip()).clicked() {
+                if ui.add(egui::Button::selectable(pane.view == v, style::mi(v.title()))).on_hover_text(v.tip()).clicked() {
                     pane.view = v;
                 }
             }
             if pane.view == FView::Details {
-                ui.menu_button("Group By", |ui| {
+                ui.menu_button(style::mi("Group By"), |ui| {
                     for g in views::FGroup::ALL {
-                        if ui.add(egui::Button::selectable(pane.group == g, g.title())).clicked() {
+                        if ui.add(egui::Button::selectable(pane.group == g, style::mi(g.title()))).clicked() {
                             pane.group = g;
                         }
                     }
                 });
             }
             if pane.view != FView::Details {
-                ui.menu_button("Sort By", |ui| {
+                ui.menu_button(style::mi("Sort By"), |ui| {
                     for col in [FSort::Name, FSort::Size, FSort::Type, FSort::Modified] {
-                        if ui.add(egui::Button::selectable(pane.sort == col, col.title())).clicked() {
+                        if ui.add(egui::Button::selectable(pane.sort == col, style::mi(col.title()))).clicked() {
                             pane.sort = col;
                         }
                     }
                     ui.separator();
-                    if ui.add(egui::Button::selectable(pane.reversed, "Reverse Order")).clicked() {
+                    if ui.add(egui::Button::selectable(pane.reversed, style::mi("Reverse Order"))).clicked() {
                         pane.reversed = !pane.reversed;
                     }
                 });
@@ -1409,27 +1409,27 @@ impl App {
                     .on_hover_text(format!("Or hold {} and turn the mouse wheel over the icons", if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" }));
             }
             let own = self.files.has_own_look();
-            if ui.button("Use This View for All Folders").on_hover_text("Show every folder with this view, sort and grouping, forgetting the ones set for single folders").clicked() {
+            if ui.add(egui::Button::new(style::mi("Use This View for All Folders"))).on_hover_text("Show every folder with this view, sort and grouping, forgetting the ones set for single folders").clicked() {
                 self.files.look_for_all();
             }
-            if ui.add_enabled(own, egui::Button::new("Reset This Folder's View")).on_hover_text("Show this folder the way folders are shown by default").clicked() {
+            if ui.add_enabled(own, egui::Button::new(style::mi("Reset This Folder's View"))).on_hover_text("Show this folder the way folders are shown by default").clicked() {
                 self.files.forget_look();
             }
             let p = &mut self.files.prefs;
-            ui.checkbox(&mut p.remember_looks, "Remember Each Folder's View").on_hover_text("A change of view, sort or grouping applies to that folder only, and comes back when you return to it");
+            ui.toggle_value(&mut p.remember_looks, style::mi("Remember Each Folder's View")).on_hover_text("A change of view, sort or grouping applies to that folder only, and comes back when you return to it");
             ui.separator();
-            if ui.add(egui::Button::selectable(p.preview, "Preview Pane").shortcut_text(k(egui::Modifiers::ALT, egui::Key::P))).clicked() {
+            if ui.add(egui::Button::selectable(p.preview, style::mi("Preview Pane")).shortcut_text(k(egui::Modifiers::ALT, egui::Key::P))).clicked() {
                 p.preview = !p.preview;
             }
             if ui
-                .add(egui::Button::selectable(p.show_hidden, "Hidden Items").shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Period)))
+                .add(egui::Button::selectable(p.show_hidden, style::mi("Hidden Items")).shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Period)))
                 .on_hover_text("Show hidden files and folders: names starting with a dot, and items marked hidden on Windows")
                 .clicked()
             {
                 p.show_hidden = !p.show_hidden;
             }
             if ui
-                .add(egui::Button::selectable(p.sequences, "Group Image Sequences"))
+                .add(egui::Button::selectable(p.sequences, style::mi("Group Image Sequences")))
                 .on_hover_text("Show numbered frames (shot.1001.exr, shot.1002.exr…) as one row. Enter or a double-click plays the sequence")
                 .clicked()
             {
@@ -1437,15 +1437,19 @@ impl App {
             }
             ui.separator();
             ui.weak("Rows");
-            ui.radio_value(&mut p.density, Density::Comfortable, "Comfortable");
-            ui.radio_value(&mut p.density, Density::Compact, "Compact");
+            if ui.add(egui::Button::selectable(p.density == Density::Comfortable, style::mi("Comfortable"))).clicked() {
+                p.density = Density::Comfortable;
+            }
+            if ui.add(egui::Button::selectable(p.density == Density::Compact, style::mi("Compact"))).clicked() {
+                p.density = Density::Compact;
+            }
             ui.separator();
-            if ui.add_enabled(p.col_widths != COL_WIDTHS, egui::Button::new("Reset Column Widths")).clicked() {
+            if ui.add_enabled(p.col_widths != COL_WIDTHS, egui::Button::new(style::mi("Reset Column Widths"))).clicked() {
                 p.col_widths = COL_WIDTHS;
             }
             ui.separator();
             let dock = self.files.prefs.dock.open;
-            if ui.add(egui::Button::selectable(dock, "Analysis Dock").shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::J))).clicked() {
+            if ui.add(egui::Button::selectable(dock, style::mi("Analysis Dock")).shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::J))).clicked() {
                 self.files.prefs.dock.open = !dock;
             }
         })
@@ -1847,7 +1851,7 @@ impl App {
                         run_search = Some(s.clone());
                     }
                     resp.context_menu(|ui| {
-                        if ui.button("Remove from This List").clicked() {
+                        if ui.add(egui::Button::new(style::mi("Remove from This List"))).clicked() {
                             remove = Some(i);
                             ui.close();
                         }
@@ -2151,13 +2155,13 @@ impl App {
                         picks.close_tab = Some(i);
                     }
                     resp.context_menu(|ui| {
-                        if ui.button("New Tab").clicked() {
+                        if ui.add(egui::Button::new(style::mi("New Tab"))).clicked() {
                             picks.new_tab = Some(here.clone());
                         }
-                        if ui.add_enabled(n > 1, egui::Button::new("Close Tab")).clicked() {
+                        if ui.add_enabled(n > 1, egui::Button::new(style::mi("Close Tab"))).clicked() {
                             picks.close_tab = Some(i);
                         }
-                        if ui.add_enabled(n > 1, egui::Button::new("Close Other Tabs")).clicked() {
+                        if ui.add_enabled(n > 1, egui::Button::new(style::mi("Close Other Tabs"))).clicked() {
                             picks.close_others = Some(i);
                         }
                     });
@@ -2245,7 +2249,7 @@ impl App {
                     }
                     let pinned = self.files.is_pinned(&root);
                     resp.context_menu(|ui| {
-                        if ui.button("Analyse This Drive").on_hover_text("Scan it and show its treemap in the analysis dock").clicked() {
+                        if ui.add(egui::Button::new(style::mi("Analyse This Drive"))).on_hover_text("Scan it and show its treemap in the analysis dock").clicked() {
                             picks.menu = Some((FAction::Analyse, vec![root.clone()]));
                         }
                         ui.separator();
@@ -2592,21 +2596,21 @@ impl App {
         empty.context_menu(|ui| {
             let ctx = ui.ctx().clone();
             let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
-            ui.menu_button("New", |ui| {
+            ui.menu_button(style::mi("New"), |ui| {
                 new_pick = self.new_menu_items(ui, &here);
             });
-            if ui.add_enabled(can_paste, egui::Button::new("Paste").shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::V))).clicked() {
+            if ui.add_enabled(can_paste, egui::Button::new(style::mi("Paste")).shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::V))).clicked() {
                 picks.menu = Some((FAction::Paste, vec![here.clone()]));
             }
             let undo = undo_label.as_deref().map_or("Undo".to_string(), |w| format!("Undo {w}"));
-            if ui.add_enabled(undo_label.is_some() && !busy, egui::Button::new(undo).shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::Z))).clicked() {
+            if ui.add_enabled(undo_label.is_some() && !busy, egui::Button::new(style::mi(undo)).shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::Z))).clicked() {
                 undo_now = true;
             }
             if let Some(w) = &redo_label
                 && ui
                     .add_enabled(
                         !busy,
-                        egui::Button::new(format!("Redo {w}"))
+                        egui::Button::new(style::mi(format!("Redo {w}")))
                             .shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::Y)),
                     )
                     .clicked()
@@ -2614,14 +2618,14 @@ impl App {
                 redo_now = true;
             }
             ui.separator();
-            if ui.add(egui::Button::new("Refresh").shortcut_text(k(egui::Modifiers::NONE, egui::Key::F5))).clicked() {
+            if ui.add(egui::Button::new(style::mi("Refresh")).shortcut_text(k(egui::Modifiers::NONE, egui::Key::F5))).clicked() {
                 picks.menu = Some((FAction::Open, Vec::new()));
             }
-            if ui.button("Open in New Tab").clicked() {
+            if ui.add(egui::Button::new(style::mi("Open in New Tab"))).clicked() {
                 picks.new_tab = Some(Location::Dir(here.clone()));
             }
             ui.separator();
-            if ui.button("Copy Path").clicked() {
+            if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
                 picks.menu = Some((FAction::CopyPath, vec![here.clone()]));
             }
             if let Some(a) = folder_menu(ui, pinned) {
@@ -3657,7 +3661,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
     let mut out = None;
     let mut item = |ui: &mut egui::Ui, enabled: bool, label: &str, keys: String, a: FAction| {
-        if ui.add_enabled(enabled, egui::Button::new(label).shortcut_text(keys)).clicked() {
+        if ui.add_enabled(enabled, egui::Button::new(style::mi(label)).shortcut_text(keys)).clicked() {
             out = Some(a);
         }
     };
@@ -3754,13 +3758,13 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
 fn folder_menu(ui: &mut egui::Ui, pinned: bool) -> Option<FAction> {
     let mut out = None;
     if pinned {
-        if ui.button("Remove from Favourites").clicked() {
+        if ui.add(egui::Button::new(style::mi("Remove from Favourites"))).clicked() {
             out = Some(FAction::Unpin);
         }
-    } else if ui.button("Add to Favourites").on_hover_text("A bookmark in the sidebar. You can also drag the folder there.").clicked() {
+    } else if ui.add(egui::Button::new(style::mi("Add to Favourites"))).on_hover_text("A bookmark in the sidebar. You can also drag the folder there.").clicked() {
         out = Some(FAction::Pin);
     }
-    if ui.button("Analyse This Folder").on_hover_text("Scan it and show its treemap in the analysis dock, while you keep browsing").clicked() {
+    if ui.add(egui::Button::new(style::mi("Analyse This Folder"))).on_hover_text("Scan it and show its treemap in the analysis dock, while you keep browsing").clicked() {
         out = Some(FAction::Analyse);
     }
     out
@@ -3768,23 +3772,23 @@ fn folder_menu(ui: &mut egui::Ui, pinned: bool) -> Option<FAction> {
 
 /// The menu for a place in the sidebar.
 fn place_menu(ui: &mut egui::Ui, path: &Path, pinned: bool, two: bool, picks: &mut FPicks) {
-    if ui.button("Open in New Tab").clicked() {
+    if ui.add(egui::Button::new(style::mi("Open in New Tab"))).clicked() {
         picks.new_tab = Some(Location::Dir(path.to_path_buf()));
     }
-    if two && ui.button("Open in Other Pane").clicked() {
+    if two && ui.add(egui::Button::new(style::mi("Open in Other Pane"))).clicked() {
         picks.menu = Some((FAction::OpenInOtherPane, vec![path.to_path_buf()]));
     }
     if pinned {
-        if ui.button("Remove from Favourites").clicked() {
+        if ui.add(egui::Button::new(style::mi("Remove from Favourites"))).clicked() {
             picks.menu = Some((FAction::Unpin, vec![path.to_path_buf()]));
         }
-    } else if ui.button("Add to Favourites").clicked() {
+    } else if ui.add(egui::Button::new(style::mi("Add to Favourites"))).clicked() {
         picks.menu = Some((FAction::Pin, vec![path.to_path_buf()]));
     }
-    if ui.button("Copy Path").clicked() {
+    if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
         picks.menu = Some((FAction::CopyPath, vec![path.to_path_buf()]));
     }
-    if ui.button("Analyse This Folder").clicked() {
+    if ui.add(egui::Button::new(style::mi("Analyse This Folder"))).clicked() {
         picks.menu = Some((FAction::Analyse, vec![path.to_path_buf()]));
     }
 }

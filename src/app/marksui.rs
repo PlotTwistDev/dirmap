@@ -61,7 +61,7 @@ pub(super) fn paint_tags(p: &egui::Painter, at: Pos2, m: &Mark, weak: Color32) -
 /// The Colour submenu and Tags and Note item, for the right-click menu.
 pub(super) fn menu(ui: &mut egui::Ui, current: Option<u8>) -> Option<FAction> {
     let mut out = None;
-    ui.menu_button("Colour", |ui| {
+    ui.menu_button(crate::app::style::mi("Colour"), |ui| {
         for (i, (name, _)) in COLOURS.iter().enumerate() {
             let i = i as u8;
             let (r, resp) = ui.allocate_exact_size(vec2(150.0, 22.0), egui::Sense::click());
@@ -90,13 +90,13 @@ pub(super) fn menu(ui: &mut egui::Ui, current: Option<u8>) -> Option<FAction> {
         }
         ui.separator();
         if ui
-            .add_enabled(current.is_some(), egui::Button::new("No Colour"))
+            .add_enabled(current.is_some(), egui::Button::new(crate::app::style::mi("No Colour")))
             .clicked()
         {
             out = Some(FAction::Colour(None));
         }
     });
-    if ui.button("Tags and Note…").clicked() {
+    if ui.add(egui::Button::new(crate::app::style::mi("Tags and Note…"))).clicked() {
         out = Some(FAction::Tags);
     }
     out

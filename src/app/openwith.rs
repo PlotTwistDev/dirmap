@@ -144,7 +144,7 @@ fn app_name(exe: &Path) -> String {
 /// The Open With submenu: the apps for this kind of item, then Choose and Manage.
 pub(super) fn menu(ui: &mut egui::Ui, apps: &[UserApp], ext: &str, is_dir: bool) -> Option<Pick> {
     let mut out = None;
-    ui.menu_button("Open With", |ui| {
+    ui.menu_button(crate::app::style::mi("Open With"), |ui| {
         let fit: Vec<(usize, &UserApp)> = apps
             .iter()
             .enumerate()
@@ -170,10 +170,10 @@ pub(super) fn menu(ui: &mut egui::Ui, apps: &[UserApp], ext: &str, is_dir: bool)
         } else {
             format!(".{ext} files")
         };
-        if ui.button(format!("Choose an App for {what}…")).clicked() {
+        if ui.add(egui::Button::new(crate::app::style::mi(format!("Choose an App for {what}…")))).clicked() {
             out = Some(Pick::Choose);
         }
-        if ui.button("Manage Apps…").clicked() {
+        if ui.add(egui::Button::new(crate::app::style::mi("Manage Apps…"))).clicked() {
             out = Some(Pick::Manage);
         }
     });

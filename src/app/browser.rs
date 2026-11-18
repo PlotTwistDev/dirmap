@@ -910,13 +910,13 @@ impl App {
             empty.context_menu(|ui| {
                 let ctx = ui.ctx().clone();
                 let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
-                if ui.add_enabled(!busy, egui::Button::new("New Folder").shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::N))).clicked() {
+                if ui.add_enabled(!busy, egui::Button::new(crate::app::style::mi("New Folder")).shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::N))).clicked() {
                     picks.new_folder = true;
                 }
-                if ui.add_enabled(can_paste, egui::Button::new("Paste").shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::V))).clicked() {
+                if ui.add_enabled(can_paste, egui::Button::new(crate::app::style::mi("Paste")).shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::V))).clicked() {
                     picks.paste = true;
                 }
-                if ui.button("Open in New Tab").clicked() {
+                if ui.add(egui::Button::new(crate::app::style::mi("Open in New Tab"))).clicked() {
                     picks.new_tab = Some(self.full_path(&folder));
                 }
             });

@@ -315,26 +315,26 @@ impl App {
 
     fn group_menu(&mut self, ui: &mut egui::Ui, g: usize) {
         let n = self.files.prefs.favourites.len();
-        if ui.button("Rename Group…").clicked() {
+        if ui.add(egui::Button::new(style::mi("Rename Group…"))).clicked() {
             let text = self.files.prefs.favourites[g].name.clone();
             self.files.fav_edit = Some(FavEdit { group: g, item: None, text, fresh: true });
         }
-        if ui.button("New Group").clicked() {
+        if ui.add(egui::Button::new(style::mi("New Group"))).clicked() {
             let groups = &mut self.files.prefs.favourites;
             groups.insert(g + 1, FavGroup::new("New group"));
             self.files.fav_edit = Some(FavEdit { group: g + 1, item: None, text: "New group".into(), fresh: true });
         }
         ui.separator();
-        if ui.add_enabled(g > 0, egui::Button::new("Move Group Up")).clicked() {
+        if ui.add_enabled(g > 0, egui::Button::new(style::mi("Move Group Up"))).clicked() {
             self.files.prefs.favourites.swap(g, g - 1);
         }
-        if ui.add_enabled(g + 1 < n, egui::Button::new("Move Group Down")).clicked() {
+        if ui.add_enabled(g + 1 < n, egui::Button::new(style::mi("Move Group Down"))).clicked() {
             self.files.prefs.favourites.swap(g, g + 1);
         }
         ui.separator();
         let into = if g == 0 { 1 } else { g - 1 };
         let tip = if n < 2 { "There has to be at least one group".to_string() } else { format!("Its favourites move to {}", self.files.prefs.favourites[into].name) };
-        if ui.add_enabled(n > 1, egui::Button::new("Remove Group")).on_hover_text(tip).on_disabled_hover_text("There has to be at least one group").clicked() {
+        if ui.add_enabled(n > 1, egui::Button::new(style::mi("Remove Group"))).on_hover_text(tip).on_disabled_hover_text("There has to be at least one group").clicked() {
             remove_group(&mut self.files.prefs.favourites, g);
         }
     }
@@ -342,40 +342,40 @@ impl App {
     fn fav_menu(&mut self, ui: &mut egui::Ui, g: usize, i: usize, picks: &mut FPicks) {
         let f = self.files.prefs.favourites[g].items[i].clone();
         let loc = Location::Dir(f.path.clone());
-        if ui.button("Open in New Tab").clicked() {
+        if ui.add(egui::Button::new(style::mi("Open in New Tab"))).clicked() {
             picks.new_tab = Some(loc.clone());
         }
         if let Some(o) = self.files.other()
-            && ui.button("Open in Other Pane").clicked()
+            && ui.add(egui::Button::new(style::mi("Open in Other Pane"))).clicked()
         {
             picks.go_other = Some((o, loc.clone()));
         }
         ui.separator();
-        if ui.button("Rename…").on_hover_text("Change the name shown here. The folder itself keeps its name.").clicked() {
+        if ui.add(egui::Button::new(style::mi("Rename…"))).on_hover_text("Change the name shown here. The folder itself keeps its name.").clicked() {
             self.files.fav_edit = Some(FavEdit { group: g, item: Some(i), text: f.label.clone(), fresh: true });
         }
-        if !f.label.is_empty() && ui.button("Use Folder's Name").clicked() {
+        if !f.label.is_empty() && ui.add(egui::Button::new(style::mi("Use Folder's Name"))).clicked() {
             self.files.prefs.favourites[g].items[i].label.clear();
         }
         let groups: Vec<String> = self.files.prefs.favourites.iter().map(|g| g.name.clone()).collect();
         if groups.len() > 1 {
-            ui.menu_button("Move to Group", |ui| {
+            ui.menu_button(style::mi("Move to Group"), |ui| {
                 for (k, name) in groups.iter().enumerate() {
-                    if k != g && ui.button(name).clicked() {
+                    if k != g && ui.add(egui::Button::new(style::mi(name))).clicked() {
                         let at = self.files.prefs.favourites[k].items.len();
                         move_fav(&mut self.files.prefs.favourites, (g, i), k, at);
                     }
                 }
             });
         }
-        if ui.button("Remove from Favourites").on_hover_text("Removes the bookmark only. The folder isn't touched.").clicked() {
+        if ui.add(egui::Button::new(style::mi("Remove from Favourites"))).on_hover_text("Removes the bookmark only. The folder isn't touched.").clicked() {
             self.files.prefs.favourites[g].items.remove(i);
         }
         ui.separator();
-        if ui.button("Copy Path").clicked() {
+        if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
             picks.menu = Some((files::FAction::CopyPath, vec![f.path.clone()]));
         }
-        if ui.button("Analyse This Folder").clicked() {
+        if ui.add(egui::Button::new(style::mi("Analyse This Folder"))).clicked() {
             picks.menu = Some((files::FAction::Analyse, vec![f.path.clone()]));
         }
     }

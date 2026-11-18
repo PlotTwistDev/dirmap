@@ -666,7 +666,7 @@ impl App {
         resp.context_menu(|ui| {
             ui.label(egui::RichText::new(disk.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()).strong());
             ui.separator();
-            if ui.button(if is_dir { "Open in List" } else { "Show in List" }).clicked() {
+            if ui.add(egui::Button::new(style::mi(if is_dir { "Open in List" } else { "Show in List" }))).clicked() {
                 let (dir, name): (PathBuf, Option<Box<str>>) =
                     if is_dir { (disk.clone(), None) } else { (disk.parent().map(Path::to_path_buf).unwrap_or_default(), disk.file_name().map(|n| n.to_string_lossy().into())) };
                 self.files.reveal(dir, name.into_iter().collect());

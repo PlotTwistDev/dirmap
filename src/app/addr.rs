@@ -373,23 +373,23 @@ impl App {
                 }
                 let pinned = self.files.is_pinned(p);
                 resp.context_menu(|ui| {
-                    if ui.button("Open in New Tab").clicked() {
+                    if ui.add(egui::Button::new(style::mi("Open in New Tab"))).clicked() {
                         menu = Some((FAction::OpenInNewTab, p.clone()));
                     }
-                    if other.is_some() && ui.button("Open in Other Pane").clicked() {
+                    if other.is_some() && ui.add(egui::Button::new(style::mi("Open in Other Pane"))).clicked() {
                         menu = Some((FAction::OpenInOtherPane, p.clone()));
                     }
                     ui.separator();
-                    if ui.button("Copy Path").clicked() {
+                    if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
                         menu = Some((FAction::CopyPath, p.clone()));
                     }
-                    if cfg!(windows) && ui.button("Copy Network (UNC) Path").on_hover_text("For a mapped drive: the \\\\server\\share form other computers can use").clicked() {
+                    if cfg!(windows) && ui.add(egui::Button::new(style::mi("Copy Network (UNC) Path"))).on_hover_text("For a mapped drive: the \\\\server\\share form other computers can use").clicked() {
                         menu = Some((FAction::CopyUnc, p.clone()));
                     }
-                    if !pinned && ui.button("Add to Favourites").clicked() {
+                    if !pinned && ui.add(egui::Button::new(style::mi("Add to Favourites"))).clicked() {
                         menu = Some((FAction::Pin, p.clone()));
                     }
-                    if ui.button("Analyse This Folder").clicked() {
+                    if ui.add(egui::Button::new(style::mi("Analyse This Folder"))).clicked() {
                         menu = Some((FAction::Analyse, p.clone()));
                     }
                 });

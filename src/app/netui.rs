@@ -255,7 +255,7 @@ impl App {
                 }
                 self.place_row(ui, &resp, path, picks);
                 resp.context_menu(|ui| {
-                    if ui.button("Disconnect").on_hover_text("Unmap or unmount it. Saved locations stay in the list.").clicked() {
+                    if ui.add(egui::Button::new(style::mi("Disconnect"))).on_hover_text("Unmap or unmount it. Saved locations stay in the list.").clicked() {
                         disconnect = Some(path.clone());
                     }
                 });
@@ -268,7 +268,7 @@ impl App {
                 let resp = files::side_row(ui, "🌐", &name, *here == Location::Dir(s.clone()), 24.0).on_hover_text(format!("{}\nSaved location", s.display()));
                 self.place_row(ui, &resp, s, picks);
                 resp.context_menu(|ui| {
-                    if ui.button("Remove from This List").clicked() {
+                    if ui.add(egui::Button::new(style::mi("Remove from This List"))).clicked() {
                         remove_server = Some(i);
                     }
                 });
@@ -297,26 +297,26 @@ impl App {
                     picks.drop = Some(d);
                 }
                 resp.context_menu(|ui| {
-                    if ui.button("Open in New Tab").clicked() {
+                    if ui.add(egui::Button::new(style::mi("Open in New Tab"))).clicked() {
                         open_site_tab = Some(i);
                         ui.close();
                     }
-                    if ui.button("Edit…").clicked() {
+                    if ui.add(egui::Button::new(style::mi("Edit…"))).clicked() {
                         edit_site = Some(i);
                         ui.close();
                     }
-                    if on && ui.button("Disconnect").clicked() {
+                    if on && ui.add(egui::Button::new(style::mi("Disconnect"))).clicked() {
                         remote::disconnect(&path);
                         ui.close();
                     }
-                    if ui.button("Forget Saved Password").on_hover_text("Remove its password from the system keychain, if one was kept there").clicked() {
+                    if ui.add(egui::Button::new(style::mi("Forget Saved Password"))).on_hover_text("Remove its password from the system keychain, if one was kept there").clicked() {
                         let url = site.url.clone();
                         std::thread::spawn(move || remote::forget_password(&url));
                         self.ops.notice = Some(("Any saved password for it was removed from the keychain.".into(), false));
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Remove from This List").clicked() {
+                    if ui.add(egui::Button::new(style::mi("Remove from This List"))).clicked() {
                         remove_site = Some(i);
                         ui.close();
                     }

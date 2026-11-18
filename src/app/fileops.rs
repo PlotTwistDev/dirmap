@@ -188,20 +188,20 @@ impl App {
         let busy = self.ops.job.is_some();
         let mut out = None;
         ui.set_min_width(200.0);
-        if ui.add_enabled(!busy, egui::Button::new("🗀 Folder").shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::N))).clicked() {
+        if ui.add_enabled(!busy, egui::Button::new(style::mi("🗀 Folder")).shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::N))).clicked() {
             out = Some(NewPick::Folder);
         }
         ui.separator();
         let (docs, scripts) = templates::builtins();
         let tip = |b: &Builtin| if b.contents.is_empty() { format!("{} (empty)", b.name) } else { format!("{}:\n\n{}", b.name, b.contents.trim_end()) };
         for b in docs {
-            if ui.add_enabled(!busy, egui::Button::new(b.label)).on_hover_text(tip(b)).clicked() {
+            if ui.add_enabled(!busy, egui::Button::new(style::mi(b.label))).on_hover_text(tip(b)).clicked() {
                 out = Some(NewPick::Builtin(*b));
             }
         }
-        ui.menu_button("Script", |ui| {
+        ui.menu_button(style::mi("Script"), |ui| {
             for b in scripts {
-                if ui.add_enabled(!busy, egui::Button::new(b.label)).on_hover_text(tip(b)).clicked() {
+                if ui.add_enabled(!busy, egui::Button::new(style::mi(b.label))).on_hover_text(tip(b)).clicked() {
                     out = Some(NewPick::Builtin(*b));
                 }
             }
@@ -211,7 +211,7 @@ impl App {
         if !user.is_empty() {
             for t in user {
                 let icon = if t.is_dir { "🗀 " } else { "" };
-                if ui.add_enabled(!busy, egui::Button::new(format!("{icon}{}", t.label))).on_hover_text(format!("A copy of {}", t.path.display())).clicked() {
+                if ui.add_enabled(!busy, egui::Button::new(style::mi(format!("{icon}{}", t.label)))).on_hover_text(format!("A copy of {}", t.path.display())).clicked() {
                     out = Some(NewPick::User(t));
                 }
             }
