@@ -1273,13 +1273,16 @@ impl App {
 
     /// The filter box (and subfolder search and Save) for the pane being drawn. `focused`: it's
     /// the pane with the keyboard, which Ctrl+F puts the cursor in. Laid out right to left.
-    fn filter_box(&mut self, ui: &mut egui::Ui, focused: bool, width: f32) {
+    /// `width` None: no room for the box, only its buttons.
+    fn filter_box(&mut self, ui: &mut egui::Ui, focused: bool, width: Option<f32>) {
         let ctx = ui.ctx().clone();
         let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
         let fid = egui::Id::new(("files-filter", self.files.focus));
-        let hint = if width < 130.0 { "🔍 Filter".to_string() } else { format!("🔍 Filter ({})", k(egui::Modifiers::COMMAND, egui::Key::F)) };
-        let f = ui.add(egui::TextEdit::singleline(&mut self.files.pane_mut().filter).id(fid).desired_width(width).hint_text(hint));
-        f.on_hover_text("Show only items whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
+        if let Some(width) = width {
+            let hint = if width < 130.0 { "🔍 Filter".to_string() } else { format!("🔍 Filter ({})", k(egui::Modifiers::COMMAND, egui::Key::F)) };
+            let f = ui.add(egui::TextEdit::singleline(&mut self.files.pane_mut().filter).id(fid).desired_width(width).hint_text(hint));
+            f.on_hover_text("Show only items whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
+        }
         let deep = self.files.pane().deep;
         if style::toggle_button(ui, deep, "🗐", "Search subfolders too: the filter looks in this folder and every folder below it").clicked() {
             self.files.pane_mut().deep = !deep;
@@ -1312,15 +1315,30 @@ impl App {
                 style::roomy(ui);
                 self.nav_buttons(ui);
                 ui.add_space(2.0);
-                // The filter gets narrower with the pane, so the path keeps some room.
-                let width = (ui.available_width() * 0.3).clamp(60.0, 150.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    self.filter_box(ui, focused, width);
-                    ui.add_space(4.0);
-                    let w = ui.available_width();
-                    ui.allocate_ui_with_layout(vec2(w, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                // Fit a narrow pane: the filter narrows first, then the path goes (the tab still
+                // names the folder), then the filter box itself, leaving its 🗐 button.
+                let avail = ui.available_width();
+                let h = ui.spacing().interact_size.y;
+                let star = self.files.pane().deep && !self.files.pane().filter.trim().is_empty();
+                let buttons = (h + 4.0) * if star { 2.0 } else { 1.0 };
+                let mut filter = (avail * 0.3).clamp(60.0, 150.0);
+                let mut path = avail - filter - buttons - 8.0;
+                if path < 70.0 {
+                    path = 0.0;
+                    filter = (avail - buttons - 4.0).min(150.0);
+                }
+                if path > 0.0 {
+                    ui.allocate_ui_with_layout(vec2(path, h), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
                         go = self.path_bar(ui);
                     });
+                    ui.add_space(4.0);
+                }
+                let rest = ui.available_width().max(0.0);
+                ui.allocate_ui_with_layout(vec2(rest, h), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
+                    // TextEdit adds its margins to the width it's given.
+                    self.filter_box(ui, focused, (filter >= 50.0).then_some(filter - 8.0));
                 });
             });
         });

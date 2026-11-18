@@ -133,6 +133,9 @@ Under the toolbar, above the tabs, the pane's own bar has:
 
 With [two panes](#two-panes), each pane has its own bar.
 
+In a narrow pane the filter box gets smaller, then the path is left out (the tab still names
+the folder), then the filter box itself, leaving **🗐**.
+
 The **View** menu has:
 
 - **Hidden Items**, which shows hidden files and folders;
