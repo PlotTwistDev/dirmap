@@ -38,6 +38,7 @@ click it for details.
 | **Quick access** | Home, Desktop, Documents, Downloads, Pictures, Music and Videos (and Applications on a Mac). These are your real folders, including ones that have been moved, such as Documents on OneDrive. |
 | **Favourites** | Folders you've bookmarked, in as many groups as you like. See [Favourites](#favourites). |
 | **Drives** | **This PC** (Windows) or **Computer** (Linux and macOS), then each local drive or mounted volume. Each has a bar showing how full it is, red when over 90%. Hover for the free space. |
+| **Linux** | Windows only, when WSL is installed: each Linux distribution, as in Explorer (`\\wsl.localhost\Ubuntu`). Opening one starts it if it isn't running. |
 | **Network & Remote** | Network drives and shares, saved servers, and **Connect to Server…**. See [Network & Remote](#network--remote). |
 | **Saved searches** | Searches you've kept with **☆**. Click one to run it again. See [Searching subfolders](#searching-subfolders). |
 | **Recent** | The last ten folders you opened. |
@@ -111,18 +112,26 @@ as `sftp://rich@render01/mnt/shots`, `ftp://nas.local`, or `davs://cloud.example
 From left to right:
 
 - the workspaces;
-- **⏴ ⏵ ⏶ ⟳**: Back, Forward, Up and Refresh;
 - **✚ New**, the [New menu](#new-folders-and-files);
-- the path (with two panes, each pane has its own Back, Forward, Up, Refresh, path and filter
-  instead: see [Two panes](#two-panes));
 - **⚡ Analyse Folder**, which becomes **⟳ Refresh Analysis** when the folder is already
   analysed, or **■ Cancel Scan** while a scan runs (see [the analysis dock](#the-analysis-dock));
 - **⊞ Analysis**, which shows or hides the dock;
 - **👁** shows or hides the [preview pane](#quick-look-and-the-preview-pane), and **⬌** splits
   the view into [two panes](#two-panes);
+- the **View** menu, Help and Settings.
+
+On a narrow window the workspace and analysis buttons show only their symbols. Hover over one to
+see what it does.
+
+Under the toolbar, above the tabs, the pane's own bar has:
+
+- **⏴ ⏵ ⏶ ⟳**: Back, Forward, Up and Refresh;
+- the path;
 - **🗐**, which makes the filter [search subfolders](#searching-subfolders) too, and **☆**, which
   saves that search in the sidebar;
-- the filter, the **View** menu, Help and Settings.
+- the filter.
+
+With [two panes](#two-panes), each pane has its own bar.
 
 The **View** menu has:
 
@@ -151,7 +160,7 @@ two folders at once. **One Above the Other** stacks them instead.
 
 - Each pane has its own tabs, history, sort order, filter and selection, and its own bar above
   its tabs with **⏴ ⏵ ⏶ ⟳**, the path and the filter (with **🗐** and **☆**). The main toolbar
-  keeps what isn't tied to a pane: New, Analysis, the view buttons, View, Help and Settings.
+  has what isn't tied to a pane: New, Analysis, the view buttons, View, Help and Settings.
 - The pane you're working in has a thin coloured line along its top, and the keyboard and the
   main toolbar work on it. Click in a pane, or press **Tab**, to switch.
 - Drag items from one pane onto the other, onto a folder in it, or onto one of its tabs.

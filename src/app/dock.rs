@@ -296,7 +296,7 @@ impl App {
         let ctx = ui.ctx().clone();
         let shortcut = ctx.format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::J));
         let open = self.files.prefs.dock.open;
-        if style::toggle_button(ui, open, "⊞ Analysis", format!("Show or hide the analysis dock: the treemap of this folder under the list ({shortcut})")).clicked() {
+        if style::toggle_button(ui, open, if style::narrow(ui) { "⊞" } else { "⊞ Analysis" }, format!("Show or hide the analysis dock: the treemap of this folder under the list ({shortcut})")).clicked() {
             self.files.prefs.dock.open = !open;
         }
         self.analyse_button(ui, false);
@@ -306,7 +306,12 @@ impl App {
     /// while a scan runs.
     fn analyse_button(&mut self, ui: &mut egui::Ui, small: bool) {
         let dir = self.files.here().dir().map(Path::to_path_buf);
-        let text = |s: &str| if small { egui::RichText::new(s).size(12.0) } else { egui::RichText::new(s) };
+        // On a narrow window the toolbar's button keeps only its symbol.
+        let short = !small && style::narrow(ui);
+        let text = |s: &str| {
+            let s = if short { s.split(' ').next().unwrap_or(s) } else { s };
+            if small { egui::RichText::new(s).size(12.0) } else { egui::RichText::new(s) }
+        };
         if let Some(job) = &self.job {
             let cancelling = job.progress.cancel.load(Ordering::Relaxed);
             let b = ui.add_enabled(!cancelling, egui::Button::new(text(if cancelling { "Cancelling…" } else { "■ Cancel Scan" })));

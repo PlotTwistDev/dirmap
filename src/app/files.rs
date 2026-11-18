@@ -1135,17 +1135,18 @@ impl App {
         let k = |key| ctx.format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key));
         let ws = self.files.prefs.workspace;
         let mut to = None;
+        let narrow = style::narrow(ui);
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             if ui
-                .add(egui::Button::selectable(ws == Workspace::Files, "🗀 Files"))
+                .add(egui::Button::selectable(ws == Workspace::Files, if narrow { "🗀" } else { "🗀 Files" }))
                 .on_hover_text(format!("File Manager: browse and open files, no scan needed ({})", k(egui::Key::Num1)))
                 .clicked()
             {
                 to = Some(Workspace::Files);
             }
             if ui
-                .add(egui::Button::selectable(ws == Workspace::Analysis, "⊞ Storage Analysis"))
+                .add(egui::Button::selectable(ws == Workspace::Analysis, if narrow { "⊞ Storage" } else { "⊞ Storage Analysis" }))
                 .on_hover_text(format!("Scan a drive or folder: folder tree, treemap, file types, duplicates… ({})", k(egui::Key::Num3)))
                 .clicked()
             {
@@ -1197,21 +1198,15 @@ impl App {
 
     // ---------- drawing ----------
 
-    /// Toolbar of the File Manager, in groups: workspaces, navigation, New, the path, analysis,
-    /// and on the right the filter, View, Help and Settings. It works on the focused pane.
+    /// Toolbar of the File Manager, in groups: workspaces, New, and on the right analysis, the
+    /// view buttons, View, Help and Settings. It works on the focused pane.
     pub(super) fn files_toolbar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
-        let mut go = None;
         ui.horizontal(|ui| {
             style::roomy(ui);
             self.workspace_switch(ui);
-            // With two panes, each has its own navigation, path and filter (`pane_bar`).
-            let one = self.files.panes.len() < 2;
-            if one {
-                self.nav_buttons(ui);
-                ui.add_space(2.0);
-            }
+            // Navigation, the path and the filter are on each pane's own bar (`pane_bar`).
             let dir = self.files.here().dir().map(Path::to_path_buf);
             let mut pick = None;
             style::tool_group(ui, |ui| {
@@ -1245,23 +1240,10 @@ impl App {
                         self.toggle_split();
                     }
                 });
-                if one {
-                    self.filter_box(ui, true);
-                }
                 ui.add_space(6.0);
                 self.dock_toolbar_buttons(ui);
-                ui.add_space(4.0);
-                if one {
-                    let w = ui.available_width();
-                    ui.allocate_ui_with_layout(vec2(w, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        go = self.path_bar(ui);
-                    });
-                }
             });
         });
-        if let Some(to) = go {
-            self.files.go(to);
-        }
     }
 
     /// Back, Forward, Up and Refresh, for the pane being drawn.
@@ -1322,7 +1304,7 @@ impl App {
         }
     }
 
-    /// With two panes: the pane's own Back, Forward, Up, Refresh, path and filter, above its tabs.
+    /// The pane's own Back, Forward, Up, Refresh, path and filter, above its tabs.
     fn pane_bar(&mut self, ui: &mut egui::Ui, focused: bool) {
         let mut go = None;
         egui::Frame::new().inner_margin(egui::Margin { left: 6, right: 6, top: 4, bottom: 2 }).show(ui, |ui| {
@@ -1820,6 +1802,16 @@ impl App {
                 self.net_refresh();
             }
         });
+        if !self.wsl.is_empty() {
+            side_section(ui, "fm-linux", "Linux", true, |ui| {
+                for root in self.wsl.clone() {
+                    // `\\wsl.localhost\Ubuntu` is all prefix to `Path`, so take the name from the text.
+                    let name = root.to_string_lossy().rsplit('\\').next().unwrap_or_default().to_string();
+                    let resp = side_row(ui, "🐧", &name, here == Location::Dir(root.clone()), ROW_F).on_hover_text(format!("{}\nWSL: starts the distribution if it isn't running", root.display()));
+                    self.place_row(ui, &resp, &root, &mut picks);
+                }
+            });
+        }
         self.network_section(ui, &here, &mut picks);
         let mut run_search = None;
         if !self.files.prefs.searches.is_empty() {
@@ -2021,9 +2013,7 @@ impl App {
         let keep = self.files.focus;
         self.files.focus = pane;
         let mut picks = FPicks::default();
-        if self.files.panes.len() > 1 {
-            self.pane_bar(ui, keep == pane);
-        }
+        self.pane_bar(ui, keep == pane);
         self.files_tabs_row(ui, pane, keep == pane, &mut picks);
         let page = ui.available_rect_before_wrap();
         ui.painter().rect_filled(page, 0.0, pal.paper);

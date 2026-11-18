@@ -298,7 +298,7 @@ Status: ✅ done · 🔨 in progress · ⬜ not started. "Win" means checked on 
 | 1 | Copy, cut, paste, rename, Recycle Bin, delete in Files | 1 | Essential | ✅ | Recycle Bin not yet checked on Win |
 | 2 | Drag and drop everywhere, Move/Copy by volume with label | 1 | Essential | ✅ | |
 | 3 | Favourites: drag to add, groups, reorder, rename | 2 | Essential | ✅ | |
-| 4 | Split panes, Tab, Shift+F5/F6, swap, divider | 3 | Essential | ✅ | With two panes each has its own Back/Forward/Up/Refresh, path and filter bar (Rich, 18 Nov) |
+| 4 | Split panes, Tab, Shift+F5/F6, swap, divider | 3 | Essential | ✅ | Each pane has its own Back/Forward/Up/Refresh, path and filter bar above its tabs, with one pane too (Rich, 18 Nov) |
 | 5 | Address bar: suggestions, Tab, variables, crumb menus and drops, `>`, `@` | 4 | Essential | ✅ | |
 | 6 | Quick Look and preview pane: images (EXR, HDR), text | 5 | Essential | ✅ | |
 | 7 | New menu: folder, starter files, scripts, user templates | 6 | Advanced | ✅ | |

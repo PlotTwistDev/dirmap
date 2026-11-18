@@ -91,7 +91,8 @@ fn main() -> eframe::Result {
         let native = eframe::NativeOptions {
             viewport: eframe::egui::ViewportBuilder::default()
                 .with_title("dirmap")
-                .with_inner_size([1280.0, 820.0]),
+                .with_inner_size([1280.0, 820.0])
+                .with_min_inner_size([640.0, 420.0]),
             renderer,
             wgpu_options: wgpu_options(),
             ..Default::default()

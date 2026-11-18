@@ -138,6 +138,11 @@ pub(crate) fn roomy(ui: &mut egui::Ui) {
     s.interact_size.y = 24.0;
 }
 
+/// True when the window is too narrow for the toolbars' full labels, so they show symbols only.
+pub(crate) fn narrow(ui: &egui::Ui) -> bool {
+    ui.ctx().content_rect().width() < 1000.0
+}
+
 /// Mix two colours: `t` = 0 gives `a`, 1 gives `b`.
 pub(crate) fn blend(a: Color32, b: Color32, t: f32) -> Color32 {
     let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;

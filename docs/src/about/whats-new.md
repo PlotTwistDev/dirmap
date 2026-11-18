@@ -114,8 +114,16 @@
 - Big folders and slow network drives never freeze the window: folders are read in the
   background, and a share that takes a while says so and can be cancelled.
 
+### Linux distributions in the sidebar
+
+- On Windows, your **WSL** distributions are listed under **Linux** in the sidebar, as in
+  Explorer. Click one to browse its files.
+
 ### Fixes
 
+- **The File Manager toolbar no longer overlaps itself on a narrow window.** Back, Forward, Up,
+  the path and the filter now sit on the pane's own bar above the tabs, and on a narrow window
+  the toolbar's buttons show only their symbols.
 - **Resizing the window on Windows** no longer makes the panels shake. dirmap now draws with
   OpenGL there. `DIRMAP_RENDERER=wgpu` brings back DirectX 12.
 - **Rename** no longer replaces a different file whose name differs only in capital letters

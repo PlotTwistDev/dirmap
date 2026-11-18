@@ -230,7 +230,9 @@ pub struct App {
     expanded: HashSet<Box<[u32]>>,
     rows: Option<Vec<Row>>,
     drives: Vec<Drive>,
-    drives_rx: Option<mpsc::Receiver<Vec<Drive>>>,
+    drives_rx: Option<mpsc::Receiver<(Vec<Drive>, Vec<PathBuf>)>>,
+    /// WSL distributions (Windows), shown under Linux in the File Manager's sidebar.
+    wsl: Vec<PathBuf>,
     show_drives: bool,
     filter: ViewFilter,
     /// (filter, matching files, matching bytes) for the filter summary.
@@ -340,6 +342,7 @@ impl App {
             rows: None,
             drives: Vec::new(),
             drives_rx: None,
+            wsl: Vec::new(),
             show_drives: false,
             filter: ViewFilter::default(),
             filter_stats: None,
@@ -676,7 +679,7 @@ impl App {
     fn refresh_drives(&mut self) {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(drives::list());
+            let _ = tx.send((drives::list(), drives::wsl()));
         });
         self.drives_rx = Some(rx);
     }
@@ -2408,8 +2411,9 @@ impl eframe::App for App {
 
         if let Some(rx) = &self.drives_rx {
             match rx.try_recv() {
-                Ok(d) => {
+                Ok((d, wsl)) => {
                     self.drives = d;
+                    self.wsl = wsl;
                     self.drives_rx = None;
                 }
                 Err(_) => ctx.request_repaint_after(Duration::from_millis(100)),
