@@ -120,6 +120,46 @@ fn group_of(e: &Entry, g: FGroup, today: chrono::NaiveDate) -> (i64, String) {
     }
 }
 
+/// A run of numbered frames shown as one row. The row is the first frame's entry.
+#[derive(Clone, Debug)]
+pub(super) struct SeqRow {
+    pub seq: crate::sequences::Sequence,
+    /// Every frame's entry, in frame order (the first is the row's own).
+    pub members: Vec<u32>,
+    /// Newest frame's time.
+    pub modified: i64,
+    /// What the row shows: `shot010_comp.####.exr`.
+    pub label: String,
+}
+
+/// Sequence rows by their entry.
+pub(super) type Seqs = HashMap<u32, SeqRow>;
+
+/// Frames needed before numbered files show as one sequence row.
+const SEQ_MIN: usize = 3;
+
+/// Fold the numbered frames in `order` into one row per sequence, where the first frame was.
+pub(super) fn fold_sequences(entries: &[Entry], order: &mut Vec<u32>) -> Seqs {
+    let files: Vec<u32> = order.iter().copied().filter(|&i| !entries[i as usize].is_dir).collect();
+    let named: Vec<(&str, u64)> = files.iter().map(|&i| (&*entries[i as usize].name, entries[i as usize].size)).collect();
+    let mut out = Seqs::new();
+    let mut hide = std::collections::HashSet::new();
+    let pos: HashMap<u32, usize> = order.iter().enumerate().map(|(p, &i)| (i, p)).collect();
+    for (seq, members) in crate::sequences::in_names(&named, SEQ_MIN) {
+        let members: Vec<u32> = members.into_iter().map(|k| files[k]).collect();
+        let modified = members.iter().map(|&i| entries[i as usize].modified).max().unwrap_or(0);
+        // The row stands where the earliest-listed frame was.
+        let head = *members.iter().min_by_key(|&&i| pos[&i]).unwrap();
+        hide.extend(members.iter().copied().filter(|&m| m != head));
+        let label = seq.display();
+        out.insert(head, SeqRow { seq, members, modified, label });
+    }
+    if !hide.is_empty() {
+        order.retain(|i| !hide.contains(i));
+    }
+    out
+}
+
 /// The display order of a folder, and its group headings when grouped: the groups in their own
 /// order (folders first; newest or largest first unless the list is reversed by that column),
 /// and the items within each in the sort order.
@@ -132,10 +172,12 @@ pub(super) fn arrange(
     hidden: bool,
     filter: &str,
     group: FGroup,
-) -> (Vec<u32>, Vec<GroupHead>) {
+    sequences: bool,
+) -> (Vec<u32>, Vec<GroupHead>, Seqs) {
     let mut order = order_entries(entries, sizes, sort, reversed, hidden, filter);
+    let seqs = if sequences { fold_sequences(entries, &mut order) } else { Seqs::new() };
     if group == FGroup::None || order.is_empty() {
-        return (order, Vec::new());
+        return (order, Vec::new(), seqs);
     }
     let today = chrono::Local::now().date_naive();
     let flip = reversed && matches!((group, sort), (FGroup::Modified, FSort::Modified) | (FGroup::Size, FSort::Size) | (FGroup::Type, FSort::Type));
@@ -157,7 +199,7 @@ pub(super) fn arrange(
             heads.push(GroupHead { start: pos as u32, label: label.clone() });
         }
     }
-    (order, heads)
+    (order, heads, seqs)
 }
 
 /// A line of the grouped Details list.
@@ -515,7 +557,8 @@ impl App {
                     icons.paint_big(ui, Rect::from_center_size(pic.center(), vec2(size * 0.8, size * 0.8)), e.is_dir, e.ext(), tint);
                 }
                 let tc = if selected { sel_fg } else if e.hidden { pal.weak } else { pal.text };
-                let mut job = egui::text::LayoutJob::simple(e.name.to_string(), FontId::proportional(11.5), tc, cell.width() - 8.0);
+                let shown = t.seqs.get(&i).map_or_else(|| e.name.to_string(), |s| s.label.clone());
+                let mut job = egui::text::LayoutJob::simple(shown, FontId::proportional(11.5), tc, cell.width() - 8.0);
                 job.wrap.max_rows = 1;
                 job.wrap.break_anywhere = true;
                 job.halign = egui::Align::Center;
@@ -573,7 +616,7 @@ mod tests {
             entry("c.png", false, 5, 0),
             entry("empty", false, 0, 0),
         ];
-        let (order, heads) = arrange(&es, None, FSort::Name, false, true, "", FGroup::Type);
+        let (order, heads, _) = arrange(&es, None, FSort::Name, false, true, "", FGroup::Type, false);
         let names: Vec<&str> = order.iter().map(|&i| &*es[i as usize].name).collect();
         assert_eq!(names[0], "docs");
         assert_eq!(heads[0], GroupHead { start: 0, label: "Folders".into() });
@@ -583,7 +626,7 @@ mod tests {
         let s = heads[png].start as usize;
         assert_eq!(&names[s..s + 2], &["b.png", "c.png"]);
 
-        let (order, heads) = arrange(&es, None, FSort::Name, false, true, "", FGroup::Size);
+        let (order, heads, _) = arrange(&es, None, FSort::Name, false, true, "", FGroup::Size, false);
         let labels: Vec<&str> = heads.iter().map(|h| h.label.as_str()).collect();
         assert_eq!(labels, ["Folders", "Medium (1 to 128 MB)", "Tiny (under 16 KB)", "Empty"]);
         assert_eq!(order.len(), 5);

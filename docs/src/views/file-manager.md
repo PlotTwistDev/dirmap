@@ -492,6 +492,55 @@ what it made. Names in an archive that would put files outside the folder you ex
 Archives are only read: dirmap doesn't add to them, rename or delete inside them, and says so if
 you try. Password-protected archives and RAR aren't supported yet.
 
+## Image sequences
+
+Numbered frames, such as `shot010_comp.1001.exr`, `shot010_comp.1002.exr` and so on, are shown as
+one row: `shot010_comp.####.exr 1001–1240`. The row gives the frame range, the total size, the
+number of frames and the newest frame's date. If frames are missing it says how many, with a ⚠.
+Three or more frames make a sequence. The frame number is the last run of digits before the
+extension, and everything before it must match, so `v1` and `v2` renders stay apart. The status bar
+says how many frames are in sequences.
+
+A sequence row works as one item: **Copy**, **Cut**, **Delete**, drag and drop, and **Copy to
+Other Pane** take every frame. To rename frames, or to work on single frames, turn off **View >
+Group Image Sequences**.
+
+### Playing a sequence
+
+Double-click a sequence, or select it and press **Enter**, to play it over the whole window. To
+compare two sequences, select both and press **Enter** (or right-click and choose **Play and
+Compare (A/B)**). The first is **A** and the second **B**, with a line between them that you can
+drag. **A**, **Wipe** and **B** at the bottom choose what's shown.
+
+![Two sequences compared in the player, a DPX plate at the left of the wipe and a PNG comp at the right](../images/file-manager-player.png)
+
+The player reads frames into memory ahead of the playhead, using several cores, and plays only from
+memory. The first time through, it may play slower than the chosen rate while frames are read:
+the rate it reaches shows beside the rate you chose, in orange while it's slower. Once the frames
+are in memory it plays at full speed. The bar along the bottom of the timeline shows which frames
+are in memory. Missing frames and frames that can't be read show in red, and the player shows a
+black frame saying so.
+
+| Control | What it does |
+|---|---|
+| **▶** / **Space** | Play or pause. **L** plays forwards, **J** backwards and **K** pauses. |
+| **⏴ ⏵** / **←** **→** | Back or on one frame (with **Shift**, ten). **Home** and **End** go to the first and last frames. |
+| Timeline | Click or drag to go to a frame. |
+| **Loop**, **Play Once**, **Ping-Pong** | What happens at the end. |
+| Rate | 23.976 to 60 frames a second. |
+| Colour | **Automatic** shows float frames (EXR, HDR) as linear light on an sRGB display, log DPX through the Cineon curve, and other images as stored. **Linear to sRGB**, **Linear to Rec.709**, **Cineon Log to sRGB** and **Raw Values** choose a transform yourself. |
+| **Exposure** | Brighter or darker, in stops. Drag it, or type a value. **0** resets it. |
+| **Full Size**, **Half Size**, **Quarter Size** | Smaller frames use a quarter or a sixteenth of the memory, so more of a long or 4K sequence plays at full speed. |
+| **In memory** | How much memory the frames use. Click it to set the limit. It's a quarter of the computer's memory unless you change it. |
+
+The mouse wheel zooms around the pointer, dragging moves the picture, and a double-click or **F**
+fits it to the window. **Escape** closes the player.
+
+The player reads every image type dirmap previews: OpenEXR, PNG, JPEG, TIFF, HDR, TGA, BMP and the
+rest. It also reads **DPX** at 8, 10, 12 and 16 bits, in either byte order, packed or filled. A
+sequence on a server plays too, as each frame is downloaded. Frames are shown without their alpha
+channel.
+
 ## Slow and unreachable drives
 
 Folders are read in the background, a batch at a time, so a folder of 100,000 files starts

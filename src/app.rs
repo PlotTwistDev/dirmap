@@ -39,6 +39,7 @@ mod fileops;
 mod addr;
 mod netui;
 mod preview;
+mod seqplayer;
 mod thumbs;
 mod views;
 pub(crate) mod style;

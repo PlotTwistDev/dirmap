@@ -1263,6 +1263,7 @@ dependencies = [
  "chrono",
  "eframe",
  "flate2",
+ "half",
  "image",
  "keyring",
  "libc",

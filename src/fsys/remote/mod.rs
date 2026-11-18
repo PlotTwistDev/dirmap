@@ -782,6 +782,21 @@ pub fn fetch(path: &Path, max: u64) -> io::Result<PathBuf> {
     Ok(dest)
 }
 
+/// Read a whole server file into memory (frames for the sequence player), refusing ones over
+/// `max` bytes.
+pub fn read_bytes(path: &Path, max: u64) -> io::Result<Vec<u8>> {
+    let (site, p) = site_path(path)?;
+    let m = with(&site, |c| c.stat(&p))?;
+    if m.len > max {
+        return Err(io::Error::other(format!("it's {}, too big", crate::scan::human(m.len))));
+    }
+    with(&site, |c| {
+        let mut out = Vec::with_capacity(m.len as usize);
+        c.get(&p, &mut out, &mut |_| true)?;
+        Ok(out)
+    })
+}
+
 /// Every item under a folder on a server, for analysing it: (path relative to `path`, meta),
 /// folders before what's in them. `seen` is told each folder's items as it's read.
 pub fn walk(path: &Path, stop: &std::sync::atomic::AtomicBool, seen: &mut dyn FnMut(&str, &Listed)) -> io::Result<Listed> {
@@ -911,6 +926,8 @@ mod live {
             assert_eq!(meta(&dir.join("copy/sub/big.bin")).unwrap().len, 3_000_000);
             let f = fetch(&dir.join("copy/two.txt"), 1 << 20).unwrap();
             assert_eq!(fs::read(&f).unwrap(), b"one");
+            assert_eq!(read_bytes(&dir.join("copy/sub/big.bin"), 4 << 20).unwrap(), big);
+            assert!(read_bytes(&dir.join("copy/sub/big.bin"), 1 << 20).is_err());
             let mut seen = 0;
             let all = walk(&dir, &std::sync::atomic::AtomicBool::new(false), &mut |_, items| seen += items.len()).unwrap();
             assert_eq!(seen, 8);

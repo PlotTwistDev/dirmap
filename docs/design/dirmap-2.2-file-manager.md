@@ -314,9 +314,9 @@ Status: ✅ done · 🔨 in progress · ⬜ not started. "Win" means checked on 
 | 17 | SFTP connection manager, keychain, host key checks | 4 | Advanced | ✅ | russh + russh-sftp; agent, key files, passwords (keychain only on request); new keys shown before connecting, changed keys refused. Untested on a Windows or Mac device (agent, Credential Manager, Keychain) |
 | 18 | FTP(S) (flagged insecure) and WebDAV | 4 | Specialist | ✅ | suppaftp and ureq; certificates checked against the system's store. No per-server certificate exceptions, no Digest sign-in for WebDAV |
 | 19 | Analysing remote folders | 4 | Specialist | ✅ | Reads every folder over the connection, then draws; no live map while it runs |
-| 20 | Image sequence grouping in Files | 5 | Specialist | ⬜ | |
-| 21 | RAM sequence player: cache, timeline, A/B | 5 | Specialist | ⬜ | |
-| 22 | DPX decode, OCIO colour | 5 | Specialist | ⬜ | |
+| 20 | Image sequence grouping in Files | 5 | Specialist | ✅ | One row per sequence in Details, Icons, Columns and Gallery; copy, move, delete and drag take every frame; View > Group Image Sequences; F2 refused on a sequence row |
+| 21 | RAM sequence player: cache, timeline, A/B | 5 | Specialist | ✅ | `src/player.rs` engine (worker pool, half-float cache to a budget, read-ahead, furthest-ahead eviction) and `src/app/seqplayer.rs`; plays only cached frames and shows the rate reached; A/B wipe; half and quarter size; servers via `remote::read_bytes` |
+| 22 | DPX decode and display colour | 5 | Specialist | ✅ | DPX 8/10/12/16-bit, both byte orders, packing 0/1/2 (10-bit method A checked against ImageMagick's files); display through a LUT: sRGB, Rec.709, Cineon log, raw, exposure. OpenColorIO is row 30 |
 | 23 | Batch rename | 6 | Advanced | ⬜ | |
 | 24 | Folder compare and sync preview | 6 | Advanced | ⬜ | |
 | 25 | Search scopes and saved searches | 6 | Advanced | ⬜ | |
@@ -324,3 +324,4 @@ Status: ✅ done · 🔨 in progress · ⬜ not started. "Win" means checked on 
 | 27 | App launcher and Open With favourites | 6 | Specialist | ⬜ | |
 | 28 | Keyboard move between sidebar and list | — | Advanced | ⬜ | |
 | 29 | Archives: browse zip, 7z, tar(.gz/.xz/.bz2) as folders; extract | 3b | Advanced | ✅ | Read only (no adding to archives yet); no RAR; no password-protected archives |
+| 30 | OpenColorIO configs and LUT files in the player | 5 | Specialist | ⬜ | OCIO is C++; needs a build of it on all three OSes, or reading .cube LUTs ourselves first |

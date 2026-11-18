@@ -22,6 +22,7 @@ mod icons;
 mod mapview;
 mod netdrives;
 mod pattern;
+mod player;
 mod settings;
 mod subset;
 mod scan;

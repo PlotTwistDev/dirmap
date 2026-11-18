@@ -33,6 +33,16 @@ A trackpad works too: two-finger scrolling acts as the wheel, and pinching zooms
 | **Drag a tab** | Move it along the tab strip. Right-click a tab for New Tab, Close Tab and Close Other Tabs. |
 | **Drag a divider between column headings** | Resize the column to its right. Double-click the divider to reset it. |
 
+### Sequence player
+
+| Input | Action |
+|---|---|
+| **Double-click a sequence** | Play it. Select two sequences and press Enter to compare them (A/B). |
+| **Click or drag in the timeline** | Go to that frame. |
+| **Mouse wheel** | Zoom in or out around the pointer. Double-click to fit. |
+| **Drag the picture** | Move it around when zoomed in. |
+| **Drag the wipe line** | A/B: move the line between the two sequences. |
+
 ### Analysis dock
 
 The treemap or sunburst under the list in the Files workspace. Wheel, drag and the + − Home keys work as in Storage Analysis.

@@ -30,6 +30,12 @@
   passwords are only ever kept in the system keychain, and only if you ask. FTP and plain-http
   WebDAV are marked as not encrypted. See
   [Servers: SFTP, FTP and WebDAV](../views/file-manager.md#servers-sftp-ftp-and-webdav).
+- **Image sequences and a sequence player.** Numbered frames (`shot.1001.exr`, `shot.1002.exr`…)
+  show as one row with their range and any missing frames, and copy, move, delete and drag as one
+  item. Double-click one to play it from memory, with a timeline, loop, ping-pong, frame rates
+  from 23.976 to 60, exposure and colour transforms (sRGB, Rec.709, Cineon log). Select two and
+  press **Enter** to compare them with a wipe. EXR, DPX, PNG, TIFF and the other image types all
+  play. See [Image sequences](../views/file-manager.md#image-sequences).
 - **Two panes** (**Ctrl+\\**): two folders side by side or one above the other, each with its own
   tabs, sort and filter. Drag between them, or press **Shift+F5** to copy and **Shift+F6** to move
   to the other one. See [Two panes](../views/file-manager.md#two-panes).

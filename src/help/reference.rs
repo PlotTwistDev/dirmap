@@ -34,6 +34,7 @@ const FAVS: &str = "src/app/favs.rs";
 const FILEOPS: &str = "src/app/fileops.rs";
 const PREVIEW: &str = "src/app/preview.rs";
 const VIEWS: &str = "src/app/views.rs";
+const PLAYER: &str = "src/app/seqplayer.rs";
 
 const fn b(keys: &'static str, mac: &'static str, action: &'static str, source: &'static [(&'static str, &'static str)]) -> Binding {
     Binding { keys, mac, action, source }
@@ -88,6 +89,18 @@ pub const KEYBOARD: &[Group] = &[
             b("Shift+F5 / Shift+F6", "⇧F5 / ⇧F6", "Two panes: copy or move the selected items to the other pane's folder.", &[(FILES, "if i.consume_key(M::SHIFT, Key::F5) {"), (FILES, "if i.consume_key(M::SHIFT, Key::F6) {")]),
             b("Ctrl+U", "⌘U", "Two panes: swap them.", &[(FILES, "if i.consume_key(M::COMMAND, Key::U) {")]),
             b("Ctrl+J", "⌘J", "Show or hide the analysis dock (works while typing elsewhere too).", &[(FILES, "i.consume_key(M::COMMAND, Key::J)")]),
+        ],
+    },
+    Group {
+        title: "Sequence player",
+        note: "While an image sequence is playing (Enter or double-click on a sequence in Files).",
+        bindings: &[
+            b("Space", "", "Play or pause.", &[(PLAYER, "if i.consume_key(M::NONE, Key::Space)")]),
+            b("L / J / K", "", "Play forwards, play backwards, pause.", &[(PLAYER, "if i.consume_key(M::NONE, Key::L) {"), (PLAYER, "if i.consume_key(M::NONE, Key::J) {"), (PLAYER, "i.consume_key(M::NONE, Key::K)")]),
+            b("← / →", "", "Back or on one frame (with Shift, ten).", &[(PLAYER, "if step(i, Key::ArrowLeft) {"), (PLAYER, "if step(i, Key::ArrowRight) {")]),
+            b("Home / End", "", "First or last frame.", &[(PLAYER, "if i.consume_key(M::NONE, Key::Home) {"), (PLAYER, "if i.consume_key(M::NONE, Key::End) {")]),
+            b("F", "", "Fit the frame to the window.", &[(PLAYER, "if i.consume_key(M::NONE, Key::F) {")]),
+            b("Escape", "", "Close the player.", &[(PLAYER, "if i.consume_key(M::NONE, Key::Escape) {")]),
         ],
     },
     Group {
@@ -206,6 +219,17 @@ pub const MOUSE: &[Group] = &[
             b("Drag the sidebar's right edge", "", "Make the sidebar wider or narrower.", &[(FILES, "egui::Panel::left(\"places\")")]),
             b("Drag a tab", "", "Move it along the tab strip. Right-click a tab for New Tab, Close Tab and Close Other Tabs.", &[(FILES, "picks.move_tab = Some((i, i - 1));"), (FILES, "picks.close_others = Some(i);")]),
             b("Drag a divider between column headings", "", "Resize the column to its right. Double-click the divider to reset it.", &[(FILES, "resized = Some((col, -g.drag_delta().x));"), (FILES, "resized = Some((col, f32::NAN));")]),
+        ],
+    },
+    Group {
+        title: "Sequence player",
+        note: "",
+        bindings: &[
+            b("Double-click a sequence", "", "Play it. Select two sequences and press Enter to compare them (A/B).", &[(FILES, "if let Some(c) = t.clip_of(i) {"), (FILES, "if clips.len() > 1 {")]),
+            b("Click or drag in the timeline", "", "Go to that frame.", &[(PLAYER, "pl.seek(k);")]),
+            b("Mouse wheel", "", "Zoom in or out around the pointer. Double-click to fit.", &[(PLAYER, "let z = (pl.zoom * (scroll * 0.002).exp())"), (PLAYER, "if resp.double_clicked() {")]),
+            b("Drag the picture", "", "Move it around when zoomed in.", &[(PLAYER, "pl.pan += resp.drag_delta();")]),
+            b("Drag the wipe line", "", "A/B: move the line between the two sequences.", &[(PLAYER, "pl.wipe = ((p.x - img.left()) / img.width()).clamp(0.0, 1.0);")]),
         ],
     },
     Group {

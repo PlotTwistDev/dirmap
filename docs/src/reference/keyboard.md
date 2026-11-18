@@ -61,6 +61,19 @@ After you've clicked in the list or the sidebar, unless the cursor is in a text 
 | **Ctrl+U** | **⌘U** | Two panes: swap them. |
 | **Ctrl+J** | **⌘J** | Show or hide the analysis dock (works while typing elsewhere too). |
 
+### Sequence player
+
+While an image sequence is playing (Enter or double-click on a sequence in Files).
+
+| Input | Action |
+|---|---|
+| **Space** | Play or pause. |
+| **L / J / K** | Play forwards, play backwards, pause. |
+| **← / →** | Back or on one frame (with Shift, ten). |
+| **Home / End** | First or last frame. |
+| **F** | Fit the frame to the window. |
+| **Escape** | Close the player. |
+
 ### Treemap
 
 In Storage Analysis, when the treemap is showing (not the sunburst), the cursor isn't in a text box, and you last clicked the map (or the file manager is in its Tree layout).

@@ -70,6 +70,10 @@ pub(super) struct FilesPrefs {
     pub servers: Vec<PathBuf>,
     /// Saved SFTP, FTP and WebDAV servers, under Network & Remote.
     pub sites: Vec<netui::SavedSite>,
+    /// Show numbered frames (`shot.1001.exr`…) as one row per sequence.
+    pub sequences: bool,
+    /// The sequence player's settings.
+    pub player: seqplayer::PlayerPrefs,
     /// Folders opened most recently, newest first.
     pub recent: Vec<PathBuf>,
     pub sort: FSort,
@@ -147,6 +151,8 @@ impl Default for FilesPrefs {
             favourites: Vec::new(),
             servers: Vec::new(),
             sites: Vec::new(),
+            sequences: true,
+            player: Default::default(),
             recent: Vec::new(),
             sort: FSort::Name,
             reversed: false,
@@ -184,9 +190,9 @@ pub(super) const DOCK_MIN_LIST: f32 = 110.0;
 pub(super) type FolderSizes = HashMap<Box<str>, (u64, u64)>;
 
 /// What an order was worked out for: (listing generation, sort, reversed, hidden, filter, sizes).
-type OrderKey = (u64, FSort, bool, bool, String, usize, views::FGroup);
-/// A display order and its group headings.
-type Arranged = (Vec<u32>, Vec<views::GroupHead>);
+type OrderKey = (u64, FSort, bool, bool, String, usize, (views::FGroup, bool));
+/// A display order, its group headings and its sequence rows.
+type Arranged = (Vec<u32>, Vec<views::GroupHead>, views::Seqs);
 /// A folder read again, arranged, with what for.
 type Rearranged = (OrderKey, Arranged);
 
@@ -216,6 +222,8 @@ pub(super) struct FTab {
     pub(super) scroll_to_cursor: bool,
     /// (scroll offset, height) of the list last frame.
     pub(super) view: (f32, f32),
+    /// Numbered frames shown as one row each, by the row's entry.
+    pub(super) seqs: views::Seqs,
     /// Group headings, when the pane groups items.
     pub(super) groups: Vec<views::GroupHead>,
     /// Another program changed the folder (at this time): read it again shortly.
@@ -243,6 +251,7 @@ impl FTab {
             scroll_to_cursor: false,
             view: (0.0, 0.0),
             groups: Vec::new(),
+            seqs: Default::default(),
             dirty_at: None,
             fresh: None,
             sizes: None,
@@ -299,7 +308,36 @@ impl FTab {
     /// Paths of the selected items, in display order.
     pub(super) fn chosen_paths(&self) -> Vec<PathBuf> {
         let (Some(dir), Some(l)) = (self.here().dir(), self.listing.as_ref()) else { return Vec::new() };
-        self.order.iter().map(|&i| &l.entries[i as usize]).filter(|e| self.selected.contains(&e.name)).map(|e| dir.join(&*e.name)).collect()
+        let mut out = Vec::new();
+        for &i in &self.order {
+            let e = &l.entries[i as usize];
+            if !self.selected.contains(&e.name) {
+                continue;
+            }
+            out.extend(self.row_paths(dir, l, i));
+        }
+        out
+    }
+
+    /// A sequence row, ready for the player.
+    pub(super) fn clip_of(&self, i: u32) -> Option<crate::player::Clip> {
+        let (dir, l, s) = (self.here().dir()?, self.listing.as_ref()?, self.seqs.get(&i)?);
+        let names: Vec<&str> = s.members.iter().map(|&m| &*l.entries[m as usize].name).collect();
+        Some(crate::player::Clip::from_names(s.label.clone(), dir, &s.seq, &names))
+    }
+
+    /// The selected sequence rows, in display order, for the player.
+    pub(super) fn chosen_clips(&self) -> Vec<crate::player::Clip> {
+        let Some(l) = self.listing.as_ref() else { return Vec::new() };
+        self.order.iter().filter(|&&i| self.seqs.contains_key(&i) && self.selected.contains(&l.entries[i as usize].name)).filter_map(|&i| self.clip_of(i)).collect()
+    }
+
+    /// The paths a row stands for: its item, or every frame of a sequence row.
+    pub(super) fn row_paths(&self, dir: &Path, l: &Listing, i: u32) -> Vec<PathBuf> {
+        match self.seqs.get(&i) {
+            Some(s) => s.members.iter().map(|&m| dir.join(&*l.entries[m as usize].name)).collect(),
+            None => vec![dir.join(&*l.entries[i as usize].name)],
+        }
     }
 }
 
@@ -496,6 +534,8 @@ pub(super) struct Files {
     pub(super) asking: Option<netui::AskBox>,
     /// Thumbnails for the Icons view.
     pub(super) thumbs: thumbs::Thumbs,
+    /// The sequence player, while it's open.
+    pub(super) player: Option<seqplayer::Player>,
     /// Folders shown beside the current one in the Columns view.
     pub(super) side: views::SideLists,
     /// Notices of changes other programs make to the folders on screen.
@@ -551,6 +591,7 @@ impl Files {
             asks: None,
             asking: None,
             thumbs: Default::default(),
+            player: None,
             side: Default::default(),
             watcher: Default::default(),
         }
@@ -1000,6 +1041,8 @@ pub(super) enum FAction {
     ExtractTo,
     /// An archive in the app the system opens it with (Open goes inside it).
     OpenWithApp,
+    /// The selected image sequences, in the player (two: A/B).
+    Play,
 }
 
 impl App {
@@ -1282,6 +1325,13 @@ impl App {
             {
                 p.show_hidden = !p.show_hidden;
             }
+            if ui
+                .add(egui::Button::selectable(p.sequences, "Group Image Sequences"))
+                .on_hover_text("Show numbered frames (shot.1001.exr, shot.1002.exr…) as one row. Enter or a double-click plays the sequence")
+                .clicked()
+            {
+                p.sequences = !p.sequences;
+            }
             ui.separator();
             ui.weak("Rows");
             ui.radio_value(&mut p.density, Density::Comfortable, "Comfortable");
@@ -1321,6 +1371,7 @@ impl App {
         self.dock_poll(&ctx);
         self.connect_window(&ctx);
         self.quick_look(&ctx);
+        self.sequence_player(&ctx);
         let pal = style::pal(ui);
 
         let status = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::symmetric(10, 3));
@@ -1442,8 +1493,10 @@ impl App {
             self.files.panes[pane].tab_mut().sizes = Some((tree_id, sizes));
         }
         let hidden = self.files.prefs.show_hidden;
+        let seqs_on = self.files.prefs.sequences;
         let p = &mut self.files.panes[pane];
         let (sort, reversed, group) = (p.sort, p.reversed, if p.view == FView::Details { p.group } else { views::FGroup::None });
+        let group = (group, seqs_on);
         let filter = p.filter.clone();
         let t = p.tab_mut();
         if t.listing.is_none()
@@ -1485,18 +1538,18 @@ impl App {
                 let (entries, f, sz) = (fl.entries.clone(), filter.clone(), sizes.clone());
                 let k: OrderKey = (fl.generation, sort, reversed, hidden, filter.clone(), tree_id, group);
                 std::thread::spawn(move || {
-                    let (o, g) = views::arrange(&entries, Some(&sz), sort, reversed, hidden, &f, group);
-                    let _ = tx.send((k, (o, g)));
+                    let _ = tx.send((k, views::arrange(&entries, Some(&sz), sort, reversed, hidden, &f, group.0, group.1)));
                 });
                 *sorting = Some(rx);
             } else if let Some(rx) = sorting {
                 match rx.try_recv() {
-                    Ok((k, (o, g))) => {
+                    Ok((k, (o, g, q))) => {
                         let (fl, _) = t.fresh.take().unwrap();
                         t.listing = Some(fl);
                         t.sorting = None;
                         t.order = o;
                         t.groups = g;
+                        t.seqs = q;
                         t.order_key = Some(k);
                         // Items that went away aren't selected any more.
                         let l = t.listing.as_ref().unwrap();
@@ -1513,13 +1566,14 @@ impl App {
         // A sort finished on another thread: use it, adding anything listed since at the end.
         if let Some((k, covered, rx)) = &t.sorting {
             match rx.try_recv() {
-                Ok((order, heads)) => {
+                Ok((order, heads, seqs)) => {
                     let same = (k.1, k.2, k.3, &k.4, k.5, k.6) == (sort, reversed, hidden, &filter, tree_id, group);
                     let covered = *covered;
                     t.sorting = None;
                     if same {
                         t.order = order;
                         t.groups = heads;
+                        t.seqs = seqs;
                         let l = t.listing.as_ref().unwrap();
                         append_new(&mut t.order, &l.entries, covered, hidden, &filter);
                         t.order_key = Some(key.clone());
@@ -1534,20 +1588,21 @@ impl App {
             let n = l.entries.len();
             let only_more = t.order_key.as_ref().is_some_and(|k| (k.1, k.2, k.3, &k.4, k.5, k.6) == (sort, reversed, hidden, &filter, tree_id, group));
             if n <= SORT_INLINE_MAX {
-                (t.order, t.groups) = views::arrange(&l.entries, Some(&sizes), sort, reversed, hidden, &filter, group);
+                (t.order, t.groups, t.seqs) = views::arrange(&l.entries, Some(&sizes), sort, reversed, hidden, &filter, group.0, group.1);
                 t.order_key = Some(key);
             } else if only_more && !l.done {
                 // A big folder still streaming in: show new items at the end, sort once it's all here.
                 let seen: usize = t.order.iter().map(|&i| i as usize + 1).max().unwrap_or(0);
                 append_new(&mut t.order, &l.entries, seen, hidden, &filter);
                 t.groups.clear();
+                t.seqs.clear();
                 t.order_key = Some(key);
             } else {
                 let entries = l.entries.clone();
                 let (tx, rx) = mpsc::channel();
                 let f = filter.clone();
                 std::thread::spawn(move || {
-                    let _ = tx.send(views::arrange(&entries, Some(&sizes), sort, reversed, hidden, &f, group));
+                    let _ = tx.send(views::arrange(&entries, Some(&sizes), sort, reversed, hidden, &f, group.0, group.1));
                 });
                 t.sorting = Some((key, n, rx));
                 ctx.request_repaint_after(Duration::from_millis(30));
@@ -2157,6 +2212,7 @@ impl App {
                     };
                     let i = order[r];
                     let e = &l.entries[i as usize];
+                    let seq = t.seqs.get(&i);
                     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
                     let selected = t.selected.contains(&e.name);
                     let p = ui.painter().clone();
@@ -2194,7 +2250,25 @@ impl App {
                                     cell.right() - 6.0
                                 };
                                 let clip = Rect::from_min_max(pos2(cell.left() + 33.0, rect.top()), pos2(end, rect.bottom()));
-                                p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &*e.name, font.clone(), tc);
+                                let name = seq.map_or(&*e.name, |s| s.label.as_str());
+                                let g = p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, name, font.clone(), tc);
+                                if let Some(s) = seq {
+                                    // The frame range after the name, and a warning for missing frames.
+                                    let gaps = if s.seq.missing > 0 { format!("  ⚠ {} missing", group(s.seq.missing)) } else { String::new() };
+                                    let note = format!("  {}{gaps}", s.seq.range_text());
+                                    p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(g.right(), cy), Align2::LEFT_CENTER, note, font.clone(), if s.seq.missing > 0 && !selected { vis.warn_fg_color } else { weak });
+                                }
+                            }
+                            Some(FSort::Size) if seq.is_some() => {
+                                p.text(right, Align2::RIGHT_CENTER, scan::human(seq.unwrap().seq.bytes), font.clone(), tc);
+                            }
+                            Some(FSort::Type) if seq.is_some() => {
+                                let s = seq.unwrap();
+                                let kind = format!("{} sequence, {} frames", s.seq.extension().to_uppercase(), group(s.seq.frames));
+                                p.with_clip_rect(cell.shrink2(vec2(6.0, 0.0)).intersect(p.clip_rect())).text(pos2(cell.left() + 8.0, cy), Align2::LEFT_CENTER, kind, font.clone(), weak);
+                            }
+                            Some(FSort::Modified) if seq.is_some_and(|s| s.modified > 0) => {
+                                p.text(pos2(cell.left() + 8.0, cy), Align2::LEFT_CENTER, fmt_time(seq.unwrap().modified), font.clone(), weak);
                             }
                             Some(FSort::Size) => {
                                 if !e.is_dir {
@@ -2398,7 +2472,8 @@ impl App {
                     }
                     // The name: up to two lines, centred, shortened with … when longer.
                     let tc = if selected { sel_fg } else if e.hidden { pal.weak } else { pal.text };
-                    let mut job = egui::text::LayoutJob::simple(e.name.to_string(), FontId::proportional(12.5), tc, cell.width() - 10.0);
+                    let shown = t.seqs.get(&i).map_or_else(|| e.name.to_string(), |s| format!("{}\n{} frames", s.label, group(s.seq.frames)));
+                    let mut job = egui::text::LayoutJob::simple(shown, FontId::proportional(12.5), tc, cell.width() - 10.0);
                     job.wrap.max_rows = 2;
                     job.wrap.break_anywhere = true;
                     job.halign = egui::Align::Center;
@@ -2433,7 +2508,13 @@ impl App {
         let mut text = format!("{} item{}", group(shown as u64), if shown == 1 { "" } else { "s" });
         // Only once the order covers everything read so far, or the count would be off.
         let current = t.order_key.as_ref().is_some_and(|k| k.0 == l.generation);
-        let left_out = if current { l.entries.len() - shown } else { 0 };
+        let folded: usize = t.seqs.values().map(|s| s.members.len() - 1).sum();
+        if !t.seqs.is_empty() {
+            let frames: usize = t.seqs.values().map(|s| s.members.len()).sum();
+            let n = t.seqs.len();
+            text.push_str(&format!(", {} frames in {} sequence{}", group(frames as u64), group(n as u64), if n == 1 { "" } else { "s" }));
+        }
+        let left_out = if current { (l.entries.len() - shown).saturating_sub(folded) } else { 0 };
         if left_out > 0 {
             let why = if self.files.panes[pane].filter.trim().is_empty() { "hidden" } else { "filtered out" };
             text.push_str(&format!(" ({} {why})", group(left_out as u64)));
@@ -2441,9 +2522,10 @@ impl App {
         if !l.done {
             text.push_str(" · reading…");
         }
-        let sel: Vec<&Entry> = t.order.iter().map(|&i| &l.entries[i as usize]).filter(|e| t.selected.contains(&e.name)).collect();
+        let sel_rows: Vec<u32> = t.order.iter().copied().filter(|&i| t.selected.contains(&l.entries[i as usize].name)).collect();
+        let sel: Vec<&Entry> = sel_rows.iter().map(|&i| &l.entries[i as usize]).collect();
         if !sel.is_empty() {
-            let bytes: u64 = sel.iter().filter(|e| !e.is_dir).map(|e| e.size).sum();
+            let bytes: u64 = sel_rows.iter().filter(|&&i| !l.entries[i as usize].is_dir).map(|i| t.seqs.get(i).map_or(l.entries[*i as usize].size, |s| s.seq.bytes)).sum();
             let dirs = sel.iter().filter(|e| e.is_dir).count();
             text.push_str(&format!("  ·  {} selected", group(sel.len() as u64)));
             if sel.len() > dirs {
@@ -2505,7 +2587,7 @@ impl App {
     fn files_keys(&mut self, ctx: &egui::Context, pointer_in: bool, picks: &mut FPicks) {
         use egui::{Key, Modifiers as M};
         // Not while a box is open over the list (Connect to Server, a server's question).
-        if self.ops.modal() || self.files.connect.is_some() || self.files.asking.is_some() {
+        if self.ops.modal() || self.files.connect.is_some() || self.files.asking.is_some() || self.files.player.is_some() {
             return;
         }
         // The mouse's side buttons go to the file manager when the pointer is over it.
@@ -2727,7 +2809,13 @@ impl App {
             Do::Open => {
                 let t = self.files.cur();
                 if let Some(i) = t.cursor.as_deref().and_then(|c| t.pos_of(c)).map(|r| t.order[r]) {
-                    picks.open = Some(i);
+                    // On selected sequences: play them together (two compare A/B).
+                    let clips = if t.seqs.contains_key(&i) { t.chosen_clips() } else { Vec::new() };
+                    if clips.len() > 1 {
+                        self.play_sequences(clips);
+                    } else {
+                        picks.open = Some(i);
+                    }
                 }
             }
             Do::All => {
@@ -2762,6 +2850,10 @@ impl App {
                 if let Some(d) = here {
                     self.files_new_folder(d);
                 }
+            }
+            Do::Act(FAction::Open) if !self.files.cur().chosen_clips().is_empty() => {
+                let clips = self.files.cur().chosen_clips();
+                self.play_sequences(clips);
             }
             Do::Act(a) => {
                 let paths = match a {
@@ -2869,7 +2961,9 @@ impl App {
         }
         if let Some(i) = picks.open {
             let t = self.files.cur();
-            if let (Some(e), Some(dir)) = (t.entry(i), t.here().dir()) {
+            if let Some(c) = t.clip_of(i) {
+                self.play_sequences(vec![c]);
+            } else if let (Some(e), Some(dir)) = (t.entry(i), t.here().dir()) {
                 let path = dir.join(&*e.name);
                 if e.is_dir || (archive::is_archive(&e.name) && !archive::inside(&path)) {
                     // Archives open like folders.
@@ -2917,7 +3011,7 @@ impl App {
     /// The list's item menu for a tile on the dock's map, run through the same commands.
     pub(super) fn tile_menu(&mut self, ui: &mut egui::Ui, disk: &Path, is_dir: bool) {
         let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
-        let m = RowMenu { is_dir, count: 1, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false };
+        let m = RowMenu { is_dir, count: 1, seq: false, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false };
         let Some(a) = item_menu(ui, &m) else { return };
         match a {
             FAction::Open if is_dir || archive => self.files.go(Location::Dir(disk.to_path_buf())),
@@ -3092,6 +3186,13 @@ impl App {
                     }
                 }
             }
+            FAction::Play => {
+                let clips = self.files.cur().chosen_clips();
+                self.play_sequences(clips);
+            }
+            FAction::Rename if paths.len() > 1 => {
+                self.ops.notice = Some(("Rename one item at a time. To rename the frames of a sequence, turn off View > Group Image Sequences.".into(), false));
+            }
             FAction::Rename => {
                 if let Some(p) = paths.into_iter().next().filter(|p| p.parent().is_some()) {
                     self.start_rename(p);
@@ -3154,6 +3255,8 @@ impl App {
 pub(super) struct RowMenu {
     pub is_dir: bool,
     pub count: usize,
+    /// The row is an image sequence.
+    pub seq: bool,
     pub pinned: bool,
     /// Split view is on (Copy and Move to Other Pane).
     pub two: bool,
@@ -3216,21 +3319,19 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     let is_dir = e.is_dir;
     // Drag what's selected (or just this item, if it isn't).
     if resp.drag_started() {
-        let (items, dirs): (Vec<PathBuf>, Vec<bool>) = if selected {
-            order.iter().map(|&k| &l.entries[k as usize]).filter(|x| t.selected.contains(&x.name)).map(|x| (dir.join(&*x.name), x.is_dir)).unzip()
-        } else {
-            (vec![path.clone()], vec![is_dir])
-        };
+        let rows: Vec<u32> = if selected { order.iter().copied().filter(|&k| t.selected.contains(&l.entries[k as usize].name)).collect() } else { vec![i] };
+        let (items, dirs): (Vec<PathBuf>, Vec<bool>) = rows.iter().flat_map(|&k| t.row_paths(dir, l, k).into_iter().map(move |p| (p, l.entries[k as usize].is_dir))).unzip();
         egui::DragAndDrop::set_payload(ui.ctx(), dnd::DragItems(items, dirs));
     }
     if is_dir {
         drops.push((resp.clone(), path.clone()));
     }
     let read_only = archive::inside(&path);
-    let ctx_menu = RowMenu { is_dir, count, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only };
+    let seq = t.seqs.contains_key(&i);
+    let ctx_menu = RowMenu { is_dir, count, seq, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only };
     resp.context_menu(|ui| {
         if let Some(a) = item_menu(ui, &ctx_menu) {
-            let paths = if selected { t.chosen_paths() } else { vec![path.clone()] };
+            let paths = if selected { t.chosen_paths() } else { t.row_paths(dir, l, i) };
             picks.menu = Some((a, paths));
         }
     });
@@ -3248,7 +3349,11 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu) -> Option<FAction> {
     };
     let many = m.count > 1;
     let open = if many { format!("Open {} Items", m.count) } else { "Open".to_string() };
-    item(ui, true, &open, k(M::NONE, Key::Enter), FAction::Open);
+    if m.seq {
+        item(ui, true, if m.count == 2 { "Play and Compare (A/B)" } else { "Play" }, k(M::NONE, Key::Enter), FAction::Play);
+    } else {
+        item(ui, true, &open, k(M::NONE, Key::Enter), FAction::Open);
+    }
     if m.is_dir {
         item(ui, true, if many { "Open in New Tabs" } else { "Open in New Tab" }, String::new(), FAction::OpenInNewTab);
         if !many {
@@ -3280,7 +3385,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu) -> Option<FAction> {
         item(ui, rw, "Move to Other Pane", k(M::SHIFT, Key::F6), FAction::MoveToOther);
     }
     ui.separator();
-    item(ui, !many && rw, "Rename…", k(M::NONE, Key::F2), FAction::Rename);
+    item(ui, !many && !m.seq && rw, "Rename…", k(M::NONE, Key::F2), FAction::Rename);
     let bin = if cfg!(windows) { "Delete (to Recycle Bin)…" } else { "Move to Trash…" };
     let bin_key = if cfg!(target_os = "macos") { k(M::COMMAND, Key::Backspace) } else { k(M::NONE, Key::Delete) };
     item(ui, rw, bin, bin_key, FAction::Trash);
