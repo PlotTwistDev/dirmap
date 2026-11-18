@@ -1273,12 +1273,12 @@ impl App {
 
     /// The filter box (and subfolder search and Save) for the pane being drawn. `focused`: it's
     /// the pane with the keyboard, which Ctrl+F puts the cursor in. Laid out right to left.
-    fn filter_box(&mut self, ui: &mut egui::Ui, focused: bool) {
+    fn filter_box(&mut self, ui: &mut egui::Ui, focused: bool, width: f32) {
         let ctx = ui.ctx().clone();
         let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
         let fid = egui::Id::new(("files-filter", self.files.focus));
-        let hint = format!("🔍 Filter ({})", k(egui::Modifiers::COMMAND, egui::Key::F));
-        let f = ui.add(egui::TextEdit::singleline(&mut self.files.pane_mut().filter).id(fid).desired_width(150.0).hint_text(hint));
+        let hint = if width < 130.0 { "🔍 Filter".to_string() } else { format!("🔍 Filter ({})", k(egui::Modifiers::COMMAND, egui::Key::F)) };
+        let f = ui.add(egui::TextEdit::singleline(&mut self.files.pane_mut().filter).id(fid).desired_width(width).hint_text(hint));
         f.on_hover_text("Show only items whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
         let deep = self.files.pane().deep;
         if style::toggle_button(ui, deep, "🗐", "Search subfolders too: the filter looks in this folder and every folder below it").clicked() {
@@ -1312,8 +1312,10 @@ impl App {
                 style::roomy(ui);
                 self.nav_buttons(ui);
                 ui.add_space(2.0);
+                // The filter gets narrower with the pane, so the path keeps some room.
+                let width = (ui.available_width() * 0.3).clamp(60.0, 150.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    self.filter_box(ui, focused);
+                    self.filter_box(ui, focused, width);
                     ui.add_space(4.0);
                     let w = ui.available_width();
                     ui.allocate_ui_with_layout(vec2(w, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {

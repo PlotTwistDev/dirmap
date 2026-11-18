@@ -338,6 +338,8 @@ impl App {
         let here = self.files.here().clone();
         let crumbs = files::crumbs_of(&here);
         let last = crumbs.len().saturating_sub(1);
+        // A crumb that still doesn't fit is cut off at the box's edge, not drawn over its neighbours.
+        ui.set_clip_rect(frame.shrink(1.0).intersect(ui.clip_rect()));
         ui.add_space(4.0);
         ui.spacing_mut().item_spacing.x = 2.0;
         // Keep the end of a long path visible: drop leading crumbs that don't fit.
