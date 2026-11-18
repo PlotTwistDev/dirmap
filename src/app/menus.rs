@@ -139,8 +139,14 @@ pub(super) struct Ops {
     type_files: Option<TypeFiles>,
     /// Last result, shown in the status bar: (text, is an error).
     pub notice: Option<(String, bool)>,
+    /// The batch rename window, while it's open.
+    pub batch: Option<super::batchren::BatchRename>,
     /// What can be undone, the latest last.
     pub undo: Vec<UndoEntry>,
+    /// What was undone and can be redone, the latest last. Any new change clears it.
+    pub redo: Vec<UndoEntry>,
+    /// The running operation is an Undo or Redo: (what it records goes to `redo`, the label).
+    pub undoing: Option<(bool, String)>,
     /// The steps of the running operation, as it records them.
     pub recording: Option<Arc<Mutex<Vec<Step>>>>,
     /// The latest change has just finished: the status bar offers Undo beside its note.
@@ -174,7 +180,7 @@ const UNDO_MAX: usize = 30;
 impl Ops {
     /// A window of ours is up and owns the keyboard.
     pub(super) fn modal(&self) -> bool {
-        self.confirm.is_some() || self.rename.is_some() || self.clash.as_ref().is_some_and(|c| c.current.is_some())
+        self.confirm.is_some() || self.rename.is_some() || self.batch.is_some() || self.clash.as_ref().is_some_and(|c| c.current.is_some())
     }
 
     /// Start recording the steps of the operation about to run, for Undo.
@@ -182,6 +188,11 @@ impl Ops {
         let r = Arc::new(Mutex::new(Vec::new()));
         self.recording = Some(r.clone());
         r
+    }
+
+    /// The name of what Ctrl+Y would redo.
+    pub(super) fn redo_label(&self) -> Option<&str> {
+        self.redo.last().map(|u| u.label.as_str())
     }
 
     /// The name of what Ctrl+Z would undo.
@@ -543,7 +554,16 @@ impl App {
                     self.ops.clash = None;
                     if let Some(rec) = self.ops.recording.take() {
                         let steps = std::mem::take(&mut *rec.lock().unwrap());
-                        if !steps.is_empty() {
+                        self.marks_follow(&steps);
+                        let undoing = self.ops.undoing.take();
+                        if let Some((to_redo, label)) = undoing {
+                            // An Undo's steps can be redone, and a Redo's undone again.
+                            if !steps.is_empty() {
+                                let stack = if to_redo { &mut self.ops.redo } else { &mut self.ops.undo };
+                                stack.push(UndoEntry { label, steps });
+                            }
+                        } else if !steps.is_empty() {
+                            self.ops.redo.clear();
                             self.ops.undo.push(UndoEntry { label: transfer::describe(&steps), steps });
                             if self.ops.undo.len() > UNDO_MAX {
                                 self.ops.undo.remove(0);
@@ -591,6 +611,7 @@ impl App {
         self.clash_window(ctx);
         self.confirm_window(ctx);
         self.rename_window(ctx);
+        self.batch_rename_window(ctx);
         self.hash_window(ctx);
         self.props_window(ctx);
         self.type_files_window(ctx);
@@ -647,21 +668,36 @@ impl App {
 
     /// Undo the last change (Ctrl+Z), in the background.
     pub(super) fn undo_last(&mut self) {
+        self.undo_or_redo(false);
+    }
+
+    pub(super) fn redo_last(&mut self) {
+        self.undo_or_redo(true);
+    }
+
+    fn undo_or_redo(&mut self, redo: bool) {
         if self.ops.job.is_some() {
             self.ops.notice = Some(("Another file operation is still running.".into(), true));
             return;
         }
-        let Some(e) = self.ops.undo.pop() else {
-            self.ops.notice = Some(("There's nothing to undo.".into(), false));
+        let stack = if redo { &mut self.ops.redo } else { &mut self.ops.undo };
+        let Some(e) = stack.pop() else {
+            self.ops.notice = Some((if redo { "There's nothing to redo." } else { "There's nothing to undo." }.into(), false));
             return;
         };
         let label = e.label;
         let steps = e.steps;
-        self.run_op(format!("Undoing {label}"), move || {
-            let (errors, touched) = transfer::undo(&steps);
-            let r = if errors.is_empty() { Ok(Some(format!("Undid {label}."))) } else { Err(format!("Undo {label}: {}", errors.join(" "))) };
+        let keep = label.clone();
+        let rec = self.ops.record();
+        let verb = if redo { "Redo" } else { "Undo" };
+        self.run_op(format!("{verb}ing {label}"), move || {
+            let (errors, touched, inverse) = transfer::undo(&steps);
+            *rec.lock().unwrap() = inverse;
+            let done = if redo { "Redid" } else { "Undid" };
+            let r = if errors.is_empty() { Ok(Some(format!("{done} {label}."))) } else { Err(format!("{verb} {label}: {}", errors.join(" "))) };
             (r, touched)
         });
+        self.ops.undoing = Some((!redo, keep));
     }
 
     /// Asks what to do when a copy or move finds a name taken. The copy waits meanwhile.

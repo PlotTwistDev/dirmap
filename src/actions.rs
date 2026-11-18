@@ -195,11 +195,6 @@ pub fn shell_properties(path: &Path) -> bool {
     }
 }
 
-/// Move to the Recycle Bin / Trash.
-pub fn trash(path: &Path) -> Result<(), String> {
-    trash_inner(path).map(drop)
-}
-
 /// Move to the Recycle Bin or Trash, then find where it went so Undo can put it back. `None`
 /// when it's gone but can't be found there (a bin dirmap can't read, or none: on a network
 /// share Windows deletes for good).

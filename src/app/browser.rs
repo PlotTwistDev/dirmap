@@ -1217,6 +1217,7 @@ impl App {
             NewFolder,
             Paste(String),
             Undo,
+            Redo,
             Find(String),
         }
         let layout = self.browser.layout();
@@ -1250,6 +1251,9 @@ impl App {
             }
             if i.consume_key(M::COMMAND | M::SHIFT, Key::N) {
                 return Some(Do::NewFolder);
+            }
+            if i.consume_key(M::COMMAND | M::SHIFT, Key::Z) || i.consume_key(M::COMMAND, Key::Y) {
+                return Some(Do::Redo);
             }
             if i.consume_key(M::COMMAND, Key::Z) {
                 return Some(Do::Undo);
@@ -1345,6 +1349,7 @@ impl App {
             }
             Do::NewFolder => picks.new_folder = true,
             Do::Undo => self.undo_last(),
+            Do::Redo => self.redo_last(),
             Do::Paste(text) => {
                 let ours = self.browser.clip.as_ref().is_some_and(|c| text_of(&c.paths) == text.trim_end());
                 if ours || self.browser.clip.is_some() && text.trim().is_empty() {

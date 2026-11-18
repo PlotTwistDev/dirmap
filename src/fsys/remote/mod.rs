@@ -939,7 +939,7 @@ mod live {
             let m = crate::transfer::transfer_with(&[dir.join("tree 2")], &dir.join("copy"), false, &mut |_| crate::transfer::Choice::Stop, &ctl);
             assert!(m.errors.is_empty(), "{:?}", m.errors);
             assert!(meta(&dir.join("copy/tree 2/sub/big.bin")).is_ok());
-            let (errs, _) = crate::transfer::undo(&m.steps);
+            let (errs, _, _) = crate::transfer::undo(&m.steps);
             assert!(errs.is_empty(), "{errs:?}");
             assert!(meta(&dir.join("tree 2")).unwrap().is_dir);
             crate::transfer::transfer_with(&[local.join("tree/one.txt")], &dir.join("tree"), true, &mut |_| crate::transfer::Choice::Stop, &ctl);

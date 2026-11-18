@@ -80,6 +80,40 @@ impl Listing {
         l
     }
 
+    /// Search `path` and every folder below it for names matching `query` (as the filter box
+    /// matches). Each result's name is its path below `path`. Hidden folders are only searched
+    /// when `hidden`.
+    /// With `tagged`, items match by being in that set instead of by name; without `deep`
+    /// only the folder itself is looked in.
+    pub fn search(
+        path: PathBuf,
+        query: String,
+        hidden: bool,
+        deep: bool,
+        tagged: Option<Arc<std::collections::HashSet<PathBuf>>>,
+    ) -> Self {
+        let (tx, rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let c = cancel.clone();
+        let spawned = std::thread::Builder::new()
+            .name("dirmap-search".into())
+            .spawn(move || search(&path, &query, hidden, deep, tagged.as_deref(), &c, &tx));
+        let mut l = Listing {
+            entries: Arc::new(Vec::new()),
+            done: false,
+            error: None,
+            started: Instant::now(),
+            generation: 0,
+            rx,
+            cancel,
+        };
+        if let Err(e) = spawned {
+            l.done = true;
+            l.error = Some(format!("Couldn't start searching: {e}"));
+        }
+        l
+    }
+
     /// Take whatever has arrived. Returns true if anything changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
@@ -178,6 +212,117 @@ fn read(path: &Path, cancel: &AtomicBool, tx: &mpsc::Sender<Msg>) {
         return;
     }
     let note = (skipped > 0).then(|| format!("{skipped} item{} couldn't be read.", if skipped == 1 { "" } else { "s" }));
+    let _ = tx.send(Msg::Done(note));
+}
+
+/// Most results a search gathers.
+const FOUND_MAX: usize = 100_000;
+
+/// Whether a name matches what's typed in the filter box: wildcards (`*`, `?`) match the whole
+/// name, anything else is found anywhere in it; case is ignored.
+pub fn name_matches(filter: &str, name: &str) -> bool {
+    let f = filter.trim();
+    if f.is_empty() {
+        return true;
+    }
+    if f.contains(['*', '?']) {
+        crate::scan::glob(f, name)
+    } else {
+        name.to_lowercase().contains(&f.to_lowercase())
+    }
+}
+
+fn search(
+    root: &Path,
+    query: &str,
+    hidden: bool,
+    deep: bool,
+    tagged: Option<&std::collections::HashSet<PathBuf>>,
+    cancel: &AtomicBool,
+    tx: &mpsc::Sender<Msg>,
+) {
+    let remote = super::remote::is_remote(root);
+    let sep = if remote {
+        '/'
+    } else {
+        std::path::MAIN_SEPARATOR
+    };
+    let mut todo = vec![(root.to_path_buf(), String::new())];
+    let mut batch = Vec::new();
+    let mut last = Instant::now();
+    let mut found = 0usize;
+    let mut unread = 0u64;
+    while let Some((dir, rel)) = todo.pop() {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        let items: Vec<Entry> = if remote {
+            match super::remote::list(&dir) {
+                Ok(v) => v,
+                Err(e) if rel.is_empty() => {
+                    let _ = tx.send(Msg::Done(Some(e)));
+                    return;
+                }
+                Err(_) => {
+                    unread += 1;
+                    continue;
+                }
+            }
+        } else {
+            match fs::read_dir(&dir) {
+                Ok(rd) => rd.flatten().filter_map(|e| entry(&e)).collect(),
+                Err(e) if rel.is_empty() => {
+                    let _ = tx.send(Msg::Done(Some(describe(&e))));
+                    return;
+                }
+                Err(_) => {
+                    unread += 1;
+                    continue;
+                }
+            }
+        };
+        for e in items {
+            let path = if rel.is_empty() {
+                e.name.to_string()
+            } else {
+                format!("{rel}{sep}{}", e.name)
+            };
+            if deep && e.is_dir && !e.is_link && (hidden || !e.hidden) {
+                todo.push((dir.join(&*e.name), path.clone()));
+            }
+            let hit = match tagged {
+                Some(set) => set.contains(&dir.join(&*e.name)),
+                None => name_matches(query, &e.name),
+            };
+            if hit {
+                found += 1;
+                batch.push(Entry {
+                    name: path.into(),
+                    ..e
+                });
+            }
+        }
+        if !batch.is_empty() && (batch.len() >= BATCH || last.elapsed() >= BATCH_TIME) {
+            if tx.send(Msg::Batch(std::mem::take(&mut batch))).is_err() {
+                return;
+            }
+            last = Instant::now();
+        }
+        if found >= FOUND_MAX {
+            let _ = tx.send(Msg::Batch(batch));
+            let _ = tx.send(Msg::Done(Some(format!(
+                "Stopped at {FOUND_MAX} results: type more to narrow the search."
+            ))));
+            return;
+        }
+    }
+    let _ = tx.send(Msg::Batch(batch));
+    let note = (unread > 0).then(|| {
+        format!(
+            "{unread} folder{} couldn't be searched.",
+            if unread == 1 { "" } else { "s" }
+        )
+    });
     let _ = tx.send(Msg::Done(note));
 }
 

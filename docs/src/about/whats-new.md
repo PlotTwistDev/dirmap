@@ -50,6 +50,27 @@
   the list. Icons and Gallery show pictures of images, videos and PDFs. Each folder remembers its
   own view, sort and grouping.
 - **Groups.** **View > Group By** puts the Details list under headings by type, date or size.
+- **Rename many items at once.** Select several items, or a sequence, and press **F2**: find and
+  replace (with regular expressions), change case, add numbers or change the extension, with every
+  new name shown before anything changes. See
+  [Renaming many items](../views/file-manager.md#renaming-many-items).
+- **Compare and sync folders.** With two panes, **View > Compare Folders…** shows what's only on
+  one side, newer on one side or different, then copies one way, both ways or mirrors the left
+  onto the right. Replaced and deleted items go to the bin, and Undo reverses a sync. See
+  [Comparing and syncing folders](../views/file-manager.md#comparing-and-syncing-folders).
+- **Search subfolders.** **🗐** beside the filter searches the folder and every folder below it,
+  and **☆** keeps the search in the sidebar. See
+  [Searching subfolders](../views/file-manager.md#searching-subfolders).
+- **Colours, tags and notes.** Give items a colour, tags and a note from the right-click menu.
+  The sidebar's **Tags** shows everything with a tag. See
+  [Colours, tags and notes](../views/file-manager.md#colours-tags-and-notes).
+- **Open With your own apps.** Add the programs you use for each type of file (Nuke, RV, a text
+  editor) and open items in them from the right-click menu. See
+  [Open With](../views/file-manager.md#open-with).
+- **Redo** (**Ctrl+Y** or **Ctrl+Shift+Z**) after an Undo, and **F6** to move the keyboard to the
+  sidebar and back.
+- **LUTs in the sequence player.** **LUT…** shows frames through a `.cube` file. See
+  [Playing a sequence](../views/file-manager.md#playing-a-sequence).
 - **Archives.** Open zip, 7z and tar archives like folders, preview what's in them, and take
   things out with **Extract Here**, **Extract To…**, copy and paste or a drag.
 - **Pause and queue.** Copies and moves show their progress in the status bar, can be paused,

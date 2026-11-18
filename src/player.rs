@@ -380,6 +380,129 @@ pub fn to_display(f: &Frame, lut: &[u8]) -> Vec<eframe::egui::Color32> {
     f.px.par_chunks_exact(4).map(|p| eframe::egui::Color32::from_rgb(lut[p[0] as usize], lut[p[1] as usize], lut[p[2] as usize])).collect()
 }
 
+/// A LUT from a `.cube` file (Adobe/Resolve format): 3D, or 1D per channel.
+#[derive(Debug)]
+pub struct Cube {
+    pub title: String,
+    /// Entries along each side (3D) or in all (1D).
+    n: usize,
+    three_d: bool,
+    min: [f32; 3],
+    max: [f32; 3],
+    /// Red changing fastest, then green, then blue.
+    data: Vec<[f32; 3]>,
+}
+
+impl Cube {
+    pub fn parse(text: &str) -> Result<Cube, String> {
+        let (mut n, mut three_d, mut title) = (0usize, true, String::new());
+        let (mut min, mut max) = ([0.0f32; 3], [1.0f32; 3]);
+        let mut data = Vec::new();
+        for (no, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut w = line.split_whitespace();
+            let first = w.next().unwrap_or("");
+            let nums = |w: std::str::SplitWhitespace| -> Result<[f32; 3], String> {
+                let v: Vec<f32> = w
+                    .map(|x| x.parse::<f32>())
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| format!("Line {} isn't three numbers.", no + 1))?;
+                v.try_into()
+                    .map_err(|_| format!("Line {} isn't three numbers.", no + 1))
+            };
+            match first {
+                "TITLE" => title = line[5..].trim().trim_matches('"').to_string(),
+                "LUT_3D_SIZE" | "LUT_1D_SIZE" => {
+                    three_d = first == "LUT_3D_SIZE";
+                    n = w
+                        .next()
+                        .and_then(|x| x.parse().ok())
+                        .filter(|&n| {
+                            (2..=256).contains(&n) || (!three_d && (2..=65536).contains(&n))
+                        })
+                        .ok_or("The LUT size isn't one dirmap can use.")?;
+                }
+                "DOMAIN_MIN" => min = nums(w)?,
+                "DOMAIN_MAX" => max = nums(w)?,
+                "LUT_1D_INPUT_RANGE" | "LUT_3D_INPUT_RANGE" => {
+                    let v: Vec<f32> = w.filter_map(|x| x.parse().ok()).collect();
+                    if let [a, b] = v[..] {
+                        min = [a; 3];
+                        max = [b; 3];
+                    }
+                }
+                _ if first.parse::<f32>().is_ok() => data.push(nums(line.split_whitespace())?),
+                // Other keywords (from Resolve and others) don't change the table.
+                _ => {}
+            }
+        }
+        let want = if three_d { n * n * n } else { n };
+        if n == 0 || data.len() != want {
+            return Err(format!(
+                "This isn't a complete .cube LUT ({} of {want} entries).",
+                data.len()
+            ));
+        }
+        Ok(Cube {
+            title,
+            n,
+            three_d,
+            min,
+            max,
+            data,
+        })
+    }
+
+    pub fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let n = self.n;
+        let pos = |c: usize| {
+            let v = ((rgb[c] - self.min[c]) / (self.max[c] - self.min[c]).max(1e-6))
+                .clamp(0.0, 1.0)
+                * (n - 1) as f32;
+            let i = (v.floor() as usize).min(n - 2);
+            (i, v - i as f32)
+        };
+        if !self.three_d {
+            let mut out = [0.0; 3];
+            for (c, o) in out.iter_mut().enumerate() {
+                let (i, f) = pos(c);
+                *o = self.data[i][c] * (1.0 - f) + self.data[i + 1][c] * f;
+            }
+            return out;
+        }
+        let ((r, fr), (g, fg), (b, fb)) = (pos(0), pos(1), pos(2));
+        let at = |r: usize, g: usize, b: usize| self.data[r + g * n + b * n * n];
+        let lerp = |a: [f32; 3], b: [f32; 3], t: f32| {
+            [
+                a[0] + (b[0] - a[0]) * t,
+                a[1] + (b[1] - a[1]) * t,
+                a[2] + (b[2] - a[2]) * t,
+            ]
+        };
+        let c00 = lerp(at(r, g, b), at(r + 1, g, b), fr);
+        let c10 = lerp(at(r, g + 1, b), at(r + 1, g + 1, b), fr);
+        let c01 = lerp(at(r, g, b + 1), at(r + 1, g, b + 1), fr);
+        let c11 = lerp(at(r, g + 1, b + 1), at(r + 1, g + 1, b + 1), fr);
+        lerp(lerp(c00, c10, fg), lerp(c01, c11, fg), fb)
+    }
+}
+
+/// A frame through a `.cube` LUT, after an exposure gain on the stored values.
+pub fn to_display_cube(f: &Frame, cube: &Cube, stops: f32) -> Vec<eframe::egui::Color32> {
+    let gain = 2f32.powf(stops);
+    let h = |b: u16| half::f16::from_bits(b).to_f32() * gain;
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    f.px.par_chunks_exact(4)
+        .map(|p| {
+            let o = cube.apply([h(p[0]), h(p[1]), h(p[2])]);
+            eframe::egui::Color32::from_rgb(byte(o[0]), byte(o[1]), byte(o[2]))
+        })
+        .collect()
+}
+
 /// The machine's memory, in bytes (0 when it can't be found).
 pub fn total_ram() -> u64 {
     #[cfg(target_os = "linux")]
@@ -831,6 +954,31 @@ mod tests {
         let shown = to_display(&f, &lut(View::Raw, 0.0));
         assert_eq!(shown[0], eframe::egui::Color32::from_rgb(120, 0, 0));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cube_luts() {
+        // An identity 3D LUT of size 2, and one that swaps red and blue.
+        let id =
+            "TITLE \"id\"\nLUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n";
+        let c = Cube::parse(id).unwrap();
+        assert_eq!(c.title, "id");
+        let v = c.apply([0.25, 0.5, 0.75]);
+        assert!(
+            (v[0] - 0.25).abs() < 1e-6 && (v[1] - 0.5).abs() < 1e-6 && (v[2] - 0.75).abs() < 1e-6
+        );
+        assert_eq!(c.apply([2.0, -1.0, 0.0]), [1.0, 0.0, 0.0]);
+        let swap = "LUT_3D_SIZE 2\n0 0 0\n0 0 1\n0 1 0\n0 1 1\n1 0 0\n1 0 1\n1 1 0\n1 1 1\n";
+        let v = Cube::parse(swap).unwrap().apply([1.0, 0.0, 0.25]);
+        assert!((v[0] - 0.25).abs() < 1e-6 && v[2] == 1.0);
+        // 1D, with a domain.
+        let one = "LUT_1D_SIZE 3\nDOMAIN_MAX 2 2 2\n0 0 0\n0.5 0.5 0.5\n1 1 1\n";
+        assert_eq!(
+            Cube::parse(one).unwrap().apply([1.0, 2.0, 0.5]),
+            [0.5, 1.0, 0.25]
+        );
+        assert!(Cube::parse("LUT_3D_SIZE 2\n0 0 0\n").is_err());
+        assert!(Cube::parse("LUT_3D_SIZE 2\n0 0 x\n").is_err());
     }
 
     #[test]

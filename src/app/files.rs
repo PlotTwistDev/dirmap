@@ -54,6 +54,14 @@ impl FSort {
     }
 }
 
+/// A search kept in the sidebar: what to look for, in a folder and below.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+pub(super) struct SavedSearch {
+    pub name: String,
+    pub dir: PathBuf,
+    pub query: String,
+}
+
 /// What's remembered between runs.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -72,6 +80,10 @@ pub(super) struct FilesPrefs {
     pub sites: Vec<netui::SavedSite>,
     /// Show numbered frames (`shot.1001.exr`…) as one row per sequence.
     pub sequences: bool,
+    /// Searches saved in the sidebar.
+    pub searches: Vec<SavedSearch>,
+    /// Programs offered under Open With.
+    pub apps: Vec<openwith::UserApp>,
     /// The sequence player's settings.
     pub player: seqplayer::PlayerPrefs,
     /// Folders opened most recently, newest first.
@@ -152,6 +164,8 @@ impl Default for FilesPrefs {
             servers: Vec::new(),
             sites: Vec::new(),
             sequences: true,
+            searches: Vec::new(),
+            apps: Vec::new(),
             player: Default::default(),
             recent: Vec::new(),
             sort: FSort::Name,
@@ -178,7 +192,7 @@ impl Default for FilesPrefs {
 
 const RECENT_MAX: usize = 10;
 /// Sidebar rows (the list's rows follow the density setting).
-const ROW_F: f32 = 24.0;
+pub(super) const ROW_F: f32 = 24.0;
 const TAB_STRIP_H: f32 = 34.0;
 const TAB_MIN_W: f32 = 110.0;
 const TAB_MAX_W: f32 = 210.0;
@@ -233,6 +247,11 @@ pub(super) struct FTab {
     fresh: Option<(Listing, Option<mpsc::Receiver<Rearranged>>)>,
     /// Folder sizes from the scan for this folder: (tree it came from, name → (bytes, files)).
     pub(super) sizes: Option<(usize, FolderSizes)>,
+    /// The listing is a search of this folder and below: (what was searched for, hidden
+    /// folders searched too).
+    pub(super) search: Option<(String, bool)>,
+    /// …and whether that search went into subfolders.
+    pub(super) search_deep: bool,
 }
 
 impl FTab {
@@ -248,6 +267,8 @@ impl FTab {
             anchor: None,
             select_later: None,
             rename_later: false,
+            search: None,
+            search_deep: false,
             scroll_to_cursor: false,
             view: (0.0, 0.0),
             groups: Vec::new(),
@@ -444,6 +465,8 @@ pub(super) struct Pane {
     pub(super) reversed: bool,
     /// Show only items whose names contain this (or match it, with * or ?).
     pub(super) filter: String,
+    /// The filter box searches subfolders too.
+    pub(super) deep: bool,
     pub(super) view: FView,
     /// Group items under headings (Details view).
     pub(super) group: views::FGroup,
@@ -461,7 +484,7 @@ impl Pane {
             tabs.push(FTab::new(places::home().map(Location::Dir).unwrap_or(Location::Computer)));
         }
         let active = active.min(tabs.len() - 1);
-        Self { tabs, active, sort, reversed, filter: String::new(), view, group: Default::default(), seen: None, grid: (1, 100.0) }
+        Self { tabs, active, sort, reversed, filter: String::new(), deep: false, view, group: Default::default(), seen: None, grid: (1, 100.0) }
     }
 
     pub(super) fn tab(&self) -> &FTab {
@@ -536,6 +559,14 @@ pub(super) struct Files {
     pub(super) thumbs: thumbs::Thumbs,
     /// The sequence player, while it's open.
     pub(super) player: Option<seqplayer::Player>,
+    /// Compare Folders, while it's open.
+    pub(super) compare: Option<compare::Compare>,
+    /// Colours, tags and notes.
+    pub(super) marks: crate::fsys::marks::Marks,
+    /// The Tags and Note box, while it's open.
+    pub(super) mark_edit: Option<marksui::MarkEdit>,
+    /// Open With's Manage Apps box, while it's open.
+    pub(super) apps_box: Option<openwith::AppsBox>,
     /// Folders shown beside the current one in the Columns view.
     pub(super) side: views::SideLists,
     /// Notices of changes other programs make to the folders on screen.
@@ -592,6 +623,10 @@ impl Files {
             asking: None,
             thumbs: Default::default(),
             player: None,
+            compare: None,
+            marks: crate::fsys::marks::Marks::load(),
+            mark_edit: None,
+            apps_box: None,
             side: Default::default(),
             watcher: Default::default(),
         }
@@ -930,15 +965,7 @@ impl Files {
 
 /// Does a name pass the "filter this folder" box?
 pub(super) fn name_matches(filter: &str, name: &str) -> bool {
-    let f = filter.trim();
-    if f.is_empty() {
-        return true;
-    }
-    if f.contains(['*', '?']) {
-        scan::glob(f, name)
-    } else {
-        name.to_lowercase().contains(&f.to_lowercase())
-    }
+    crate::fsys::listing::name_matches(filter, name)
 }
 
 /// The display order of a folder's entries: folders first, then by the chosen key, names in
@@ -1043,6 +1070,12 @@ pub(super) enum FAction {
     OpenWithApp,
     /// The selected image sequences, in the player (two: A/B).
     Play,
+    /// Set (or clear) the items' colour.
+    Colour(Option<u8>),
+    /// Open With: one of the user's apps, or choose or manage them.
+    OpenWith(openwith::Pick),
+    /// The Tags and Note box.
+    Tags,
 }
 
 impl App {
@@ -1226,7 +1259,22 @@ impl App {
                 let fid = egui::Id::new("files-filter");
                 let hint = format!("🔍 Filter ({})", k(egui::Modifiers::COMMAND, egui::Key::F));
                 let f = ui.add(egui::TextEdit::singleline(&mut self.files.pane_mut().filter).id(fid).desired_width(150.0).hint_text(hint));
-                f.on_hover_text("Show only items in this folder whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
+                f.on_hover_text("Show only items whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
+                let deep = self.files.pane().deep;
+                if style::toggle_button(ui, deep, "🗐", "Search subfolders too: the filter looks in this folder and every folder below it").clicked() {
+                    self.files.pane_mut().deep = !deep;
+                }
+                let query = self.files.pane().filter.trim().to_string();
+                if deep
+                    && !query.is_empty()
+                    && let Some(dir) = self.files.here().dir().map(Path::to_path_buf)
+                {
+                    let saved = self.files.prefs.searches.iter().any(|s| s.dir == dir && s.query == query);
+                    if style::icon_button(ui, !saved, "☆", if saved { "This search is in the sidebar" } else { "Save this search in the sidebar" }).clicked() {
+                        let name = format!("{query} in {}", dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| dir.shown()));
+                        self.files.prefs.searches.push(SavedSearch { name, dir, query });
+                    }
+                }
                 if std::mem::take(&mut self.files.focus_filter) {
                     ctx.memory_mut(|m| m.request_focus(fid));
                 }
@@ -1255,6 +1303,7 @@ impl App {
         let mut split_to = None;
         let mut swap = false;
         let mut same = false;
+        let mut compare = false;
         ui.menu_button("View ⏷", |ui| {
             let split = self.files.prefs.split;
             ui.weak("Panes");
@@ -1269,6 +1318,9 @@ impl App {
             }
             if ui.add_enabled(two, egui::Button::new("Same Folder in Other Pane")).on_hover_text("Open this pane's folder in the other pane too").clicked() {
                 same = true;
+            }
+            if ui.add_enabled(two, egui::Button::new("Compare Folders…")).on_hover_text("Compare the two panes' folders, and sync them").clicked() {
+                compare = true;
             }
             ui.separator();
             ui.weak(if two { "This pane" } else { "Layout" });
@@ -1357,6 +1409,9 @@ impl App {
         if swap {
             self.files.swap_panes();
         }
+        if compare {
+            self.start_compare();
+        }
         if same && let Some(o) = self.files.other() {
             let here = self.files.here().clone();
             self.files.go_in(o, here);
@@ -1372,6 +1427,9 @@ impl App {
         self.connect_window(&ctx);
         self.quick_look(&ctx);
         self.sequence_player(&ctx);
+        self.compare_window(&ctx);
+        self.mark_edit_window(&ctx);
+        self.apps_window(&ctx);
         let pal = style::pal(ui);
 
         let status = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::symmetric(10, 3));
@@ -1497,12 +1555,49 @@ impl App {
         let p = &mut self.files.panes[pane];
         let (sort, reversed, group) = (p.sort, p.reversed, if p.view == FView::Details { p.group } else { views::FGroup::None });
         let group = (group, seqs_on);
-        let filter = p.filter.clone();
+        let tag = p
+            .filter
+            .trim()
+            .strip_prefix('#')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string);
+        let wanted = ((p.deep || tag.is_some()) && !p.filter.trim().is_empty())
+            .then(|| (p.filter.trim().to_string(), hidden));
+        let deep = p.deep;
+        let tagged = tag.map(|t| {
+            Arc::new(
+                self.files
+                    .marks
+                    .tagged(&t)
+                    .into_iter()
+                    .collect::<HashSet<PathBuf>>(),
+            )
+        });
+        let p = &mut self.files.panes[pane];
+        // A search's results already match: the filter isn't applied to their paths again.
+        let filter = if wanted.is_some() { String::new() } else { p.filter.clone() };
         let t = p.tab_mut();
+        if t.search != wanted || (wanted.is_some() && t.search_deep != deep) {
+            t.search = wanted.clone();
+            t.search_deep = deep;
+            t.listing = None;
+            t.order_key = None;
+            t.sorting = None;
+            t.fresh = None;
+            t.selected.clear();
+        }
         if t.listing.is_none()
             && let Location::Dir(p) = t.here().clone()
         {
-            t.listing = Some(Listing::start(p));
+            t.listing = Some(match &wanted {
+                Some((q, h)) => Listing::search(p, q.clone(), *h, deep, tagged),
+                None => Listing::start(p),
+            });
+        }
+        if t.search.is_some() {
+            // Results aren't read again when something changes; F5 searches again.
+            t.dirty_at = None;
         }
         let Some(l) = t.listing.as_mut() else { return };
         l.poll();
@@ -1629,6 +1724,10 @@ impl App {
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         let mut picks = FPicks::default();
+        ui.ctx().data_mut(|d| {
+            d.get_temp_mut_or_default::<Vec<egui::Id>>(egui::Id::new(SIDE_ROWS))
+                .clear()
+        });
         let here = self.files.here().clone();
         ui.spacing_mut().item_spacing.y = 1.0;
         let pressed = ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| ui.max_rect().contains(p)));
@@ -1673,6 +1772,31 @@ impl App {
             }
         });
         self.network_section(ui, &here, &mut picks);
+        let mut run_search = None;
+        if !self.files.prefs.searches.is_empty() {
+            let mut remove = None;
+            side_section(ui, "fm-searches", "Saved searches", true, |ui| {
+                for (i, s) in self.files.prefs.searches.iter().enumerate() {
+                    let resp = side_row(ui, "🔍", &s.name, false, ROW_F).on_hover_text(format!(
+                        "{} in {} and below",
+                        s.query,
+                        s.dir.shown()
+                    ));
+                    if resp.clicked() {
+                        run_search = Some(s.clone());
+                    }
+                    resp.context_menu(|ui| {
+                        if ui.button("Remove from This List").clicked() {
+                            remove = Some(i);
+                            ui.close();
+                        }
+                    });
+                }
+            });
+            if let Some(i) = remove {
+                self.files.prefs.searches.remove(i);
+            }
+        }
         if !self.files.prefs.recent.is_empty() {
             side_section(ui, "fm-recent", "Recent", false, |ui| {
                 for p in self.files.prefs.recent.clone() {
@@ -1682,7 +1806,50 @@ impl App {
                 }
             });
         }
+        let tag = self.tags_section(ui);
+        // A row opened from the keyboard hands the keyboard back to the list.
+        let ctx = ui.ctx().clone();
+        let side_focus = Self::side_focus(&ctx);
+        if let Some(id) = side_focus
+            && (picks.go.is_some()
+                || run_search.is_some()
+                || tag.is_some()
+                || ctx.input(|i| i.key_pressed(egui::Key::Escape)))
+        {
+            ctx.memory_mut(|m| m.surrender_focus(id));
+            self.files.focused = true;
+        }
         self.files_apply(picks);
+        if let Some((dir, t)) = tag {
+            self.show_tag(dir, t);
+        }
+        if let Some(s) = run_search {
+            self.files.go(Location::Dir(s.dir));
+            let p = self.files.pane_mut();
+            p.filter = s.query;
+            p.deep = true;
+        }
+    }
+
+    /// The sidebar row that has the keyboard, if one does.
+    fn side_focus(ctx: &egui::Context) -> Option<egui::Id> {
+        let f = ctx.memory(|m| m.focused())?;
+        ctx.data(|d| d.get_temp::<Vec<egui::Id>>(egui::Id::new(SIDE_ROWS)))
+            .filter(|v| v.contains(&f))
+            .map(|_| f)
+    }
+
+    /// F6: the keyboard to the sidebar (its first row), or back to the list.
+    fn toggle_side_focus(&mut self, ctx: &egui::Context) {
+        if let Some(id) = Self::side_focus(ctx) {
+            ctx.memory_mut(|m| m.surrender_focus(id));
+            self.files.focused = true;
+        } else if let Some(first) = ctx
+            .data(|d| d.get_temp::<Vec<egui::Id>>(egui::Id::new(SIDE_ROWS)))
+            .and_then(|v| v.first().copied())
+        {
+            ctx.memory_mut(|m| m.request_focus(first));
+        }
     }
 
     /// A folder row in the sidebar: click to go, middle-click for a tab, a menu, and drops.
@@ -1750,6 +1917,10 @@ impl App {
         self.files_keys(ui.ctx(), pointer_in, &mut picks);
         self.files_apply(picks);
         for (pane, r) in rects.into_iter().enumerate() {
+            // A key in the first pane can close the second (Ctrl+\).
+            if pane >= self.files.panes.len() {
+                break;
+            }
             let mut cui = ui.new_child(egui::UiBuilder::new().id_salt(("pane", pane)).max_rect(r).layout(egui::Layout::top_down(egui::Align::Min)));
             cui.set_clip_rect(r.intersect(ui.clip_rect()));
             self.pane_ui(&mut cui, pane);
@@ -2240,6 +2411,19 @@ impl App {
                                 let icon = Rect::from_min_size(pos2(cell.left() + 10.0, cy - 8.0), vec2(16.0, 16.0));
                                 let tint = if faint { Color32::from_gray(120) } else { color_for(e.ext()) };
                                 self.icons.paint(ui, icon, e.is_dir, e.ext(), tint);
+                                let mark = if self.files.marks.is_empty() {
+                                    None
+                                } else {
+                                    self.files.marks.get(&dir.join(&*e.name))
+                                };
+                                if let Some(m) = mark {
+                                    marksui::paint_dot(
+                                        &p,
+                                        icon,
+                                        m,
+                                        if selected { sel_bg } else { pal.paper },
+                                    );
+                                }
                                 if e.is_link {
                                     p.text(icon.left_bottom() + vec2(-3.0, 2.0), Align2::LEFT_BOTTOM, "↪", FontId::proportional(10.0), vis.strong_text_color());
                                 }
@@ -2252,11 +2436,15 @@ impl App {
                                 let clip = Rect::from_min_max(pos2(cell.left() + 33.0, rect.top()), pos2(end, rect.bottom()));
                                 let name = seq.map_or(&*e.name, |s| s.label.as_str());
                                 let g = p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, name, font.clone(), tc);
+                                let mut after = g.right();
                                 if let Some(s) = seq {
                                     // The frame range after the name, and a warning for missing frames.
                                     let gaps = if s.seq.missing > 0 { format!("  ⚠ {} missing", group(s.seq.missing)) } else { String::new() };
                                     let note = format!("  {}{gaps}", s.seq.range_text());
-                                    p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(g.right(), cy), Align2::LEFT_CENTER, note, font.clone(), if s.seq.missing > 0 && !selected { vis.warn_fg_color } else { weak });
+                                    after = p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(g.right(), cy), Align2::LEFT_CENTER, note, font.clone(), if s.seq.missing > 0 && !selected { vis.warn_fg_color } else { weak }).right();
+                                }
+                                if let Some(m) = mark {
+                                    marksui::paint_tags(&p.with_clip_rect(clip.intersect(p.clip_rect())), pos2(after + 8.0, cy), m, weak);
                                 }
                             }
                             Some(FSort::Size) if seq.is_some() => {
@@ -2301,7 +2489,7 @@ impl App {
                         hovered_row = Some(i);
                     }
                     let pinned = e.is_dir && self.files.is_pinned(&dir.join(&*e.name));
-                    let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste };
+                    let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste, marks: &self.files.marks, apps: &self.files.prefs.apps };
                     item_actions(ui, resp, i, &ic, pinned, picks, &mut rows_drop);
                 }
             });
@@ -2335,8 +2523,10 @@ impl App {
         let can_paste = self.can_paste();
         let mut new_pick = None;
         let undo_label = self.ops.undo_label().map(str::to_string);
+        let redo_label = self.ops.redo_label().map(str::to_string);
         let busy = self.ops.job.is_some();
         let mut undo_now = false;
+        let mut redo_now = false;
         empty.context_menu(|ui| {
             let ctx = ui.ctx().clone();
             let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
@@ -2349,6 +2539,17 @@ impl App {
             let undo = undo_label.as_deref().map_or("Undo".to_string(), |w| format!("Undo {w}"));
             if ui.add_enabled(undo_label.is_some() && !busy, egui::Button::new(undo).shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::Z))).clicked() {
                 undo_now = true;
+            }
+            if let Some(w) = &redo_label
+                && ui
+                    .add_enabled(
+                        !busy,
+                        egui::Button::new(format!("Redo {w}"))
+                            .shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::Y)),
+                    )
+                    .clicked()
+            {
+                redo_now = true;
             }
             ui.separator();
             if ui.add(egui::Button::new("Refresh").shortcut_text(k(egui::Modifiers::NONE, egui::Key::F5))).clicked() {
@@ -2370,6 +2571,9 @@ impl App {
         }
         if undo_now {
             self.undo_last();
+        }
+        if redo_now {
+            self.redo_last();
         }
         // The four views, at the right of the footer as in Explorer.
         let reserve = 104.0;
@@ -2414,7 +2618,7 @@ impl App {
         let can_paste = self.can_paste();
         let two_panes = self.files.panes.len() > 1;
         let files = &mut self.files;
-        let (panes, thumb_cache, favourites) = (&files.panes, &mut files.thumbs, &files.prefs.favourites);
+        let (panes, thumb_cache, favourites, marks, apps) = (&files.panes, &mut files.thumbs, &files.prefs.favourites, &files.marks, &files.prefs.apps);
         let icons = &mut self.icons;
         let t = panes[pane].tab();
         let Some(l) = t.listing.as_ref() else { return };
@@ -2470,6 +2674,23 @@ impl App {
                     if e.is_link {
                         p.text(pic.left_bottom() + vec2(size * 0.1, -2.0), Align2::LEFT_BOTTOM, "↪", FontId::proportional(14.0), pal.strong);
                     }
+                    if let Some(m) = (!marks.is_empty()).then(|| marks.get(&path)).flatten() {
+                        marksui::paint_dot(&p, pic.shrink(size * 0.1), m, pal.paper);
+                        if !m.tags.is_empty() || !m.note.trim().is_empty() {
+                            let tip = m
+                                .tags
+                                .iter()
+                                .map(|t| format!("#{t}"))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            ui.interact(cell, egui::Id::new(("mark-tip", i)), Sense::hover())
+                                .on_hover_text(if m.note.trim().is_empty() {
+                                    tip
+                                } else {
+                                    format!("{tip}\n{}", m.note)
+                                });
+                        }
+                    }
                     // The name: up to two lines, centred, shortened with … when longer.
                     let tc = if selected { sel_fg } else if e.hidden { pal.weak } else { pal.text };
                     let shown = t.seqs.get(&i).map_or_else(|| e.name.to_string(), |s| format!("{}\n{} frames", s.label, group(s.seq.frames)));
@@ -2480,7 +2701,7 @@ impl App {
                     let g = ui.fonts_mut(|f| f.layout_job(job));
                     p.galley(pos2(cell.center().x, pic.bottom() + 6.0), g, tc);
                     let pinned = e.is_dir && favourites.iter().any(|g| g.items.iter().any(|f| f.path == path));
-                    let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste };
+                    let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste, marks, apps };
                     let resp = resp.on_hover_text_at_pointer(if e.is_dir { e.name.to_string() } else { format!("{}\n{}", e.name, scan::human(e.size)) });
                     item_actions(ui, resp, i, &ic, pinned, picks, &mut drops);
                 }
@@ -2506,6 +2727,13 @@ impl App {
         let Some(l) = t.listing.as_ref() else { return };
         let shown = t.order.len();
         let mut text = format!("{} item{}", group(shown as u64), if shown == 1 { "" } else { "s" });
+        if t.search.is_some() {
+            text.push_str(if t.search_deep {
+                " found here and in subfolders"
+            } else {
+                " found"
+            });
+        }
         // Only once the order covers everything read so far, or the count would be off.
         let current = t.order_key.as_ref().is_some_and(|k| k.0 == l.generation);
         let folded: usize = t.seqs.values().map(|s| s.members.len() - 1).sum();
@@ -2520,7 +2748,11 @@ impl App {
             text.push_str(&format!(" ({} {why})", group(left_out as u64)));
         }
         if !l.done {
-            text.push_str(" · reading…");
+            text.push_str(if t.search.is_some() { " · searching…" } else { " · reading…" });
+        } else if t.search.is_some()
+            && let Some(e) = &l.error
+        {
+            text.push_str(&format!(" · {e}"));
         }
         let sel_rows: Vec<u32> = t.order.iter().copied().filter(|&i| t.selected.contains(&l.entries[i as usize].name)).collect();
         let sel: Vec<&Entry> = sel_rows.iter().map(|&i| &l.entries[i as usize]).collect();
@@ -2587,7 +2819,7 @@ impl App {
     fn files_keys(&mut self, ctx: &egui::Context, pointer_in: bool, picks: &mut FPicks) {
         use egui::{Key, Modifiers as M};
         // Not while a box is open over the list (Connect to Server, a server's question).
-        if self.ops.modal() || self.files.connect.is_some() || self.files.asking.is_some() || self.files.player.is_some() {
+        if self.ops.modal() || self.files.connect.is_some() || self.files.asking.is_some() || self.files.player.is_some() || self.files.compare.is_some() || self.files.mark_edit.is_some() || self.files.apps_box.is_some() {
             return;
         }
         // The mouse's side buttons go to the file manager when the pointer is over it.
@@ -2607,6 +2839,10 @@ impl App {
             None => {}
         }
         // Shortcuts that work even while typing in the filter box.
+        if ctx.input_mut(|i| i.consume_key(M::NONE, Key::F6)) {
+            self.toggle_side_focus(ctx);
+            return;
+        }
         let (find, path, dock, split, preview) = ctx.input_mut(|i| {
             let path = i.consume_key(M::COMMAND, Key::L) || (!cfg!(target_os = "macos") && (i.consume_key(M::ALT, Key::D) || i.consume_key(M::NONE, Key::F4)));
             (i.consume_key(M::COMMAND, Key::F), path, i.consume_key(M::COMMAND, Key::J), i.consume_key(M::COMMAND, Key::Backslash), i.consume_key(M::ALT, Key::P))
@@ -2657,6 +2893,7 @@ impl App {
             Act(FAction),
             NewFolder,
             Undo,
+            Redo,
             OtherPane,
             Swap,
             Find(String),
@@ -2703,6 +2940,9 @@ impl App {
             }
             if i.consume_key(M::COMMAND, Key::U) {
                 return Some(Do::Swap);
+            }
+            if i.consume_key(M::COMMAND | M::SHIFT, Key::Z) || i.consume_key(M::COMMAND, Key::Y) {
+                return Some(Do::Redo);
             }
             if i.consume_key(M::COMMAND, Key::Z) {
                 return Some(Do::Undo);
@@ -2844,6 +3084,7 @@ impl App {
             }
             Do::Swap => self.files.swap_panes(),
             Do::Undo => self.undo_last(),
+            Do::Redo => self.redo_last(),
             Do::Refresh => self.files.refresh(),
             Do::Hidden => self.files.prefs.show_hidden = !self.files.prefs.show_hidden,
             Do::NewFolder => {
@@ -3011,8 +3252,13 @@ impl App {
     /// The list's item menu for a tile on the dock's map, run through the same commands.
     pub(super) fn tile_menu(&mut self, ui: &mut egui::Ui, disk: &Path, is_dir: bool) {
         let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
-        let m = RowMenu { is_dir, count: 1, seq: false, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false };
-        let Some(a) = item_menu(ui, &m) else { return };
+        let colour = self.files.marks.get(disk).and_then(|m| m.colour);
+        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false };
+        let ext = disk
+            .file_name()
+            .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
+            .unwrap_or_default();
+        let Some(a) = item_menu(ui, &m, &self.files.prefs.apps.clone(), &ext) else { return };
         match a {
             FAction::Open if is_dir || archive => self.files.go(Location::Dir(disk.to_path_buf())),
             FAction::Open => {
@@ -3186,13 +3432,14 @@ impl App {
                     }
                 }
             }
+            FAction::Colour(c) => self.set_colour(&paths, c),
+            FAction::OpenWith(pick) => self.open_with(pick, paths),
+            FAction::Tags => self.open_mark_edit(paths),
             FAction::Play => {
                 let clips = self.files.cur().chosen_clips();
                 self.play_sequences(clips);
             }
-            FAction::Rename if paths.len() > 1 => {
-                self.ops.notice = Some(("Rename one item at a time. To rename the frames of a sequence, turn off View > Group Image Sequences.".into(), false));
-            }
+            FAction::Rename if paths.len() > 1 => self.start_batch_rename(paths),
             FAction::Rename => {
                 if let Some(p) = paths.into_iter().next().filter(|p| p.parent().is_some()) {
                     self.start_rename(p);
@@ -3257,6 +3504,8 @@ pub(super) struct RowMenu {
     pub count: usize,
     /// The row is an image sequence.
     pub seq: bool,
+    /// The item's colour, if it has one.
+    pub colour: Option<u8>,
     pub pinned: bool,
     /// Split view is on (Copy and Move to Other Pane).
     pub two: bool,
@@ -3289,6 +3538,8 @@ pub(super) struct ItemCtx<'a> {
     pub(super) sizes: Option<&'a FolderSizes>,
     pub(super) two: bool,
     pub(super) can_paste: bool,
+    pub(super) marks: &'a crate::fsys::marks::Marks,
+    pub(super) apps: &'a [openwith::UserApp],
 }
 
 /// Clicks, double-clicks, middle-clicks, dragging and the right-click menu for one item (a row
@@ -3328,16 +3579,17 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     }
     let read_only = archive::inside(&path);
     let seq = t.seqs.contains_key(&i);
-    let ctx_menu = RowMenu { is_dir, count, seq, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only };
+    let colour = c.marks.get(&path).and_then(|m| m.colour);
+    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only };
     resp.context_menu(|ui| {
-        if let Some(a) = item_menu(ui, &ctx_menu) {
+        if let Some(a) = item_menu(ui, &ctx_menu, c.apps, e.ext()) {
             let paths = if selected { t.chosen_paths() } else { t.row_paths(dir, l, i) };
             picks.menu = Some((a, paths));
         }
     });
 }
 
-fn item_menu(ui: &mut egui::Ui, m: &RowMenu) -> Option<FAction> {
+fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &str) -> Option<FAction> {
     use egui::{Key, Modifiers as M};
     let ctx = ui.ctx().clone();
     let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
@@ -3362,6 +3614,11 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu) -> Option<FAction> {
     } else if !many {
         item(ui, true, "Quick Look", k(M::NONE, Key::Space), FAction::QuickLook);
     }
+    let with = if m.seq {
+        None
+    } else {
+        openwith::menu(ui, apps, ext, m.is_dir)
+    };
     if m.archive {
         if !many {
             item(ui, true, "Open with Its App", String::new(), FAction::OpenWithApp);
@@ -3385,11 +3642,23 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu) -> Option<FAction> {
         item(ui, rw, "Move to Other Pane", k(M::SHIFT, Key::F6), FAction::MoveToOther);
     }
     ui.separator();
-    item(ui, !many && !m.seq && rw, "Rename…", k(M::NONE, Key::F2), FAction::Rename);
+    let rename = if m.seq && !many {
+        "Rename Frames…".to_string()
+    } else if many {
+        format!("Rename {} Items…", m.count)
+    } else {
+        "Rename…".to_string()
+    };
+    item(ui, rw, &rename, k(M::NONE, Key::F2), FAction::Rename);
     let bin = if cfg!(windows) { "Delete (to Recycle Bin)…" } else { "Move to Trash…" };
     let bin_key = if cfg!(target_os = "macos") { k(M::COMMAND, Key::Backspace) } else { k(M::NONE, Key::Delete) };
     item(ui, rw, bin, bin_key, FAction::Trash);
     item(ui, rw, "Delete Permanently…", k(M::SHIFT, Key::Delete), FAction::Delete);
+    let mut marked = None;
+    if !m.read_only {
+        ui.separator();
+        marked = marksui::menu(ui, m.colour);
+    }
     ui.separator();
     item(ui, true, if many { "Copy Paths" } else { "Copy Path" }, k(M::COMMAND | M::SHIFT, Key::C), FAction::CopyPath);
     if cfg!(windows) {
@@ -3416,7 +3685,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu) -> Option<FAction> {
             out = Some(a);
         }
     }
-    out
+    out.or(marked).or(with.map(FAction::OpenWith))
 }
 
 /// Add to Favourites (or remove) and Analyse, for a folder.
@@ -3477,10 +3746,28 @@ pub(super) fn side_row(ui: &mut egui::Ui, icon: &str, label: &str, on: bool, h: 
 }
 
 /// `side_row` that can also be dragged.
+/// Where the sidebar's rows are listed each frame, for keyboard focus.
+const SIDE_ROWS: &str = "fm-side-rows";
 pub(super) fn side_row_sense(ui: &mut egui::Ui, icon: &str, label: &str, on: bool, h: f32, sense: Sense) -> egui::Response {
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), sense);
+    // Remembered for F6, which moves the keyboard to the sidebar and back.
+    ui.ctx().data_mut(|d| {
+        d.get_temp_mut_or_default::<Vec<egui::Id>>(egui::Id::new(SIDE_ROWS))
+            .push(resp.id)
+    });
+    if resp.gained_focus() {
+        resp.scroll_to_me(None);
+    }
     let pal = style::pal(ui);
     let p = ui.painter();
+    if resp.has_focus() {
+        p.rect_stroke(
+            r.shrink(1.0),
+            style::RADIUS as f32,
+            Stroke::new(1.5, pal.accent),
+            egui::StrokeKind::Inside,
+        );
+    }
     if on {
         p.rect_filled(r, style::RADIUS as f32, pal.sel);
         p.rect_filled(Rect::from_min_size(pos2(r.left(), r.top() + 5.0), vec2(3.0, ROW_F - 10.0)), 1.5, pal.accent);

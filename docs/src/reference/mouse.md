@@ -16,7 +16,7 @@ A trackpad works too: two-finger scrolling acts as the wheel, and pinching zooms
 | **Shift+click** | Select everything from the last item clicked to this one. |
 | **Double-click** | Open a folder, or a file with its usual app. |
 | **Middle-click a folder, place or tab** | Open the folder or place in a new tab; close the tab. |
-| **Right-click** | The item's menu: Open, Copy, Cut, Paste, Rename, Move to Trash, Copy Path, Add to Favourites, Show in Explorer or Finder, Properties, Analyse This Folder and, with two panes, Copy or Move to the other pane. On empty space: New, Paste, Refresh and more. |
+| **Right-click** | The item's menu: Open, Open With, Copy, Cut, Paste, Rename (several items: Batch Rename), Move to Trash, Colour, Tags and Note, Copy Path, Add to Favourites, Show in Explorer or Finder, Properties, Analyse This Folder and, with two panes, Copy or Move to the other pane. On empty space: New, Paste, Undo, Redo, Refresh and more. |
 | **Drag onto a folder, a tab, a folder in the path, the other pane or a sidebar place** | Move the items there when it's on the same drive, copy them when it's another drive. Hold Ctrl or Alt to copy (⌥ on a Mac), Shift to move (⌘ on a Mac). The label by the pointer says which. Hold over a tab to switch to it. |
 | **Ctrl+wheel over the icons (⌘+scroll on a Mac), or pinch** | Icons view: make the icons bigger or smaller. |
 | **Click the view buttons at the bottom right of the list** | Show the folder as Details (rows), Icons, Columns or Gallery. Each folder remembers its own view, sort and grouping (View > Remember Each Folder's View). |

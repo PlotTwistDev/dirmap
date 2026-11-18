@@ -47,11 +47,13 @@ pub(super) struct PlayerPrefs {
     /// 1 full size, 2 half, 4 quarter.
     pub scale: u32,
     pub view: View,
+    /// A .cube LUT used in place of the view transform.
+    pub lut: Option<std::path::PathBuf>,
 }
 
 impl Default for PlayerPrefs {
     fn default() -> Self {
-        Self { cache_gb: 0.0, fps: 24.0, ends: Ends::Loop, scale: 1, view: View::Auto }
+        Self { cache_gb: 0.0, fps: 24.0, ends: Ends::Loop, scale: 1, view: View::Auto, lut: None }
     }
 }
 
@@ -97,6 +99,10 @@ pub(super) struct Player {
     compare: Compare,
     wipe: f32,
     dragging_wipe: bool,
+    /// The .cube LUT in use, and one being read.
+    cube: Option<Arc<player::Cube>>,
+    cube_rx: Option<std::sync::mpsc::Receiver<Result<player::Cube, String>>>,
+    cube_error: Option<String>,
 }
 
 impl Player {
@@ -127,7 +133,25 @@ impl Player {
             compare: if two { Compare::Wipe } else { Compare::A },
             wipe: 0.5,
             dragging_wipe: false,
+            cube: None,
+            cube_rx: None,
+            cube_error: None,
         }
+    }
+
+    /// Read a .cube file in the background (it's a user file: never on the UI thread).
+    fn load_cube(&mut self, path: std::path::PathBuf) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let r = std::fs::read_to_string(&path).map_err(|e| format!("Couldn't read the LUT: {e}")).and_then(|t| player::Cube::parse(&t));
+            let _ = tx.send(r.map(|mut c| {
+                if c.title.is_empty() {
+                    c.title = path.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                }
+                c
+            }));
+        });
+        self.cube_rx = Some(rx);
     }
 
     fn len(&self) -> usize {
@@ -237,8 +261,11 @@ impl Player {
                 continue;
             }
             let Some(f) = self.tracks[t].engine.frame(k) else { continue };
-            let lut = self.lut(view.resolve(f.enc));
-            let image = egui::ColorImage::new([f.w as usize, f.h as usize], player::to_display(&f, &lut));
+            let pixels = match &self.cube {
+                Some(c) => player::to_display_cube(&f, c, self.stops),
+                None => player::to_display(&f, &self.lut(view.resolve(f.enc))),
+            };
+            let image = egui::ColorImage::new([f.w as usize, f.h as usize], pixels);
             let tr = &mut self.tracks[t];
             match &mut tr.tex {
                 Some(tex) => tex.set(image, egui::TextureOptions::LINEAR),
@@ -257,7 +284,11 @@ impl App {
         if clips.is_empty() {
             return;
         }
-        self.files.player = Some(Player::new(clips, &self.files.prefs.player));
+        let mut pl = Player::new(clips, &self.files.prefs.player);
+        if let Some(p) = self.files.prefs.player.lut.clone() {
+            pl.load_cube(p);
+        }
+        self.files.player = Some(pl);
     }
 
     /// The player over the whole window, while it's open.
@@ -318,6 +349,26 @@ fn player_ui(ctx: &egui::Context, pl: &mut Player, prefs: &mut PlayerPrefs) -> b
     });
     if close {
         return false;
+    }
+    if let Some(rx) = &pl.cube_rx
+        && let Ok(r) = rx.try_recv()
+    {
+        pl.cube_rx = None;
+        match r {
+            Ok(c) => {
+                pl.cube = Some(Arc::new(c));
+                pl.cube_error = None;
+            }
+            Err(e) => {
+                pl.cube = None;
+                pl.cube_error = Some(e);
+                prefs.lut = None;
+            }
+        }
+        pl.look += 1;
+    }
+    if pl.cube_rx.is_some() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
     let now = ctx.input(|i| i.time);
     pl.tick(now, prefs);
@@ -560,13 +611,37 @@ fn controls(ui: &mut egui::Ui, pl: &mut Player, prefs: &mut PlayerPrefs) {
         }
         ui.separator();
         let before = (prefs.view, pl.stops);
-        egui::ComboBox::from_id_salt("seq-view").selected_text(prefs.view.title()).show_ui(ui, |ui| {
-            for v in View::ALL {
-                ui.selectable_value(&mut prefs.view, v, v.title());
+        let lut_title = pl.cube.as_ref().map(|c| c.title.clone());
+        match &lut_title {
+            Some(t) => {
+                ui.label(egui::RichText::new(format!("LUT: {t}")).strong()).on_hover_text("The frames' values, after the exposure, go through this LUT");
+                if ui.small_button("✖").on_hover_text("Stop using the LUT").clicked() {
+                    pl.cube = None;
+                    prefs.lut = None;
+                    pl.look += 1;
+                }
             }
-        })
-        .response
-        .on_hover_text("How the values are shown. Automatic: float frames as linear light on an sRGB display, log DPX through the Cineon curve, the rest as stored");
+            None => {
+                if ui.button("LUT…").on_hover_text("Use a .cube LUT file (3D or 1D) in place of the colour transform").clicked()
+                    && let Some(p) = rfd::FileDialog::new().add_filter("Cube LUT", &["cube"]).set_title("Choose a .cube LUT").pick_file()
+                {
+                    prefs.lut = Some(p.clone());
+                    pl.load_cube(p);
+                }
+            }
+        }
+        if let Some(e) = &pl.cube_error {
+            ui.colored_label(ui.visuals().error_fg_color, "⚠").on_hover_text(e.clone());
+        }
+        if lut_title.is_none() {
+            egui::ComboBox::from_id_salt("seq-view").selected_text(prefs.view.title()).show_ui(ui, |ui| {
+                for v in View::ALL {
+                    ui.selectable_value(&mut prefs.view, v, v.title());
+                }
+            })
+            .response
+            .on_hover_text("How the values are shown. Automatic: float frames as linear light on an sRGB display, log DPX through the Cineon curve, the rest as stored");
+        }
         ui.add(egui::DragValue::new(&mut pl.stops).speed(0.05).range(-12.0..=12.0).fixed_decimals(1).prefix("Exposure ").suffix(" stops"));
         if pl.stops != 0.0 && ui.small_button("0").on_hover_text("Reset the exposure").clicked() {
             pl.stops = 0.0;

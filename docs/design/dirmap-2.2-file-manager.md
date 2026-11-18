@@ -308,20 +308,20 @@ Status: ✅ done · 🔨 in progress · ⬜ not started. "Win" means checked on 
 | 11 | Grouping (by type, date, size) | 3b | Advanced | ✅ | Details view only; View > Group By |
 | 12 | Remembered view per folder | 3b | Advanced | ✅ | View, sort and grouping; Use This View for All Folders; Reset; can be turned off |
 | 13 | Audio, video and PDF previews | 3b | Advanced | ✅ | Pictures from the system's thumbnailers (Windows shell, macOS Quick Look, Linux ffmpeg/pdftoppm); sound plays (Windows MCI, afplay, ffplay); no in-app video playback. Windows and macOS untested on device |
-| 14 | Undo for file operations | 3b | Advanced | ✅ | Ctrl+Z, last 30; restores from Recycle Bin/Trash (Windows $I parsing and macOS untested on device); no Redo yet |
+| 14 | Undo for file operations | 3b | Advanced | ✅ | Ctrl+Z, last 30; restores from Recycle Bin/Trash (Windows $I parsing and macOS untested on device); Redo (Ctrl+Y, Ctrl+Shift+Z) from the steps Undo records |
 | 15 | Conflict choices (Replace, Keep Both, Skip), pause, transfer queue | 3b | Advanced | ✅ | Pause/Resume/Stop with progress in the status bar; copies and moves queue in order |
 | 16 | Notice changes made by other apps (file watching) | 3b | Advanced | ✅ | Open tabs and Columns folders; the list updates in place. Network shares depend on the server sending notices |
 | 17 | SFTP connection manager, keychain, host key checks | 4 | Advanced | ✅ | russh + russh-sftp; agent, key files, passwords (keychain only on request); new keys shown before connecting, changed keys refused. Untested on a Windows or Mac device (agent, Credential Manager, Keychain) |
 | 18 | FTP(S) (flagged insecure) and WebDAV | 4 | Specialist | ✅ | suppaftp and ureq; certificates checked against the system's store. No per-server certificate exceptions, no Digest sign-in for WebDAV |
 | 19 | Analysing remote folders | 4 | Specialist | ✅ | Reads every folder over the connection, then draws; no live map while it runs |
-| 20 | Image sequence grouping in Files | 5 | Specialist | ✅ | One row per sequence in Details, Icons, Columns and Gallery; copy, move, delete and drag take every frame; View > Group Image Sequences; F2 refused on a sequence row |
+| 20 | Image sequence grouping in Files | 5 | Specialist | ✅ | One row per sequence in Details, Icons, Columns and Gallery; copy, move, delete and drag take every frame; View > Group Image Sequences; F2 on a sequence row opens Rename Frames (row 23) |
 | 21 | RAM sequence player: cache, timeline, A/B | 5 | Specialist | ✅ | `src/player.rs` engine (worker pool, half-float cache to a budget, read-ahead, furthest-ahead eviction) and `src/app/seqplayer.rs`; plays only cached frames and shows the rate reached; A/B wipe; half and quarter size; servers via `remote::read_bytes` |
 | 22 | DPX decode and display colour | 5 | Specialist | ✅ | DPX 8/10/12/16-bit, both byte orders, packing 0/1/2 (10-bit method A checked against ImageMagick's files); display through a LUT: sRGB, Rec.709, Cineon log, raw, exposure. OpenColorIO is row 30 |
-| 23 | Batch rename | 6 | Advanced | ⬜ | |
-| 24 | Folder compare and sync preview | 6 | Advanced | ⬜ | |
-| 25 | Search scopes and saved searches | 6 | Advanced | ⬜ | |
-| 26 | Folder colours, tags and notes | 6 | Specialist | ⬜ | |
-| 27 | App launcher and Open With favourites | 6 | Specialist | ⬜ | |
-| 28 | Keyboard move between sidebar and list | — | Advanced | ⬜ | |
+| 23 | Batch rename | 6 | Advanced | ✅ | `src/app/batchren.rs`: find/replace (regex, case, extension), case, numbering, extension; live preview with clashes, taken and invalid names; two passes through temporary names so swaps work; rolls back on failure; one Undo |
+| 24 | Folder compare and sync preview | 6 | Advanced | ✅ | `src/app/compare.rs`: two panes, with subfolders, 2 s time slack, optional SHA-256 contents (local only); Update Right/Left, Both Ways, Mirror (second confirmation listing deletions); replaced and deleted items to the bin; one Undo |
+| 25 | Search scopes and saved searches | 6 | Advanced | ✅ | 🗐 beside the filter searches subfolders (`Listing::search`, streamed, 100,000 cap, servers too); ☆ saves to the sidebar; results not refreshed by file watching (F5). No content search or date/size scopes yet |
+| 26 | Folder colours, tags and notes | 6 | Specialist | ✅ | `src/fsys/marks.rs` (marks.ron in dirmap's data folder, saved off the UI thread), `src/app/marksui.rs`; 7 colours, tags, a note; Tags sidebar section and `#tag` filter; follow renames and moves made in dirmap, not elsewhere |
+| 27 | App launcher and Open With favourites | 6 | Specialist | ✅ | `src/app/openwith.rs`: apps per type (or folder, or all), arguments with `{file}`, no shell; macOS .app via `open -a`; server and archive items fetched first. Not checked on Windows or macOS devices |
+| 28 | Keyboard move between sidebar and list | — | Advanced | ✅ | F6 to the sidebar and back; ↑/↓ move, Enter opens and returns, Escape returns; focus ring on the row |
 | 29 | Archives: browse zip, 7z, tar(.gz/.xz/.bz2) as folders; extract | 3b | Advanced | ✅ | Read only (no adding to archives yet); no RAR; no password-protected archives |
-| 30 | OpenColorIO configs and LUT files in the player | 5 | Specialist | ⬜ | OCIO is C++; needs a build of it on all three OSes, or reading .cube LUTs ourselves first |
+| 30 | OpenColorIO configs and LUT files in the player | 5 | Specialist | 🔨 | `.cube` LUTs (3D and 1D, DOMAIN, trilinear) done in `player.rs`, read off the UI thread and remembered. OCIO configs not done: OCIO is C++ and needs a build on all three OSes |

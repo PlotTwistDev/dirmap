@@ -39,11 +39,17 @@ click it for details.
 | **Favourites** | Folders you've bookmarked, in as many groups as you like. See [Favourites](#favourites). |
 | **Drives** | **This PC** (Windows) or **Computer** (Linux and macOS), then each local drive or mounted volume. Each has a bar showing how full it is, red when over 90%. Hover for the free space. |
 | **Network & Remote** | Network drives and shares, saved servers, and **Connect to Server…**. See [Network & Remote](#network--remote). |
+| **Saved searches** | Searches you've kept with **☆**. Click one to run it again. See [Searching subfolders](#searching-subfolders). |
 | **Recent** | The last ten folders you opened. |
+| **Tags** | Every [tag](#colours-tags-and-notes) you've given items. Click one to see what has it. |
 
 Click an entry to go there. Middle-click opens it in a new tab. Click a group's title to fold it
 away. Drag the sidebar's edge to make it wider. Every entry also takes dropped files: drop items
 on a drive or a favourite to copy or move them there.
+
+**F6** moves the keyboard to the sidebar and back. In the sidebar, **↑** and **↓** move from entry
+to entry, **Enter** opens one and hands the keyboard back to the list, and **Escape** goes back
+without opening anything.
 
 ## Favourites
 
@@ -113,6 +119,8 @@ From left to right:
 - **⊞ Analysis**, which shows or hides the dock;
 - **👁** shows or hides the [preview pane](#quick-look-and-the-preview-pane), and **⬌** splits
   the view into [two panes](#two-panes);
+- **🗐**, which makes the filter [search subfolders](#searching-subfolders) too, and **☆**, which
+  saves that search in the sidebar;
 - the filter, the **View** menu, Help and Settings.
 
 The **View** menu has:
@@ -120,8 +128,8 @@ The **View** menu has:
 - **Hidden Items**, which shows hidden files and folders;
 - **Comfortable** or **Compact** rows;
 - **Reset Column Widths**;
-- **Panes**: **One Pane**, **Side by Side** or **One Above the Other**, then **Swap Panes** and
-  **Same Folder in Other Pane**;
+- **Panes**: **One Pane**, **Side by Side** or **One Above the Other**, then **Swap Panes**,
+  **Same Folder in Other Pane** and [**Compare Folders…**](#comparing-and-syncing-folders);
 - **☰ Details** or **⊞ Icons** for the pane you're in, and in Icons, **Sort By** and the icon
   **Size** (see [The Icons view](#the-icons-view));
 - **Preview Pane**;
@@ -175,7 +183,9 @@ To choose items:
 The bar under the list counts the items and adds up the size of what's selected.
 
 - **Filter** (**Ctrl+F**) shows only the names containing what you type. `*` and `?` work as
-  wildcards, for example `*.exr` or `shot_??.png`. **Escape** clears it.
+  wildcards, for example `*.exr` or `shot_??.png`. **Escape** clears it. With **🗐** on it
+  [searches subfolders](#searching-subfolders) too, and `#tag` shows what has that
+  [tag](#colours-tags-and-notes).
 - **View > Hidden Items** (**Ctrl+Shift+.**) shows hidden files and folders: names starting with
   a dot, and items marked hidden on Windows.
 
@@ -185,6 +195,25 @@ The bar under the list counts the items and adds up the size of what's selected.
 then each kind of file), **Date Modified** (Today, Yesterday, Earlier this week, Last week, and so
 on back by year) or **Size** (from Gigantic, over 4 GB, down to Empty). Within each group the
 items keep the sort order. **None** turns grouping off.
+
+## Searching subfolders
+
+Turn on **🗐** beside the filter and the filter looks in the folder and every folder below it.
+The results fill in as they're found, each named by its path below the folder, for example
+`renders/shot010/comp_v003.exr`. The bar under the list says **found here and in subfolders**, or
+**searching…** while it's still looking. Everything else works on the results as it does in a
+folder: open, copy, drag, rename, Quick Look.
+
+- The same rules as the filter apply: text anywhere in the name, or `*` and `?` as wildcards.
+- Hidden folders are searched only when **View > Hidden Items** is on. Links to folders aren't
+  followed.
+- A search stops at 100,000 results; type more to narrow it.
+- Results aren't updated when files change; press **F5** to search again.
+- Servers are searched too, folder by folder, which can be slow on a large tree.
+
+Click **☆** to keep the search in the sidebar under **Saved searches**, named after what you
+typed and the folder. Clicking it later goes to the folder and runs the search again. Right-click
+it for **Remove from This List**.
 
 ## Four ways to see a folder
 
@@ -249,11 +278,13 @@ read shows its type's icon instead.
 | Command | What it does |
 |---|---|
 | **Open** / **Open in New Tab** / **Open in Other Pane** | Opens folders here, in a new tab or in the other pane, and files in their apps. |
+| **Open With** | Opens the item in one of [your apps](#open-with), or lets you choose one. |
 | **Quick Look** (**Space**) | A [large preview](#quick-look-and-the-preview-pane) of the file. |
 | **Copy** / **Cut** / **Paste** (**Ctrl+C**, **Ctrl+X**, **Ctrl+V**) | See [Copying, moving and deleting](#copying-moving-and-deleting). |
 | **Copy to Other Pane** / **Move to Other Pane** (**Shift+F5**, **Shift+F6**) | With two panes. |
-| **Rename…** (**F2**) | Renames the item. Only the name is selected at first, not the extension. |
+| **Rename…** (**F2**) | Renames the item. Only the name is selected at first, not the extension. With several items selected, or on a sequence, it's **Rename N Items…** or **Rename Frames…**: see [Renaming many items](#renaming-many-items). |
 | **Move to Trash…** (**Delete (to Recycle Bin)…** on Windows; **Delete** key) / **Delete Permanently…** (**Shift+Delete**) | Asks first, saying how much is involved. |
+| **Colour** / **Tags and Note…** | See [Colours, tags and notes](#colours-tags-and-notes). |
 | **Copy Path** (**Ctrl+Shift+C**) / **Copy Name** | Puts the full paths, or just the names, on the clipboard, one per line. On a mapped network drive, **Copy Network (UNC) Path** gives the `\\server\share\…` form. |
 | **Add to Favourites** | Bookmarks the folder in [Favourites](#favourites). |
 | **Show in Explorer** (Finder, or the system file manager) | Opens the system's file manager with the item selected. |
@@ -261,8 +292,93 @@ read shows its type's icon instead.
 | **Properties** (**Alt+Enter**) | Size, number of files and dates. |
 | **Analyse This Folder** | Scans the folder and shows it in the [analysis dock](#the-analysis-dock). You stay in Files. |
 
-Right-click empty space in the list for **New**, **Paste**, **Refresh**, Open in New Tab, Add to
-Favourites and Analyse.
+Right-click empty space in the list for **New**, **Paste**, **Undo**, **Redo**, **Refresh**, Open in
+New Tab, Add to Favourites and Analyse.
+
+## Renaming many items
+
+Select several items and press **F2** (or right-click and choose **Rename N Items…**) to rename
+them together. On a [sequence](#image-sequences), **Rename Frames…** renames all its frames. The
+box shows each old name beside its new one as you type, and nothing changes until you click
+**Rename**.
+
+| Option | What it does |
+|---|---|
+| **Find** / **Replace with** | Changes that text wherever it appears in the names. **Match case** makes `IMG` different from `img`. **Regular expression** treats Find as a pattern, and `$1`, `$2` in Replace put back what its brackets matched. **Include extension** lets the change reach the extension as well. |
+| **Case** | **Keep**, **lower**, **UPPER** or **Title** case. |
+| **Number** | Adds a number **Before Name** or **After Name**, or **Replace Name** with a base name and the number. **Between** goes between the name and the number, and **Start**, **Step** and **Digits** set the numbers (with 3 digits: `001`, `002`…). Items are numbered in the order the list shows them. |
+| **Extension** | **Change to** gives every item that extension (empty: none). |
+
+A name that can't be used is shown in red, and **Rename** waits until it's fixed: two items would
+get the same name, the name is taken by something else in the folder, or it's empty or has a
+character the system doesn't allow. Names can swap (`a` to `b` and `b` to `a`), as dirmap renames
+through temporary names. If one rename fails, the ones already done are put back. **Ctrl+Z** undoes
+the whole rename.
+
+![Rename 4 Items: IMG_ replaced with shot_, each old name beside its new one](../images/file-manager-batch-rename.png)
+
+## Colours, tags and notes
+
+Right-click items and choose **Colour** to give them one of seven colours, shown as a dot on the
+icon. **No Colour** takes it away.
+
+**Tags and Note…** gives items tags, separated by commas (`client, final, to review`), and one
+item a note. Tags show after the name as `#client`, and 📝 marks an item with a note. The box
+offers the tags you've already used. With several items selected, the tags you type replace the
+ones they all share; each item keeps its other tags and its note.
+
+The sidebar's **Tags** lists every tag. Click one to see everything that has it, in that folder
+and the ones below: the filter becomes `#client` and [searches subfolders](#searching-subfolders).
+You can type `#client` in the filter yourself, too.
+
+Colours, tags and notes are kept by dirmap in its own file, not in the files themselves. They
+follow items you rename or move in dirmap (and through Undo), but renaming or moving the items in
+another program loses them, and other programs don't see them.
+
+## Comparing and syncing folders
+
+With [two panes](#two-panes) open, **View > Compare Folders…** compares the left pane's folder with
+the right's, including their subfolders unless you turn off **Include subfolders**.
+
+| Result | Means |
+|---|---|
+| **Only left** / **Only right** | The item is on one side only. |
+| **Newer left** / **Newer right** | It's on both sides, and was changed more recently on that one. |
+| **Different** | The same date but a different size, or different contents with **Compare contents** on. |
+| **Same** | The same size and date. Dates within 2 seconds count as the same, as FAT drives and some servers keep times only to 2 seconds. |
+
+Click a result's button to show or hide those items. **Compare contents** also reads files that
+have the same size and date on both sides and compares what's in them. That finds files changed
+without their date changing, but takes as long as reading them all. It works on local folders only.
+
+**Sync** then makes the folders match in one of four ways. Each row shows what will happen to it
+(**➡** copied to the right, **⬅** to the left, **✖** deleted), and the line beside **Sync** adds it
+up:
+
+| Sync | What it does |
+|---|---|
+| **Update Right** | Copies what's only on the left, or newer there, to the right. Nothing is deleted. |
+| **Update Left** | The same the other way. |
+| **Both Ways** | Copies each item to the side where it's missing or older. Nothing is deleted, and items marked Different are left alone. |
+| **Mirror to Right** | Makes the right an exact copy of the left: copies as Update Right does, replaces Different items, and deletes what's only on the right. It lists what it will delete and asks again first. |
+
+Replaced and deleted items go to the Recycle Bin or Trash, and **Ctrl+Z** undoes the whole sync.
+
+![Compare Folders: items only on the left, only on the right and newer on the left, with Update Right ready to copy 7 items](../images/file-manager-compare.png)
+
+## Open With
+
+**Open With** on the right-click menu opens an item in another app instead of its usual one. It
+lists the apps you've added for that kind of item, then:
+
+- **Choose an App for .ext files…**, which picks a program, opens the item in it and adds it to
+  the list for that type;
+- **Manage Apps…**, which lists your apps. Each has a name, the program, its arguments, and the
+  types it's offered for: extensions such as `exr, dpx`, `folder` for folders, or nothing for
+  everything. `{file}` in the arguments is where the item's path goes (it's added at the end if
+  you leave it out), for example `--view {file}`. On a Mac, choose the app itself (`Nuke.app`).
+
+Files on a server, or in an archive, are copied to a temporary folder first, as **Open** does.
 
 ## New folders and files
 
@@ -469,6 +585,9 @@ right-click menu of empty space in the list has **Undo**.
   says so and you can restore it yourself.
 - **Delete Permanently** can't be undone, which is why it asks first.
 
+**Ctrl+Y** or **Ctrl+Shift+Z** (**⇧⌘Z** on a Mac) redoes what you just undid, and the right-click
+menu of empty space has **Redo** too. Making another change clears what can be redone.
+
 ## Archives
 
 dirmap opens zip, 7z, tar, tar.gz (`.tgz`), tar.xz and tar.bz2 archives like folders. Double-click
@@ -502,8 +621,8 @@ extension, and everything before it must match, so `v1` and `v2` renders stay ap
 says how many frames are in sequences.
 
 A sequence row works as one item: **Copy**, **Cut**, **Delete**, drag and drop, and **Copy to
-Other Pane** take every frame. To rename frames, or to work on single frames, turn off **View >
-Group Image Sequences**.
+Other Pane** take every frame, and **F2** opens [Rename Frames](#renaming-many-items) for all of
+them. To work on single frames, turn off **View > Group Image Sequences**.
 
 ### Playing a sequence
 
@@ -528,7 +647,8 @@ black frame saying so.
 | Timeline | Click or drag to go to a frame. |
 | **Loop**, **Play Once**, **Ping-Pong** | What happens at the end. |
 | Rate | 23.976 to 60 frames a second. |
-| Colour | **Automatic** shows float frames (EXR, HDR) as linear light on an sRGB display, log DPX through the Cineon curve, and other images as stored. **Linear to sRGB**, **Linear to Rec.709**, **Cineon Log to sRGB** and **Raw Values** choose a transform yourself. |
+| Colour | Hidden while a LUT is in use. **Automatic** shows float frames (EXR, HDR) as linear light on an sRGB display, log DPX through the Cineon curve, and other images as stored. **Linear to sRGB**, **Linear to Rec.709**, **Cineon Log to sRGB** and **Raw Values** choose a transform yourself. |
+| **LUT…** | Shows the frames through a `.cube` LUT file (3D or 1D, as written by Resolve, Nuke and most grading tools) in place of the colour transform. The exposure applies before it. The LUT's name shows instead of the button; **✖** stops using it. The player remembers it for next time. |
 | **Exposure** | Brighter or darker, in stops. Drag it, or type a value. **0** resets it. |
 | **Full Size**, **Half Size**, **Quarter Size** | Smaller frames use a quarter or a sixteenth of the memory, so more of a long or 4K sequence plays at full speed. |
 | **In memory** | How much memory the frames use. Click it to set the limit. It's a quarter of the computer's memory unless you change it. |

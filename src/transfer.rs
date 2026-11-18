@@ -419,11 +419,12 @@ fn move_with(from: &Path, to: &Path, ctl: &Ctl) -> Result<(), String> {
     }
 }
 
-/// Undo recorded steps, last first. Returns the problems (empty when all went back) and the
-/// paths that changed.
-pub fn undo(steps: &[Step]) -> (Vec<String>, Vec<PathBuf>) {
+/// Undo recorded steps, last first. Returns the problems (empty when all went back), the
+/// paths that changed and the steps that would redo it.
+pub fn undo(steps: &[Step]) -> (Vec<String>, Vec<PathBuf>, Vec<Step>) {
     let mut errors = Vec::new();
     let mut touched = Vec::new();
+    let mut redo = Vec::new();
     for s in steps.iter().rev() {
         let r = match s {
             Step::Created(p) => {
@@ -433,7 +434,13 @@ pub fn undo(steps: &[Step]) -> (Vec<String>, Vec<PathBuf>) {
                 } else if remote::is_remote(p) {
                     remote::delete(p).map_err(|e| format!("Couldn't remove {}: {}", crate::fsys::PathShow::shown(p.as_path()), remote::describe(&e)))
                 } else {
-                    actions::trash(p).map_err(|e| format!("Couldn't remove {}: {e}", p.display()))
+                    match actions::trash_keep(p) {
+                        Ok(receipt) => {
+                            redo.push(Step::Trashed { original: p.clone(), receipt });
+                            Ok(())
+                        }
+                        Err(e) => Err(format!("Couldn't remove {}: {e}", p.display())),
+                    }
                 }
             }
             Step::Moved { from, to } => {
@@ -442,13 +449,13 @@ pub fn undo(steps: &[Step]) -> (Vec<String>, Vec<PathBuf>) {
                 if !exists(to) {
                     Err(format!("{} isn't there any more.", crate::fsys::PathShow::shown(to.as_path())))
                 } else {
-                    move_path(to, from)
+                    move_path(to, from).inspect(|_| redo.push(Step::Moved { from: to.clone(), to: from.clone() }))
                 }
             }
             Step::Trashed { original, receipt } => {
                 touched.push(original.clone());
                 match receipt {
-                    Some(r) => restore(r, original),
+                    Some(r) => restore(r, original).inspect(|_| redo.push(Step::Created(original.clone()))),
                     None => Err(format!(
                         "{} couldn't be found in the {}. Put it back from there yourself.",
                         original.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
@@ -466,6 +473,7 @@ pub fn undo(steps: &[Step]) -> (Vec<String>, Vec<PathBuf>) {
                     fs::create_dir_all(p).map_err(|e| format!("Couldn't make {} again: {e}", p.display()))
                 }
             }
+            .inspect(|_| redo.push(Step::Created(p.clone()))),
             Step::Deleted(p) => {
                 touched.push(p.clone());
                 Err(format!("{} was deleted on the server when it was replaced, and can't be brought back.", p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()))
@@ -475,7 +483,9 @@ pub fn undo(steps: &[Step]) -> (Vec<String>, Vec<PathBuf>) {
             errors.push(e);
         }
     }
-    (errors, touched)
+    // In the order they were undone: undoing these goes through them backwards, which is the
+    // order of the original steps.
+    (errors, touched, redo)
 }
 
 /// Put an item back from the bin.
@@ -586,7 +596,7 @@ mod tests {
         assert_eq!(fs::read_to_string(b.join("x.txt")).unwrap(), "old");
         assert!(b.join("y.txt").exists() && b.join("sub/z.txt").exists() && b.join("sub/keep.txt").exists());
         // Undo removes the copies only.
-        let (errs, _) = undo(&out.steps);
+        let (errs, _, _) = undo(&out.steps);
         assert!(errs.is_empty() || errs.iter().all(|e| e.contains("Trash")), "{errs:?}");
         if errs.is_empty() {
             assert!(!b.join("x 2.txt").exists() && !b.join("y.txt").exists() && !b.join("sub/z.txt").exists());
@@ -617,7 +627,7 @@ mod tests {
         assert!(a.join("2.txt").exists() && a.join("3.txt").exists());
         assert_eq!(fs::read_to_string(b.join("2.txt")).unwrap(), "there");
         // Undo moves 1.txt back.
-        let (errs, _) = undo(&out.steps);
+        let (errs, _, _) = undo(&out.steps);
         assert!(errs.is_empty(), "{errs:?}");
         assert!(a.join("1.txt").exists() && !b.join("1.txt").exists());
         // Moving to where it is does nothing; into itself is refused.
@@ -645,11 +655,25 @@ mod tests {
         assert_eq!(describe(&[Step::Moved { from: d.join("a/x"), to: d.join("b/x") }, Step::Moved { from: d.join("a/y"), to: d.join("b/y") }]), "Move of 2 items");
         assert_eq!(describe(&[Step::Created(d.join("n"))]), "New Item");
         fs::write(d.join("b"), "b").unwrap();
-        let (errs, _) = undo(&steps);
+        let (errs, _, redo) = undo(&steps);
         assert!(errs.is_empty());
         assert!(d.join("a").exists() && !d.join("b").exists());
+        // Redo is the undo of the inverse, and gives the original steps back.
+        let (errs, _, again) = undo(&redo);
+        assert!(errs.is_empty() && d.join("b").exists() && !d.join("a").exists());
+        assert_eq!(format!("{again:?}"), format!("{steps:?}"));
+        undo(&again);
+        // Steps that depend on each other (a rename through a temporary name) redo in order.
+        let chain = vec![Step::Moved { from: d.join("a"), to: d.join("t") }, Step::Moved { from: d.join("t"), to: d.join("c") }];
+        fs::rename(d.join("a"), d.join("c")).unwrap();
+        let (errs, _, redo) = undo(&chain);
+        assert!(errs.is_empty() && d.join("a").exists(), "{errs:?}");
+        let (errs, _, again) = undo(&redo);
+        assert!(errs.is_empty() && d.join("c").exists() && !d.join("t").exists(), "{errs:?}");
+        assert_eq!(format!("{again:?}"), format!("{chain:?}"));
+        fs::rename(d.join("c"), d.join("a")).unwrap();
         // Gone since: says so, and changes nothing.
-        let (errs, _) = undo(&steps);
+        let (errs, _, _) = undo(&steps);
         assert_eq!(errs.len(), 1);
         fs::remove_dir_all(&d).ok();
     }
@@ -695,7 +719,7 @@ mod bin_tests {
         }
         assert_eq!(fs::read_to_string(b.join("shot.exr")).unwrap(), "new");
         assert!(matches!(&out.steps[0], Step::Trashed { receipt: Some(_), .. }), "{:?}", out.steps);
-        let (errs, _) = undo(&out.steps);
+        let (errs, _, _) = undo(&out.steps);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(fs::read_to_string(b.join("shot.exr")).unwrap(), "old");
         assert_eq!(fs::read_to_string(a.join("shot.exr")).unwrap(), "new");

@@ -506,7 +506,7 @@ impl App {
         let can_paste = self.can_paste();
         let two_panes = self.files.panes.len() > 1;
         let files = &mut self.files;
-        let (panes, thumb_cache, favourites) = (&files.panes, &mut files.thumbs, &files.prefs.favourites);
+        let (panes, thumb_cache, favourites, marks, apps) = (&files.panes, &mut files.thumbs, &files.prefs.favourites, &files.marks, &files.prefs.apps);
         let icons = &mut self.icons;
         let colors = &self.colors;
         let color_for = |ext: &str| colors.get(ext).or_else(|| colors.get(&ext.to_lowercase())).copied().unwrap_or(Color32::GRAY);
@@ -565,7 +565,7 @@ impl App {
                 let g = ui.fonts_mut(|f| f.layout_job(job));
                 p.galley(pos2(cell.center().x, pic.bottom() + 6.0), g, tc);
                 let pinned = e.is_dir && favourites.iter().any(|g| g.items.iter().any(|f| f.path == path));
-                let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste };
+                let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste, marks, apps };
                 let resp = resp.on_hover_text_at_pointer(e.name.to_string());
                 item_actions(ui, resp, i, &ic, pinned, picks, &mut drops);
             }

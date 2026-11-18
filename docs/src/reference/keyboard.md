@@ -52,6 +52,8 @@ After you've clicked in the list or the sidebar, unless the cursor is in a text 
 | **Shift+Delete** | **⇧Delete** | Delete the selected items for good (it asks first). |
 | **Ctrl+Shift+N** | **⌘⇧N** | New folder here, with its name ready to type. |
 | **Ctrl+Z** | **⌘Z** | Undo the last copy, move, rename, new item or Move to Trash. Press again to undo the one before. |
+| **Ctrl+Y or Ctrl+Shift+Z** | **⌘Y or ⇧⌘Z** | Redo what was just undone. |
+| **F6** | **F6** | Move the keyboard to the sidebar, and back to the list. In the sidebar ↑ and ↓ move, Enter opens and Escape goes back. |
 | **Alt+Enter** | **⌥Enter** | Properties: size, contents and dates. |
 | **Space** | **Space** | Quick Look: a large preview of the selected file. ↑ / ↓ move to the next file while it's open; Space or Escape closes it. |
 | **Alt+P** | **⌥P** | Show or hide the preview pane (works while typing elsewhere too). |
