@@ -24,6 +24,7 @@ mod netdrives;
 mod pattern;
 mod player;
 mod settings;
+mod shellmenu;
 mod subset;
 mod scan;
 mod sequences;

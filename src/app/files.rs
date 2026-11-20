@@ -1079,6 +1079,8 @@ pub(super) enum FAction {
     OpenWith(openwith::Pick),
     /// The Tags and Note box.
     Tags,
+    /// Windows' own right-click menu, with other apps' items (true: with the Shift extras).
+    SystemMenu(bool),
 }
 
 impl App {
@@ -2995,6 +2997,9 @@ impl App {
             if i.consume_key(M::ALT, Key::Enter) {
                 return Some(Do::Act(FAction::Properties));
             }
+            if cfg!(windows) && i.consume_key(M::SHIFT, Key::F10) {
+                return Some(Do::Act(FAction::SystemMenu(false)));
+            }
             if i.consume_key(M::SHIFT, Key::F5) {
                 return Some(Do::Act(FAction::CopyToOther));
             }
@@ -3521,6 +3526,17 @@ impl App {
                 }
                 None => self.ops.notice = Some(("Open a second pane first (View > Side by Side), with a folder in it.".into(), false)),
             },
+            FAction::SystemMenu(extended) => match crate::shellmenu::show(self.hwnd, &paths, extended) {
+                Ok(crate::shellmenu::Picked::Rename) => {
+                    if let Some(p) = paths.into_iter().next().filter(|p| p.parent().is_some()) {
+                        self.start_rename(p);
+                    }
+                }
+                // The folder is being watched, but not every change made elsewhere is seen at once.
+                Ok(crate::shellmenu::Picked::Done) => self.files.refresh(),
+                Ok(crate::shellmenu::Picked::Nothing) => {}
+                Err(e) => self.ops.notice = Some((e, true)),
+            },
             FAction::Properties => {
                 if let Some(p) = paths.into_iter().next() {
                     let q = p.clone();
@@ -3647,6 +3663,12 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     let seq = t.seqs.contains_key(&i);
     let colour = c.marks.get(&path).and_then(|m| m.colour);
     let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only };
+    // Shift+right-click: straight to Windows' own menu, with its Shift extras, as in Explorer.
+    if cfg!(windows) && !read_only && resp.secondary_clicked() && ui.input(|i| i.modifiers.shift) {
+        let paths = if selected { t.chosen_paths() } else { t.row_paths(dir, l, i) };
+        picks.menu = Some((FAction::SystemMenu(true), paths));
+        return;
+    }
     resp.context_menu(|ui| {
         if let Some(a) = item_menu(ui, &ctx_menu, c.apps, e.ext()) {
             let paths = if selected { t.chosen_paths() } else { t.row_paths(dir, l, i) };
@@ -3744,6 +3766,11 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
             item(ui, true, label, String::new(), FAction::Terminal(*which));
         }
         item(ui, true, "Properties", k(M::ALT, Key::Enter), FAction::Properties);
+    }
+    if cfg!(windows) && !m.read_only {
+        ui.separator();
+        // Explorer's full menu, with what other apps add (7-Zip, Notepad++, Send to…).
+        item(ui, true, "Show More Options", k(M::SHIFT, Key::F10), FAction::SystemMenu(false));
     }
     if m.is_dir && !many {
         ui.separator();

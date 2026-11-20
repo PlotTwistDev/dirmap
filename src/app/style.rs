@@ -290,6 +290,7 @@ const MENU_ICONS: &[(&str, &str)] = &[
     ("Pin", "📌"),
     ("Unpin", "📌"),
     // Finding out.
+    ("Show More Options", "🗖"),
     ("Show in", "🔍"),
     ("Select in", "🔍"),
     ("Reveal", "🔍"),

@@ -1270,6 +1270,7 @@ dependencies = [
  "lzma-rust2",
  "notify",
  "pulldown-cmark",
+ "raw-window-handle",
  "rayon",
  "regex",
  "rfd",

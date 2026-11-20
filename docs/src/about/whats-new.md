@@ -119,6 +119,13 @@
 - On Windows, your **WSL** distributions are listed under **Linux** in the sidebar, as in
   Explorer. Click one to browse its files.
 
+### Windows' own right-click menu
+
+- On Windows, **Show More Options** at the bottom of an item's right-click menu (or **Shift+F10**,
+  or **Shift+right-click**) opens the menu Explorer shows, with what other apps add to it:
+  7-Zip or PeaZip, Notepad++, PowerToys, antivirus scanners, **Send to** and the rest. See
+  [Right-click menu](../views/file-manager.md#right-click-menu).
+
 ### Fixes
 
 - **Menus have icons**, in a column of their own so the names line up.

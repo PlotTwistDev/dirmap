@@ -306,6 +306,10 @@ read shows its type's icon instead.
 | **Open in Terminal…** (Command Prompt or PowerShell on Windows) | Opens a terminal in the folder. |
 | **Properties** (**Alt+Enter**) | Size, number of files and dates. |
 | **Analyse This Folder** | Scans the folder and shows it in the [analysis dock](#the-analysis-dock). You stay in Files. |
+| **Show More Options** (**Shift+F10**; Windows) | Opens Windows' own menu for the items, the one Explorer shows: everything other apps add to it (7-Zip, Notepad++, PowerToys, your antivirus…), **Send to**, **Give access to** and the rest. **Rename** there renames in dirmap's list. |
+
+On Windows, **Shift+right-click** an item to go straight to Windows' menu, with the extra commands
+Explorer shows when Shift is held (such as **Copy as path** and more **Send to** places).
 
 Right-click empty space in the list for **New**, **Paste**, **Undo**, **Redo**, **Refresh**, Open in
 New Tab, Add to Favourites and Analyse.

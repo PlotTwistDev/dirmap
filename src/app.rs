@@ -233,6 +233,8 @@ pub struct App {
     drives_rx: Option<mpsc::Receiver<(Vec<Drive>, Vec<PathBuf>)>>,
     /// WSL distributions (Windows), shown under Linux in the File Manager's sidebar.
     wsl: Vec<PathBuf>,
+    /// The window's handle on Windows (for the system's own right-click menu), else 0.
+    hwnd: isize,
     show_drives: bool,
     filter: ViewFilter,
     /// (filter, matching files, matching bytes) for the filter summary.
@@ -343,6 +345,7 @@ impl App {
             drives: Vec::new(),
             drives_rx: None,
             wsl: Vec::new(),
+            hwnd: window_handle(cc),
             show_drives: false,
             filter: ViewFilter::default(),
             filter_stats: None,
@@ -2967,4 +2970,19 @@ mod filter_tests {
         assert!(ViewFilter { custom: custom("*.exr"), ..Default::default() } == ViewFilter { custom: custom("*.exr"), ..Default::default() });
         assert!(ViewFilter { custom: custom("*.exr"), ..Default::default() } != ViewFilter { custom: custom("*.png"), ..Default::default() });
     }
+}
+
+/// The native window handle, for the Windows shell menu.
+fn window_handle(cc: &eframe::CreationContext) -> isize {
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(h) = cc.window_handle()
+            && let RawWindowHandle::Win32(w) = h.as_raw()
+        {
+            return w.hwnd.get();
+        }
+    }
+    let _ = cc;
+    0
 }
