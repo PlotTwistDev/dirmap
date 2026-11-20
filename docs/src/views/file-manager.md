@@ -211,6 +211,18 @@ then each kind of file), **Date Modified** (Today, Yesterday, Earlier this week,
 on back by year) or **Size** (from Gigantic, over 4 GB, down to Empty). Within each group the
 items keep the sort order. **None** turns grouping off.
 
+## Showing only some kinds of file
+
+**Show** beside the filter keeps only some kinds of file: **Audio**, **Video**, **Images**, **AI
+models**, **Archives**, **Documents**, **Code**, **Programs**, **Disk images** or **Other** (the
+same kinds as Storage Analysis's [Show row](../filtering/categories.md)). Pick several to see them
+all; **All** shows everything again. While it's on, the button is lit and says what it shows, and
+folders are hidden.
+
+With **🗐** on as well, it gathers those files from every subfolder too, so **Show > Video** with
+**🗐** lists every video under the folder. It works together with the filter text: **Images** and
+`shot_*` finds images whose names start with `shot_`.
+
 ## Searching subfolders
 
 Turn on **🗐** beside the filter and the filter looks in the folder and every folder below it.

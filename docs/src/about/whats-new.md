@@ -126,6 +126,14 @@
   7-Zip or PeaZip, Notepad++, PowerToys, antivirus scanners, **Send to** and the rest. See
   [Right-click menu](../views/file-manager.md#right-click-menu).
 
+### Show in Files
+
+- **Show** beside the filter in Files keeps only some kinds of file (Audio, Video, Images,
+  Documents…), and with **🗐** gathers them from every subfolder. See
+  [Showing only some kinds of file](../views/file-manager.md#showing-only-some-kinds-of-file).
+- **Crashes are saved** to `crash.log` in dirmap's settings folder, and on Windows a message says
+  what happened, so a crash can be reported.
+
 ### Fixes
 
 - **Menus have icons**, in a column of their own so the names line up.

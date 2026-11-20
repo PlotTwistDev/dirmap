@@ -218,6 +218,28 @@ fn read(path: &Path, cancel: &AtomicBool, tx: &mpsc::Sender<Msg>) {
 /// Most results a search gathers.
 const FOUND_MAX: usize = 100_000;
 
+/// A filter that also keeps only some kinds of file (a `categories::Category` bit mask), in
+/// one string so it travels with the text through sorting and searching: `\u{1}bits\u{1}text`.
+pub fn pack_filter(text: &str, kinds: u16) -> String {
+    if kinds == 0 { text.to_string() } else { format!("\u{1}{kinds}\u{1}{text}") }
+}
+
+/// The text and kinds of a filter made by `pack_filter`.
+pub fn unpack_filter(f: &str) -> (&str, u16) {
+    if let Some(rest) = f.strip_prefix('\u{1}')
+        && let Some((bits, text)) = rest.split_once('\u{1}')
+    {
+        return (text, bits.parse().unwrap_or(0));
+    }
+    (f, 0)
+}
+
+/// Whether an item passes a filter made by `pack_filter`. With kinds chosen, folders don't.
+pub fn entry_matches(filter: &str, name: &str, is_dir: bool) -> bool {
+    let (text, kinds) = unpack_filter(filter);
+    (kinds == 0 || (!is_dir && kinds & crate::categories::of(name).bit() != 0)) && name_matches(text, name)
+}
+
 /// Whether a name matches what's typed in the filter box: wildcards (`*`, `?`) match the whole
 /// name, anything else is found anywhere in it; case is ignored.
 pub fn name_matches(filter: &str, name: &str) -> bool {
@@ -292,7 +314,7 @@ fn search(
             }
             let hit = match tagged {
                 Some(set) => set.contains(&dir.join(&*e.name)),
-                None => name_matches(query, &e.name),
+                None => entry_matches(query, &e.name, e.is_dir),
             };
             if hit {
                 found += 1;

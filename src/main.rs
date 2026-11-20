@@ -41,6 +41,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 fn main() -> eframe::Result {
+    crash_log();
     let mut cli = false;
     let mut top = 15usize;
     let mut path = None;
@@ -179,4 +180,31 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
         opts.wgpu_setup = eframe::egui_wgpu::WgpuSetup::CreateNew(setup);
     }
     opts
+}
+
+/// On a panic, write what happened to `crash.log` in dirmap's settings folder, and on Windows
+/// say so in a message box: the window has no console, so the message would otherwise be lost.
+fn crash_log() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default(info);
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+        let text = format!(
+            "dirmap {} crashed ({}, thread {thread})\n\n{info}\n\n{backtrace}\n",
+            env!("CARGO_PKG_VERSION"),
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+        );
+        let file = eframe::storage_dir("dirmap").map(|d| d.join("crash.log"));
+        let saved = file.as_ref().is_some_and(|f| std::fs::create_dir_all(f.parent().unwrap_or(f)).and_then(|_| std::fs::write(f, &text)).is_ok());
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+            let where_ = if saved { format!("\n\nThe details are saved in\n{}", file.as_ref().unwrap().display()) } else { String::new() };
+            let msg = format!("dirmap stopped because of a bug:\n\n{info}{where_}");
+            let w = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+            unsafe { MessageBoxW(std::ptr::null_mut(), w(&msg).as_ptr(), w("dirmap crashed").as_ptr(), MB_OK | MB_ICONERROR) };
+        }
+        let _ = saved;
+    }));
 }

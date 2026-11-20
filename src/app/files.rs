@@ -467,6 +467,8 @@ pub(super) struct Pane {
     pub(super) filter: String,
     /// The filter box searches subfolders too.
     pub(super) deep: bool,
+    /// Show only these kinds of file (`categories::Category` bits); 0 for everything.
+    pub(super) kinds: u16,
     pub(super) view: FView,
     /// Group items under headings (Details view).
     pub(super) group: views::FGroup,
@@ -484,7 +486,7 @@ impl Pane {
             tabs.push(FTab::new(places::home().map(Location::Dir).unwrap_or(Location::Computer)));
         }
         let active = active.min(tabs.len() - 1);
-        Self { tabs, active, sort, reversed, filter: String::new(), deep: false, view, group: Default::default(), seen: None, grid: (1, 100.0) }
+        Self { tabs, active, sort, reversed, filter: String::new(), deep: false, kinds: 0, view, group: Default::default(), seen: None, grid: (1, 100.0) }
     }
 
     pub(super) fn tab(&self) -> &FTab {
@@ -967,6 +969,7 @@ impl Files {
 }
 
 /// Does a name pass the "filter this folder" box?
+#[cfg(test)]
 pub(super) fn name_matches(filter: &str, name: &str) -> bool {
     crate::fsys::listing::name_matches(filter, name)
 }
@@ -984,7 +987,7 @@ pub(super) fn order_entries(
     let mut o: Vec<u32> = (0..entries.len() as u32)
         .filter(|&i| {
             let e = &entries[i as usize];
-            (show_hidden || !e.hidden) && name_matches(filter, &e.name)
+            (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, &e.name, e.is_dir)
         })
         .collect();
     let size_of = |e: &Entry| if e.is_dir { sizes.and_then(|s| s.get(&e.name)).map(|s| s.0).unwrap_or(0) } else { e.size };
@@ -1012,7 +1015,7 @@ pub(super) fn order_entries(
 /// Add the entries from `from` on that pass the filter to the end of `order`.
 fn append_new(order: &mut Vec<u32>, entries: &[Entry], from: usize, show_hidden: bool, filter: &str) {
     for (i, e) in entries.iter().enumerate().skip(from) {
-        if (show_hidden || !e.hidden) && name_matches(filter, &e.name) {
+        if (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, &e.name, e.is_dir) {
             order.push(i as u32);
         }
     }
@@ -1286,9 +1289,10 @@ impl App {
             f.on_hover_text("Show only items whose names contain this text. * and ? work as wildcards (*.exr, shot_??.png).");
         }
         let deep = self.files.pane().deep;
-        if style::toggle_button(ui, deep, "🗐", "Search subfolders too: the filter looks in this folder and every folder below it").clicked() {
+        if style::toggle_button(ui, deep, "🗐", "Search subfolders too: the filter and Show look in this folder and every folder below it").clicked() {
             self.files.pane_mut().deep = !deep;
         }
+        self.show_menu(ui);
         let query = self.files.pane().filter.trim().to_string();
         if deep
             && !query.is_empty()
@@ -1309,6 +1313,47 @@ impl App {
         }
     }
 
+    /// Show: only some kinds of file (Audio, Video, Images…), like Storage Analysis's Show row.
+    /// With 🗐 on it gathers them from every subfolder too.
+    fn show_menu(&mut self, ui: &mut egui::Ui) {
+        use crate::categories::Category;
+        let kinds = self.files.pane().kinds;
+        let label = match kinds {
+            0 => "Show ⏷".to_string(),
+            k if k.count_ones() == 1 => format!("{} ⏷", Category::ALL.iter().find(|c| c.bit() == k).map_or("", |c| c.label())),
+            k => format!("{} kinds ⏷", k.count_ones()),
+        };
+        let mut picked = None;
+        ui.scope(|ui| {
+            if kinds != 0 {
+                // Lit up while it hides things, like a toggle that's on.
+                let v = ui.visuals_mut();
+                v.widgets.inactive.weak_bg_fill = v.selection.bg_fill;
+                v.widgets.inactive.fg_stroke.color = v.selection.stroke.color;
+            }
+            let config = egui::containers::menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+            egui::containers::menu::MenuButton::new(label).config(config).ui(ui, |ui| {
+                if ui.add(egui::Button::selectable(kinds == 0, style::mi("All"))).clicked() {
+                    picked = Some(0);
+                }
+                ui.separator();
+                for c in Category::ALL {
+                    let on = kinds & c.bit() != 0;
+                    if ui.add(egui::Button::selectable(on, style::mi(c.label()))).on_hover_text(c.tooltip()).clicked() {
+                        picked = Some(kinds ^ c.bit());
+                    }
+                }
+                ui.separator();
+                ui.weak("Pick several to show them all.\nWith 🗐 on, subfolders are searched too.");
+            })
+            .0
+            .on_hover_text("Show only some kinds of file: audio, video, images, documents…");
+        });
+        if let Some(k) = picked {
+            self.files.pane_mut().kinds = k;
+        }
+    }
+
     /// The pane's own Back, Forward, Up, Refresh, path and filter, above its tabs.
     fn pane_bar(&mut self, ui: &mut egui::Ui, focused: bool) {
         let mut go = None;
@@ -1322,7 +1367,8 @@ impl App {
                 let avail = ui.available_width();
                 let h = ui.spacing().interact_size.y;
                 let star = self.files.pane().deep && !self.files.pane().filter.trim().is_empty();
-                let buttons = (h + 4.0) * if star { 2.0 } else { 1.0 };
+                // 🗐 and ☆, and the Show menu.
+                let buttons = (h + 4.0) * if star { 2.0 } else { 1.0 } + 70.0;
                 let mut filter = (avail * 0.3).clamp(60.0, 150.0);
                 let mut path = avail - filter - buttons - 8.0;
                 if path < 70.0 {
@@ -1619,8 +1665,9 @@ impl App {
             .map(str::trim)
             .filter(|t| !t.is_empty())
             .map(str::to_string);
-        let wanted = ((p.deep || tag.is_some()) && !p.filter.trim().is_empty())
-            .then(|| (p.filter.trim().to_string(), hidden));
+        let kinds = p.kinds;
+        let wanted = (tag.is_some() || (p.deep && (!p.filter.trim().is_empty() || kinds != 0)))
+            .then(|| (crate::fsys::listing::pack_filter(p.filter.trim(), if tag.is_some() { 0 } else { kinds }), hidden));
         let deep = p.deep;
         let tagged = tag.map(|t| {
             Arc::new(
@@ -1633,7 +1680,7 @@ impl App {
         });
         let p = &mut self.files.panes[pane];
         // A search's results already match: the filter isn't applied to their paths again.
-        let filter = if wanted.is_some() { String::new() } else { p.filter.clone() };
+        let filter = if wanted.is_some() { String::new() } else { crate::fsys::listing::pack_filter(&p.filter, p.kinds) };
         let t = p.tab_mut();
         if t.search != wanted || (wanted.is_some() && t.search_deep != deep) {
             t.search = wanted.clone();
