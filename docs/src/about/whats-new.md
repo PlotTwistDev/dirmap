@@ -131,6 +131,8 @@
 - **Show** beside the filter in Files keeps only some kinds of file (Audio, Video, Images,
   Documents…), and with **🗐** gathers them from every subfolder. See
   [Showing only some kinds of file](../views/file-manager.md#showing-only-some-kinds-of-file).
+- **The preview pane counts a selection** of several items by kind, with sizes. Click a kind to
+  preview one of them.
 - **Crashes are saved** to `crash.log` in dirmap's settings folder, and on Windows a message says
   what happened, so a crash can be reported.
 

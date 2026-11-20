@@ -445,6 +445,11 @@ the file in its usual app.
 the selected item with its details: kind, size, dates and, for images, the dimensions and pixel
 format. Drag its edge to make it wider.
 
+With several items selected, the top of the pane counts them: how many files and folders, their
+total size, and a line for each kind (**JPG image**, **ZIP archive**, **SH source**…) with how
+many there are and their size. Click a kind to preview one of those items, and click it again for
+the next. The selection stays as it is.
+
 | Kind | What you see |
 |---|---|
 | Images | PNG, JPEG, GIF, WebP, TIFF, BMP, TGA, ICO, QOI, PNM, and HDR and OpenEXR (shown with a standard display curve). Transparent areas show a checkerboard. |

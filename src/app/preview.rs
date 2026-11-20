@@ -393,6 +393,76 @@ impl App {
     }
 
     /// The preview pane at the right of the list.
+    /// With several items selected: how many of each kind and their size. Clicking a kind
+    /// previews one of those items (the next one on each click).
+    fn selection_tally(&mut self, ui: &mut egui::Ui) {
+        let t = self.files.cur();
+        if t.selected.len() < 2 {
+            return;
+        }
+        let Some(l) = t.listing.as_ref() else { return };
+        // kind -> (items, bytes, names in list order)
+        let mut kinds: std::collections::BTreeMap<String, (usize, u64, Vec<Box<str>>)> = Default::default();
+        let (mut total, mut files, mut folders) = (0u64, 0usize, 0usize);
+        for &i in &t.order {
+            let e = &l.entries[i as usize];
+            if !t.selected.contains(&e.name) {
+                continue;
+            }
+            // A sequence row stands for all its frames.
+            let (kind, size) = match t.seqs.get(&i) {
+                Some(s) => (format!("{} sequence", s.seq.extension().to_uppercase()), s.seq.bytes),
+                // A folder's size is known only from an analysis that covers it.
+                None if e.is_dir => (browser::kind_for(&e.name, true), t.sizes.as_ref().and_then(|s| s.1.get(&e.name)).map_or(0, |s| s.0)),
+                None => (browser::kind_for(&e.name, false), e.size),
+            };
+            let k = kinds.entry(kind).or_default();
+            k.0 += 1;
+            k.1 += size;
+            k.2.push(e.name.clone());
+            total += size;
+            if e.is_dir { folders += 1 } else { files += 1 }
+        }
+        let mut rows: Vec<_> = kinds.into_iter().collect();
+        rows.sort_by(|a, b| b.1.0.cmp(&a.1.0).then(b.1.1.cmp(&a.1.1)));
+        let cursor = t.cursor.clone();
+        let pal = style::pal(ui);
+        ui.add_space(4.0);
+        let what = match (files, folders) {
+            (_, 0) => format!("{files} files"),
+            (0, _) => format!("{folders} folders"),
+            _ => format!("{files} files, {folders} folders"),
+        };
+        ui.label(egui::RichText::new(format!("{} selected · {what} · {}", group(t.selected.len() as u64), crate::scan::human(total))).strong());
+        ui.add_space(2.0);
+        let mut show = None;
+        egui::Grid::new("preview-tally").num_columns(3).spacing([10.0, 2.0]).striped(false).show(ui, |ui| {
+            for (kind, (n, bytes, names)) in rows.iter().take(12) {
+                let here = cursor.as_ref().is_some_and(|c| names.contains(c));
+                let r = ui.add(egui::Button::selectable(here, kind.as_str())).on_hover_text("Preview one of these (click again for the next)");
+                if r.clicked() {
+                    // The next of this kind after the one on show, wrapping round.
+                    let at = cursor.as_ref().and_then(|c| names.iter().position(|x| x == c));
+                    show = Some(names[at.map_or(0, |i| (i + 1) % names.len())].clone());
+                }
+                ui.label(egui::RichText::new(group(*n as u64)).color(pal.weak));
+                ui.label(egui::RichText::new(crate::scan::human(*bytes)).color(pal.weak));
+                ui.end_row();
+            }
+        });
+        if rows.len() > 12 {
+            ui.weak(format!("and {} more kinds", rows.len() - 12));
+        }
+        if let Some(name) = show {
+            // Move the cursor only: the selection stays as it is.
+            let t = self.files.tab();
+            t.cursor = Some(name);
+            t.scroll_to_cursor = true;
+        }
+        ui.add_space(6.0);
+        ui.separator();
+    }
+
     pub(super) fn preview_pane(&mut self, ui: &mut egui::Ui) {
         let pal = style::pal(ui);
         ui.add_space(6.0);
@@ -404,6 +474,7 @@ impl App {
                 }
             });
         });
+        self.selection_tally(ui);
         let Some((path, e)) = self.look_target() else {
             ui.add_space(30.0);
             ui.vertical_centered(|ui| ui.label(egui::RichText::new("Select a file to preview it").color(pal.weak)));
