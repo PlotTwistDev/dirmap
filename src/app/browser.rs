@@ -564,7 +564,7 @@ impl App {
 
     /// Paths of the items picked along with the selection, for the maps to outline too.
     pub(super) fn picked_paths(&self) -> Vec<Vec<u32>> {
-        if self.files.prefs.workspace == super::Workspace::Files {
+        if self.files.prefs.workspace != super::Workspace::Analysis {
             return self.dock.picked.clone();
         }
         if self.browser.picked.len() < 2 || self.browser.layout() == Layout::Tree {

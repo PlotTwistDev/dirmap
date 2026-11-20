@@ -47,6 +47,7 @@ pub const KEYBOARD: &[Group] = &[
         bindings: &[
             b("F1", "", "Open help for the part of the window under the pointer.", &[(APP, "Key::F1")]),
             b("Ctrl+1", "⌘1", "Switch to the Files workspace.", &[(FILES, "i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num1)")]),
+            b("Ctrl+2", "⌘2", "Switch to the Remote workspace (this computer beside a server).", &[(FILES, "i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num2)")]),
             b("Ctrl+3", "⌘3", "Switch to the Storage Analysis workspace.", &[(FILES, "i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num3)")]),
             b("Ctrl+F", "⌘F", "Files: put the cursor in the Filter box. Storage Analysis: open the Custom filter.", &[(FILES, "i.consume_key(M::COMMAND, Key::F)"), (CUSTOM, "egui::Modifiers::COMMAND, egui::Key::F")]),
         ],

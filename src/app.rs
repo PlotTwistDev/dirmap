@@ -42,6 +42,7 @@ mod compare;
 mod marksui;
 mod openwith;
 mod netui;
+mod remoteui;
 mod preview;
 mod seqplayer;
 mod thumbs;

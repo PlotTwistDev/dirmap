@@ -17,6 +17,7 @@ In the main window, unless the cursor is in a text box.
 |---|---|---|
 | **F1** | **F1** | Open help for the part of the window under the pointer. |
 | **Ctrl+1** | **⌘1** | Switch to the Files workspace. |
+| **Ctrl+2** | **⌘2** | Switch to the Remote workspace (this computer beside a server). |
 | **Ctrl+3** | **⌘3** | Switch to the Storage Analysis workspace. |
 | **Ctrl+F** | **⌘F** | Files: put the cursor in the Filter box. Storage Analysis: open the Custom filter. |
 

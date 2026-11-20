@@ -577,7 +577,7 @@ impl App {
                     let mut then = done.select;
                     then.extend(self.ops.then_select.take());
                     let rename = std::mem::take(&mut self.ops.then_rename);
-                    let in_files = self.files.prefs.workspace == files::Workspace::Files;
+                    let in_files = self.files.prefs.workspace != files::Workspace::Analysis;
                     if let Some(p) = then.last().cloned()
                         && let Some(tp) = self.tree_path_of(&p)
                     {

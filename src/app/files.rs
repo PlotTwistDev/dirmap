@@ -27,6 +27,9 @@ pub(super) enum Workspace {
     Files,
     /// The scan, folder tree, treemap and analysis tabs.
     Analysis,
+    /// Servers: the File Manager with its own panes (this computer beside a server), saved
+    /// sites and quick connect (`remoteui.rs`).
+    Remote,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
@@ -117,6 +120,8 @@ pub(super) struct FilesPrefs {
     pub folder_looks: Vec<(PathBuf, FolderLook)>,
     /// How folders without one of their own are shown.
     pub base_look: Option<FolderLook>,
+    /// The Remote workspace's panes and layout (the Files workspace's are the fields above).
+    pub remote_desk: super::remoteui::DeskSave,
 }
 
 /// How a folder is shown: its view, sort and grouping.
@@ -186,6 +191,7 @@ impl Default for FilesPrefs {
             remember_looks: true,
             folder_looks: Vec::new(),
             base_look: None,
+            remote_desk: Default::default(),
         }
     }
 }
@@ -480,7 +486,7 @@ pub(super) struct Pane {
 }
 
 impl Pane {
-    fn new(tabs: &[Location], active: usize, sort: FSort, reversed: bool, view: FView) -> Self {
+    pub(super) fn new(tabs: &[Location], active: usize, sort: FSort, reversed: bool, view: FView) -> Self {
         let mut tabs: Vec<FTab> = tabs.iter().cloned().map(FTab::new).collect();
         if tabs.is_empty() {
             tabs.push(FTab::new(places::home().map(Location::Dir).unwrap_or(Location::Computer)));
@@ -505,7 +511,7 @@ impl Pane {
         (self.view, self.sort, self.reversed, self.group) = (l.view, l.sort, l.reversed, l.group);
     }
 
-    fn save(&self) -> PaneSave {
+    pub(super) fn save(&self) -> PaneSave {
         PaneSave { tabs: self.tabs.iter().map(|t| t.here().clone()).collect(), active: self.active, sort: self.sort, reversed: self.reversed, view: self.view }
     }
 }
@@ -517,7 +523,7 @@ pub(super) struct Files {
     pub(super) panes: Vec<Pane>,
     pub(super) focus: usize,
     /// Recently closed tabs, to reopen with Ctrl+Shift+T.
-    closed: Vec<Location>,
+    pub(super) closed: Vec<Location>,
     pub(super) places: Vec<Place>,
     places_rx: Option<mpsc::Receiver<Vec<Place>>>,
     /// The path being typed in the path bar (it shows breadcrumbs otherwise).
@@ -575,6 +581,8 @@ pub(super) struct Files {
     pub(super) side: views::SideLists,
     /// Notices of changes other programs make to the folders on screen.
     watcher: crate::fsys::watch::Watcher,
+    /// The Remote workspace: the other desk, the Site Manager, quick connect.
+    pub(super) rws: super::remoteui::RemoteState,
 }
 
 impl Files {
@@ -634,6 +642,7 @@ impl Files {
             apps_box: None,
             side: Default::default(),
             watcher: Default::default(),
+            rws: Default::default(),
         }
     }
 
@@ -649,6 +658,7 @@ impl Files {
         if let Some(second) = self.panes.get(1) {
             p.second = second.save();
         }
+        super::remoteui::finish_save(self, &mut p);
         p
     }
 
@@ -1093,13 +1103,16 @@ impl App {
         if from == to {
             return;
         }
+        // Files and Remote each have their own panes; Storage Analysis keeps the last ones.
+        super::remoteui::use_desk(&mut self.files, to);
         match to {
             Workspace::Analysis => {
                 if self.job.is_none() {
                     self.analysis_follow_files();
                 }
             }
-            Workspace::Files => self.files_follow_analysis(),
+            Workspace::Files if from == Workspace::Analysis => self.files_follow_analysis(),
+            Workspace::Files | Workspace::Remote => {}
         }
         self.files.prefs.workspace = to;
     }
@@ -1151,6 +1164,13 @@ impl App {
                 to = Some(Workspace::Files);
             }
             if ui
+                .add(egui::Button::selectable(ws == Workspace::Remote, if narrow { "🖧" } else { "🖧 Remote" }))
+                .on_hover_text(format!("Servers: this computer beside a server, saved sites, quick connect ({})", k(egui::Key::Num2)))
+                .clicked()
+            {
+                to = Some(Workspace::Remote);
+            }
+            if ui
                 .add(egui::Button::selectable(ws == Workspace::Analysis, if narrow { "⊞ Storage" } else { "⊞ Storage Analysis" }))
                 .on_hover_text(format!("Scan a drive or folder: folder tree, treemap, file types, duplicates… ({})", k(egui::Key::Num3)))
                 .clicked()
@@ -1169,11 +1189,13 @@ impl App {
         if self.ops.modal() {
             return;
         }
-        let (files, analysis) = ctx.input_mut(|i| {
-            (i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num1), i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num3))
+        let (files, remote, analysis) = ctx.input_mut(|i| {
+            (i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num1), i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num2), i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num3))
         });
         if files {
             self.set_workspace(Workspace::Files);
+        } else if remote {
+            self.set_workspace(Workspace::Remote);
         } else if analysis {
             self.set_workspace(Workspace::Analysis);
         }
@@ -1211,6 +1233,7 @@ impl App {
         ui.horizontal(|ui| {
             style::roomy(ui);
             self.workspace_switch(ui);
+            self.remote_toolbar(ui);
             // Navigation, the path and the filter are on each pane's own bar (`pane_bar`).
             let dir = self.files.here().dir().map(Path::to_path_buf);
             let mut pick = None;
@@ -1527,6 +1550,7 @@ impl App {
         self.files.drop_claimed = false;
         self.files_poll(&ctx);
         self.dock_poll(&ctx);
+        self.remote_frame(&ctx);
         self.connect_window(&ctx);
         self.quick_look(&ctx);
         self.sequence_player(&ctx);
@@ -1839,6 +1863,7 @@ impl App {
             self.files.focused = true;
         }
 
+        self.remote_sidebar(ui, &here, &mut picks);
         side_section(ui, "fm-quick", "Quick access", true, |ui| {
             if self.files.places.is_empty() && self.files.places_rx.is_some() {
                 ui.weak("…");

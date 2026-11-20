@@ -1,6 +1,6 @@
 # dirmap 2.3: the Remote workspace
 
-Status: assessment and plan, 20 November 2026. It follows `dirmap-2.2-file-manager.md` (phase 4
+Status: assessment and plan, 20 November 2026; phase 1 implemented the same day (see the tracker). It follows `dirmap-2.2-file-manager.md` (phase 4
 there added SFTP, FTP(S) and WebDAV). The brief replaces the sidebar's **Network & Remote**
 section and its Connect to Server box with a **Remote** workspace: two panes (local and remote
 side by side), a site manager, connection tabs, a transfer dock, and the analysis tools, all
@@ -450,13 +450,13 @@ Each phase ends with a Windows build on Rich's PC and a review, as before.
 
 | # | Item | Phase | State |
 |---|---|---|---|
-| 1 | Remote workspace, Ctrl+2, desk swap | 1 | ○ |
-| 2 | Site profiles, migration | 1 | ○ |
-| 3 | Site Manager window | 1 | ○ |
-| 4 | Quick connect, connection chip, insecure warning | 1 | ○ |
-| 5 | Remote sidebar (Sites, Sessions, Recent) | 1 | ○ |
-| 6 | Capabilities, browse channel apart from transfers | 1 | ○ |
-| 7 | Connection log with redaction | 1 | ○ |
+| 1 | Remote workspace, Ctrl+2, desk swap | 1 | ✅ `app/remoteui.rs` (`use_desk`, `finish_save`, `FilesPrefs.remote_desk`) |
+| 2 | Site profiles, migration | 1 | ✅ `SavedSite` grew group, favourite, notes, local folder, insecure choice, last used (old prefs load unchanged) |
+| 3 | Site Manager window | 1 | ✅ list by group with search, form, Save, Test, Connect, New, Duplicate, Delete, rename group |
+| 4 | Quick connect, connection chip, insecure warning | 1 | ✅ `Ask::Insecure` in `remote::open`, so every way of connecting asks |
+| 5 | Remote sidebar (Sites, Sessions, Recent) | 1 | 🔨 Sites (favourites, groups, search) and Other Connections done; Recent servers not yet |
+| 6 | Capabilities, browse channel apart from transfers | 1 | ○ moved to phase 2/3, with the menus and the queue that need them |
+| 7 | Connection log with redaction | 1 | ✅ `remote::log_of`, `latency`; unsafe listed names refused (`safe_name`, `local_name`) |
 | 8 | Two-pane defaults, F5/F6 to other pane | 2 | ○ |
 | 9 | Capability-aware menus | 2 | ○ |
 | 10 | Remote properties, chmod | 2 | ○ |

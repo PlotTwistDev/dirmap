@@ -283,6 +283,9 @@ pub enum Ask {
     Password { site: String, retry: bool },
     /// The passphrase for an SSH key file.
     Passphrase { key: String, retry: bool },
+    /// The protocol sends the password and files unencrypted (FTP, http WebDAV): connect
+    /// anyway? `Trust { always }` remembers the answer for this site.
+    Insecure { site: String },
 }
 
 /// The user's answer.
@@ -389,6 +392,8 @@ fn password_for(site: &Site, tried: Option<&str>) -> Option<String> {
 pub struct Options {
     /// An SSH key file to try first.
     pub key: Option<PathBuf>,
+    /// The user has agreed to connect to this site although it isn't encrypted.
+    pub allow_insecure: bool,
 }
 
 fn options() -> &'static Mutex<HashMap<String, Options>> {
@@ -421,14 +426,123 @@ fn conn(site: &Site) -> io::Result<Arc<dyn Backend>> {
         return Ok(c.clone());
     }
     *s = None;
-    let opts = options().lock().unwrap().get(&site.url()).cloned().unwrap_or_default();
-    let c: Arc<dyn Backend> = match site.scheme {
-        Scheme::Sftp => Arc::new(sftp::Sftp::connect(site, &opts)?),
-        Scheme::Ftp | Scheme::Ftps => Arc::new(ftp::Ftp::connect(site)?),
-        Scheme::Dav | Scheme::Davs => Arc::new(dav::Dav::connect(site)?),
-    };
+    let c = open(site)?;
     *s = Some(c.clone());
     Ok(c)
+}
+
+/// A new connection to a site (not kept in the pool), after the unencrypted-protocol check.
+fn open(site: &Site) -> io::Result<Arc<dyn Backend>> {
+    let opts = options().lock().unwrap().get(&site.url()).cloned().unwrap_or_default();
+    if site.scheme.insecure() && !opts.allow_insecure && !insecure_allowed(site) {
+        match ask(Ask::Insecure { site: site.url() }) {
+            Answer::Trust { .. } => allow_insecure(site),
+            _ => return Err(io::Error::new(io::ErrorKind::Interrupted, "Not connected: the connection wouldn't be encrypted.")),
+        }
+    }
+    note(site, false, format!("Connecting to {} ({})…", site.short(), site.scheme.title()));
+    let t = std::time::Instant::now();
+    let r: io::Result<Arc<dyn Backend>> = match site.scheme {
+        Scheme::Sftp => sftp::Sftp::connect(site, &opts).map(|c| Arc::new(c) as Arc<dyn Backend>),
+        Scheme::Ftp | Scheme::Ftps => ftp::Ftp::connect(site).map(|c| Arc::new(c) as Arc<dyn Backend>),
+        Scheme::Dav | Scheme::Davs => dav::Dav::connect(site).map(|c| Arc::new(c) as Arc<dyn Backend>),
+    };
+    match &r {
+        Ok(_) => note(site, false, format!("Connected in {} ms", t.elapsed().as_millis())),
+        Err(e) => note(site, true, format!("Couldn't connect: {}", describe(e))),
+    }
+    r
+}
+
+/// Sites the user agreed to use unencrypted, while dirmap runs (saved sites keep it in
+/// their profile and pass it through `Options`).
+fn insecure_ok() -> &'static Mutex<std::collections::HashSet<String>> {
+    static S: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    S.get_or_init(Default::default)
+}
+
+fn insecure_allowed(site: &Site) -> bool {
+    insecure_ok().lock().unwrap().contains(&site.url())
+}
+
+fn allow_insecure(site: &Site) {
+    insecure_ok().lock().unwrap().insert(site.url());
+}
+
+/// Try a server: connect afresh (asking for what's needed), list the folder, and disconnect.
+/// Returns a line for the user: how long it took and what's there.
+pub fn test(path: &Path) -> Result<String, String> {
+    let (site, p) = split(path).ok_or("That isn't a server address.")?;
+    let c = open(&site).map_err(|e| describe(&e))?;
+    let dir = if p == "/" { c.home().unwrap_or_else(|_| "/".into()) } else { p };
+    let t = std::time::Instant::now();
+    let items = c.list(&dir).map_err(|e| format!("Connected, but couldn't list {dir}: {}", describe(&e)))?;
+    let n = items.iter().filter(|(n, _)| n != "." && n != "..").count();
+    Ok(format!(
+        "Connected and signed in. {dir} lists {n} item{} in {} ms.{}",
+        if n == 1 { "" } else { "s" },
+        t.elapsed().as_millis().max(1),
+        if site.scheme.insecure() { " Not encrypted." } else { "" }
+    ))
+}
+
+// ---------------------------------------------------------------------------------------------
+// The connection log and latency, per site. Only what was done and how long it took: never a
+// password, passphrase, key or anything typed in answer to a question.
+
+/// One line of a site's log.
+#[derive(Clone, Debug)]
+pub struct LogLine {
+    pub at: SystemTime,
+    pub error: bool,
+    pub text: String,
+}
+
+#[derive(Default)]
+struct SiteLog {
+    lines: std::collections::VecDeque<LogLine>,
+    /// The last few round trips of small requests, for the latency shown.
+    trips: std::collections::VecDeque<Duration>,
+}
+
+const LOG_LINES: usize = 500;
+
+fn logs() -> &'static Mutex<HashMap<String, SiteLog>> {
+    static L: OnceLock<Mutex<HashMap<String, SiteLog>>> = OnceLock::new();
+    L.get_or_init(Default::default)
+}
+
+fn note(site: &Site, error: bool, text: String) {
+    let mut l = logs().lock().unwrap_or_else(|e| e.into_inner());
+    let log = l.entry(site.url()).or_default();
+    if log.lines.len() >= LOG_LINES {
+        log.lines.pop_front();
+    }
+    log.lines.push_back(LogLine { at: SystemTime::now(), error, text });
+}
+
+fn trip(site: &Site, d: Duration) {
+    let mut l = logs().lock().unwrap_or_else(|e| e.into_inner());
+    let log = l.entry(site.url()).or_default();
+    if log.trips.len() >= 5 {
+        log.trips.pop_front();
+    }
+    log.trips.push_back(d);
+}
+
+/// A site's log (`sftp://rich@render01`), oldest first.
+pub fn log_of(site_url: &str) -> Vec<LogLine> {
+    logs().lock().unwrap_or_else(|e| e.into_inner()).get(site_url).map(|l| l.lines.iter().cloned().collect()).unwrap_or_default()
+}
+
+/// The quickest of the last few small requests to a site: about one round trip.
+pub fn latency(site_url: &str) -> Option<Duration> {
+    logs().lock().unwrap_or_else(|e| e.into_inner()).get(site_url).and_then(|l| l.trips.iter().min().copied())
+}
+
+/// The site part of a remote path (`sftp://rich@render01`), for the log and latency.
+pub fn site_url(path: &Path) -> Option<String> {
+    split(path).map(|(s, _)| s.url())
 }
 
 /// Run `f` on a site's connection, connecting again once if the connection had dropped.
@@ -436,12 +550,52 @@ fn with<T>(site: &Site, mut f: impl FnMut(&dyn Backend) -> io::Result<T>) -> io:
     let c = conn(site)?;
     match f(&*c) {
         Err(e) if !c.alive() => {
-            let _ = e;
+            note(site, true, format!("The connection dropped ({}); connecting again", describe(&e)));
             let c = conn(site)?;
             f(&*c)
         }
         r => r,
     }
+}
+
+/// A name a server listed is used as one name: never `.`, `..`, or anything with a slash or
+/// NUL in it, which would reach outside the folder.
+fn safe_name(n: &str) -> bool {
+    !n.is_empty() && n != "." && n != ".." && !n.contains(['/', '\0'])
+}
+
+/// A server's name for an item as a name on this computer. Refuses names that this system
+/// would read as more than one name (`a\b` on Windows, `C:x`), so a download never writes
+/// outside the folder it was asked to.
+pub fn local_name(n: &str) -> io::Result<&str> {
+    let mut comps = Path::new(n).components();
+    match (comps.next(), comps.next()) {
+        (Some(Component::Normal(c)), None) if c == std::ffi::OsStr::new(n) => Ok(n),
+        _ => Err(io::Error::new(io::ErrorKind::InvalidData, format!("The server listed a name that can't be used on this computer: {n:?}"))),
+    }
+}
+
+/// A folder's items, without names that aren't safe.
+fn listed(site: &Site, p: &str) -> io::Result<Vec<(String, Meta)>> {
+    let t = std::time::Instant::now();
+    let r = with(site, |c| c.list(p));
+    match &r {
+        Ok(items) => {
+            let d = t.elapsed();
+            if items.len() < 200 {
+                trip(site, d);
+            }
+            note(site, false, format!("Listed {p}: {} items in {} ms", items.len(), d.as_millis()));
+        }
+        Err(e) => note(site, true, format!("Couldn't list {p}: {}", describe(e))),
+    }
+    let mut items = r?;
+    let odd = items.iter().filter(|(n, _)| n != "." && n != ".." && !safe_name(n)).count();
+    if odd > 0 {
+        note(site, true, format!("Left out {odd} item(s) in {p} with names that aren't safe to use"));
+    }
+    items.retain(|(n, _)| safe_name(n));
+    Ok(items)
 }
 
 /// Connect (asking for what's needed) and return the folder the account starts in.
@@ -494,10 +648,9 @@ pub fn meta(path: &Path) -> io::Result<Meta> {
 /// A folder's items, for the file list.
 pub fn list(path: &Path) -> Result<Vec<Entry>, String> {
     let (site, p) = site_path(path).map_err(|e| e.to_string())?;
-    let items = with(&site, |c| c.list(&p)).map_err(|e| describe(&e))?;
+    let items = listed(&site, &p).map_err(|e| describe(&e))?;
     Ok(items
         .into_iter()
-        .filter(|(n, _)| n != "." && n != "..")
         .map(|(name, m)| Entry { hidden: name.starts_with('.'), name: name.into(), is_dir: m.is_dir, is_link: m.is_link, size: if m.is_dir { 0 } else { m.len }, modified: m.modified })
         .collect())
 }
@@ -505,8 +658,8 @@ pub fn list(path: &Path) -> Result<Vec<Entry>, String> {
 /// The paths of a folder's items.
 pub fn read_dir(path: &Path) -> io::Result<Vec<PathBuf>> {
     let (site, p) = site_path(path)?;
-    let items = with(&site, |c| c.list(&p))?;
-    Ok(items.into_iter().filter(|(n, _)| n != "." && n != "..").map(|(n, _)| path_of(&site, &join(&p, &n))).collect())
+    let items = listed(&site, &p)?;
+    Ok(items.into_iter().map(|(n, _)| path_of(&site, &join(&p, &n))).collect())
 }
 
 pub fn create_dir(path: &Path) -> io::Result<()> {
@@ -555,7 +708,7 @@ pub fn delete(path: &Path) -> io::Result<()> {
     fn walk(c: &dyn Backend, p: &str) -> io::Result<()> {
         let m = c.stat(p)?;
         if m.is_dir && !m.is_link {
-            for (n, _) in c.list(p)? {
+            for (n, _) in c.list(p)?.into_iter().filter(|(n, _)| safe_name(n)) {
                 if n != "." && n != ".." {
                     walk(c, &join(p, &n))?;
                 }
@@ -582,7 +735,7 @@ pub fn bytes_in(path: &Path, ctl: &Ctl) -> u64 {
             if ctl.stop.load(Ordering::Relaxed) {
                 break;
             }
-            if n != "." && n != ".." {
+            if safe_name(&n) {
                 sum += walk(c, &join(p, &n), m, ctl);
             }
         }
@@ -615,7 +768,7 @@ pub fn copy_tree(src: &Path, dest: &Path, ctl: &Ctl) -> io::Result<()> {
             let m = with(&ss, |c| c.stat(&sp))?;
             if m.is_dir && !m.is_link {
                 create_dir(dest)?;
-                for (n, _) in with(&ss, |c| c.list(&sp))? {
+                for (n, _) in listed(&ss, &sp)? {
                     if n != "." && n != ".." {
                         copy_tree(&path_of(&ss, &join(&sp, &n)), &path_of(&ds, &join(&dp, &n)), ctl)?;
                     }
@@ -637,10 +790,8 @@ pub fn copy_tree(src: &Path, dest: &Path, ctl: &Ctl) -> io::Result<()> {
             let m = with(&ss, |c| c.stat(&sp))?;
             if m.is_dir && !m.is_link {
                 fs::create_dir(dest)?;
-                for (n, _) in with(&ss, |c| c.list(&sp))? {
-                    if n != "." && n != ".." {
-                        copy_tree(&path_of(&ss, &join(&sp, &n)), &dest.join(&n), ctl)?;
-                    }
+                for (n, _) in listed(&ss, &sp)? {
+                    copy_tree(&path_of(&ss, &join(&sp, &n)), &dest.join(local_name(&n)?), ctl)?;
                 }
                 Ok(())
             } else {
@@ -814,7 +965,7 @@ pub fn walk(path: &Path, stop: &std::sync::atomic::AtomicBool, seen: &mut dyn Fn
             Err(e) if rel.is_empty() => return Err(e),
             Err(_) => continue,
         };
-        let items: Vec<(String, Meta)> = items.into_iter().filter(|(n, _)| n != "." && n != "..").collect();
+        let items: Vec<(String, Meta)> = items.into_iter().filter(|(n, _)| safe_name(n)).collect();
         seen(&rel, &items);
         for (n, m) in items {
             let r = if rel.is_empty() { n } else { format!("{rel}/{n}") };
@@ -855,6 +1006,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unsafe_names_are_refused() {
+        for bad in ["", ".", "..", "a/b", "../etc", "/etc/passwd", "a\0b"] {
+            assert!(!safe_name(bad), "{bad:?}");
+        }
+        for good in ["shot.1001.exr", ".hidden", "12:30 notes.txt", "..."] {
+            assert!(safe_name(good), "{good:?}");
+        }
+        assert!(local_name("plate.exr").is_ok());
+        assert!(local_name("a/b").is_err());
+        if cfg!(windows) {
+            assert!(local_name("..\\up").is_err());
+            assert!(local_name("C:x").is_err());
+        }
+    }
+
+    #[test]
+    fn log_never_holds_passwords() {
+        let site = Site { scheme: Scheme::Sftp, user: "rich".into(), host: "logtest".into(), port: 22 };
+        note(&site, false, format!("Connecting to {}…", site.short()));
+        trip(&site, Duration::from_millis(12));
+        let lines = log_of(&site.url());
+        assert_eq!(lines.len(), 1);
+        assert!(!lines[0].text.contains("password"));
+        assert_eq!(latency(&site.url()), Some(Duration::from_millis(12)));
+    }
+
+    #[test]
     fn paths_round_trip() {
         let p = parse("sftp://rich@Render01:2222/home/rich/shots").unwrap();
         let (site, rest) = split(&p).unwrap();
@@ -890,7 +1068,7 @@ mod live {
         let urls = std::env::var("DIRMAP_TEST_SERVERS").expect("DIRMAP_TEST_SERVERS");
         let pw = std::env::var("DIRMAP_TEST_PASSWORD").unwrap_or_default();
         set_asker(move |q| match q {
-            Ask::NewHostKey { .. } => Answer::Trust { always: false },
+            Ask::NewHostKey { .. } | Ask::Insecure { .. } => Answer::Trust { always: false },
             Ask::Password { retry: false, .. } => Answer::Secret { text: pw.clone(), remember: false },
             _ => Answer::Cancel,
         });
@@ -974,7 +1152,7 @@ mod live_keys {
         set_asker(move |q| {
             a2.lock().unwrap().push(format!("{q:?}"));
             match q {
-                Ask::NewHostKey { .. } => Answer::Trust { always: false },
+                Ask::NewHostKey { .. } | Ask::Insecure { .. } => Answer::Trust { always: false },
                 Ask::Passphrase { retry: false, .. } => Answer::Secret { text: "wrong".into(), remember: false },
                 Ask::Passphrase { retry: true, .. } => Answer::Secret { text: "phrase1".into(), remember: false },
                 _ => Answer::Cancel,
@@ -982,7 +1160,7 @@ mod live_keys {
         });
         for (var, port_user) in [("DIRMAP_TEST_KEY", "tester"), ("DIRMAP_TEST_KEY_LOCKED", "tester")] {
             let key = PathBuf::from(std::env::var(var).unwrap());
-            set_options(&url, Options { key: Some(key) });
+            set_options(&url, Options { key: Some(key), allow_insecure: false });
             disconnect(&parse(&url).unwrap());
             let home = connect(&parse(&url).unwrap()).unwrap_or_else(|e| panic!("{var}: {e} {:?}", asked.lock().unwrap()));
             assert!(show(&home).unwrap().ends_with(&format!("/home/{port_user}")));

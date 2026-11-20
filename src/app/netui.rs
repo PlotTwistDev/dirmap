@@ -29,6 +29,18 @@ pub(super) struct SavedSite {
     pub url: String,
     /// An SSH key file to sign in with.
     pub key: Option<PathBuf>,
+    /// The Site Manager's folder for it: "Render Farm", or "Clients/Acme" for a subfolder.
+    pub group: String,
+    /// Shown first, and in the Files sidebar too.
+    pub favourite: bool,
+    /// The user's own notes ("NAS in the machine room, admin is Sam").
+    pub notes: String,
+    /// The user agreed to connect although the protocol isn't encrypted (FTP, http WebDAV).
+    pub allow_insecure: bool,
+    /// The local folder to show beside it in the Remote workspace.
+    pub local_dir: Option<PathBuf>,
+    /// When it was last opened (seconds since 1970), for Recent.
+    pub last_used: i64,
 }
 
 impl SavedSite {
@@ -36,7 +48,12 @@ impl SavedSite {
         remote::parse(&self.url)
     }
 
-    fn shown(&self) -> String {
+    /// Connections to this site use its key file and insecure choice.
+    pub fn options(&self) -> remote::Options {
+        remote::Options { key: self.key.clone(), allow_insecure: self.allow_insecure }
+    }
+
+    pub(super) fn shown(&self) -> String {
         if !self.name.trim().is_empty() {
             return self.name.clone();
         }
@@ -101,7 +118,7 @@ pub(super) struct ConnectBox {
 
 impl ConnectBox {
     /// The box filled in from a saved server, to change it.
-    fn editing(i: usize, s: &SavedSite) -> ConnectBox {
+    pub(super) fn editing(i: usize, s: &SavedSite) -> ConnectBox {
         let mut c = ConnectBox { editing: Some(i), save: true, fresh: true, name: s.name.clone(), key: s.key.as_ref().map(|k| k.display().to_string()).unwrap_or_default(), ..Default::default() };
         if let Some((site, folder)) = s.path().and_then(|p| remote::split(&p)) {
             c.kind = Some(site.scheme);
@@ -114,7 +131,7 @@ impl ConnectBox {
     }
 
     /// The address the fields make, or why they don't make one.
-    fn url(&mut self) -> Result<PathBuf, String> {
+    pub(super) fn url(&mut self) -> Result<PathBuf, String> {
         let kind = self.kind.ok_or("")?;
         // A whole address pasted into the server field fills in the rest.
         if self.host.contains("://")
@@ -195,10 +212,18 @@ impl App {
                         }
                     }
                     self.ops.notice = Some((format!("Connected: {}", path.shown()), false));
-                    self.files.go(Location::Dir(path));
+                    // The Remote workspace said which pane it's for.
+                    match self.files.rws.target.take().filter(|&p| p < self.files.panes.len() && remote::is_remote(&path)) {
+                        Some(p) => {
+                            self.files.set_focus(p);
+                            self.files.go(Location::Dir(path));
+                        }
+                        None => self.files.go(Location::Dir(path)),
+                    }
                 }
                 Ok(None) => self.ops.notice = Some(("Disconnected.".into(), false)),
                 Err(e) => {
+                    self.files.rws.target = None;
                     if let Some(c) = self.files.connect.as_mut() {
                         c.busy = false;
                         c.error = Some(e.clone());
@@ -239,7 +264,8 @@ impl App {
             rows.push((n.path.clone(), drive_name(&n.path, "", &n.remote), format!("{}\n{}\n{state}", n.path.display(), n.remote), n.disconnected, None));
         }
         let servers = self.files.prefs.servers.clone();
-        let sites = self.files.prefs.sites.clone();
+        // The Remote workspace lists saved sites in its own Sites section.
+        let sites = if self.files.prefs.workspace == files::Workspace::Remote { Vec::new() } else { self.files.prefs.sites.clone() };
         let mut remove_server = None;
         let mut disconnect = None;
         let (mut open_site, mut open_site_tab, mut edit_site, mut remove_site) = (None, None, None, None);
@@ -369,7 +395,7 @@ impl App {
     /// Tell connections which key file each saved server uses. Cheap; no network.
     pub(super) fn site_options(&self) {
         for s in &self.files.prefs.sites {
-            remote::set_options(&s.url, remote::Options { key: s.key.clone() });
+            remote::set_options(&s.url, s.options());
         }
     }
 
@@ -529,8 +555,13 @@ impl App {
                 Ok(path) => {
                     let key = Some(c.key.trim()).filter(|k| !k.is_empty()).map(PathBuf::from);
                     let url = remote::show(&path).unwrap_or_default();
-                    remote::set_options(&url, remote::Options { key: key.clone() });
-                    c.pending = Some(SavedSite { name: c.name.trim().to_string(), url, key });
+                    let mut site = match c.editing.and_then(|i| self.files.prefs.sites.get(i)) {
+                        Some(old) => old.clone(),
+                        None => SavedSite::default(),
+                    };
+                    (site.name, site.url, site.key) = (c.name.trim().to_string(), url.clone(), key);
+                    remote::set_options(&url, site.options());
+                    c.pending = Some(site);
                     c.busy = true;
                     c.error = None;
                     self.net_job(move || remote::connect(&path).map(Some));
@@ -593,6 +624,25 @@ impl App {
                         answer = Some(Answer::Cancel);
                     }
                 }
+                Ask::Insecure { site } => {
+                    ui.heading("Connect without encryption?");
+                    ui.add_space(6.0);
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        format!("{site} uses a protocol that isn't encrypted. Your password and the files can be read, and changed, by anyone on the network between here and the server."),
+                    );
+                    ui.add_space(4.0);
+                    ui.label("Use it only on a network you trust. If the server offers SFTP, FTPS or https, use that instead.");
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Connect Anyway").on_hover_text("Don't ask again for this server while dirmap is open (saved servers remember it)").clicked() {
+                            answer = Some(Answer::Trust { always: true });
+                        }
+                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            answer = Some(Answer::Cancel);
+                        }
+                    });
+                }
                 Ask::Password { site, retry } | Ask::Passphrase { key: site, retry } => {
                     let passphrase = matches!(a.ask, Ask::Passphrase { .. });
                     ui.heading(if passphrase { "Passphrase for SSH key" } else { "Sign in" });
@@ -621,6 +671,14 @@ impl App {
         });
         if let Some(ans) = answer {
             let a = self.files.asking.take().unwrap();
+            if let (Ask::Insecure { site }, Answer::Trust { .. }) = (&a.ask, &ans) {
+                for s in self.files.prefs.sites.iter_mut() {
+                    if s.path().and_then(|p| remote::site_url(&p)).as_deref() == Some(site.as_str()) {
+                        s.allow_insecure = true;
+                        remote::set_options(&s.url, s.options());
+                    }
+                }
+            }
             let _ = a.reply.send(ans);
             ctx.input_mut(|i| {
                 i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
@@ -631,7 +689,7 @@ impl App {
 }
 
 /// The system keychain's name, as people know it.
-fn keychain_name() -> &'static str {
+pub(super) fn keychain_name() -> &'static str {
     if cfg!(windows) {
         "Windows Credential Manager"
     } else if cfg!(target_os = "macos") {
