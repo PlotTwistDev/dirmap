@@ -1,0 +1,587 @@
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-dl" viewBox="0 0 16 16"><path d="M8 2v8m0 0L4.5 6.5M8 10l3.5-3.5M3 13h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-logo" viewBox="0 0 20 20"><rect x="1" y="1" width="10" height="11" rx="2" fill="#ff6363"/><rect x="12" y="1" width="7" height="6" rx="1.5" fill="#e6e6e6"/><rect x="12" y="8" width="7" height="4" rx="1.2" fill="#63a1ff"/><rect x="1" y="13" width="6" height="6" rx="1.5" fill="#e6e6e6"/><rect x="8" y="13" width="5" height="6" rx="1.2" fill="#6a6b6c"/><rect x="14" y="13" width="5" height="6" rx="1.2" fill="#ff6363" opacity=".55"/></symbol>
+</svg>
+
+<header class="nav">
+  <div class="wrap">
+    <nav class="nav-bar" aria-label="Main">
+      <a class="brand" href="#top"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#vfx">For VFX</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#download">Download</a>
+      </div>
+      <a class="btn btn-key btn-sm" href="#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <div class="hero">
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="wrap">
+      <span class="eyebrow"><b>New in 2.3</b> Remote servers and transfers</span>
+      <h1>See where your disk went.</h1>
+      <p class="lede">Filescape scans a drive in seconds and draws every file as a tile you can zoom through. When you find what's eating the space, deal with it right there in a full file manager.</p>
+      <div class="dl-row" id="hero-downloads">
+        <a class="btn btn-key" data-os="windows" href="https://downloads.filescape.app/latest/windows"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for Windows</a>
+        <a class="btn btn-ghost" data-os="mac" href="https://downloads.filescape.app/latest/macos"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for macOS</a>
+        <a class="btn btn-ghost" data-os="linux" href="https://downloads.filescape.app/latest/linux"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for Linux</a>
+      </div>
+      <div class="dl-meta"><span>Free to use</span><span>Pro is $5, once</span><span>v2.3</span></div>
+
+      <div class="window" role="group" aria-label="Interactive example of the Filescape disk map">
+        <div class="win-bar">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div class="crumbs" id="crumbs"></div>
+          <div class="win-actions">
+            <button class="chip" id="zoom-out" type="button">Zoom out</button>
+            <button class="chip" id="color-mode" type="button" aria-pressed="false">Colour: Type</button>
+          </div>
+        </div>
+        <div class="map-wrap" id="map-wrap">
+          <canvas id="map" aria-label="Treemap of an example Projects folder. Click a block to zoom in."></canvas>
+        </div>
+        <div class="win-foot">
+          <span class="readout" id="readout">~/Projects · 61.9 GB · 2,262 files</span>
+          <span class="hint">Click to zoom in · right-click to zoom out</span>
+        </div>
+        <div class="legend" id="legend"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="facts">
+      <div class="fact"><b>47 s</b><span>to map 1.3 million files on our test drive</span></div>
+      <div class="fact"><b>25 MB</b><span>download, no installer or runtime on Windows</span></div>
+      <div class="fact"><b>3</b><span>platforms: Windows, macOS and Linux</span></div>
+      <div class="fact"><b>$5</b><span>once for Pro, on up to 10 computers</span></div>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Map and manage</span>
+        <h2>The map shows you the problem. The file manager under it fixes it.</h2>
+      </div>
+
+      <div class="showcase">
+        <div class="copy">
+          <h3>A cushion treemap you can fly through</h3>
+          <p>Every file is a shaded tile sized by how much space it takes. The map is drawn on your graphics card, so zooming and panning stay smooth even with millions of files.</p>
+          <ul class="ticks">
+            <li>Zoom toward the pointer, pan with inertia, step Back and Forward</li>
+            <li>Colour by file type, by age, or by what changed since a snapshot</li>
+            <li>Switch to a sunburst when you want to see the folder tree as rings</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="{{img:map-and-files}}" alt="Filescape showing a folder list above a colourful treemap of a Projects folder, with a file types list on the right" width="1280" height="820" loading="lazy"></div>
+      </div>
+
+      <div class="showcase flip">
+        <div class="copy">
+          <h3>A real file manager, with the map docked underneath</h3>
+          <p>Browse without scanning first. Two panes, tabs, previews and the usual copy, move and rename. The map follows the folder you're in, and selecting a file highlights its tile.</p>
+          <ul class="ticks">
+            <li>Details, Icons, Columns and Gallery views, with EXR and HDR thumbnails</li>
+            <li>Batch rename with a preview, Compare Folders and sync, tags and notes</li>
+            <li>Zip, 7z and tar archives open like folders</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="{{img:files-dock}}" alt="Filescape's Files workspace with a sidebar of drives, a file list and the analysis treemap docked below" width="1280" height="820" loading="lazy"></div>
+      </div>
+
+      <div class="showcase">
+        <div class="copy">
+          <h3>Servers open like drives</h3>
+          <p>Connect to SFTP, FTP(S) and WebDAV, then browse, copy and analyse them like a local folder. Big copies go into a queue you can pause, stop and reorder.</p>
+          <ul class="ticks">
+            <li>Saved sites in the sidebar, SSH agent or key files</li>
+            <li>Passwords kept in your system keychain, never in a settings file</li>
+            <li>Choose how many transfers run at once</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="{{img:remote}}" alt="The Remote workspace with a local folder and an SFTP server side by side and two transfers running in the queue" width="1280" height="820" loading="lazy"></div>
+      </div>
+
+      <div class="keys">
+        <div class="keycard"><span class="kbd">Duplicates</span><h3>Find the copies</h3><p>Matched by size, then the first 64 KB, then a hash of the whole file.</p></div>
+        <div class="keycard"><span class="kbd">Snapshots</span><h3>See what grew</h3><p>Save a snapshot, scan again next week, and colour the map by what changed.</p></div>
+        <div class="keycard"><span class="kbd">Filters</span><h3>Show only what matters</h3><p>Filter by category, size or name pattern. Highlight matches or hide everything else.</p></div>
+        <div class="keycard"><span class="kbd">Ctrl F</span><h3>Search subfolders</h3><p>Search a whole tree from the filter box and save searches you run often.</p></div>
+        <div class="keycard"><span class="kbd">F1</span><h3>Help built in</h3><p>A searchable Help Centre and context help for every panel, offline.</p></div>
+        <div class="keycard"><span class="kbd">--cli</span><h3>Reports from a terminal</h3><p>Print the largest folders or compare snapshots from the command line.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="vfx">
+    <div class="wrap">
+      <div class="showcase flip">
+        <div class="copy">
+          <span class="eyebrow">For VFX and post</span>
+          <h2>Frame sequences are one row, not 240.</h2>
+          <p>Filescape folds numbered frames into a single sequence with its range, size and any missing frames. Copy or move the whole shot at once, and play it straight from the list.</p>
+          <ul class="ticks">
+            <li>Player for EXR, DPX (8 to 16 bit), PNG and TIFF, played from memory</li>
+            <li>sRGB, Rec.709 and Cineon log display, exposure, and .cube LUTs</li>
+            <li>A/B wipe to compare a plate against the comp</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="{{img:player}}" alt="The sequence player comparing a DPX plate and a PNG comp with an A/B wipe, at frame 11 of 30" width="1280" height="820" loading="lazy"></div>
+      </div>
+
+      <div class="vfx" role="region" aria-label="Example of sequences folded in the file list">
+        <div class="vfx-scroll">
+          <table>
+            <thead><tr><th>Name</th><th>Frames</th><th class="num">Count</th><th class="num">Size</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>sh010_plate.####.exr</td><td>1001–1240</td><td class="num">240</td><td class="num">7.2 GB</td><td>Complete</td></tr>
+              <tr><td>sh010_comp_v012.####.exr</td><td>1001–1240</td><td class="num">238</td><td class="num">2.8 GB</td><td class="miss">Missing 1137, 1138</td></tr>
+              <tr><td>sh020_scan.####.dpx</td><td>1001–1180</td><td class="num">180</td><td class="num">2.2 GB</td><td>10-bit log</td></tr>
+              <tr><td>sh020_roto.####.png</td><td>1001–1180 x2</td><td class="num">90</td><td class="num">412 MB</td><td>Every other frame</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="vfx-cap">Example shot folder. Padding, steps and gaps are detected the same way in the map's name filter, so <span class="mono">sh0*_plate.####.exr</span> finds every plate at once.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Pricing</span>
+        <h2>Free to look. $5 to do everything.</h2>
+        <p class="lede">No subscription. Buy Pro once and use it on up to 10 of your computers.</p>
+      </div>
+      <div class="plans">
+        <div class="plan">
+          <div><h3>Free</h3><p class="small">Forever, no sign-up</p></div>
+          <div class="price"><b>$0</b></div>
+          <ul>
+            <li>The disk map: treemap and sunburst</li>
+            <li>The file browser</li>
+            <li>Category and size filters, highlight or show matches only</li>
+            <li>Scan exclusions</li>
+          </ul>
+          <a class="btn btn-ghost" href="#download">Download free</a>
+        </div>
+        <div class="plan pro">
+          <div><h3>Filescape Pro</h3><p class="small">One payment, yours to keep</p></div>
+          <div class="price"><b>$5</b><span>once</span></div>
+          <ul>
+            <li>Everything in Free</li>
+            <li>Two-pane file management, batch rename, Compare Folders</li>
+            <li>SFTP, FTP(S) and WebDAV with the transfer queue</li>
+            <li>Sequence player, duplicates, snapshots and custom filters</li>
+            <li>Activate on up to 10 of your computers</li>
+            <li>Every update for a year, then keep the version you have</li>
+          </ul>
+          <button class="btn btn-key" id="buy" type="button">Buy Filescape Pro for $5</button>
+          <p class="checkout-note" id="checkout-note" hidden>The checkout couldn't open. Please try again, or email <a href="mailto:support@filescape.app">support@filescape.app</a>.</p>
+          <p class="small">Checkout and tax are handled by Paddle, our reseller. Your licence key arrives by email.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="download">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Download</span>
+        <h2>One app for all three systems.</h2>
+      </div>
+      <div class="reqs">
+        <div class="req">
+          <h3>Windows</h3>
+          <p>64-bit Windows 10 or 11. Unzip and run. No installer or runtime needed.</p>
+          <a class="btn btn-ghost btn-sm" data-os="windows" href="https://downloads.filescape.app/latest/windows"><svg aria-hidden="true"><use href="#i-dl"/></svg>Windows x64</a>
+        </div>
+        <div class="req">
+          <h3>macOS</h3>
+          <p>macOS 11 Big Sur or later, on Apple silicon or Intel.</p>
+          <a class="btn btn-ghost btn-sm" data-os="mac" href="https://downloads.filescape.app/latest/macos"><svg aria-hidden="true"><use href="#i-dl"/></svg>macOS universal</a>
+        </div>
+        <div class="req">
+          <h3>Linux</h3>
+          <p>64-bit x86 with X11 or Wayland. Desktop installs already have what it needs.</p>
+          <a class="btn btn-ghost btn-sm" data-os="linux" href="https://downloads.filescape.app/latest/linux"><svg aria-hidden="true"><use href="#i-dl"/></svg>Linux x86_64</a>
+        </div>
+      </div>
+      <p class="small" style="margin-top:16px">Memory: allow about 150 MB per million files scanned. Graphics: any GPU with Vulkan, Direct3D 12, Metal or OpenGL 3.3.</p>
+
+      <div class="faq">
+        <details><summary>Do my files leave my computer?</summary><p>No. Scanning, the map and previews all run locally. Filescape only goes online to activate a Pro licence, or when you connect to a server yourself.</p></details>
+        <details><summary>Is this a subscription?</summary><p>No. Pro is a single $5 payment. There's nothing to renew.</p></details>
+        <details><summary>I replaced my computer. Can I move my licence?</summary><p>Each licence activates on up to 10 computers. If you've used them all, contact support and we'll reset your activations.</p></details>
+        <details><summary>How is size calculated?</summary><p>Filescape adds up file sizes. Hard links count once per name, and compressed, sparse or cloud-only files show their full size, so totals can differ from what your system reports as used.</p></details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="#top"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+    <a href="https://account.filescape.app/">Your licence</a>
+    <a href="/terms">Terms</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/refunds">Refunds</a>
+    <a href="mailto:support@filescape.app">support@filescape.app</a>
+    <span class="ver">© 2026 Filescape</span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  "use strict";
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- Put the visitor's OS first ---------- */
+  const ua = navigator.userAgent;
+  const os = /Mac|iPhone|iPad/.test(ua) ? "mac" : /Linux|X11|CrOS/.test(ua) && !/Android/.test(ua) ? "linux" : "windows";
+  const row = document.getElementById("hero-downloads");
+  row.querySelectorAll("a").forEach(a => {
+    const mine = a.dataset.os === os;
+    a.classList.toggle("btn-key", mine);
+    a.classList.toggle("btn-ghost", !mine);
+    if (mine) row.prepend(a);
+  });
+
+  /* ---------- Paddle checkout ---------- */
+  // Token, price and success page come from /config.js, shared with /buy.
+  const PADDLE = window.FILESCAPE || {};
+  let paddleReady = false;
+  try {
+    if (window.Paddle && PADDLE.paddleClientToken) {
+      if (PADDLE.paddleEnvironment === "sandbox") window.Paddle.Environment.set("sandbox");
+      window.Paddle.Initialize({ token: PADDLE.paddleClientToken });
+      paddleReady = true;
+    }
+  } catch (e) { /* shown on click */ }
+  document.getElementById("buy").addEventListener("click", () => {
+    try {
+      if (!paddleReady || !PADDLE.priceId) throw new Error("checkout unavailable");
+      window.Paddle.Checkout.open({ items: [{ priceId: PADDLE.priceId, quantity: 1 }], settings: { successUrl: PADDLE.successUrl } });
+    } catch (e) {
+      document.getElementById("checkout-note").hidden = false;
+    }
+  });
+
+  /* ---------- Example disk: a creative's Projects folder ---------- */
+  let seed = 20261123;
+  const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const MB = 1024 * 1024, GB = 1024 * MB;
+  const D = (name, children) => ({ name, children });
+  const F = (name, size) => ({ name, size: Math.round(size), ext: name.includes(".") ? name.split(".").pop().toLowerCase() : "" });
+  const seq = (prefix, ext, from, to, avg, jitter, skip = []) => {
+    const out = [];
+    for (let f = from; f <= to; f++) if (!skip.includes(f)) out.push(F(`${prefix}.${f}.${ext}`, avg * (1 - jitter + rnd() * jitter * 2)));
+    return out;
+  };
+  const many = (fmt, n, avg, jitter) => Array.from({ length: n }, (_, i) => F(fmt(i), avg * Math.pow(rnd() * 1.6 + .2, 1 + jitter)));
+  const pad = (n, w = 4) => String(n).padStart(w, "0");
+
+  const root = D("~/Projects", [
+    D("Film", [
+      D("sh010", [
+        D("plates", seq("sh010_plate", "exr", 1001, 1240, 30.7 * MB, .08)),
+        D("comp", seq("sh010_comp_v012", "exr", 1001, 1240, 12 * MB, .15, [1137, 1138])),
+      ]),
+      D("sh020", [
+        D("scan", seq("sh020_scan", "dpx", 1001, 1180, 12.4 * MB, .02)),
+        D("roto", seq("sh020_roto", "png", 1001, 1180, 4.6 * MB, .3).filter((_, i) => i % 2 === 0)),
+      ]),
+      D("edit", [F("final_cut.mov", 2.0 * GB), F("rough_cut_v3.mov", 1.4 * GB), F("trailer_prores.mov", 860 * MB), F("score.wav", 600 * MB), F("dialog.flac", 80 * MB)]),
+    ]),
+    D("Models", [F("llama-3-8b.gguf", 4.0 * GB), F("sdxl_base.safetensors", 6.5 * GB), F("sdxl_refiner.safetensors", 5.7 * GB),
+      D("lora", many(i => `style_${pad(i, 2)}.safetensors`, 24, 144 * MB, .4))]),
+    D("Photos", [
+      D("2026-iceland", many(i => `IMG_${pad(4100 + i)}.cr3`, 320, 26 * MB, .2)),
+      D("exports", many(i => `iceland_${pad(i, 3)}.jpg`, 140, 7 * MB, .5)),
+      D("panoramas", [F("glacier_pano.psd", 1.1 * GB), F("coast_pano.psd", 640 * MB), F("panorama.psd", 140 * MB)]),
+    ]),
+    D("Code", [
+      D("target", many(i => `lib${["egui", "wgpu", "russh", "image", "tokio", "serde", "rayon", "naga", "zstd", "ring"][i % 10]}-${(rnd() * 1e8 | 0).toString(16)}.rlib`, 520, 4 * MB, 1.6)),
+      D("node_modules", many(i => `chunk_${i}.js`, 260, 600 * 1024, 1.8)),
+      F("dataset.sqlite", 1.3 * GB),
+    ]),
+    D("Downloads", [F("ubuntu-24.04.iso", 5.9 * GB), F("installer.dmg", 300 * MB), F("Blender-4.2.zip", 340 * MB), F("manual.pdf", 12 * MB), F("plugins.zip", 40 * MB)]),
+    D("Music", [D("samples", many(i => `kit_${pad(i, 3)}.wav`, 380, 9 * MB, 1.1)), F("album_master.wav", 900 * MB), F("stems.zip", 1.2 * GB)]),
+  ]);
+
+  const TYPE = {
+    exr: ["#b8d36a", "EXR"], dpx: ["#e8c27a", "DPX"], png: ["#7fd9a0", "PNG"], mov: ["#7aa7f5", "Video"], wav: ["#f0b45f", "Audio"], flac: ["#f0b45f", "Audio"],
+    gguf: ["#f08585", "AI models"], safetensors: ["#e27ae6", "AI models"], cr3: ["#61c9b8", "Photos"], jpg: ["#61c9b8", "Photos"], psd: ["#ef7fb4", "Photoshop"],
+    rlib: ["#c7a3f5", "Code"], js: ["#c7a3f5", "Code"], sqlite: ["#9db0c8", "Data"], iso: ["#6fe0e0", "Disk images"], dmg: ["#a68af0", "Disk images"],
+    zip: ["#d8d06a", "Archives"], pdf: ["#f28d72", "Documents"],
+  };
+  const OTHER = ["#9a9a9a", "Other"];
+
+  // Totals, parents, paths
+  let fileCount = 0;
+  (function prep(n, parent) {
+    n.parent = parent;
+    if (n.children) {
+      n.size = 0;
+      for (const c of n.children) { prep(c, n); n.size += c.size; }
+      n.children.sort((a, b) => b.size - a.size);
+      n.files = n.children.reduce((s, c) => s + (c.children ? c.files : 1), 0);
+    } else fileCount++;
+  })(root, null);
+  const leaves = [];
+  (function collect(n, depth) { n.depth = depth; if (n.children) n.children.forEach(c => collect(c, depth + 1)); else leaves.push(n); })(root, 0);
+
+  // Age colouring: a stable pseudo-age per file, newer in Film and Code
+  const ageOf = n => { let a = n; while (a.parent && a.parent !== root) a = a.parent; const base = { Film: .15, Code: .1, Models: .45, Photos: .55, Downloads: .3, Music: .75 }[a.name] ?? .5; return Math.min(1, Math.max(0, base + (rnd() - .5) * .4)); };
+  leaves.forEach(l => { l.age = ageOf(l); l.rgb = hexRgb((TYPE[l.ext] || OTHER)[0]); });
+  function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+  const ageRgb = t => { // new = coral, old = deep blue
+    const a = [255, 110, 100], b = [60, 90, 190];
+    return a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  };
+
+  const fmt = b => b >= GB ? (b / GB).toFixed(1) + " GB" : b >= MB ? (b / MB).toFixed(1) + " MB" : (b / 1024).toFixed(1) + " KB";
+  const pathOf = n => { const p = []; for (let a = n; a; a = a.parent) p.unshift(a.name); return p.join("/"); };
+
+  /* ---------- Squarified layout ---------- */
+  function layout(node, x, y, w, h) {
+    node.r = [x, y, w, h];
+    if (!node.children) return;
+    const kids = node.children.filter(c => c.size > 0);
+    const total = node.size, area = w * h;
+    let items = kids.map(c => ({ n: c, a: c.size / total * area }));
+    let rx = x, ry = y, rw = w, rh = h;
+    while (items.length) {
+      const short = Math.min(rw, rh);
+      if (!(short > 1e-6)) { for (const it of items) layout(it.n, rx, ry, Math.max(0, rw), Math.max(0, rh)); break; }
+      let row = [], best = Infinity, i = 0;
+      for (; i < items.length; i++) {
+        const trial = row.concat(items[i]);
+        const s = trial.reduce((t, it) => t + it.a, 0);
+        const mx = Math.max(...trial.map(t => t.a)), mn = Math.min(...trial.map(t => t.a));
+        const worst = Math.max(short * short * mx / (s * s), s * s / (short * short * mn));
+        if (worst > best) break;
+        best = worst; row = trial;
+      }
+      items = items.slice(row.length);
+      const s = row.reduce((t, it) => t + it.a, 0);
+      if (rw >= rh) {
+        const cw = s / rh; let cy = ry;
+        for (const it of row) { const ch = it.a / cw; layout(it.n, rx, cy, cw, ch); cy += ch; }
+        rx += cw; rw = Math.max(0, rw - cw);
+      } else {
+        const ch = s / rw; let cx = rx;
+        for (const it of row) { const cw2 = it.a / ch; layout(it.n, cx, ry, cw2, ch); cx += cw2; }
+        ry += ch; rh = Math.max(0, rh - ch);
+      }
+    }
+  }
+
+  /* ---------- Drawing ---------- */
+  // The focused folder is always laid out to fill the canvas. Zooming morphs every tile from
+  // where it is on screen now to where it lands in the new layout.
+  const canvas = document.getElementById("map"), wrap = document.getElementById("map-wrap");
+  const ctx = canvas.getContext("2d");
+  let W = 0, H = 0, dpr = 1, mono = "monospace";
+  let focus = root, anim = 0, frames = null;
+  let hover = null, light = { x: .35, y: .3 }, colorMode = "type";
+
+  function resize() {
+    const r = wrap.getBoundingClientRect();
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = Math.max(1, r.width); H = Math.max(1, r.height);
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    mono = getComputedStyle(document.body).getPropertyValue("--mono") || "monospace";
+    layout(focus, 0, 0, W, H);
+    draw();
+  }
+  const shade = (c, k) => c.map(v => Math.max(0, Math.min(255, Math.round(v * k))));
+  const mix = (c, t) => c.map(v => Math.round(v + (255 - v) * t));
+  const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+  const inside = (n, a) => { for (let p = n; p; p = p.parent) if (p === a) return true; return false; };
+
+  function paint(l, r, alpha) {
+    if (!r.every(Number.isFinite)) return;
+    const [sx, sy, sw, sh] = r;
+    if (sw * sh < .25 || alpha <= 0) return;
+    const base = colorMode === "age" ? ageRgb(l.age) : l.rgb;
+    ctx.globalAlpha = alpha;
+    if (sw < 3 || sh < 3) { ctx.fillStyle = css(shade(base, .75)); ctx.fillRect(sx, sy, sw, sh); return; }
+    const cx = sx + sw * (.5 + (light.x - .5) * .5), cy = sy + sh * (.5 + (light.y - .5) * .5);
+    const g = ctx.createRadialGradient(cx, cy, 0, sx + sw / 2, sy + sh / 2, Math.max(sw, sh) * .78);
+    g.addColorStop(0, css(mix(base, .38)));
+    g.addColorStop(.55, css(base));
+    g.addColorStop(1, css(shade(base, .42)));
+    ctx.fillStyle = g;
+    const gap = sw > 6 && sh > 6 ? .5 : 0;
+    ctx.fillRect(sx + gap, sy + gap, sw - gap * 2, sh - gap * 2);
+  }
+
+  function draw(t) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+    if (frames) {
+      for (const f of frames) {
+        if (f.a && f.b) continue;
+        paint(f.l, f.a || f.b, f.a ? 1 - t : t);
+      }
+      for (const f of frames) {
+        if (!(f.a && f.b)) continue;
+        paint(f.l, f.a.map((v, i) => v + (f.b[i] - v) * t), 1);
+      }
+      ctx.globalAlpha = 1;
+      return;
+    }
+    for (const l of leaves) {
+      if (!inside(l, focus)) { l.s = null; continue; }
+      l.s = l.r; paint(l, l.r, 1);
+    }
+    ctx.globalAlpha = 1;
+    // File labels
+    ctx.textBaseline = "top";
+    for (const l of leaves) {
+      if (!l.s) continue;
+      const [sx, sy, sw, sh] = l.s;
+      if (sw < 96 || sh < 36) continue;
+      ctx.save(); ctx.beginPath(); ctx.rect(sx, sy, sw, sh); ctx.clip();
+      ctx.font = "500 12px " + mono;
+      ctx.fillStyle = "rgba(10,10,12,.82)";
+      ctx.fillText(l.name, sx + 6, sy + 6);
+      ctx.font = "400 11px " + mono;
+      ctx.fillStyle = "rgba(10,10,12,.62)";
+      ctx.fillText(fmt(l.size), sx + 6, sy + 21);
+      ctx.restore();
+    }
+    // Outlines and name chips for the folders inside the focus
+    const hg = hoverGroup();
+    if (focus.children) for (const c of focus.children) {
+      if (!c.children) continue;
+      const [sx, sy, sw, sh] = c.r;
+      ctx.strokeStyle = c === hg ? "rgba(255,255,255,.9)" : "rgba(0,0,0,.55)";
+      ctx.lineWidth = c === hg ? 1.5 : 1;
+      ctx.strokeRect(sx + .5, sy + .5, sw - 1, sh - 1);
+      if (sw < 90 || sh < 28) continue;
+      const label = `${c.name}/  ${fmt(c.size)}`;
+      ctx.font = "500 11px " + mono;
+      const tw = Math.min(ctx.measureText(label).width + 14, sw - 12);
+      ctx.fillStyle = "rgba(4,5,6,.78)";
+      roundRect(sx + 6, sy + sh - 28, tw, 20, 5); ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.rect(sx + 6, sy + sh - 28, tw, 20); ctx.clip();
+      ctx.fillStyle = "#fff"; ctx.textBaseline = "middle";
+      ctx.fillText(label, sx + 13, sy + sh - 18);
+      ctx.restore(); ctx.textBaseline = "top";
+    }
+    if (hover && hover.s) {
+      const [sx, sy, sw, sh] = hover.s;
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+      ctx.strokeRect(sx + .75, sy + .75, Math.max(0, sw - 1.5), Math.max(0, sh - 1.5));
+    }
+  }
+  function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+  function hoverGroup() { if (!hover) return null; let a = hover; while (a.parent && a.parent !== focus) a = a.parent; return a.parent === focus ? a : null; }
+
+  let queued = false;
+  const redraw = () => { if (queued || frames) return; queued = true; requestAnimationFrame(() => { queued = false; draw(); }); };
+
+  /* ---------- Zoom ---------- */
+  function zoomTo(n) {
+    if (!n || n === focus || !n.children) return;
+    const old = new Map();
+    for (const l of leaves) if (inside(l, focus)) old.set(l, l.r.slice());
+    focus = n;
+    layout(n, 0, 0, W, H);
+    hover = null;
+    renderCrumbs(); updateReadout();
+    if (reduce) { frames = null; draw(); return; }
+    frames = [];
+    for (const l of leaves) {
+      const a = old.get(l) || null, b = inside(l, n) ? l.r.slice() : null;
+      if (a || b) frames.push({ l, a, b });
+    }
+    const t0 = performance.now(), dur = 560;
+    cancelAnimationFrame(anim);
+    const step = now => {
+      let t = Math.min(1, (now - t0) / dur);
+      t = t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      if (t < 1) { draw(t); anim = requestAnimationFrame(step); }
+      else { frames = null; draw(); }
+    };
+    anim = requestAnimationFrame(step);
+  }
+  const zoomOut = () => { if (focus.parent) zoomTo(focus.parent); };
+
+  function leafAt(x, y) {
+    for (const l of leaves) { const s = l.s; if (s && x >= s[0] && y >= s[1] && x < s[0] + s[2] && y < s[1] + s[3]) return l; }
+    return null;
+  }
+  const readout = document.getElementById("readout");
+  function updateReadout() {
+    if (hover) {
+      const t = (TYPE[hover.ext] || OTHER)[1];
+      readout.textContent = `${pathOf(hover)} · ${fmt(hover.size)} · ${t}`;
+    } else readout.textContent = `${pathOf(focus)} · ${fmt(focus.size)} · ${focus.files.toLocaleString("en-US")} files`;
+  }
+  canvas.addEventListener("pointermove", e => {
+    const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    light = { x: x / W, y: y / H };
+    const h = leafAt(x, y);
+    if (h !== hover) { hover = h; updateReadout(); }
+    redraw();
+  });
+  canvas.addEventListener("pointerleave", () => { hover = null; updateReadout(); redraw(); });
+  canvas.addEventListener("click", e => {
+    const r = canvas.getBoundingClientRect();
+    const l = leafAt(e.clientX - r.left, e.clientY - r.top);
+    if (!l || frames) return;
+    let a = l; while (a.parent && a.parent !== focus) a = a.parent;
+    if (a.children) zoomTo(a);
+  });
+  canvas.addEventListener("contextmenu", e => { e.preventDefault(); zoomOut(); });
+  document.getElementById("zoom-out").addEventListener("click", zoomOut);
+  const modeBtn = document.getElementById("color-mode");
+  modeBtn.addEventListener("click", () => {
+    colorMode = colorMode === "type" ? "age" : "type";
+    modeBtn.textContent = colorMode === "type" ? "Colour: Type" : "Colour: Age";
+    modeBtn.setAttribute("aria-pressed", String(colorMode === "age"));
+    renderLegend(); draw();
+  });
+  canvas.tabIndex = 0;
+  canvas.addEventListener("keydown", e => { if (e.key === "Escape" || e.key === "Backspace") { e.preventDefault(); zoomOut(); } });
+
+  /* ---------- Breadcrumbs and legend ---------- */
+  const crumbs = document.getElementById("crumbs");
+  function renderCrumbs() {
+    crumbs.textContent = "";
+    const chain = []; for (let a = focus; a; a = a.parent) chain.unshift(a);
+    chain.forEach((n, i) => {
+      if (i) { const s = document.createElement("span"); s.className = "sep"; s.textContent = "/"; crumbs.append(s); }
+      const b = document.createElement("button"); b.type = "button"; b.textContent = n.name;
+      if (n === focus) b.setAttribute("aria-current", "true"); else b.addEventListener("click", () => zoomTo(n));
+      crumbs.append(b);
+    });
+  }
+  const legend = document.getElementById("legend");
+  function renderLegend() {
+    legend.textContent = "";
+    if (colorMode === "age") {
+      [["New", ageRgb(0)], ["Months old", ageRgb(.5)], ["Years old", ageRgb(1)]].forEach(([t, c]) => add(t, css(c)));
+      return;
+    }
+    const by = new Map();
+    for (const l of leaves) { const [c, t] = TYPE[l.ext] || OTHER; const e = by.get(t) || { c, s: 0 }; e.s += l.size; by.set(t, e); }
+    [...by.entries()].sort((a, b) => b[1].s - a[1].s).slice(0, 9).forEach(([t, e]) => add(`${t} ${fmt(e.s)}`, e.c));
+    function add(t, c) { const s = document.createElement("span"); const i = document.createElement("i"); i.style.background = c; s.append(i, t); legend.append(s); }
+  }
+  renderCrumbs(); renderLegend(); updateReadout();
+  new ResizeObserver(resize).observe(wrap);
+  resize();
+  if (document.fonts) document.fonts.ready.then(() => { mono = getComputedStyle(document.body).getPropertyValue("--mono") || mono; draw(); });
+})();
+</script>

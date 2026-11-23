@@ -106,7 +106,10 @@ notifications for your other product too; the server ignores anything without th
 
 ## 8. The website (Cloudflare Pages)
 
-The pages name Filescape as the seller, with a 14-day refund period. Deploy them:
+`licensing/site` is the whole site, ready to deploy: the homepage, `/buy`, `/terms`, `/privacy`
+and `/refunds`. The homepage is generated from `licensing/site-src`; after changing anything
+there, run `python3 licensing/site-src/build.py` to rebuild `site/index.html`. The Paddle token
+and price for both checkout buttons are in `licensing/site/config.js`.
 
 ```
 npx wrangler@4 pages deploy licensing/site --project-name filescape-site
@@ -118,13 +121,14 @@ In the dashboard, **Workers & Pages > filescape-site > Custom domains**: add `fi
 ## 9. Downloads (R2)
 
 1. **R2 > Create bucket** `filescape-downloads`. **Settings > Custom domains**: `downloads.filescape.app`.
-2. Upload each release:
+2. Upload each release under the names the website's download buttons use (`latest/windows`,
+   `latest/macos`, `latest/linux`). `--cd` gives the downloaded file a proper name:
    ```
-   npx wrangler@4 r2 object put filescape-downloads/latest/Filescape-windows.zip --file Filescape-windows.zip --remote
+   npx wrangler@4 r2 object put filescape-downloads/latest/windows --file Filescape-windows.zip --ct application/zip --cd "attachment; filename=Filescape-windows.zip" --remote
+   npx wrangler@4 r2 object put filescape-downloads/latest/macos --file Filescape-macos.dmg --ct application/x-apple-diskimage --cd "attachment; filename=Filescape-macos.dmg" --remote
+   npx wrangler@4 r2 object put filescape-downloads/latest/linux --file Filescape-linux.tar.gz --ct application/gzip --cd "attachment; filename=Filescape-linux.tar.gz" --remote
    ```
-   The website's download buttons point at `latest/Filescape-windows.zip` and
-   `latest/Filescape-macos.dmg` (`licensing/site/config.js`). Attach the same files to a GitHub
-   release as a mirror.
+   Uploading again replaces the file. Attach the same files to a GitHub release as a mirror.
 
 ## 10. App builds for sale
 
