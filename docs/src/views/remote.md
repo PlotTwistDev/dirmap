@@ -76,6 +76,40 @@ uploads to SFTP and FTP. Elsewhere the file starts again from the beginning.
 
 Every file's size is checked once it has arrived. dirmap doesn't compare checksums yet.
 
+## Comparing and synchronising
+
+**View > Compare Folders…** compares the two panes' folders, a local folder with a server's or
+two servers', and syncs them, as described in
+[Comparing and syncing folders](file-manager.md#comparing-and-syncing-folders). Nothing is copied
+or deleted until you've seen the list and pressed **Sync**, and you can click any row to leave
+it out.
+
+![Compare Folders between this computer and a server, set to Both Ways, with one file left out](../images/remote-compare.png)
+
+With a server on either side, the sync runs as one job in the [Transfers panel](#transfers), with
+its progress, Pause and Stop. If it fails part-way, **Retry** carries on: files that already
+arrived (same size and time) are left alone.
+
+Servers keep file times differently. SFTP sets each copied file's time to the original's, so a
+second compare shows them as the same. Some FTP servers can't set times at all; there, turn on
+**Ignore times** so files of the same size count as the same.
+
+## Editing files on a server
+
+Double-click a file on a server (or use **Open With**) and dirmap fetches it to a folder of its
+own and opens it in its app. Each time you save it there, dirmap sends it back to the server,
+the same safe way as a transfer, and the status bar says so ("Saved notes.txt to render01").
+The pane re-reads the folder, so the new size and time show.
+
+If someone changed the server's copy since you opened it, dirmap asks before replacing it:
+**Replace It** or **Don't Send** (your copy stays, and saving again asks again). If sending
+fails, saving again tries again.
+
+Files being edited are listed at the top of the [Transfers panel](#transfers), with how many
+times each was sent; **Stop Sending** stops sending a file's saves. Opening the same file again
+while it's being edited opens your copy, with your changes, rather than fetching it again.
+Editing stops when dirmap closes.
+
 ## SSH terminal
 
 On an SFTP server, **Open SSH Terminal Here…** (in the item menu, the connection menu in the
@@ -173,6 +207,24 @@ The buttons:
 
 Passwords are never saved in dirmap's own settings. When you tick **Remember** in the sign-in box
 they go to Windows Credential Manager, your macOS Keychain or your desktop's keyring.
+
+### Importing from WinSCP and FileZilla
+
+**Import/Export** under the list brings in sites you already have:
+
+- **Import from FileZilla** reads FileZilla's site list on this computer, with its folders as
+  groups.
+- **Import from WinSCP** reads WinSCP's sites (from the registry on Windows, or from WinSCP.ini).
+  A site in a WinSCP folder (`Render Farm/head node`) goes in that group.
+- **Import from a File…** reads a FileZilla `sitemanager.xml` or a `WinSCP.ini` (in WinSCP,
+  **Tools > Export/Backup Configuration**).
+- **Export for FileZilla…** saves all your sites as a `sitemanager.xml`, which FileZilla, WinSCP
+  and Cyberduck can import. FileZilla has no WebDAV, so WebDAV sites are left out (and named).
+
+The address, port, user name, remote and local folders, key file and notes come across.
+Passwords never do, in either direction: dirmap asks on the first connection, and **Remember**
+keeps them in the keychain. Sites already in the list are skipped, and kinds of server dirmap
+doesn't connect to (S3, for example) are named as left out.
 
 ## Unencrypted protocols
 

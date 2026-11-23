@@ -92,7 +92,7 @@ impl UserApp {
             super::files::archive_temp(file)
                 .map_err(|e| format!("Couldn't take it out of the archive: {e}"))?
         } else if remote::is_remote(file) {
-            remote::fetch(file, 4 << 30).map_err(|e| {
+            remote::edit::open_copy(file).map_err(|e| {
                 format!(
                     "Couldn't fetch it from the server: {}",
                     remote::describe(&e)

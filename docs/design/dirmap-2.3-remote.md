@@ -473,11 +473,11 @@ nothing, upload continued from a part and renamed over an existing file, on SFTP
 | 15 | Transfers, History, Log dock tabs; chip | 3 | ✅ as a Transfers panel along the bottom (running, waiting, then the last 100 finished with results) and a status-bar chip with count and speed; the per-site log stays in the Connection Log window |
 | 16 | Retries; implicit FTPS | 3 | ✅ 3 retries with 1/2/4 s back-off on dropped connections, reconnecting and continuing; implicit FTPS on port 990 |
 | 17 | Verification | 3 | 🔨 size checked after every file (and the part kept out of place if it differs); checksums not yet: SFTP has no standard hash request and FTP's HASH is rare, so it needs a read-back pass, planned with Synchronise in phase 4 |
-| 18 | Compare in panes; Synchronise | 4 | ○ |
-| 19 | Edit and upload on save | 4 | ○ |
-| 20 | Remote analysis cache, transfer sizes | 4 | ○ |
-| 21 | Import/export profiles | 4 | ○ |
-| 22 | SCP | 4 | ○ |
+| 18 | Compare in panes; Synchronise | 4 | ✅ Compare Folders (already able to read servers) gained Ignore times, click-to-leave-out rows and Select in Panes (selects differences in both panes, instead of colouring rows, which would need the list's row painter); a sync with a server runs as one queue job (`compare::sync_items`, `App::queue_sync`), Retry skips files already there; `transfer_with` keeps totals a caller preset |
+| 19 | Edit and upload on save | 4 | ✅ `remote::edit`: opening a server file (double-click, Open With) fetches it to its own folder, a 1 s poll sends each save once it settles (part-file upload on its own lane), `Ask::Overwrite` if the server's copy changed; listed in the Transfers panel with Stop Sending |
+| 20 | Remote analysis cache, transfer sizes | 4 | ○ moved to phase 5 with performance (sizes before a transfer already show while the queue counts) |
+| 21 | Import/export profiles | 4 | ✅ `app/siteimport.rs`: FileZilla sitemanager.xml (folders as groups), WinSCP.ini and the WinSCP registry key (via `reg query`), export as FileZilla XML; never passwords |
+| 22 | SCP | 4 | ○ deferred: every server with SCP that dirmap has met also offers SFTP (OpenSSH has defaulted scp to SFTP since 9.0), so SCP-only is rare; revisit if Rich has such a box |
 | 23 | Performance, server matrix, security review | 5 | ○ |
 | 24 | Help Centre chapter | 5 | ○ |
 | 25 | Embedded SSH terminal | later | option |

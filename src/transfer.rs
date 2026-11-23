@@ -52,7 +52,7 @@ impl Ctl {
 }
 
 /// Bytes in the files under `p`, stopping early if asked to.
-fn bytes_in(p: &Path, ctl: &Ctl) -> u64 {
+pub fn bytes_in(p: &Path, ctl: &Ctl) -> u64 {
     if remote::is_remote(p) {
         return remote::bytes_in(p, ctl);
     }
@@ -219,8 +219,12 @@ pub fn transfer(sources: &[PathBuf], dest_dir: &Path, copy: bool, ask: &mut dyn 
 /// `transfer`, which can be paused and stopped through `ctl` and reports its progress there.
 pub fn transfer_with(sources: &[PathBuf], dest_dir: &Path, copy: bool, ask: &mut dyn FnMut(&Clash) -> Choice, ctl: &Ctl) -> Outcome {
     let mut out = Outcome::default();
-    ctl.items_total.store(sources.len() as u64, Ordering::Relaxed);
-    if copy {
+    // A caller running several of these as one job (a sync) sets the totals for all of it first.
+    let preset = ctl.bytes_total.load(Ordering::Relaxed) > 0;
+    if !preset {
+        ctl.items_total.store(sources.len() as u64, Ordering::Relaxed);
+    }
+    if copy && !preset {
         ctl.counting.store(true, Ordering::Relaxed);
         let total = sources.iter().map(|s| bytes_in(s, ctl)).sum();
         ctl.bytes_total.store(total, Ordering::Relaxed);

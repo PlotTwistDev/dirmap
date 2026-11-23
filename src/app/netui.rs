@@ -646,6 +646,22 @@ impl App {
                         }
                     });
                 }
+                Ask::Overwrite { site, name } => {
+                    ui.heading("Replace the server's copy?");
+                    ui.add_space(6.0);
+                    ui.label(format!("You saved {name}, but its copy on {site} has changed since you opened it, perhaps by someone else."));
+                    ui.add_space(4.0);
+                    ui.label("Sending yours replaces those changes.");
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Replace It").clicked() {
+                            answer = Some(Answer::Trust { always: false });
+                        }
+                        if ui.button("Don't Send").on_hover_text("Keep the server's copy; your saved copy stays here. Save again to be asked again").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            answer = Some(Answer::Cancel);
+                        }
+                    });
+                }
                 Ask::Password { site, retry } | Ask::Passphrase { key: site, retry } => {
                     let passphrase = matches!(a.ask, Ask::Passphrase { .. });
                     ui.heading(if passphrase { "Passphrase for SSH key" } else { "Sign in" });

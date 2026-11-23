@@ -3450,8 +3450,8 @@ impl App {
                 let tmp = archive_temp(&p).map_err(|e| format!("Couldn't take it out of the archive: {e}"))?;
                 actions::open(&tmp)
             } else if remote::is_remote(&p) {
-                // A copy fetched from the server (changes to it aren't sent back).
-                let tmp = remote::fetch(&p, 4 << 30).map_err(|e| format!("Couldn't fetch it from the server: {}", remote::describe(&e)))?;
+                // A copy fetched from the server; saves to it are sent back.
+                let tmp = remote::edit::open_copy(&p).map_err(|e| format!("Couldn't fetch it from the server: {}", remote::describe(&e)))?;
                 actions::open(&tmp)
             } else {
                 actions::open(&p)

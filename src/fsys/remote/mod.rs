@@ -12,6 +12,7 @@
 //! keychain, and only when the user ticks "Remember".
 
 mod dav;
+pub mod edit;
 mod ftp;
 mod sftp;
 
@@ -307,6 +308,9 @@ pub enum Ask {
     /// The protocol sends the password and files unencrypted (FTP, http WebDAV): connect
     /// anyway? `Trust { always }` remembers the answer for this site.
     Insecure { site: String },
+    /// A file being edited here was saved, but the server's copy changed since it was
+    /// fetched: send it anyway (`Trust`)?
+    Overwrite { site: String, name: String },
 }
 
 /// The user's answer.
@@ -1605,5 +1609,65 @@ mod live_flaky {
         assert!(log.iter().any(|l| l.text.contains("trying again")));
         let _ = with(&site, |c| c.rm(&target));
         let _ = fs::remove_dir_all(&local);
+    }
+}
+
+/// Edit with upload on save, against `DIRMAP_TEST_SERVERS` (each) and `DIRMAP_TEST_PASSWORD`.
+#[cfg(test)]
+mod live_edit {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn live_edit_sends_saves() {
+        let urls = std::env::var("DIRMAP_TEST_SERVERS").expect("DIRMAP_TEST_SERVERS");
+        let pw = std::env::var("DIRMAP_TEST_PASSWORD").unwrap_or_default();
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        set_asker(move |q| {
+            a2.lock().unwrap().push(format!("{q:?}"));
+            match q {
+                Ask::NewHostKey { .. } | Ask::Insecure { .. } => Answer::Trust { always: false },
+                Ask::Password { .. } => Answer::Secret { text: pw.clone(), remember: false },
+                // Someone else changed it: don't send.
+                _ => Answer::Cancel,
+            }
+        });
+        let wait_event = || -> (String, bool) {
+            for _ in 0..100 {
+                if let Some(e) = edit::take_events().pop() {
+                    return e;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            panic!("no event");
+        };
+        for url in urls.split_whitespace() {
+            let home = connect(&parse(url).unwrap()).unwrap();
+            let p = home.join(format!("edit-{}.txt", std::process::id()));
+            write_new(&p, b"first").unwrap();
+            let local = edit::open_copy(&p).unwrap();
+            assert_eq!(fs::read(&local).unwrap(), b"first");
+            assert_eq!(edit::editing().len(), 1);
+            // An app saves (FTP times are to the second: let them differ).
+            std::thread::sleep(Duration::from_millis(1100));
+            fs::write(&local, b"second, longer").unwrap();
+            let (msg, err) = wait_event();
+            assert!(!err, "{msg}");
+            assert_eq!(read_bytes(&p, 1 << 20).unwrap(), b"second, longer");
+            // The server's copy changes behind our back; the next save asks, and isn't sent.
+            std::thread::sleep(Duration::from_millis(1100));
+            let (site, rp) = split(&p).unwrap();
+            with(&site, |c| c.put(&rp, &mut io::Cursor::new(b"theirs!".to_vec()), 7, &mut |_| true)).unwrap();
+            fs::write(&local, b"third").unwrap();
+            let (msg, err) = wait_event();
+            assert!(err, "{msg}");
+            assert!(asked.lock().unwrap().iter().any(|a| a.starts_with("Overwrite")));
+            assert_eq!(read_bytes(&p, 1 << 20).unwrap(), b"theirs!");
+            edit::stop(&p);
+            assert!(edit::editing().is_empty());
+            delete(&p).unwrap();
+            asked.lock().unwrap().clear();
+        }
     }
 }

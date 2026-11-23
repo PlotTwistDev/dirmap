@@ -379,7 +379,9 @@ the right's, including their subfolders unless you turn off **Include subfolders
 | **Different** | The same date but a different size, or different contents with **Compare contents** on. |
 | **Same** | The same size and date. Dates within 2 seconds count as the same, as FAT drives and some servers keep times only to 2 seconds. |
 
-Click a result's button to show or hide those items. **Compare contents** also reads files that
+Click a result's button to show or hide those items. **Ignore times** counts files of the same
+size as the same whatever their dates, for servers that can't set a file's time (after a copy
+there, every file looks newer). **Compare contents** also reads files that
 have the same size and date on both sides and compares what's in them. That finds files changed
 without their date changing, but takes as long as reading them all. It works on local folders only.
 
@@ -394,7 +396,14 @@ up:
 | **Both Ways** | Copies each item to the side where it's missing or older. Nothing is deleted, and items marked Different are left alone. |
 | **Mirror to Right** | Makes the right an exact copy of the left: copies as Update Right does, replaces Different items, and deletes what's only on the right. It lists what it will delete and asks again first. |
 
+Click a row to leave that item out of the sync (it shows ☐); click it again to put it back.
+**Select in Panes** closes the window and selects what differs in both panes, so you can work on
+it by hand.
+
 Replaced and deleted items go to the Recycle Bin or Trash, and **Ctrl+Z** undoes the whole sync.
+With a server on either side, the sync runs in the background as one job in the
+[Transfers panel](remote.md#transfers), where it can be paused, stopped and retried; on a server,
+replaced and deleted items are deleted, as a server has no bin.
 
 ![Compare Folders: items only on the left, only on the right and newer on the left, with Update Right ready to copy 7 items](../images/file-manager-compare.png)
 

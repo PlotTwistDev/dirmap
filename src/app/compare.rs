@@ -181,6 +181,7 @@ pub(super) fn compare(
     right: &Path,
     deep: bool,
     contents: bool,
+    ignore_times: bool,
     stop: &AtomicBool,
     seen: &AtomicU64,
 ) -> Result<Vec<Diff>, String> {
@@ -222,7 +223,7 @@ pub(super) fn compare(
                 (Some(a), Some(b)) if a.is_dir != b.is_dir => Kind::Conflict,
                 (Some(a), Some(b)) => {
                     let close = (a.modified - b.modified).abs() <= SLACK;
-                    if a.size == b.size && close {
+                    if a.size == b.size && (close || ignore_times) {
                         let differ = contents
                             && same_contents(&join(left, &path), &join(right, &path), stop)
                                 == Some(false);
@@ -254,6 +255,10 @@ pub(super) struct Compare {
     pub right: PathBuf,
     pub deep: bool,
     pub contents: bool,
+    /// Same size counts as the same, whatever the times (servers that can't set times).
+    pub ignore_times: bool,
+    /// Items the user took out of the sync plan.
+    off: std::collections::HashSet<String>,
     job: Option<(
         mpsc::Receiver<Result<Vec<Diff>, String>>,
         Arc<AtomicBool>,
@@ -273,6 +278,8 @@ impl Compare {
             right,
             deep: true,
             contents: false,
+            ignore_times: false,
+            off: Default::default(),
             job: None,
             diffs: None,
             show: [true, true, true, true, true, false],
@@ -287,6 +294,7 @@ impl Compare {
         let (tx, rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let seen = Arc::new(AtomicU64::new(0));
+        let ignore_times = self.ignore_times;
         let (l, r, deep, contents, st, se) = (
             self.left.clone(),
             self.right.clone(),
@@ -296,13 +304,14 @@ impl Compare {
             seen.clone(),
         );
         std::thread::spawn(move || {
-            let _ = tx.send(compare(&l, &r, deep, contents, &st, &se));
+            let _ = tx.send(compare(&l, &r, deep, contents, ignore_times, &st, &se));
         });
         if let Some((_, s, _)) = self.job.replace((rx, stop, seen)) {
             s.store(true, Ordering::Relaxed);
         }
         self.diffs = None;
         self.confirm = false;
+        self.off.clear();
     }
 }
 
@@ -380,6 +389,7 @@ impl App {
         }
         let mut close = false;
         let mut sync: Option<Vec<(Act, String)>> = None;
+        let mut pick: Option<Vec<(Kind, String)>> = None;
         let screen = ctx.content_rect();
         egui::Modal::new(egui::Id::new("compare")).show(ctx, |ui| {
             ui.set_width((screen.width() - 80.0).clamp(400.0, 1100.0));
@@ -399,6 +409,7 @@ impl App {
             });
             ui.horizontal(|ui| {
                 let mut again = ui.checkbox(&mut c.deep, "Include subfolders").changed();
+                again |= ui.checkbox(&mut c.ignore_times, "Ignore times").on_hover_text("Files of the same size count as the same. For servers that can't set a file's time, where every copy looks newer").changed();
                 again |= ui.checkbox(&mut c.contents, "Compare contents").on_hover_text("Also read files with the same size and date, to be sure they match. Slower; local folders only").changed();
                 if ui.button("Compare Again").clicked() || again {
                     c.start();
@@ -442,13 +453,25 @@ impl App {
             }
             egui::ScrollArea::vertical().max_height((screen.height() - 360.0).max(160.0)).auto_shrink([false, true]).show_rows(ui, row_h, shown.len(), |ui, range| {
                 for d in &shown[range] {
-                    let (row, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), row_h), egui::Sense::hover());
-                    let (arrow, tip) = match action(mode, d.kind) {
+                    let (row, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), row_h), egui::Sense::click());
+                    let act = action(mode, d.kind);
+                    let off = act != Act::Skip && c.off.contains(&d.rel);
+                    if act != Act::Skip && resp.clicked() {
+                        if off {
+                            c.off.remove(&d.rel);
+                        } else {
+                            c.off.insert(d.rel.clone());
+                        }
+                    }
+                    if resp.hovered() && act != Act::Skip {
+                        ui.painter().rect_filled(row, 2.0, ui.visuals().widgets.hovered.weak_bg_fill);
+                    }
+                    let (arrow, tip) = if off { ("☐", "Left out of the sync (click to put it back)") } else { match act {
                         Act::CopyRight => ("➡", "Copied to the right"),
                         Act::CopyLeft => ("⬅", "Copied to the left"),
                         Act::DeleteRight => ("✖", "Deleted on the right (to the bin)"),
                         Act::Skip => ("", "Left as it is"),
-                    };
+                    } };
                     let cols = columns(row.left(), row.width());
                     let p = ui.painter_at(row);
                     let font = egui::TextStyle::Body.resolve(ui.style());
@@ -460,17 +483,18 @@ impl App {
                     };
                     put(0, d.kind.title(), d.kind.colour());
                     put(1, arrow, text);
-                    put(2, &d.rel, text);
+                    put(2, &d.rel, if off { weak } else { text });
                     put(3, &fmt_info(d.left), weak);
                     put(4, &fmt_info(d.right), weak);
-                    resp.on_hover_text(format!("{}: {tip}", d.rel));
+                    let tip = if act != Act::Skip && !off { format!("{}: {tip} (click to leave it out)", d.rel) } else { format!("{}: {tip}", d.rel) };
+                    resp.on_hover_text(tip);
                 }
             });
             ui.separator();
-            let plan: Vec<(Act, String)> = diffs.iter().map(|d| (action(c.mode, d.kind), d.rel.clone())).filter(|(a, _)| *a != Act::Skip).collect();
+            let plan: Vec<(Act, String)> = diffs.iter().filter(|d| !c.off.contains(&d.rel)).map(|d| (action(c.mode, d.kind), d.rel.clone())).filter(|(a, _)| *a != Act::Skip).collect();
             let count = |a: Act| plan.iter().filter(|(x, _)| *x == a).count();
             let (to_r, to_l, del) = (count(Act::CopyRight), count(Act::CopyLeft), count(Act::DeleteRight));
-            let skipped = diffs.iter().filter(|d| d.kind != Kind::Same && action(c.mode, d.kind) == Act::Skip).count();
+            let skipped = diffs.iter().filter(|d| d.kind != Kind::Same && (action(c.mode, d.kind) == Act::Skip || c.off.contains(&d.rel))).count();
             if c.confirm {
                 ui.colored_label(ui.visuals().warn_fg_color, format!("Mirror will delete {del} item{} on the right (to the {}):", if del == 1 { "" } else { "s" }, crate::actions::BIN));
                 egui::ScrollArea::vertical().id_salt("cmp-del").max_height(120.0).show(ui, |ui| {
@@ -518,10 +542,23 @@ impl App {
                     }
                 }
             });
-            ui.weak("Replaced and deleted items go to the bin, and Undo (Ctrl+Z) reverses a sync.");
+            ui.horizontal(|ui| {
+                ui.weak("Click an item to leave it out. Replaced and deleted items go to the bin (on a server, they're deleted), and Undo (Ctrl+Z) reverses a sync.");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Select in Panes").on_hover_text("Close this and select what differs in both panes (the top-level item of each difference)").clicked() {
+                        pick = Some(diffs.iter().filter(|d| d.kind != Kind::Same).map(|d| (d.kind, d.rel.split('/').next().unwrap_or("").to_string())).collect());
+                    }
+                });
+            });
         });
         if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.files.compare = None;
+            return;
+        }
+        if let Some(pick) = pick {
+            let (l, r) = (c.left.clone(), c.right.clone());
+            self.files.compare = None;
+            self.select_differences(&l, &r, &pick);
             return;
         }
         if let Some(plan) = sync {
@@ -531,7 +568,37 @@ impl App {
         }
     }
 
+    /// Select each difference's top-level item in the pane showing its side.
+    fn select_differences(&mut self, left: &Path, right: &Path, pick: &[(Kind, String)]) {
+        let mut n = 0;
+        for p in &mut self.files.panes {
+            let Some(dir) = p.tab().here().dir().map(Path::to_path_buf) else { continue };
+            let side_left = dir == left;
+            if !side_left && dir != right {
+                continue;
+            }
+            let names: std::collections::HashSet<Box<str>> = pick
+                .iter()
+                .filter(|(k, _)| match k {
+                    Kind::OnlyLeft => side_left,
+                    Kind::OnlyRight => !side_left,
+                    _ => true,
+                })
+                .map(|(_, name)| name.as_str().into())
+                .collect();
+            n += names.len();
+            let t = p.tab_mut();
+            t.selected = names.into_iter().collect();
+        }
+        self.ops.notice = Some((format!("Selected {n} item{} that differ.", if n == 1 { "" } else { "s" }), false));
+    }
+
     fn run_sync(&mut self, left: PathBuf, right: PathBuf, plan: Vec<(Act, String)>) {
+        // With a server on either side: the transfer queue, in the background.
+        if remote::is_remote(&left) || remote::is_remote(&right) {
+            self.queue_sync(left, right, plan);
+            return;
+        }
         if self.ops.job.is_some() {
             self.ops.notice = Some(("Another file operation is still running.".into(), true));
             return;
@@ -540,58 +607,8 @@ impl App {
         let ctl = Arc::new(crate::transfer::Ctl::default());
         let c2 = ctl.clone();
         self.run_op(format!("Syncing {} items", plan.len()), move || {
-            let mut steps = Vec::new();
-            let mut touched = Vec::new();
-            let mut errors = Vec::new();
-            let mut done = 0;
-            for (act, rel) in &plan {
-                if !c2.go_on() {
-                    break;
-                }
-                let (src, dest) = match act {
-                    Act::CopyRight => (join(&left, rel), join(&right, rel)),
-                    Act::CopyLeft => (join(&right, rel), join(&left, rel)),
-                    Act::DeleteRight => {
-                        let p = join(&right, rel);
-                        let r = if remote::is_remote(&p) {
-                            remote::delete(&p)
-                                .map(|_| crate::transfer::Step::Deleted(p.clone()))
-                                .map_err(|e| remote::describe(&e))
-                        } else {
-                            crate::actions::trash_keep(&p).map(|receipt| {
-                                crate::transfer::Step::Trashed {
-                                    original: p.clone(),
-                                    receipt,
-                                }
-                            })
-                        };
-                        match r {
-                            Ok(s) => {
-                                steps.push(s);
-                                done += 1;
-                            }
-                            Err(e) => errors.push(format!("Couldn't delete {}: {e}", p.shown())),
-                        }
-                        touched.push(p);
-                        continue;
-                    }
-                    Act::Skip => continue,
-                };
-                let Some(dir) = dest.parent().map(Path::to_path_buf) else {
-                    continue;
-                };
-                let out = crate::transfer::transfer_with(
-                    std::slice::from_ref(&src),
-                    &dir,
-                    true,
-                    &mut |_| crate::transfer::Choice::Replace,
-                    &c2,
-                );
-                steps.extend(out.steps);
-                touched.extend(out.touched);
-                errors.extend(out.errors);
-                done += out.made.len();
-            }
+            let out = sync_items(&left, &right, &plan, false, &c2);
+            let (steps, touched, errors, done) = (out.steps, out.touched, out.errors, out.made.len());
             *rec.lock().unwrap() = steps;
             let r = if errors.is_empty() {
                 Ok(Some(format!(
@@ -607,6 +624,98 @@ impl App {
             j.ctl = Some(ctl);
         }
     }
+}
+
+/// Carry out a sync plan between `left` and `right`: copies replace what's there (to the bin
+/// on this computer), Mirror deletes. One job: the totals cover the whole plan.
+/// `retry`: a second go after a failure, where files already copied (same size, times within
+/// two seconds) are left alone.
+pub(super) fn sync_items(left: &Path, right: &Path, plan: &[(Act, String)], retry: bool, ctl: &crate::transfer::Ctl) -> crate::transfer::Outcome {
+    ctl.items_total.store(plan.len() as u64, Ordering::Relaxed);
+    ctl.counting.store(true, Ordering::Relaxed);
+    let total: u64 = plan
+        .iter()
+        .map(|(act, rel)| match act {
+            Act::CopyRight => crate::transfer::bytes_in(&join(left, rel), ctl),
+            Act::CopyLeft => crate::transfer::bytes_in(&join(right, rel), ctl),
+            _ => 0,
+        })
+        .sum();
+    ctl.bytes_total.store(total, Ordering::Relaxed);
+    ctl.counting.store(false, Ordering::Relaxed);
+    let mut steps = Vec::new();
+    let mut touched = Vec::new();
+    let mut errors = Vec::new();
+    let mut made = Vec::new();
+    let mut skipped = 0;
+    for (act, rel) in plan {
+        if !ctl.go_on() {
+            break;
+        }
+        let (src, dest) = match act {
+            Act::CopyRight => (join(left, rel), join(right, rel)),
+            Act::CopyLeft => (join(right, rel), join(left, rel)),
+            Act::DeleteRight => {
+                let p = join(right, rel);
+                let r = if remote::is_remote(&p) {
+                    remote::delete(&p)
+                        .map(|_| crate::transfer::Step::Deleted(p.clone()))
+                        .map_err(|e| remote::describe(&e))
+                } else {
+                    crate::actions::trash_keep(&p).map(|receipt| {
+                        crate::transfer::Step::Trashed {
+                            original: p.clone(),
+                            receipt,
+                        }
+                    })
+                };
+                match r {
+                    Ok(s) => {
+                        steps.push(s);
+                        made.push(p.clone());
+                    }
+                    Err(e) => errors.push(format!("Couldn't delete {}: {e}", p.shown())),
+                }
+                touched.push(p);
+                continue;
+            }
+            Act::Skip => continue,
+        };
+        let Some(dir) = dest.parent().map(Path::to_path_buf) else {
+            continue;
+        };
+        if retry && already_there(&src, &dest) {
+            skipped += 1;
+            continue;
+        }
+        let out = crate::transfer::transfer_with(
+            std::slice::from_ref(&src),
+            &dir,
+            true,
+            &mut |_| crate::transfer::Choice::Replace,
+            ctl,
+        );
+        steps.extend(out.steps);
+        touched.extend(out.touched);
+        errors.extend(out.errors);
+        made.extend(out.made);
+        skipped += out.skipped;
+    }
+    crate::transfer::Outcome { made, touched, steps, errors, skipped, stopped: ctl.stop.load(Ordering::Relaxed) }
+}
+
+/// Both are files of the same size with times within two seconds: copied on an earlier try.
+fn already_there(a: &Path, b: &Path) -> bool {
+    let info = |p: &Path| -> Option<(bool, u64, i64)> {
+        if remote::is_remote(p) {
+            remote::meta(p).ok().map(|m| (m.is_dir, m.len, m.modified))
+        } else {
+            let m = std::fs::metadata(p).ok()?;
+            let t = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+            Some((m.is_dir(), m.len(), t))
+        }
+    };
+    matches!((info(a), info(b)), (Some((false, la, ta)), Some((false, lb, tb))) if la == lb && (ta - tb).abs() <= SLACK)
 }
 
 /// Where the list's columns start: what differs, the action, the name, the left and right
@@ -657,7 +766,7 @@ mod tests {
         set_time(&l.join("sneaky.txt"), 1_000_000);
         set_time(&r.join("sneaky.txt"), 1_000_000);
         let (stop, seen) = (AtomicBool::new(false), AtomicU64::new(0));
-        let got = compare(&l, &r, true, false, &stop, &seen).unwrap();
+        let got = compare(&l, &r, true, false, false, &stop, &seen).unwrap();
         let kinds: Vec<(&str, Kind)> = got.iter().map(|d| (d.rel.as_str(), d.kind)).collect();
         assert_eq!(
             kinds,
@@ -670,12 +779,12 @@ mod tests {
                 ("sub/new.txt", Kind::NewerLeft)
             ]
         );
-        let got = compare(&l, &r, true, true, &stop, &seen).unwrap();
+        let got = compare(&l, &r, true, true, false, &stop, &seen).unwrap();
         assert_eq!(
             got.iter().find(|d| d.rel == "sneaky.txt").unwrap().kind,
             Kind::Conflict
         );
-        let shallow = compare(&l, &r, false, false, &stop, &seen).unwrap();
+        let shallow = compare(&l, &r, false, false, false, &stop, &seen).unwrap();
         assert!(shallow.iter().all(|d| !d.rel.contains('/')));
         // Plans.
         assert_eq!(action(Mode::ToRight, Kind::OnlyRight), Act::Skip);

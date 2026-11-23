@@ -56,6 +56,8 @@ pub(super) struct Job {
     /// What happened, once finished.
     pub note: String,
     pub errors: Vec<String>,
+    /// A sync's plan between `sources[0]` (left) and `dest` (right), instead of a copy or move.
+    pub sync: Option<Arc<Vec<(super::compare::Act, String)>>>,
     clash: Option<ClashAsk>,
     rx: Option<mpsc::Receiver<Outcome>>,
     lane: u8,
@@ -65,6 +67,9 @@ pub(super) struct Job {
 
 impl Job {
     pub fn label(&self) -> String {
+        if let Some(plan) = &self.sync {
+            return format!("Sync {} item{}: {} and {}", plan.len(), if plan.len() == 1 { "" } else { "s" }, self.sources[0].shown(), self.dest.shown());
+        }
         let what = if self.sources.len() == 1 {
             self.sources[0].file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| self.sources[0].shown())
         } else {
@@ -114,6 +119,8 @@ pub(super) struct Queue {
     pub open: bool,
     /// The job whose clash question is in `Ops::clash` now.
     lent: Option<u64>,
+    /// Server files open in apps here, whose saves are sent back.
+    pub edits: Vec<remote::edit::Editing>,
 }
 
 /// How many finished transfers the list keeps.
@@ -138,6 +145,7 @@ impl Queue {
             ctl: Arc::new(Ctl::default()),
             state: State::Waiting,
             retry,
+            sync: None,
             started: None,
             took: None,
             note: String::new(),
@@ -176,6 +184,15 @@ fn start(job: &mut Job, lane: u8) {
     job.started = Some(Instant::now());
     job.samples.clear();
     let (ctl, sources, dest, copy, retry) = (job.ctl.clone(), job.sources.clone(), job.dest.clone(), job.copy, job.retry);
+    if let Some(plan) = job.sync.clone() {
+        std::thread::spawn(move || {
+            remote::set_lane(lane);
+            let out = super::compare::sync_items(&sources[0], &dest, &plan, retry, &ctl);
+            remote::set_lane(0);
+            let _ = tx.send(out);
+        });
+        return;
+    }
     std::thread::spawn(move || {
         remote::set_lane(lane);
         // A retried move: what went across already is gone from where it was.
@@ -270,9 +287,34 @@ impl App {
         true
     }
 
+    /// A sync with a server on either side: one job in the queue, the plan already confirmed.
+    pub(super) fn queue_sync(&mut self, left: PathBuf, right: PathBuf, plan: Vec<(super::compare::Act, String)>) {
+        let q = &mut self.files.rws.queue;
+        if q.prefs.is_none() {
+            q.prefs = Some(self.files.prefs.remote_desk.transfers.clone());
+        }
+        let id = q.add(vec![left], right, true, false);
+        if let Some(j) = q.jobs.iter_mut().find(|j| j.id == id) {
+            j.sync = Some(Arc::new(plan));
+        }
+        q.fill();
+        q.open = true;
+        self.ops.notice = Some(("Sync started. It runs in the background, in the Transfers panel.".into(), false));
+    }
+
     /// Collect finished transfers, start waiting ones, and pass clash questions to the clash
     /// window. Call once per frame, before `ops_ui`.
     pub(super) fn transfers_poll(&mut self, ctx: &egui::Context) {
+        // Saves of server files being edited, sent back in the background.
+        let sent = remote::edit::take_events();
+        self.files.rws.queue.edits = remote::edit::editing();
+        if !self.files.rws.queue.edits.is_empty() {
+            ctx.request_repaint_after(Duration::from_millis(1000));
+        }
+        if let Some((text, error)) = sent.last().cloned() {
+            self.ops.notice = Some((text, error));
+            self.files_after_op(&[], false);
+        }
         let q = &mut self.files.rws.queue;
         if q.jobs.is_empty() {
             return;
@@ -316,6 +358,7 @@ impl App {
             let verb = if j.copy { "Copied" } else { "Moved" };
             let mut note = match n {
                 0 => String::new(),
+                n if j.sync.is_some() => format!("Synced {n} item{}", if n == 1 { "" } else { "s" }),
                 1 => format!("{verb} to {}", j.dest.shown()),
                 n => format!("{verb} {n} items to {}", j.dest.shown()),
             };
@@ -381,7 +424,7 @@ impl App {
     /// The status bar's transfers chip: what's running and how fast. Opens the panel.
     pub(super) fn transfers_chip(&mut self, ui: &mut egui::Ui) {
         let q = &self.files.rws.queue;
-        if q.jobs.is_empty() {
+        if q.jobs.is_empty() && q.edits.is_empty() {
             return;
         }
         let running: Vec<&Job> = q.jobs.iter().filter(|j| j.state == State::Running).collect();
@@ -399,6 +442,9 @@ impl App {
         };
         if failed > 0 {
             text.push_str(&format!(" · {failed} failed"));
+        }
+        if !q.edits.is_empty() {
+            text.push_str(&format!(" · editing {}", q.edits.len()));
         }
         let open = q.open;
         let mut b = egui::Button::new(egui::RichText::new(text).size(12.0)).small().selected(open);
@@ -456,7 +502,40 @@ impl App {
         let mut retry = None;
         let mut remove = None;
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            if q.jobs.is_empty() {
+            if !q.edits.is_empty() {
+                ui.label(egui::RichText::new("Being edited: saves are sent back to the server").size(12.0).weak());
+                let mut stop = None;
+                for e in &q.edits {
+                    ui.horizontal(|ui| {
+                        ui.label("✏");
+                        let name = e.local.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                        ui.allocate_ui_with_layout(egui::vec2(280.0, 18.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.set_min_width(280.0);
+                            ui.add(egui::Label::new(egui::RichText::new(&name).size(12.0)).truncate()).on_hover_text(format!("{}\nCopy here: {}", e.remote.shown(), e.local.display()));
+                        });
+                        let (text, err) = match (&e.error, e.busy, e.uploads) {
+                            (_, true, _) => ("Sending…".to_string(), false),
+                            (Some(err), _, _) => (err.clone(), true),
+                            (None, _, 0) => ("Open; nothing saved yet".into(), false),
+                            (None, _, 1) => ("Saved to the server once".into(), false),
+                            (None, _, n) => (format!("Saved to the server {n} times"), false),
+                        };
+                        let rt = egui::RichText::new(text).size(12.0);
+                        ui.label(if err { rt.color(ui.visuals().error_fg_color) } else { rt.weak() });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Stop Sending").on_hover_text("Stop sending this file's saves to the server").clicked() {
+                                stop = Some(e.remote.clone());
+                            }
+                        });
+                    });
+                }
+                if let Some(r) = stop {
+                    remote::edit::stop(&r);
+                    q.edits.retain(|e| e.remote != r);
+                }
+                ui.separator();
+            }
+            if q.jobs.is_empty() && q.edits.is_empty() {
                 ui.weak("Nothing here yet. Copies and moves to and from servers show up here.");
             }
             // Running and waiting first, then the finished ones, latest first.
@@ -549,7 +628,10 @@ impl App {
         }
         if let Some(i) = retry {
             let j = q.jobs.remove(i);
-            q.add(j.sources, j.dest, j.copy, true);
+            let id = q.add(j.sources, j.dest, j.copy, true);
+            if let Some(n) = q.jobs.iter_mut().find(|n| n.id == id) {
+                n.sync = j.sync;
+            }
         }
         if let Some(i) = remove {
             q.jobs.remove(i);

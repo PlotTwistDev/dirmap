@@ -44,6 +44,7 @@ mod openwith;
 mod netui;
 mod remoteui;
 mod transfers;
+mod siteimport;
 mod preview;
 mod seqplayer;
 mod thumbs;

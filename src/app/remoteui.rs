@@ -1077,6 +1077,56 @@ impl App {
                         if ui.add_enabled(m.sel.is_some(), egui::Button::new("Delete")).clicked() {
                             m.confirm_delete = true;
                         }
+                        ui.menu_button("Import/Export", |ui| {
+                            use super::siteimport as si;
+                            let mut got: Option<Result<si::Found, String>> = None;
+                            let fz = si::filezilla_file();
+                            if ui.add_enabled(fz.is_some(), egui::Button::new("Import from FileZilla")).on_disabled_hover_text("FileZilla's sites weren't found on this computer; use From a File…").clicked()
+                                && let Some(f) = &fz
+                            {
+                                got = Some(std::fs::read_to_string(f).map_err(|e| e.to_string()).and_then(|t| si::from_filezilla(&t)));
+                                ui.close();
+                            }
+                            if ui.button("Import from WinSCP").clicked() {
+                                got = Some(si::winscp_here());
+                                ui.close();
+                            }
+                            if ui.button("Import from a File…").on_hover_text("A FileZilla sitemanager.xml, or a WinSCP.ini (WinSCP: Tools > Export/Backup Configuration)").clicked() {
+                                if let Some(f) = rfd::FileDialog::new().add_filter("Site files", &["xml", "ini"]).pick_file() {
+                                    got = Some(si::from_file(&f));
+                                }
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button("Export for FileZilla…").on_hover_text("All sites, without passwords, as a sitemanager.xml that FileZilla, WinSCP and Cyberduck can import").clicked() {
+                                let (xml, left_out) = si::to_filezilla(&sites);
+                                if let Some(f) = rfd::FileDialog::new().set_file_name("dirmap-sites.xml").add_filter("FileZilla site file", &["xml"]).save_file() {
+                                    match std::fs::write(&f, xml) {
+                                        Ok(()) => {
+                                            let extra = if left_out.is_empty() { String::new() } else { format!(" Left out (FileZilla has no WebDAV): {}.", left_out.join(", ")) };
+                                            m.tested = Some(Ok(format!("Exported {} sites to {}, without passwords.{extra}", sites.len() - left_out.len(), f.display())));
+                                            m.error = None;
+                                        }
+                                        Err(e) => m.error = Some(format!("Couldn't write {}: {e}", f.display())),
+                                    }
+                                }
+                                ui.close();
+                            }
+                            if let Some(r) = got {
+                                match r {
+                                    Ok(found) => {
+                                        let n = si::merge(sites, found.sites);
+                                        let mut msg = format!("Imported {n} site{}. Passwords aren't brought across: you're asked on the first connection, and Remember keeps them in the keychain.", if n == 1 { "" } else { "s" });
+                                        if !found.skipped.is_empty() {
+                                            msg.push_str(&format!(" Left out: {}.", found.skipped.join("; ")));
+                                        }
+                                        m.tested = Some(Ok(msg));
+                                        m.error = None;
+                                    }
+                                    Err(e) => m.error = Some(e),
+                                }
+                            }
+                        });
                     });
                 });
                 ui.separator();
