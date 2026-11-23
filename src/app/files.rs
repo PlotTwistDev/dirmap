@@ -1566,6 +1566,7 @@ impl App {
         let status = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::symmetric(10, 3));
         let r = egui::Panel::bottom("files-status").frame(status).show(ui, |ui| self.files_status(ui));
         self.help_regions.push((r.response.rect, topics::FILE_MANAGER));
+        self.transfers_panel(ui);
         let side = egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 6, right: 4, top: 8, bottom: 6 });
         let r = egui::Panel::left("places")
             .default_size(self.files.prefs.sidebar_width)
@@ -2958,6 +2959,7 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.activity_chip(ui);
+                self.transfers_chip(ui);
                 self.transfer_strip(ui);
             });
         });

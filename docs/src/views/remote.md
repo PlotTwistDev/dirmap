@@ -24,8 +24,8 @@ beside local all work.
 
 With two panes, **F5** copies and **F6** moves the selected items to the other pane's folder, as
 in WinSCP's Commander view (**Shift+F5** and **Shift+F6** do the same, as in Files). **Ctrl+R**
-reads the folder again. Copies and moves run in the background, ask about names already taken,
-and can be undone, as in Files.
+reads the folder again. Copies and moves to or from a server go to the
+[transfer queue](#transfers); they ask about names already taken and can be undone, as in Files.
 
 On a server, the item menu leaves out what only works on this computer (Show in Explorer, the
 Windows menu, the Recycle Bin, the network path). **Delete Permanently** is the only delete,
@@ -33,6 +33,48 @@ because a server has no bin.
 
 If a folder can't be read (the connection dropped, the server refused), the pane says why, with
 **Try Again** and **Go up**.
+
+## Transfers
+
+Every copy or move to or from a server, however you start it (F5, drag and drop, paste, a drop on
+a site), joins the transfer queue and runs in the background, so you can keep browsing, on the
+same server too. Copies between folders on this computer work as in Files.
+
+![The Transfers panel with two downloads running and one upload finished](../images/remote-transfers.png)
+
+The **Transfers** chip in the status bar shows how many are running or waiting and how fast
+they're going. Click it to open the **Transfers** panel along the bottom:
+
+- Each running transfer shows how much has arrived, its speed and the time left. Hover over the
+  bar to see the file it's on.
+- **Pause** and **Resume** hold one transfer; **Pause All** holds them all. Pausing a waiting one
+  keeps it from starting.
+- **Stop** (or **Cancel** for one that hasn't started) ends it. Files that arrived complete
+  stay, and **Undo** removes them; the file it was part-way through is removed.
+- **At once** sets how many run at the same time (two at first, up to eight). Each uses its own
+  connection to the server, so a long upload doesn't hold up browsing.
+- Finished transfers stay in the list with what happened (the last 100). **Clear Finished**
+  empties it; **Remove** takes one out.
+
+When a name is already taken you're asked, one question at a time, as in Files: **Replace**,
+**Keep Both**, **Skip** or **Stop**.
+
+### When the connection drops
+
+A file is written under a temporary name (`.name.dirmap-part`, beside where it's going) and only
+takes its real name once all of it has arrived and its size matches. So a file with its real name
+is always complete, and a cut-off transfer never replaces a good file.
+
+If the connection drops, dirmap connects again and carries on from where it got to, up to three
+times (after 1, 2 and 4 seconds). If it still can't, the transfer is marked failed and the part
+file stays. **Retry** runs it again: files that already arrived (same size and time) are skipped,
+folders are merged, and the part file is continued rather than started again. Asking for the same
+copy later, even after closing dirmap, continues it the same way.
+
+Continuing part-way works for downloads from SFTP, FTP and WebDAV servers that allow it, and for
+uploads to SFTP and FTP. Elsewhere the file starts again from the beginning.
+
+Every file's size is checked once it has arrived. dirmap doesn't compare checksums yet.
 
 ## SSH terminal
 
@@ -71,7 +113,7 @@ Type an address in the **Quick connect** box in the toolbar and press **Enter**:
 |---|---|
 | `render01` or `rich@render01:2222/mnt/shots` | SFTP (a bare name is SFTP) |
 | `sftp://rich@render01/mnt/shots` | SFTP |
-| `ftps://ftp.example.com` | FTP over TLS |
+| `ftps://ftp.example.com` | FTP over TLS (on port 990, TLS from the start, for older servers) |
 | `ftp://nas.local` | FTP, after a warning that it isn't encrypted |
 | `https://cloud.example.com/remote.php/dav` | WebDAV over https |
 | `\\server\share` or `smb://server/share` | A network share, through your system ([Connect to Server](file-manager.md#network--remote)) |

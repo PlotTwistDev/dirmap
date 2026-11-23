@@ -590,6 +590,10 @@ has got, with:
   one is running, it waits its turn, and they run one after another in the order you asked. Click
   it to see them, or to cancel the ones still waiting.
 
+Copies and moves to or from a server work differently: several run at once, each can be paused,
+stopped and retried, and a dropped connection is picked up where it left off. They're listed in
+the **Transfers** panel (see [Transfers](remote.md#transfers)).
+
 ### Changes made by other programs
 
 The folders open in tabs are watched, so when another program adds, removes, renames or rewrites

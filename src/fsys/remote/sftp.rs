@@ -78,8 +78,14 @@ fn check_key(site: &Site, key: &keys::PublicKey, refused: &Mutex<Option<String>>
             Err(_) => {}
         }
     }
+    // Accepted once already while dirmap runs (more connections to it are made for transfers).
+    let once = format!("hostkey:{host}:{}:{fingerprint}", site.port);
+    if super::session_secret(&once).is_some() {
+        return true;
+    }
     match ask(Ask::NewHostKey { site: site.url(), algorithm, fingerprint }) {
         Answer::Trust { always } => {
+            super::keep_session_secret(&once, "1");
             if always && let Some(own) = own_known_hosts() {
                 if let Some(d) = own.parent() {
                     let _ = std::fs::create_dir_all(d);
@@ -136,6 +142,11 @@ fn load_key(path: &PathBuf) -> Option<keys::PrivateKey> {
         Err(_) => return None,
     }
     let account = format!("ssh-key:{}", path.display());
+    if let Some(p) = super::session_secret(&account)
+        && let Ok(k) = keys::load_secret_key(path, Some(&p))
+    {
+        return Some(k);
+    }
     if let Some(p) = keychain_get(&account) {
         if let Ok(k) = keys::load_secret_key(path, Some(&p)) {
             return Some(k);
@@ -147,6 +158,7 @@ fn load_key(path: &PathBuf) -> Option<keys::PrivateKey> {
         match ask(Ask::Passphrase { key: path.display().to_string(), retry }) {
             Answer::Secret { text, remember } => {
                 if let Ok(k) = keys::load_secret_key(path, Some(&text)) {
+                    super::keep_session_secret(&account, &text);
                     if remember {
                         let _ = keychain_set(&account, &text);
                     }
@@ -353,6 +365,53 @@ impl Backend for Sftp {
                     return Err(super::stopped());
                 }
             }
+            Ok(())
+        })
+    }
+
+    fn get_from(&self, p: &str, offset: u64, out: &mut dyn Write, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        use tokio::io::AsyncSeekExt;
+        rt().block_on(async {
+            let mut f = self.sftp.open(p).await.map_err(sftp_err)?;
+            if offset > 0 {
+                f.seek(std::io::SeekFrom::Start(offset)).await?;
+            }
+            let mut buf = vec![0u8; PIECE];
+            loop {
+                let n = f.read(&mut buf).await?;
+                if n == 0 {
+                    break;
+                }
+                out.write_all(&buf[..n])?;
+                if !tick(n as u64) {
+                    return Err(super::stopped());
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn put_at(&self, p: &str, offset: u64, input: &mut dyn Read, len: u64, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        use russh_sftp::protocol::OpenFlags;
+        use tokio::io::AsyncSeekExt;
+        if offset == 0 {
+            return self.put(p, input, len, tick);
+        }
+        rt().block_on(async {
+            let mut f = self.sftp.open_with_flags(p, OpenFlags::WRITE).await.map_err(sftp_err)?;
+            f.seek(std::io::SeekFrom::Start(offset)).await?;
+            let mut buf = vec![0u8; PIECE];
+            loop {
+                let n = input.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                f.write_all(&buf[..n]).await?;
+                if !tick(n as u64) {
+                    return Err(super::stopped());
+                }
+            }
+            f.shutdown().await?;
             Ok(())
         })
     }

@@ -51,6 +51,7 @@ pub(super) struct DeskSave {
     pub preview: bool,
     pub preview_width: f32,
     pub dock: super::dock::DockPrefs,
+    pub transfers: super::transfers::TransferPrefs,
 }
 
 /// The Remote workspace's own state, kept in `Files`.
@@ -70,6 +71,8 @@ pub(super) struct RemoteState {
     pub(super) target: Option<usize>,
     /// Properties of an item on a server, while the window is open.
     pub(super) props: Option<RemoteProps>,
+    /// Copies and moves to and from servers.
+    pub(super) queue: super::transfers::Queue,
 }
 
 /// The Properties window for an item on a server: what the server says about it, and its
@@ -237,11 +240,12 @@ impl Desk {
             preview: self.preview,
             preview_width: self.preview_width,
             dock: self.dock.clone(),
+            transfers: Default::default(),
         }
     }
 }
 
-/// The dock starts closed in Remote (it gets the Transfers tab in phase 3).
+/// The dock starts closed in Remote.
 struct DockClosed;
 impl DockClosed {
     fn closed(d: &super::dock::DockPrefs) -> super::dock::DockPrefs {
@@ -295,6 +299,12 @@ pub(super) fn use_desk(files: &mut Files, ws: Workspace) {
 /// Finish `Files::to_save`: the Files desk goes in the usual fields and the Remote desk in
 /// `remote_desk`, whichever is on screen.
 pub(super) fn finish_save(files: &Files, p: &mut FilesPrefs) {
+    let transfers = files.rws.queue.prefs.clone().unwrap_or_else(|| p.remote_desk.transfers.clone());
+    finish_desk(files, p);
+    p.remote_desk.transfers = transfers;
+}
+
+fn finish_desk(files: &Files, p: &mut FilesPrefs) {
     let Some(stash) = &files.rws.stash else { return };
     match files.rws.active {
         DeskKind::Files => p.remote_desk = stash.to_save(),
@@ -311,6 +321,7 @@ pub(super) fn finish_save(files: &Files, p: &mut FilesPrefs) {
                 preview: p.preview,
                 preview_width: p.preview_width,
                 dock: p.dock.clone(),
+                transfers: Default::default(),
             };
             let f = stash.to_save();
             (p.tabs, p.active, p.sort, p.reversed, p.view) = (f.first.tabs, f.first.active, f.first.sort, f.first.reversed, f.first.view);

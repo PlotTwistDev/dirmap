@@ -43,6 +43,7 @@ mod marksui;
 mod openwith;
 mod netui;
 mod remoteui;
+mod transfers;
 mod preview;
 mod seqplayer;
 mod thumbs;
@@ -2415,6 +2416,7 @@ impl eframe::App for App {
         if analysis {
             self.tree_shortcuts(&ctx);
         }
+        self.transfers_poll(&ctx);
         self.ops_ui(&ctx);
 
         if let Some(rx) = &self.drives_rx {

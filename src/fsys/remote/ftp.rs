@@ -74,6 +74,15 @@ fn open(site: &Site, password: &str) -> io::Result<Conn> {
     let user = if site.user.is_empty() { "anonymous" } else { site.user.as_str() };
     let password = if site.user.is_empty() { "anonymous@" } else { password };
     let mut c = match site.scheme {
+        // Port 990 is implicit FTPS: TLS from the first byte (older servers).
+        Scheme::Ftps if site.port == 990 => {
+            #[allow(deprecated)]
+            let s = RustlsFtpStream::connect_secure_implicit(addr, RustlsConnector::from(tls_config()?), host).map_err(|e| {
+                let e = ftp_err(e);
+                if e.to_string().contains("certificate") { untrusted(site, &e) } else { e }
+            })?;
+            Conn::Tls(s)
+        }
         Scheme::Ftps => {
             let s = RustlsFtpStream::connect_timeout(addr, TIMEOUT).map_err(ftp_err)?;
             let s = s.into_secure(RustlsConnector::from(tls_config()?), host).map_err(|e| {
@@ -185,11 +194,18 @@ impl Backend for Ftp {
         }
         let (dir, name) = p.rsplit_once('/').unwrap_or(("", p));
         let dir = if dir.is_empty() { "/" } else { dir };
-        self.list_files(dir)?
-            .iter()
-            .find(|f| name_of(f) == name)
-            .map(meta_of)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no such file"))
+        if let Some(m) = self.list_files(dir)?.iter().find(|f| name_of(f) == name).map(meta_of) {
+            return Ok(m);
+        }
+        // Many servers leave dot files out of listings (dirmap's own part files among them);
+        // SIZE and MDTM still answer for a file.
+        match self.op(|c| on!(c, s => s.size(p)).map_err(ftp_err)) {
+            Ok(len) => {
+                let modified = self.op(|c| on!(c, s => s.mdtm(p)).map_err(ftp_err)).map(|t| unix_secs(t.year() as i64, t.month() as i64, t.day() as i64, t.hour() as i64 * 3600 + t.minute() as i64 * 60 + t.second() as i64)).unwrap_or(0);
+                Ok(Meta { len: len as u64, modified, ..Default::default() })
+            }
+            Err(_) => Err(io::Error::new(io::ErrorKind::NotFound, "no such file")),
+        }
     }
 
     fn list(&self, p: &str) -> io::Result<Vec<(String, Meta)>> {
@@ -229,8 +245,16 @@ impl Backend for Ftp {
     }
 
     fn get(&self, p: &str, out: &mut dyn Write, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        self.get_from(p, 0, out, tick)
+    }
+
+    fn get_from(&self, p: &str, offset: u64, out: &mut dyn Write, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
         let stopped = std::cell::Cell::new(false);
         let r = self.op(|c| {
+            if offset > 0 {
+                // REST: servers that can't are told apart by the error, and the copy starts over.
+                on!(c, s => s.resume_transfer(offset as usize)).map_err(|e| io::Error::new(io::ErrorKind::Unsupported, ftp_err(e).to_string()))?;
+            }
             on!(c, s => s.retr(p, |r: &mut dyn Read| {
                 let mut buf = vec![0u8; 256 << 10];
                 loop {
@@ -250,10 +274,16 @@ impl Backend for Ftp {
         if stopped.get() { Err(super::stopped()) } else { r }
     }
 
-    fn put(&self, p: &str, input: &mut dyn Read, _len: u64, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+    fn put(&self, p: &str, input: &mut dyn Read, len: u64, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        self.put_at(p, 0, input, len, tick)
+    }
+
+    /// From `offset` on, APPE adds to the end of the part already there (the caller checked
+    /// that it's `offset` long).
+    fn put_at(&self, p: &str, offset: u64, input: &mut dyn Read, _len: u64, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
         self.op(|c| {
             on!(c, s => {
-                let mut w = s.put_with_stream(p).map_err(ftp_err)?;
+                let mut w = if offset > 0 { s.append_with_stream(p) } else { s.put_with_stream(p) }.map_err(ftp_err)?;
                 let mut buf = vec![0u8; 256 << 10];
                 loop {
                     let n = input.read(&mut buf)?;
@@ -284,4 +314,15 @@ impl Backend for Ftp {
     fn alive(&self) -> bool {
         !self.dead.load(Ordering::Relaxed)
     }
+}
+
+/// Seconds since the Unix epoch for a UTC date and time of day (MDTM's answer).
+fn unix_secs(y: i64, m: i64, d: i64, secs: i64) -> i64 {
+    // Days from 1970-01-01 (Howard Hinnant's days_from_civil).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    (era * 146097 + doe - 719468) * 86400 + secs
 }

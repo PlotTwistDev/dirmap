@@ -720,6 +720,10 @@ impl App {
 
     /// Copy or move items into a folder, in the background, then select the last of them.
     pub(super) fn transfer(&mut self, sources: Vec<PathBuf>, dest: PathBuf, copy: bool) {
+        // To or from a server: the transfer queue, several at once in the background.
+        if self.queue_transfer(&sources, &dest, copy) {
+            return;
+        }
         if self.ops.job.is_some() {
             // Wait for the one running: copies and moves run one at a time, in the order asked.
             let n = self.ops.queued.len() + 1;

@@ -424,6 +424,12 @@ Each phase ends with a Windows build on Rich's PC and a review, as before.
 4. Retries with backoff on dropped connections; implicit FTPS.
 5. Verification option.
 
+Phase 3 tests: `live_servers` (resume from a part, a stale part started over, stop leaves
+nothing, upload continued from a part and renamed over an existing file, on SFTP and FTP) and
+`live_retry_and_resume` (through a proxy that cuts the first connections part-way:
+`python3 docs/design/tools/flaky-proxy.py 2223 2222 2500000 3`, then
+`DIRMAP_TEST_FLAKY=sftp://tester@127.0.0.1:2223/home/tester cargo test live_retry -- --ignored`).
+
 ### Phase 4: Advanced
 1. Compare panes in place; Synchronise with preview.
 2. Edit with upload on save.
@@ -455,18 +461,18 @@ Each phase ends with a Windows build on Rich's PC and a review, as before.
 | 3 | Site Manager window | 1 | ✅ list by group with search, form, Save, Test, Connect, New, Duplicate, Delete, rename group |
 | 4 | Quick connect, connection chip, insecure warning | 1 | ✅ `Ask::Insecure` in `remote::open`, so every way of connecting asks |
 | 5 | Remote sidebar (Sites, Sessions, Recent) | 1 | 🔨 Sites (favourites, groups, search) and Other Connections done; Recent servers not yet |
-| 6 | Capabilities, browse channel apart from transfers | 1 | ○ moved to phase 2/3, with the menus and the queue that need them |
+| 6 | Capabilities, browse channel apart from transfers | 1 | ✅ `remote::caps` (phase 2); connection pool keyed by (site, lane), browsing on lane 0, each running transfer on its own lane (`remote::set_lane`) |
 | 7 | Connection log with redaction | 1 | ✅ `remote::log_of`, `latency`; unsafe listed names refused (`safe_name`, `local_name`) |
 | 8 | Two-pane defaults, F5/F6 to other pane | 2 | ✅ `remoteui::remote_keys` (Shift+F5/F6 still work) |
 | 9 | Capability-aware menus | 2 | ✅ `remote::caps`; `RowMenu.server/ssh` drop Explorer, system menu, bin, UNC on servers |
 | 10 | Remote properties, chmod | 2 | ✅ `RemoteProps` window; `Backend::chmod/readlink` (SFTP setstat, FTP SITE CHMOD); recursive option |
 | 11 | SSH terminal (system) | 2 | ✅ `remote::ssh_args`, `remoteui::launch_ssh` (ssh.exe console, Terminal.app, Linux terminals); Ctrl+Alt+T |
-| 12 | Listing cache, error pane | 2 | 🔨 Try Again on errors done; back/forward listing cache moved to phase 3 with the browse channel |
-| 13 | Transfer queue, workers, clash rules | 3 | ○ |
-| 14 | Resume, temp-name uploads | 3 | ○ |
-| 15 | Transfers, History, Log dock tabs; chip | 3 | ○ |
-| 16 | Retries; implicit FTPS | 3 | ○ |
-| 17 | Verification | 3 | ○ |
+| 12 | Listing cache, error pane | 2 | 🔨 Try Again on errors done; back/forward listing cache moved to phase 5 (performance), since browsing no longer waits behind transfers |
+| 13 | Transfer queue, workers, clash rules | 3 | ✅ `app/transfers.rs`: anything to or from a server joins the queue from `App::transfer`; 1–8 at once (default 2); per-job pause, stop, retry; clash questions go through the usual clash window one at a time; Undo per job. Local copies keep the one-at-a-time `Ops` job. The queue isn't kept across restarts: asking for the same copy again continues the part files |
+| 14 | Resume, temp-name uploads | 3 | ✅ `Backend::get_from/put_at` (SFTP seek, FTP REST and APPE, WebDAV Range); downloads to `.name.dirmap-part` beside the target, uploads to `.name.dirmap-part` in the server folder, renamed into place when complete (old target moved aside first where the server won't rename over it); parts continued only when their time matches the source |
+| 15 | Transfers, History, Log dock tabs; chip | 3 | ✅ as a Transfers panel along the bottom (running, waiting, then the last 100 finished with results) and a status-bar chip with count and speed; the per-site log stays in the Connection Log window |
+| 16 | Retries; implicit FTPS | 3 | ✅ 3 retries with 1/2/4 s back-off on dropped connections, reconnecting and continuing; implicit FTPS on port 990 |
+| 17 | Verification | 3 | 🔨 size checked after every file (and the part kept out of place if it differs); checksums not yet: SFTP has no standard hash request and FTP's HASH is rare, so it needs a read-back pass, planned with Synchronise in phase 4 |
 | 18 | Compare in panes; Synchronise | 4 | ○ |
 | 19 | Edit and upload on save | 4 | ○ |
 | 20 | Remote analysis cache, transfer sizes | 4 | ○ |

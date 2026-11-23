@@ -234,9 +234,17 @@ impl Backend for Dav {
     }
 
     fn get(&self, p: &str, out: &mut dyn Write, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
-        let mut r = self.send("GET", p, &[], Body::None)?;
+        self.get_from(p, 0, out, tick)
+    }
+
+    fn get_from(&self, p: &str, offset: u64, out: &mut dyn Write, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        let range = if offset > 0 { vec![("Range", format!("bytes={offset}-"))] } else { Vec::new() };
+        let mut r = self.send("GET", p, &range, Body::None)?;
         if !r.status().is_success() {
             return Err(status_err(&r, "downloading"));
+        }
+        if offset > 0 && r.status().as_u16() != 206 {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "The server can't continue a download part-way."));
         }
         let mut rd = r.body_mut().with_config().limit(u64::MAX).reader();
         let mut buf = vec![0u8; 256 << 10];

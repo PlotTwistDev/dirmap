@@ -175,7 +175,7 @@ pub(super) struct ClashAsk {
 }
 
 /// How many changes Undo remembers.
-const UNDO_MAX: usize = 30;
+pub(super) const UNDO_MAX: usize = 30;
 
 impl Ops {
     /// A window of ours is up and owns the keyboard.
@@ -701,7 +701,7 @@ impl App {
     }
 
     /// Asks what to do when a copy or move finds a name taken. The copy waits meanwhile.
-    fn clash_window(&mut self, ctx: &egui::Context) {
+    pub(super) fn clash_window(&mut self, ctx: &egui::Context) {
         let Some(c) = &mut self.ops.clash else { return };
         if c.current.is_none() {
             match c.rx.try_recv() {

@@ -264,7 +264,14 @@ trait Backend: Send + Sync {
     fn get(&self, p: &str, out: &mut dyn Write, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()>;
     /// Upload (replacing what's there).
     fn put(&self, p: &str, input: &mut dyn Read, len: u64, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()>;
-    /// Set the modified time, where the server allows it.
+    /// Read from `offset` on, to continue a download. Unsupported where the server can't.
+    fn get_from(&self, p: &str, offset: u64, out: &mut dyn Write, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        if offset == 0 { self.get(p, out, tick) } else { Err(io::Error::new(io::ErrorKind::Unsupported, "can't continue part-way")) }
+    }
+    /// Write from `offset` on, to continue an upload. Unsupported where the server can't.
+    fn put_at(&self, p: &str, offset: u64, input: &mut dyn Read, len: u64, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        if offset == 0 { self.put(p, input, len, tick) } else { Err(io::Error::new(io::ErrorKind::Unsupported, "can't continue part-way")) }
+    }
     /// Change an item's Unix permission bits.
     fn chmod(&self, _p: &str, _mode: u32) -> io::Result<()> {
         Err(io::Error::new(io::ErrorKind::Unsupported, "This kind of server can't change permissions."))
@@ -273,6 +280,7 @@ trait Backend: Send + Sync {
     fn readlink(&self, _p: &str) -> io::Result<String> {
         Err(io::Error::new(io::ErrorKind::Unsupported, "This kind of server doesn't say where links point."))
     }
+    /// Set the modified time, where the server allows it.
     fn touch(&self, _p: &str, _modified: i64) -> io::Result<()> {
         Ok(())
     }
@@ -374,7 +382,30 @@ pub fn forget_password(url: &str) {
 
 /// The password for a site: the keychain's, else the user's (kept if they say so). `tried`
 /// is the one that just failed, so it isn't offered again.
+/// Passwords and passphrases given while dirmap runs, so the extra connections made for
+/// transfers don't ask again. Only in memory: never written anywhere.
+fn session() -> &'static Mutex<HashMap<String, String>> {
+    static S: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    S.get_or_init(Default::default)
+}
+
+pub(super) fn session_secret(account: &str) -> Option<String> {
+    session().lock().unwrap_or_else(|e| e.into_inner()).get(account).cloned()
+}
+
+pub(super) fn keep_session_secret(account: &str, secret: &str) {
+    session().lock().unwrap_or_else(|e| e.into_inner()).insert(account.to_string(), secret.to_string());
+}
+
 fn password_for(site: &Site, tried: Option<&str>) -> Option<String> {
+    if tried.is_none()
+        && let Some(p) = session_secret(&site.account())
+    {
+        return Some(p);
+    }
+    if tried.is_some() {
+        session().lock().unwrap_or_else(|e| e.into_inner()).remove(&site.account());
+    }
     if tried.is_none()
         && let Some(p) = keychain_get(&site.account())
     {
@@ -391,6 +422,7 @@ fn password_for(site: &Site, tried: Option<&str>) -> Option<String> {
             if remember {
                 let _ = keychain_set(&site.account(), &text);
             }
+            keep_session_secret(&site.account(), &text);
             Some(text)
         }
         _ => None,
@@ -423,15 +455,27 @@ pub fn set_options(url: &str, o: Options) {
 
 type Slot = Arc<Mutex<Option<Arc<dyn Backend>>>>;
 
-fn pool() -> &'static Mutex<HashMap<Site, Slot>> {
-    static P: OnceLock<Mutex<HashMap<Site, Slot>>> = OnceLock::new();
+fn pool() -> &'static Mutex<HashMap<(Site, u8), Slot>> {
+    static P: OnceLock<Mutex<HashMap<(Site, u8), Slot>>> = OnceLock::new();
     P.get_or_init(Default::default)
+}
+
+thread_local! {
+    /// Which of a site's connections this thread uses: 0 for browsing, 1… for transfers, so a
+    /// long download never makes the file list wait.
+    static LANE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+/// Use connection `lane` (1… for transfer workers) for every server call from this thread.
+pub fn set_lane(lane: u8) {
+    LANE.with(|l| l.set(lane));
 }
 
 /// The open connection to a site, connecting (and asking for what's needed) first if there
 /// isn't one. Connections to one site are made one at a time.
 fn conn(site: &Site) -> io::Result<Arc<dyn Backend>> {
-    let slot = pool().lock().unwrap().entry(site.clone()).or_default().clone();
+    let lane = LANE.with(|l| l.get());
+    let slot = pool().lock().unwrap().entry((site.clone(), lane)).or_default().clone();
     let mut s = slot.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(c) = s.as_ref()
         && c.alive()
@@ -709,7 +753,7 @@ pub fn connect(path: &Path) -> Result<PathBuf, String> {
 /// Close the connection to a site (open windows on it connect again when used).
 pub fn disconnect(path: &Path) {
     if let Some((site, _)) = split(path) {
-        pool().lock().unwrap().remove(&site);
+        pool().lock().unwrap().retain(|(s, _), _| *s != site);
     }
 }
 
@@ -719,9 +763,10 @@ pub fn connected() -> Vec<String> {
     let mut out: Vec<String> = p
         .iter()
         .filter(|(_, slot)| slot.try_lock().ok().is_some_and(|s| s.as_ref().is_some_and(|c| c.alive())))
-        .map(|(site, _)| site.url())
+        .map(|((site, _), _)| site.url())
         .collect();
     out.sort();
+    out.dedup();
     out
 }
 
@@ -926,49 +971,269 @@ pub fn copy_tree(src: &Path, dest: &Path, ctl: &Ctl) -> io::Result<()> {
     }
 }
 
-fn download_file(site: &Site, p: &str, dest: &Path, m: Meta, ctl: &Ctl) -> io::Result<()> {
-    set_current(ctl, p.rsplit('/').next().unwrap_or(p));
-    let mut f = fs::File::create(dest)?;
-    let r = with(site, |c| {
-        let mut tick = |n: u64| {
-            ctl.bytes_done.fetch_add(n, Ordering::Relaxed);
-            ctl.go_on()
-        };
-        c.get(p, &mut f, &mut tick)
-    });
-    if let Err(e) = r {
-        drop(f);
-        let _ = fs::remove_file(dest);
-        return Err(e);
+/// Errors worth trying the file again for: a dropped or stalled connection. Not a refusal, a
+/// missing file, or the user stopping.
+fn worth_retry(e: &io::Error) -> bool {
+    use io::ErrorKind::*;
+    !matches!(
+        e.kind(),
+        NotFound | PermissionDenied | Interrupted | Unsupported | InvalidInput | InvalidData | AlreadyExists | StorageFull | QuotaExceeded | FileTooLarge | ReadOnlyFilesystem | DirectoryNotEmpty | IsADirectory | NotADirectory
+    )
+}
+
+/// How many times a file is tried again after a dropped connection.
+const RETRIES: u32 = 3;
+
+/// Forget this lane's connection to a site, so the next call connects afresh.
+fn drop_conn(site: &Site) {
+    let lane = LANE.with(|l| l.get());
+    if let Some(slot) = pool().lock().unwrap().get(&(site.clone(), lane)).cloned() {
+        *slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
-    f.flush()?;
-    if let Some(t) = m.modified_time() {
+}
+
+/// Wait before trying again (1, 2, 4 s), unless stopped. False once stopped.
+fn back_off(attempt: u32, ctl: &Ctl) -> bool {
+    let until = std::time::Instant::now() + Duration::from_secs(1 << attempt.min(4));
+    while std::time::Instant::now() < until {
+        if !ctl.go_on() {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    ctl.go_on()
+}
+
+fn was_stopped(e: &io::Error, ctl: &Ctl) -> bool {
+    ctl.stop.load(Ordering::Relaxed) || (e.kind() == io::ErrorKind::Interrupted && e.to_string() == "stopped")
+}
+
+/// The name a download is written under until it's complete: `.name.dirmap-part`, next to
+/// where it goes. A part left by a failed download is continued by the next try.
+pub fn part_name(dest: &Path) -> PathBuf {
+    let name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "file".into());
+    dest.with_file_name(format!(".{name}.dirmap-part"))
+}
+
+/// The same for an upload, in the server folder it goes to.
+fn remote_part(p: &str) -> String {
+    let (dir, name) = p.rsplit_once('/').unwrap_or(("", p));
+    format!("{dir}/.{name}.dirmap-part")
+}
+
+/// Download one file. It's written to a part file next to `dest` and renamed into place only
+/// once all of it has arrived and its size matches the server's, so a cut-off download never
+/// looks like a finished file. A dropped connection is tried again (continuing where it got to,
+/// where the server allows); a part left by a failure is continued next time.
+fn download_file(site: &Site, p: &str, dest: &Path, m: Meta, ctl: &Ctl) -> io::Result<()> {
+    use std::io::{Seek, SeekFrom};
+    set_current(ctl, p.rsplit('/').next().unwrap_or(p));
+    let part = part_name(dest);
+    // Bytes of this file counted in the progress so far.
+    let counted = std::cell::Cell::new(0u64);
+    let mut attempt = 0;
+    loop {
+        // A part is only continued if it's from the same version of the file (its modified
+        // time is set to the server's after each try) and isn't longer than it.
+        let have = fs::metadata(&part)
+            .ok()
+            .filter(|d| d.is_file() && d.len() <= m.len && m.modified > 0 && d.modified().ok() == m.modified_time())
+            .map(|d| d.len())
+            .unwrap_or(0);
+        let mut f = fs::OpenOptions::new().create(true).write(true).truncate(false).open(&part)?;
+        f.set_len(have)?;
+        f.seek(SeekFrom::End(0))?;
+        if have != counted.get() {
+            if have > counted.get() {
+                ctl.bytes_done.fetch_add(have - counted.get(), Ordering::Relaxed);
+            } else {
+                ctl.bytes_done.fetch_sub((counted.get() - have).min(ctl.bytes_done.load(Ordering::Relaxed)), Ordering::Relaxed);
+            }
+            counted.set(have);
+        }
+        if have > 0 {
+            note(site, false, format!("Continuing {} from {}", p, crate::scan::human(have)));
+        }
+        let r = conn(site).and_then(|c| {
+            let mut tick = |n: u64| {
+                counted.set(counted.get() + n);
+                ctl.bytes_done.fetch_add(n, Ordering::Relaxed);
+                ctl.go_on()
+            };
+            match c.get_from(p, have, &mut f, &mut tick) {
+                // Can't continue part-way here: from the start instead.
+                Err(e) if have > 0 && e.kind() == io::ErrorKind::Unsupported => {
+                    f.set_len(0)?;
+                    f.seek(SeekFrom::Start(0))?;
+                    ctl.bytes_done.fetch_sub(have.min(ctl.bytes_done.load(Ordering::Relaxed)), Ordering::Relaxed);
+                    counted.set(counted.get() - have);
+                    c.get(p, &mut f, &mut tick)
+                }
+                r => r,
+            }
+        });
+        let r = r.and_then(|_| f.flush());
+        match r {
+            Ok(()) => break,
+            Err(e) if was_stopped(&e, ctl) => {
+                drop(f);
+                let _ = fs::remove_file(&part);
+                return Err(e);
+            }
+            Err(e) => {
+                let _ = f.flush();
+                if let Some(t) = m.modified_time() {
+                    let _ = f.set_modified(t);
+                }
+                drop(f);
+                if attempt < RETRIES && worth_retry(&e) {
+                    note(site, true, format!("{p}: {} (trying again, {} of {RETRIES})", describe(&e), attempt + 1));
+                    drop_conn(site);
+                    if !back_off(attempt, ctl) {
+                        let _ = fs::remove_file(&part);
+                        return Err(stopped());
+                    }
+                    attempt += 1;
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+    let got = fs::metadata(&part)?.len();
+    if got != m.len {
+        let _ = fs::remove_file(&part);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{p} arrived as {} but the server says it's {}; it may have changed while it was copied", crate::scan::human(got), crate::scan::human(m.len)),
+        ));
+    }
+    if let Some(t) = m.modified_time()
+        && let Ok(f) = fs::OpenOptions::new().write(true).open(&part)
+    {
         let _ = f.set_modified(t);
+    }
+    fs::rename(&part, dest)
+}
+
+/// Upload one file. It's written to `.name.dirmap-part` in the server folder and renamed over
+/// the target only once complete and the right size, so a cut-off upload never replaces a good
+/// file. A dropped connection is tried again, continuing where it got to on SFTP.
+fn upload_file(src: &Path, site: &Site, p: &str, ctl: &Ctl) -> io::Result<()> {
+    use std::io::{Seek, SeekFrom};
+    set_current(ctl, &src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    let md = fs::metadata(src)?;
+    let secs = md.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0);
+    let tmp = remote_part(p);
+    let counted = std::cell::Cell::new(0u64);
+    let mut attempt = 0;
+    loop {
+        // Continue a part only if it's from this version of the file: after a failed try its
+        // modified time is set to the local file's.
+        // On a second try the part is this upload's own, whatever the server did with its time.
+        let have = conn(site)
+            .and_then(|c| c.stat(&tmp))
+            .ok()
+            .filter(|t| !t.is_dir && t.len <= md.len() && (attempt > 0 || (secs > 0 && t.modified == secs)))
+            .map(|t| t.len)
+            .unwrap_or(0);
+        if have != counted.get() {
+            if have > counted.get() {
+                ctl.bytes_done.fetch_add(have - counted.get(), Ordering::Relaxed);
+            } else {
+                ctl.bytes_done.fetch_sub((counted.get() - have).min(ctl.bytes_done.load(Ordering::Relaxed)), Ordering::Relaxed);
+            }
+            counted.set(have);
+        }
+        let r = conn(site).and_then(|c| {
+            let mut f = fs::File::open(src)?;
+            let mut tick = |n: u64| {
+                counted.set(counted.get() + n);
+                ctl.bytes_done.fetch_add(n, Ordering::Relaxed);
+                ctl.go_on()
+            };
+            let r = if have > 0 {
+                f.seek(SeekFrom::Start(have))?;
+                note(site, false, format!("Continuing {} from {}", p, crate::scan::human(have)));
+                c.put_at(&tmp, have, &mut f, md.len() - have, &mut tick)
+            } else {
+                Err(io::Error::new(io::ErrorKind::Unsupported, ""))
+            };
+            match r {
+                Err(e) if e.kind() == io::ErrorKind::Unsupported => {
+                    f.seek(SeekFrom::Start(0))?;
+                    ctl.bytes_done.fetch_sub(counted.get().min(ctl.bytes_done.load(Ordering::Relaxed)), Ordering::Relaxed);
+                    counted.set(0);
+                    c.put(&tmp, &mut f, md.len(), &mut tick)
+                }
+                r => r,
+            }
+        });
+        match r {
+            Ok(()) => break,
+            Err(e) if was_stopped(&e, ctl) => {
+                let _ = with(site, |c| c.rm(&tmp));
+                return Err(e);
+            }
+            Err(e) => {
+                let retry = attempt < RETRIES && worth_retry(&e);
+                if retry {
+                    note(site, true, format!("{p}: {} (trying again, {} of {RETRIES})", describe(&e), attempt + 1));
+                    drop_conn(site);
+                }
+                // Marked as from this version of the file, so it can be continued.
+                if secs > 0 {
+                    let _ = conn(site).and_then(|c| c.touch(&tmp, secs));
+                }
+                if retry {
+                    if !back_off(attempt, ctl) {
+                        let _ = with(site, |c| c.rm(&tmp));
+                        return Err(stopped());
+                    }
+                    attempt += 1;
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+    let sent = with(site, |c| c.stat(&tmp))?;
+    if sent.len != md.len() {
+        let _ = with(site, |c| c.rm(&tmp));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{p} reached the server as {} but is {} here; it may have changed while it was copied", crate::scan::human(sent.len), crate::scan::human(md.len())),
+        ));
+    }
+    replace_with(site, &tmp, p)?;
+    if secs > 0 {
+        let _ = with(site, |c| c.touch(p, secs));
     }
     Ok(())
 }
 
-fn upload_file(src: &Path, site: &Site, p: &str, ctl: &Ctl) -> io::Result<()> {
-    set_current(ctl, &src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
-    let md = fs::metadata(src)?;
-    let r = with(site, |c| {
-        let mut f = fs::File::open(src)?;
-        let mut tick = |n: u64| {
-            ctl.bytes_done.fetch_add(n, Ordering::Relaxed);
-            ctl.go_on()
-        };
-        c.put(p, &mut f, md.len(), &mut tick)
-    });
-    if let Err(e) = r {
-        let _ = with(site, |c| c.rm(p));
+/// Rename `tmp` over `p`. Servers that won't rename over an item get the old one moved aside
+/// first, then removed once the new one is in place (or put back if that fails).
+fn replace_with(site: &Site, tmp: &str, p: &str) -> io::Result<()> {
+    let c = conn(site)?;
+    let Err(e) = c.rename(tmp, p) else { return Ok(()) };
+    if c.stat(p).is_err() {
         return Err(e);
     }
-    if let Ok(t) = md.modified()
-        && let Ok(d) = t.duration_since(UNIX_EPOCH)
-    {
-        let _ = with(site, |c| c.touch(p, d.as_secs() as i64));
+    let old = format!("{}.old", tmp.trim_end_matches(".dirmap-part"));
+    let old = format!("{old}.dirmap-part");
+    let _ = c.rm(&old);
+    c.rename(p, &old)?;
+    match c.rename(tmp, p) {
+        Ok(()) => {
+            let _ = c.rm(&old);
+            Ok(())
+        }
+        Err(e) => {
+            let _ = c.rename(&old, p);
+            Err(e)
+        }
     }
-    Ok(())
 }
 
 /// Write bytes to a new file on a server.
@@ -1024,9 +1289,7 @@ pub fn fetch(path: &Path, max: u64) -> io::Result<PathBuf> {
         return Ok(dest);
     }
     fs::create_dir_all(&dir)?;
-    let part = dir.join(format!(".{name}.part"));
-    download_file(&site, &p, &part, m, &Ctl::default())?;
-    fs::rename(&part, &dest)?;
+    download_file(&site, &p, &dest, m, &Ctl::default())?;
     Ok(dest)
 }
 
@@ -1227,6 +1490,41 @@ mod live {
             assert!(meta(&nf).unwrap().is_dir);
             write_new(&dir.join("new.txt"), b"made").unwrap();
             assert_eq!(meta(&dir.join("new.txt")).unwrap().len, 4);
+            // Downloads continue from a part left by an earlier try, when it's from the same
+            // version of the file; a stale part is started over.
+            let (site, rp) = split(&dir.join("copy/sub/big.bin")).unwrap();
+            let rm = meta(&dir.join("copy/sub/big.bin")).unwrap();
+            let dest = local.join("resumed.bin");
+            let part = part_name(&dest);
+            fs::write(&part, &big[..1_000_000]).unwrap();
+            fs::OpenOptions::new().write(true).open(&part).unwrap().set_modified(rm.modified_time().unwrap()).unwrap();
+            let c2 = Ctl::default();
+            download_file(&site, &rp, &dest, rm, &c2).unwrap();
+            assert_eq!(fs::read(&dest).unwrap(), big);
+            assert!(!part.exists());
+            assert_eq!(c2.bytes_done.load(Ordering::Relaxed), 3_000_000);
+            assert!(log_of(&site.url()).iter().any(|l| l.text.contains("Continuing")), "no resume on {url}");
+            fs::write(&part, vec![9u8; 1_000_000]).unwrap();
+            fs::remove_file(&dest).unwrap();
+            download_file(&site, &rp, &dest, rm, &Ctl::default()).unwrap();
+            assert_eq!(fs::read(&dest).unwrap(), big, "a stale part was continued on {url}");
+            // Stopped: nothing is left behind.
+            let stop = Ctl::default();
+            stop.stop.store(true, Ordering::Relaxed);
+            assert!(download_file(&site, &rp, &local.join("stopped.bin"), rm, &stop).is_err());
+            assert!(!part_name(&local.join("stopped.bin")).exists() && !local.join("stopped.bin").exists());
+            // Uploads go to a part and replace the target only when complete; a part from
+            // this version of the file is continued where the server can.
+            let src = local.join("tree/sub/big.bin");
+            let target = format!("{}/up.bin", split(&dir).unwrap().1);
+            write_new(&path_of(&site, &target), b"old contents").unwrap();
+            let secs = fs::metadata(&src).unwrap().modified().unwrap().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+            write_new(&path_of(&site, &remote_part(&target)), &big[..1_000_000]).unwrap();
+            let _ = with(&site, |c| c.touch(&remote_part(&target), secs));
+            upload_file(&src, &site, &target, &Ctl::default()).unwrap();
+            assert_eq!(read_bytes(&path_of(&site, &target), 4 << 20).unwrap(), big);
+            assert!(meta(&path_of(&site, &remote_part(&target))).is_err());
+            assert!(list(&dir).unwrap().iter().all(|e| !e.name.to_string().contains("dirmap-part")));
             delete(&dir).unwrap();
             assert!(meta(&dir).is_err());
         }
@@ -1265,5 +1563,47 @@ mod live_keys {
         let asked = asked.lock().unwrap();
         assert!(asked.iter().all(|a| !a.starts_with("Password")), "{asked:?}");
         assert_eq!(asked.iter().filter(|a| a.starts_with("Passphrase")).count(), 2, "{asked:?}");
+    }
+}
+
+/// Retries over a connection that drops: `DIRMAP_TEST_FLAKY=sftp://tester@127.0.0.1:2223/home/tester`
+/// through a proxy that cuts the first few connections part-way, with `DIRMAP_TEST_PASSWORD`.
+#[cfg(test)]
+mod live_flaky {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn live_retry_and_resume() {
+        let url = std::env::var("DIRMAP_TEST_FLAKY").expect("DIRMAP_TEST_FLAKY");
+        let pw = std::env::var("DIRMAP_TEST_PASSWORD").unwrap_or_default();
+        set_asker(move |q| match q {
+            Ask::NewHostKey { .. } | Ask::Insecure { .. } => Answer::Trust { always: false },
+            Ask::Password { .. } => Answer::Secret { text: pw.clone(), remember: false },
+            _ => Answer::Cancel,
+        });
+        let local = std::env::temp_dir().join(format!("dirmap-flaky-{}", std::process::id()));
+        fs::create_dir_all(&local).unwrap();
+        let big: Vec<u8> = (0..6_000_000u32).map(|i| (i * 13 % 253) as u8).collect();
+        fs::write(local.join("big.bin"), &big).unwrap();
+        let home = connect(&parse(&url).unwrap()).unwrap();
+        let (site, hp) = split(&home).unwrap();
+        let target = format!("{hp}/flaky-{}.bin", std::process::id());
+        let ctl = Ctl::default();
+        upload_file(&local.join("big.bin"), &site, &target, &ctl).unwrap();
+        assert_eq!(ctl.bytes_done.load(Ordering::Relaxed), 6_000_000);
+        let m = with(&site, |c| c.stat(&target)).unwrap();
+        assert_eq!(m.len, 6_000_000);
+        let ctl = Ctl::default();
+        download_file(&site, &target, &local.join("back.bin"), m, &ctl).unwrap();
+        assert_eq!(ctl.bytes_done.load(Ordering::Relaxed), 6_000_000);
+        assert_eq!(fs::read(local.join("back.bin")).unwrap(), big);
+        let log = log_of(&site.url());
+        for l in &log {
+            eprintln!("{}", l.text);
+        }
+        assert!(log.iter().any(|l| l.text.contains("trying again")));
+        let _ = with(&site, |c| c.rm(&target));
+        let _ = fs::remove_dir_all(&local);
     }
 }
