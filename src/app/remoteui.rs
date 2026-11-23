@@ -413,6 +413,24 @@ impl SiteManager {
 
 /// Groups in the order shown: favourites first (as ""), then by name; "" also holds sites in no
 /// group.
+/// Most recent server folders kept in the Remote sidebar.
+const RECENT_SERVERS: usize = 8;
+
+/// Note a folder just opened: a server folder goes to the front of `list`, replacing that
+/// server's previous one, so each server shows once with where you were last.
+pub(super) fn note_recent(list: &mut Vec<PathBuf>, p: &Path) {
+    let Some(url) = remote::site_url(p) else { return };
+    list.retain(|q| remote::site_url(q).as_deref() != Some(url.as_str()));
+    list.insert(0, p.to_path_buf());
+    list.truncate(RECENT_SERVERS);
+}
+
+/// "shots on render01": the folder first, since the sidebar cuts long names short.
+fn recent_label(site: &remote::Site, p: &str) -> String {
+    let name = p.trim_end_matches('/').rsplit('/').next().filter(|n| !n.is_empty()).unwrap_or("/");
+    format!("{name} on {}", site.host)
+}
+
 fn grouped(sites: &[SavedSite], search: &str) -> Vec<(String, Vec<usize>)> {
     let q = search.trim().to_lowercase();
     let mut groups: std::collections::BTreeMap<String, Vec<usize>> = Default::default();
@@ -742,6 +760,10 @@ impl App {
         });
         match path {
             Some(p) => {
+                // A password typed in the address has been taken out of it: don't leave it showing.
+                if text.contains('@') {
+                    self.files.rws.quick = remote::show(&p).unwrap_or_default();
+                }
                 let target = self.remote_pane();
                 self.files.set_focus(target);
                 self.files.rws.target = Some(target);
@@ -972,6 +994,49 @@ impl App {
                     });
                 }
             });
+        }
+        // Where you were lately, saved or not: click to go back there.
+        let recent = self.files.prefs.recent_servers.clone();
+        let (mut go, mut go_tab, mut drop_recent) = (None, None, None);
+        if !recent.is_empty() {
+            files::side_section(ui, "rm-recent", "Recent Servers", true, |ui| {
+                for (k, p) in recent.iter().enumerate() {
+                    let Some((site, rp)) = remote::split(p) else { continue };
+                    let at = here.dir() == Some(p.as_path());
+                    let resp = files::side_row(ui, lock(Some(site.scheme)), &recent_label(&site, &rp), at, 24.0)
+                        .on_hover_text(format!("{}{}", site.url(), rp));
+                    if resp.clicked() {
+                        go = Some(k);
+                    }
+                    if resp.middle_clicked() {
+                        go_tab = Some(k);
+                    }
+                    resp.context_menu(|ui| {
+                        if ui.add(egui::Button::new(style::mi("Open in New Tab"))).clicked() {
+                            go_tab = Some(k);
+                            ui.close();
+                        }
+                        if ui.add(egui::Button::new(style::mi("Remove from Recent"))).clicked() {
+                            drop_recent = Some(k);
+                            ui.close();
+                        }
+                    });
+                }
+            });
+        }
+        if let Some(k) = go.or(go_tab)
+            && let Some(p) = recent.get(k)
+        {
+            let target = self.remote_pane();
+            self.files.set_focus(target);
+            if go_tab.is_some() {
+                self.files.new_tab(Location::Dir(p.clone()));
+            }
+            self.files.rws.target = Some(target);
+            self.open_server(p.clone());
+        }
+        if let Some(k) = drop_recent {
+            self.files.prefs.recent_servers.retain(|q| Some(q) != recent.get(k));
         }
         if let Some(i) = open {
             self.open_site(i, false);

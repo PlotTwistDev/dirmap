@@ -447,7 +447,10 @@ nothing, upload continued from a part and renamed over an existing file, on SFTP
 
 ### Validation for every stage
 - `cargo test` (help docs, filters, path round-trips, redaction), live tests against
-  OpenSSH, vsftpd and a WebDAV server in the container (`cargo test live_ -- --ignored`).
+  OpenSSH, vsftpd and a WebDAV server in the container
+  (`cargo test live_ -- --ignored --test-threads=1`: the tests share the global asker and the
+  listing cache, so they must run one at a time). FTPS and https WebDAV with a test CA:
+  `SSL_CERT_FILE=<ca + system bundle>` for the test process only.
 - GUI checks under Xvfb with screenshots.
 - `cargo check` for Windows and macOS targets; the scan benchmark doesn't regress.
 - Rich's Windows PC: SMB, mapped drives, Credential Manager, Windows OpenSSH agent.
@@ -460,14 +463,14 @@ nothing, upload continued from a part and renamed over an existing file, on SFTP
 | 2 | Site profiles, migration | 1 | ✅ `SavedSite` grew group, favourite, notes, local folder, insecure choice, last used (old prefs load unchanged) |
 | 3 | Site Manager window | 1 | ✅ list by group with search, form, Save, Test, Connect, New, Duplicate, Delete, rename group |
 | 4 | Quick connect, connection chip, insecure warning | 1 | ✅ `Ask::Insecure` in `remote::open`, so every way of connecting asks |
-| 5 | Remote sidebar (Sites, Sessions, Recent) | 1 | 🔨 Sites (favourites, groups, search) and Other Connections done; Recent servers not yet |
+| 5 | Remote sidebar (Sites, Sessions, Recent) | 1 | ✅ Sites (favourites, groups, search), Other Connections, Recent Servers (phase 5: `FilesPrefs.recent_servers`, one folder per server, last 8, `remoteui::note_recent`) |
 | 6 | Capabilities, browse channel apart from transfers | 1 | ✅ `remote::caps` (phase 2); connection pool keyed by (site, lane), browsing on lane 0, each running transfer on its own lane (`remote::set_lane`) |
 | 7 | Connection log with redaction | 1 | ✅ `remote::log_of`, `latency`; unsafe listed names refused (`safe_name`, `local_name`) |
 | 8 | Two-pane defaults, F5/F6 to other pane | 2 | ✅ `remoteui::remote_keys` (Shift+F5/F6 still work) |
 | 9 | Capability-aware menus | 2 | ✅ `remote::caps`; `RowMenu.server/ssh` drop Explorer, system menu, bin, UNC on servers |
 | 10 | Remote properties, chmod | 2 | ✅ `RemoteProps` window; `Backend::chmod/readlink` (SFTP setstat, FTP SITE CHMOD); recursive option |
 | 11 | SSH terminal (system) | 2 | ✅ `remote::ssh_args`, `remoteui::launch_ssh` (ssh.exe console, Terminal.app, Linux terminals); Ctrl+Alt+T |
-| 12 | Listing cache, error pane | 2 | 🔨 Try Again on errors done; back/forward listing cache moved to phase 5 (performance), since browsing no longer waits behind transfers |
+| 12 | Listing cache, error pane | 2 | ✅ Try Again on errors (phase 2); listing cache (phase 5): `remote::listed` keeps each folder's list 60 s (32 folders, 400k names), every change through the `Tracked` backend wrapper drops that folder, its parent and anything under it, a listing begun before a change isn't kept, Refresh/Try Again call `remote::forget`; Compare and transfers use `list_fresh`/`listed_fresh` |
 | 13 | Transfer queue, workers, clash rules | 3 | ✅ `app/transfers.rs`: anything to or from a server joins the queue from `App::transfer`; 1–8 at once (default 2); per-job pause, stop, retry; clash questions go through the usual clash window one at a time; Undo per job. Local copies keep the one-at-a-time `Ops` job. The queue isn't kept across restarts: asking for the same copy again continues the part files |
 | 14 | Resume, temp-name uploads | 3 | ✅ `Backend::get_from/put_at` (SFTP seek, FTP REST and APPE, WebDAV Range); downloads to `.name.dirmap-part` beside the target, uploads to `.name.dirmap-part` in the server folder, renamed into place when complete (old target moved aside first where the server won't rename over it); parts continued only when their time matches the source |
 | 15 | Transfers, History, Log dock tabs; chip | 3 | ✅ as a Transfers panel along the bottom (running, waiting, then the last 100 finished with results) and a status-bar chip with count and speed; the per-site log stays in the Connection Log window |
@@ -475,10 +478,10 @@ nothing, upload continued from a part and renamed over an existing file, on SFTP
 | 17 | Verification | 3 | 🔨 size checked after every file (and the part kept out of place if it differs); checksums not yet: SFTP has no standard hash request and FTP's HASH is rare, so it needs a read-back pass, planned with Synchronise in phase 4 |
 | 18 | Compare in panes; Synchronise | 4 | ✅ Compare Folders (already able to read servers) gained Ignore times, click-to-leave-out rows and Select in Panes (selects differences in both panes, instead of colouring rows, which would need the list's row painter); a sync with a server runs as one queue job (`compare::sync_items`, `App::queue_sync`), Retry skips files already there; `transfer_with` keeps totals a caller preset |
 | 19 | Edit and upload on save | 4 | ✅ `remote::edit`: opening a server file (double-click, Open With) fetches it to its own folder, a 1 s poll sends each save once it settles (part-file upload on its own lane), `Ask::Overwrite` if the server's copy changed; listed in the Transfers panel with Stop Sending |
-| 20 | Remote analysis cache, transfer sizes | 4 | ○ moved to phase 5 with performance (sizes before a transfer already show while the queue counts) |
+| 20 | Remote analysis cache, transfer sizes | 4 | 🔨 sizes before a transfer show while the queue counts; browsing is covered by the listing cache (row 12); a remembered Storage Analysis scan of a server isn't built (each Analyse reads the server again) |
 | 21 | Import/export profiles | 4 | ✅ `app/siteimport.rs`: FileZilla sitemanager.xml (folders as groups), WinSCP.ini and the WinSCP registry key (via `reg query`), export as FileZilla XML; never passwords |
 | 22 | SCP | 4 | ○ deferred: every server with SCP that dirmap has met also offers SFTP (OpenSSH has defaulted scp to SFTP since 9.0), so SCP-only is rare; revisit if Rich has such a box |
-| 23 | Performance, server matrix, security review | 5 | ○ |
-| 24 | Help Centre chapter | 5 | ○ |
+| 23 | Performance, server matrix, security review | 5 | 🔨 SFTP keeps 16 READDIRs in flight on a second channel (`Sftp::read_dir_ahead`): 100k items 87 s → 15 s at 40 ms/2 MB/s, 1.4 s → 0.25 s locally. Live tests pass on OpenSSH, vsftpd (plain and explicit TLS), WsgiDAV (http and https); an untrusted FTPS certificate is refused with a plain message. Security: per-user 0700 temp folder (`remote::temp_dir`), uploads skip links leading outside the folder sent (`copy_tree_in`, and in sync), `user:pw@host` passwords go to the session store and out of the address; live test checks the log, GUI check the saved settings. Not done: Windows OpenSSH, Synology, Nextcloud, Samba (Rich's network), keyboard/drag review against WinSCP |
+| 24 | Help Centre chapter | 5 | ✅ `docs/src/views/remote.md` (Recent Servers, Listings and Refresh, password in an address, link and temp-folder safety; screenshot remote-recent.png) |
 | 25 | Embedded SSH terminal | later | option |
 | 26 | S3-compatible storage | later | option |

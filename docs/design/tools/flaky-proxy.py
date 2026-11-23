@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # Test proxy for dirmap's live transfer tests: forwards LPORT to 127.0.0.1:DPORT, cutting the first
 # CUTS connections after CUT bytes each way, and optionally limiting each to RATE bytes/s.
-# Usage: flaky-proxy.py LPORT DPORT CUT CUTS [RATE]   e.g. flaky-proxy.py 2223 2222 2500000 3
+# Usage: flaky-proxy.py LPORT DPORT CUT CUTS [RATE [DELAY_MS]]   e.g. flaky-proxy.py 2223 2222 2500000 3
+# DELAY_MS holds each piece back that long each way, for a slow link's round trip.
 import socket, threading, sys
 lport, dport, cut, cuts = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
 rate = float(sys.argv[5]) if len(sys.argv) > 5 else 0
+delay = float(sys.argv[6]) / 1000 if len(sys.argv) > 6 else 0
 import time
 count = [0]
 def pipe(a, b, limit, both):
@@ -16,6 +18,7 @@ def pipe(a, b, limit, both):
             n += len(d)
             if limit and n > limit:
                 both(); return
+            if delay: time.sleep(delay)
             b.sendall(d)
             if rate: time.sleep(len(d) / rate)
     except OSError: pass

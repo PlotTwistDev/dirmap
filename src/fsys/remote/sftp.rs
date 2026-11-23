@@ -7,7 +7,7 @@ use super::{Answer, Ask, Backend, Meta, Options, Site, ask, err, keychain_forget
 use russh::client::{self, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{self, HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::MethodKind;
-use russh_sftp::client::SftpSession;
+use russh_sftp::client::{RawSftpSession, SftpSession};
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -104,7 +104,14 @@ fn check_key(site: &Site, key: &keys::PublicKey, refused: &Mutex<Option<String>>
 pub struct Sftp {
     handle: Arc<Handle<Client>>,
     sftp: SftpSession,
+    /// A second SFTP channel on the same connection, for listings: its raw requests let
+    /// several READDIRs be in flight at once (see `list`). None if the server refused it.
+    lister: Option<Arc<RawSftpSession>>,
 }
+
+/// READDIRs in flight at once. Each returns about 100 names (OpenSSH), so a folder of 100,000
+/// takes a thousand round trips one at a time; with 16 out it takes about 63.
+const LIST_AHEAD: usize = 16;
 
 fn ssh_err(e: russh::Error) -> io::Error {
     match e {
@@ -121,6 +128,46 @@ fn sftp_err(e: russh_sftp::client::error::Error) -> io::Error {
         E::Status(s) if s.status_code == S::PermissionDenied => io::Error::new(io::ErrorKind::PermissionDenied, s.error_message.clone()),
         E::Status(s) if !s.error_message.is_empty() => err(&s.error_message),
         _ => err(e),
+    }
+}
+
+/// List a folder with up to `LIST_AHEAD` READDIRs in flight on one handle. The server answers
+/// them in turn, each with the next batch of names, then end-of-folder.
+async fn read_dir_ahead(raw: &Arc<RawSftpSession>, p: &str) -> io::Result<Vec<(String, Meta)>> {
+    use russh_sftp::client::error::Error;
+    use russh_sftp::protocol::StatusCode;
+    let handle = raw.opendir(p).await.map_err(sftp_err)?.handle;
+    let mut set = tokio::task::JoinSet::new();
+    let ask = |set: &mut tokio::task::JoinSet<_>| {
+        let (raw, h) = (raw.clone(), handle.clone());
+        set.spawn(async move { raw.readdir(h).await });
+    };
+    for _ in 0..LIST_AHEAD {
+        ask(&mut set);
+    }
+    let mut out = Vec::new();
+    let mut end = false;
+    let mut failed = None;
+    while let Some(r) = set.join_next().await {
+        match r {
+            Ok(Ok(name)) => {
+                out.extend(name.files.into_iter().map(|f| {
+                    let m = meta_of(&f.attrs);
+                    (f.filename, m)
+                }));
+                if !end && failed.is_none() {
+                    ask(&mut set);
+                }
+            }
+            Ok(Err(Error::Status(s))) if s.status_code == StatusCode::Eof => end = true,
+            Ok(Err(e)) => failed = Some(sftp_err(e)),
+            Err(e) => failed = Some(io::Error::other(e.to_string())),
+        }
+    }
+    let _ = raw.close(handle).await;
+    match failed {
+        Some(e) => Err(e),
+        None => Ok(out),
     }
 }
 
@@ -172,6 +219,12 @@ fn load_key(path: &PathBuf) -> Option<keys::PrivateKey> {
 }
 
 impl Sftp {
+    /// One READDIR at a time (russh-sftp's own read_dir).
+    async fn read_dir_plain(&self, p: &str) -> io::Result<Vec<(String, Meta)>> {
+        let rd = self.sftp.read_dir(p).await.map_err(sftp_err)?;
+        Ok(rd.map(|e| (e.file_name(), meta_of(&e.metadata()))).collect())
+    }
+
     pub fn connect(site: &Site, opts: &Options) -> io::Result<Sftp> {
         rt().block_on(Self::connect_async(site, opts))
     }
@@ -202,7 +255,16 @@ impl Sftp {
         ch.request_subsystem(true, "sftp").await.map_err(ssh_err)?;
         let sftp = SftpSession::new(ch.into_stream()).await.map_err(|e| io::Error::other(format!("{} has no SFTP service: {e}", site.host)))?;
         sftp.set_timeout(60);
-        Ok(Sftp { handle: Arc::new(h), sftp })
+        let lister = async {
+            let ch = h.channel_open_session().await.ok()?;
+            ch.request_subsystem(true, "sftp").await.ok()?;
+            let raw = RawSftpSession::new(ch.into_stream());
+            raw.set_timeout(60);
+            raw.init().await.ok()?;
+            Some(Arc::new(raw))
+        }
+        .await;
+        Ok(Sftp { handle: Arc::new(h), sftp, lister })
     }
 
     /// Try each way of signing in. False when none worked (or the user cancelled).
@@ -314,21 +376,35 @@ impl Backend for Sftp {
 
     fn list(&self, p: &str) -> io::Result<Vec<(String, Meta)>> {
         rt().block_on(async {
-            let rd = self.sftp.read_dir(p).await.map_err(sftp_err)?;
-            let mut out = Vec::new();
-            let mut links = Vec::new();
-            for e in rd {
-                let m = meta_of(&e.metadata());
-                if m.is_link {
-                    links.push(out.len());
+            let mut out: Vec<(String, Meta)> = match &self.lister {
+                Some(raw) => match read_dir_ahead(raw, p).await {
+                    Ok(v) => v,
+                    // A server that doesn't take READDIRs ahead: one at a time.
+                    Err(e) if e.kind() != io::ErrorKind::NotFound && e.kind() != io::ErrorKind::PermissionDenied => self.read_dir_plain(p).await?,
+                    Err(e) => return Err(e),
+                },
+                None => self.read_dir_plain(p).await?,
+            };
+            out.retain(|(n, _)| n != "." && n != "..");
+            // Links to folders open like folders: their targets asked about together.
+            let links: Vec<usize> = (0..out.len()).filter(|&i| out[i].1.is_link).collect();
+            for chunk in links.chunks(LIST_AHEAD * 4) {
+                let mut set = tokio::task::JoinSet::new();
+                for &i in chunk {
+                    let full = super::join(p, &out[i].0);
+                    match &self.lister {
+                        Some(raw) => {
+                            let raw = raw.clone();
+                            set.spawn(async move { (i, raw.stat(full).await.is_ok_and(|a| a.attrs.is_dir())) });
+                        }
+                        None => {
+                            let is_dir = self.sftp.metadata(full).await.is_ok_and(|m| m.is_dir());
+                            out[i].1.is_dir |= is_dir;
+                        }
+                    }
                 }
-                out.push((e.file_name(), m));
-            }
-            // Links to folders open like folders.
-            for i in links {
-                let full = super::join(p, &out[i].0);
-                if self.sftp.metadata(full).await.is_ok_and(|m| m.is_dir()) {
-                    out[i].1.is_dir = true;
+                while let Some(Ok((i, is_dir))) = set.join_next().await {
+                    out[i].1.is_dir |= is_dir;
                 }
             }
             Ok(out)

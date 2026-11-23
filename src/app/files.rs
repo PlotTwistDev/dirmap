@@ -91,6 +91,8 @@ pub(super) struct FilesPrefs {
     pub player: seqplayer::PlayerPrefs,
     /// Folders opened most recently, newest first.
     pub recent: Vec<PathBuf>,
+    /// Server folders opened most recently, one per server, newest first (Remote sidebar).
+    pub recent_servers: Vec<PathBuf>,
     pub sort: FSort,
     /// Opposite of the sort's natural direction.
     pub reversed: bool,
@@ -173,6 +175,7 @@ impl Default for FilesPrefs {
             apps: Vec::new(),
             player: Default::default(),
             recent: Vec::new(),
+            recent_servers: Vec::new(),
             sort: FSort::Name,
             reversed: false,
             show_hidden: false,
@@ -751,6 +754,7 @@ impl Files {
         if let Location::Dir(p) = self.here().clone() {
             let r = &mut self.prefs.recent;
             r.retain(|q| q != &p);
+            super::remoteui::note_recent(&mut self.prefs.recent_servers, &p);
             r.insert(0, p);
             r.truncate(RECENT_MAX);
         }
@@ -864,6 +868,9 @@ impl Files {
 
     pub(super) fn refresh(&mut self) {
         self.side.clear();
+        if let Some(d) = self.here().dir() {
+            remote::forget(d);
+        }
         self.tab().reread();
     }
 

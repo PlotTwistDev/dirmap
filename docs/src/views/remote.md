@@ -147,7 +147,7 @@ Type an address in the **Quick connect** box in the toolbar and press **Enter**:
 |---|---|
 | `render01` or `rich@render01:2222/mnt/shots` | SFTP (a bare name is SFTP) |
 | `sftp://rich@render01/mnt/shots` | SFTP |
-| `ftps://ftp.example.com` | FTP over TLS (on port 990, TLS from the start, for older servers) |
+| `ftps://ftp.example.com` | FTP over TLS (on port 990, TLS from the start, for older servers; on any other port, the plain connection is switched to TLS before signing in) |
 | `ftp://nas.local` | FTP, after a warning that it isn't encrypted |
 | `https://cloud.example.com/remote.php/dav` | WebDAV over https |
 | `\\server\share` or `smb://server/share` | A network share, through your system ([Connect to Server](file-manager.md#network--remote)) |
@@ -155,6 +155,10 @@ Type an address in the **Quick connect** box in the toolbar and press **Enter**:
 The server opens in the pane that's already on a server, otherwise in the right-hand pane, so
 this computer stays beside it. A quick connection isn't saved: use **Save as Site…** in the
 connection menu (below) to keep it.
+
+If you type a password in the address (`sftp://rich:password@render01`), dirmap signs in with it
+and takes it straight out of the address: it isn't shown in the box, the address bar, the
+connection log, Recent Servers or anything saved, and it's forgotten when dirmap closes.
 
 ## The connection in the toolbar
 
@@ -177,6 +181,24 @@ Right-click a site for **Add to Favourites**, **Edit…** and **Disconnect**. Wi
 sites a search box appears above them.
 
 Servers you're connected to that aren't saved are listed under **Other Connections**.
+
+**Recent Servers** lists the last eight servers you opened, saved or not, each with the folder you
+were in last ("shots on render01"). Click one to go back there, middle-click for a new tab, or
+right-click to **Remove from Recent**.
+
+![The Remote sidebar with Other Connections and Recent Servers](../images/remote-recent.png)
+
+## Listings and Refresh
+
+dirmap remembers each server folder's list for a minute, so Back, Forward and going back into a
+folder you just left are instant and don't ask the server again. Anything dirmap changes on the
+server (a copy, move, rename, delete, new folder or upload) drops the remembered list of that
+folder, so you always see your own changes. Changes made by someone else, or by another program,
+show when you press **Refresh** (the button beside the address bar, or **Ctrl+R**; in Remote, F5
+copies to the other pane), or after the minute is up. Compare Folders and transfers always read the server afresh.
+
+Big folders list quickly on SFTP: dirmap asks for many batches of names at once instead of one
+after another, so a folder of 100,000 items over a slow link takes seconds rather than minutes.
 
 ## The Site Manager
 
@@ -241,6 +263,11 @@ time dirmap starts. Use SFTP, FTPS or https when the server offers them.
   slash, are left out of the list (the connection log says so), and a download never writes
   outside the folder you chose.
 - Delete on a server is permanent and dirmap asks first.
+- When you upload a folder, a link inside it is sent (as the file it points to) only when it
+  points to a file inside that folder. A link to something elsewhere, such as your SSH key, is
+  skipped and the connection log says so. A link you chose on its own is sent as usual.
+- Files fetched to preview, open or edit are kept in a temporary folder only you can read
+  (on macOS and Linux, where the temporary folder is shared between users).
 
 ## Related topics
 

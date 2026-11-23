@@ -131,7 +131,7 @@ type Listed = Vec<(String, Info)>;
 
 fn list(dir: &Path) -> Result<Listed, String> {
     if remote::is_remote(dir) {
-        return Ok(remote::list(dir)?
+        return Ok(remote::list_fresh(dir)?
             .into_iter()
             .map(|e| {
                 (
@@ -687,6 +687,16 @@ pub(super) fn sync_items(left: &Path, right: &Path, plan: &[(Act, String)], retr
         if retry && already_there(&src, &dest) {
             skipped += 1;
             continue;
+        }
+        // Nothing is sent to a server through a link that leads out of the compared folder.
+        if remote::is_remote(&dest) && !remote::is_remote(&src) {
+            let top = if matches!(act, Act::CopyRight) { left } else { right };
+            if let (Ok(t), Ok(s)) = (std::fs::canonicalize(top), std::fs::canonicalize(&src))
+                && !s.starts_with(&t)
+            {
+                errors.push(format!("Skipped {}: it's a link to something outside {}", src.shown(), top.shown()));
+                continue;
+            }
         }
         let out = crate::transfer::transfer_with(
             std::slice::from_ref(&src),

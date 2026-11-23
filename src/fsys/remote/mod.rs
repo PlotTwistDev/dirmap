@@ -138,7 +138,17 @@ fn parse_authority(scheme: Scheme, auth: &str) -> Option<Site> {
     if host.is_empty() || host.contains(['/', '\\', ' ']) {
         return None;
     }
-    Some(Site { scheme, user, host: host.to_ascii_lowercase(), port })
+    // `user:password@host`: the password is kept in memory for this run and taken out of the
+    // address, so it never reaches the address bar, history, Recent, saved sites or the log.
+    let (user, password) = match user.split_once(':') {
+        Some((u, p)) => (u.to_string(), Some(percent_decode(p))),
+        None => (user, None),
+    };
+    let site = Site { scheme, user, host: host.to_ascii_lowercase(), port };
+    if let Some(p) = password.filter(|p| !p.is_empty()) {
+        keep_session_secret(&site.account(), &p);
+    }
+    Some(site)
 }
 
 /// For a remote path: the server and the path on it (always starting with '/'). Decided by the
@@ -512,7 +522,141 @@ fn open(site: &Site) -> io::Result<Arc<dyn Backend>> {
         Ok(_) => note(site, false, format!("Connected in {} ms", t.elapsed().as_millis())),
         Err(e) => note(site, true, format!("Couldn't connect: {}", describe(e))),
     }
-    r
+    r.map(|inner| Arc::new(Tracked { inner, site: site.clone() }) as Arc<dyn Backend>)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Listing cache: Back, Forward and returning to a folder don't ask the server again for a
+// minute, unless dirmap changed something on that server meanwhile (any connection, any
+// lane) or the user refreshes (`forget`).
+
+/// How long a listing is reused.
+const LISTING_FRESH: Duration = Duration::from_secs(60);
+/// Folders kept, and names across them (a few big folders, or many small ones).
+const LISTING_FOLDERS: usize = 32;
+const LISTING_NAMES: usize = 400_000;
+
+struct Cached {
+    at: std::time::Instant,
+    items: Arc<Vec<(String, Meta)>>,
+}
+
+#[derive(Default)]
+struct ListingCache {
+    folders: HashMap<(Site, String), Cached>,
+    /// Bumped whenever dirmap changes something on the site.
+    generation: HashMap<Site, u64>,
+}
+
+fn listing_cache() -> &'static Mutex<ListingCache> {
+    static C: OnceLock<Mutex<ListingCache>> = OnceLock::new();
+    C.get_or_init(Default::default)
+}
+
+/// dirmap changed `p` on `site`: drop the listings of its folder and of it and anything under
+/// it (a folder renamed or removed), and don't keep listings that were being read meanwhile.
+fn changed_on(site: &Site, p: &str) {
+    let mut c = listing_cache().lock().unwrap_or_else(|e| e.into_inner());
+    *c.generation.entry(site.clone()).or_default() += 1;
+    let parent = p.rsplit_once('/').map(|(d, _)| if d.is_empty() { "/" } else { d }).unwrap_or("/");
+    let under = format!("{}/", p.trim_end_matches('/'));
+    c.folders.retain(|(s, f), _| s != site || (f != parent && f != p && !f.starts_with(&under)));
+}
+
+/// Read a folder again next time (Refresh): its site's listings are dropped.
+pub fn forget(path: &Path) {
+    if let Some((site, _)) = split(path) {
+        let mut c = listing_cache().lock().unwrap_or_else(|e| e.into_inner());
+        c.folders.retain(|(s, _), _| *s != site);
+    }
+}
+
+fn cached(site: &Site, p: &str) -> Option<Arc<Vec<(String, Meta)>>> {
+    let c = listing_cache().lock().unwrap_or_else(|e| e.into_inner());
+    c.folders.get(&(site.clone(), p.to_string())).filter(|e| e.at.elapsed() < LISTING_FRESH).map(|e| e.items.clone())
+}
+
+fn keep(site: &Site, p: &str, generation: u64, items: Arc<Vec<(String, Meta)>>) {
+    let mut c = listing_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if c.generation.get(site).copied().unwrap_or(0) != generation {
+        return;
+    }
+    c.folders.retain(|_, e| e.at.elapsed() < LISTING_FRESH);
+    c.folders.insert((site.clone(), p.to_string()), Cached { at: std::time::Instant::now(), items });
+    // Oldest out first, while over either limit.
+    while c.folders.len() > LISTING_FOLDERS || c.folders.values().map(|e| e.items.len()).sum::<usize>() > LISTING_NAMES {
+        let Some(k) = c.folders.iter().min_by_key(|(_, e)| e.at).map(|(k, _)| k.clone()) else { break };
+        c.folders.remove(&k);
+    }
+}
+
+fn generation_of(site: &Site) -> u64 {
+    listing_cache().lock().unwrap_or_else(|e| e.into_inner()).generation.get(site).copied().unwrap_or(0)
+}
+
+/// A connection that notes every change it makes, so cached listings of that site are
+/// read again.
+struct Tracked {
+    inner: Arc<dyn Backend>,
+    site: Site,
+}
+
+impl Tracked {
+    fn changed<T>(&self, p: &str, r: io::Result<T>) -> io::Result<T> {
+        changed_on(&self.site, p);
+        r
+    }
+}
+
+impl Backend for Tracked {
+    fn stat(&self, p: &str) -> io::Result<Meta> {
+        self.inner.stat(p)
+    }
+    fn list(&self, p: &str) -> io::Result<Vec<(String, Meta)>> {
+        self.inner.list(p)
+    }
+    fn mkdir(&self, p: &str) -> io::Result<()> {
+        self.changed(p, self.inner.mkdir(p))
+    }
+    fn rmdir(&self, p: &str) -> io::Result<()> {
+        self.changed(p, self.inner.rmdir(p))
+    }
+    fn rm(&self, p: &str) -> io::Result<()> {
+        self.changed(p, self.inner.rm(p))
+    }
+    fn rename(&self, from: &str, to: &str) -> io::Result<()> {
+        changed_on(&self.site, from);
+        self.changed(to, self.inner.rename(from, to))
+    }
+    fn get(&self, p: &str, out: &mut dyn Write, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        self.inner.get(p, out, tick)
+    }
+    fn put(&self, p: &str, input: &mut dyn Read, len: u64, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        changed_on(&self.site, p);
+        self.changed(p, self.inner.put(p, input, len, tick))
+    }
+    fn get_from(&self, p: &str, offset: u64, out: &mut dyn Write, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        self.inner.get_from(p, offset, out, tick)
+    }
+    fn put_at(&self, p: &str, offset: u64, input: &mut dyn Read, len: u64, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {
+        changed_on(&self.site, p);
+        self.changed(p, self.inner.put_at(p, offset, input, len, tick))
+    }
+    fn chmod(&self, p: &str, mode: u32) -> io::Result<()> {
+        self.changed(p, self.inner.chmod(p, mode))
+    }
+    fn readlink(&self, p: &str) -> io::Result<String> {
+        self.inner.readlink(p)
+    }
+    fn touch(&self, p: &str, modified: i64) -> io::Result<()> {
+        self.changed(p, self.inner.touch(p, modified))
+    }
+    fn home(&self) -> io::Result<String> {
+        self.inner.home()
+    }
+    fn alive(&self) -> bool {
+        self.inner.alive()
+    }
 }
 
 /// Sites the user agreed to use unencrypted, while dirmap runs (saved sites keep it in
@@ -722,6 +866,17 @@ pub fn local_name(n: &str) -> io::Result<&str> {
 
 /// A folder's items, without names that aren't safe.
 fn listed(site: &Site, p: &str) -> io::Result<Vec<(String, Meta)>> {
+    if let Some(items) = cached(site, p) {
+        return Ok((*items).clone());
+    }
+    let generation = generation_of(site);
+    let items = listed_fresh(site, p)?;
+    keep(site, p, generation, Arc::new(items.clone()));
+    Ok(items)
+}
+
+/// `listed`, always asking the server.
+fn listed_fresh(site: &Site, p: &str) -> io::Result<Vec<(String, Meta)>> {
     let t = std::time::Instant::now();
     let r = with(site, |c| c.list(p));
     match &r {
@@ -793,8 +948,17 @@ pub fn meta(path: &Path) -> io::Result<Meta> {
 
 /// A folder's items, for the file list.
 pub fn list(path: &Path) -> Result<Vec<Entry>, String> {
+    list_with(path, listed)
+}
+
+/// `list`, always asking the server (Compare, which must see changes made elsewhere).
+pub fn list_fresh(path: &Path) -> Result<Vec<Entry>, String> {
+    list_with(path, listed_fresh)
+}
+
+fn list_with(path: &Path, how: fn(&Site, &str) -> io::Result<Vec<(String, Meta)>>) -> Result<Vec<Entry>, String> {
     let (site, p) = site_path(path).map_err(|e| e.to_string())?;
-    let items = listed(&site, &p).map_err(|e| describe(&e))?;
+    let items = how(&site, &p).map_err(|e| describe(&e))?;
     Ok(items
         .into_iter()
         .map(|(name, m)| Entry { hidden: name.starts_with('.'), name: name.into(), is_dir: m.is_dir, is_link: m.is_link, size: if m.is_dir { 0 } else { m.len }, modified: m.modified })
@@ -804,7 +968,7 @@ pub fn list(path: &Path) -> Result<Vec<Entry>, String> {
 /// The paths of a folder's items.
 pub fn read_dir(path: &Path) -> io::Result<Vec<PathBuf>> {
     let (site, p) = site_path(path)?;
-    let items = listed(&site, &p)?;
+    let items = listed_fresh(&site, &p)?;
     Ok(items.into_iter().map(|(n, _)| path_of(&site, &join(&p, &n))).collect())
 }
 
@@ -906,6 +1070,14 @@ fn set_current(ctl: &Ctl, name: &str) {
 /// Copy a file or folder tree where either end (or both) is on a server. Archive items are
 /// extracted to a temporary folder first.
 pub fn copy_tree(src: &Path, dest: &Path, ctl: &Ctl) -> io::Result<()> {
+    copy_tree_in(src, dest, ctl, None)
+}
+
+/// `copy_tree`, with `root` the local folder being uploaded once inside one: a link in it is
+/// followed only when what it points to is inside that folder too, so a link to a private
+/// file elsewhere (`~/.ssh/id_ed25519`) left in a folder isn't sent to a server with it. A
+/// link chosen on its own is followed as usual.
+fn copy_tree_in(src: &Path, dest: &Path, ctl: &Ctl, root: Option<&Path>) -> io::Result<()> {
     if !ctl.go_on() {
         return Err(stopped());
     }
@@ -914,7 +1086,7 @@ pub fn copy_tree(src: &Path, dest: &Path, ctl: &Ctl) -> io::Result<()> {
             let m = with(&ss, |c| c.stat(&sp))?;
             if m.is_dir && !m.is_link {
                 create_dir(dest)?;
-                for (n, _) in listed(&ss, &sp)? {
+                for (n, _) in listed_fresh(&ss, &sp)? {
                     if n != "." && n != ".." {
                         copy_tree(&path_of(&ss, &join(&sp, &n)), &path_of(&ds, &join(&dp, &n)), ctl)?;
                     }
@@ -936,7 +1108,7 @@ pub fn copy_tree(src: &Path, dest: &Path, ctl: &Ctl) -> io::Result<()> {
             let m = with(&ss, |c| c.stat(&sp))?;
             if m.is_dir && !m.is_link {
                 fs::create_dir(dest)?;
-                for (n, _) in listed(&ss, &sp)? {
+                for (n, _) in listed_fresh(&ss, &sp)? {
                     copy_tree(&path_of(&ss, &join(&sp, &n)), &dest.join(local_name(&n)?), ctl)?;
                 }
                 Ok(())
@@ -956,16 +1128,31 @@ pub fn copy_tree(src: &Path, dest: &Path, ctl: &Ctl) -> io::Result<()> {
                 return r;
             }
             let md = fs::symlink_metadata(src)?;
-            if md.is_dir() {
+            if md.is_dir() || (root.is_none() && fs::metadata(src).is_ok_and(|m| m.is_dir())) {
                 create_dir(dest)?;
+                let top = match root {
+                    Some(r) => r.to_path_buf(),
+                    None => fs::canonicalize(src)?,
+                };
                 for e in fs::read_dir(src)? {
                     let e = e?;
                     let n = e.file_name().to_string_lossy().to_string();
-                    copy_tree(&e.path(), &path_of(&ds, &join(&dp, &n)), ctl)?;
+                    copy_tree_in(&e.path(), &path_of(&ds, &join(&dp, &n)), ctl, Some(&top))?;
                 }
                 Ok(())
             } else if md.file_type().is_symlink() {
-                // Links can't be made on most servers: the file it points to is copied.
+                // Links can't be made on most servers: the file it points to is copied, when
+                // it's a file inside the folder being sent (or the link was chosen itself).
+                let to = fs::canonicalize(src);
+                let inside = match (root, &to) {
+                    (None, _) => true,
+                    (Some(r), Ok(t)) => t.starts_with(r),
+                    (Some(_), Err(_)) => false,
+                };
+                if !inside || to.as_ref().is_ok_and(|t| t.is_dir()) {
+                    note(&ds, false, format!("Skipped {}: a link to something outside the folder being sent, or to a folder", src.display()));
+                    return Ok(());
+                }
                 upload_file(src, &ds, &dp, ctl)
             } else {
                 upload_file(src, &ds, &dp, ctl)
@@ -1246,9 +1433,51 @@ pub fn write_new(path: &Path, contents: &[u8]) -> io::Result<()> {
     with(&site, |c| c.put(&p, &mut io::Cursor::new(contents), contents.len() as u64, &mut |_| true))
 }
 
-/// dirmap's folder for files fetched from servers to preview or open.
+/// dirmap's folder for files fetched from servers to preview, open or edit. On Unix it's
+/// one per user, readable only by them (0700), since /tmp is shared: a folder someone else
+/// made, or a link put there in its place, isn't used.
 pub fn temp_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(private_temp).clone()
+}
+
+#[cfg(not(unix))]
+fn private_temp() -> PathBuf {
+    // %TEMP% is already the user's own on Windows.
     std::env::temp_dir().join("dirmap-remote")
+}
+
+#[cfg(unix)]
+fn private_temp() -> PathBuf {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    let uid = unsafe { libc::getuid() };
+    let base = std::env::temp_dir();
+    let ours = |d: &Path| {
+        let _ = fs::DirBuilder::new().mode(0o700).create(d);
+        match fs::symlink_metadata(d) {
+            Ok(m) if m.is_dir() && m.uid() == uid => {
+                if m.mode() & 0o077 != 0 {
+                    fs::set_permissions(d, fs::Permissions::from_mode(0o700)).is_ok()
+                } else {
+                    true
+                }
+            }
+            _ => false,
+        }
+    };
+    let dir = base.join(format!("dirmap-remote-{uid}"));
+    if ours(&dir) {
+        return dir;
+    }
+    // Taken by someone else: a fresh one of our own instead.
+    let mut d = dir;
+    for _ in 0..20 {
+        d = base.join(format!("dirmap-remote-{uid}-{:x}", unique()));
+        if fs::DirBuilder::new().mode(0o700).create(&d).is_ok() {
+            break;
+        }
+    }
+    d
 }
 
 fn unique() -> u64 {
@@ -1370,6 +1599,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn listing_cache_drops_only_touched_folders() {
+        let site = Site { scheme: Scheme::Sftp, user: "cache".into(), host: "cache.test".into(), port: 22 };
+        let one = Arc::new(vec![("a".to_string(), Meta::default())]);
+        for f in ["/w", "/w/sub", "/w/sub/deep", "/other"] {
+            keep(&site, f, generation_of(&site), one.clone());
+        }
+        // A change in /w/sub/x drops /w/sub (its folder) but not /w or /other.
+        changed_on(&site, "/w/sub/x");
+        assert!(cached(&site, "/w/sub").is_none());
+        assert!(cached(&site, "/w").is_some() && cached(&site, "/other").is_some());
+        // Removing /w/sub drops /w and everything under /w/sub.
+        keep(&site, "/w/sub", generation_of(&site), one.clone());
+        changed_on(&site, "/w/sub");
+        assert!(cached(&site, "/w").is_none() && cached(&site, "/w/sub").is_none() && cached(&site, "/w/sub/deep").is_none());
+        assert!(cached(&site, "/other").is_some());
+        // A listing begun before a change isn't kept.
+        let g = generation_of(&site);
+        changed_on(&site, "/elsewhere/y");
+        keep(&site, "/late", g, one.clone());
+        assert!(cached(&site, "/late").is_none());
+        forget(Path::new("sftp:/cache@cache.test:22/other"));
+        assert!(cached(&site, "/other").is_none());
+    }
+
+    #[test]
     fn unsafe_names_are_refused() {
         for bad in ["", ".", "..", "a/b", "../etc", "/etc/passwd", "a\0b"] {
             assert!(!safe_name(bad), "{bad:?}");
@@ -1383,6 +1637,16 @@ mod tests {
             assert!(local_name("..\\up").is_err());
             assert!(local_name("C:x").is_err());
         }
+    }
+
+    #[test]
+    fn passwords_in_addresses_are_taken_out() {
+        let p = parse("sftp://rich:hunter%402@pwtest:2200/srv").unwrap();
+        assert!(!p.to_string_lossy().contains("hunter"));
+        assert_eq!(show(&p).unwrap(), "sftp://rich@pwtest:2200/srv");
+        let (site, _) = split(&p).unwrap();
+        assert_eq!(site.user, "rich");
+        assert_eq!(session_secret(&site.account()).as_deref(), Some("hunter@2"));
     }
 
     #[test]
@@ -1460,6 +1724,21 @@ mod live {
             rename(&dir.join("tree/one.txt"), &dir.join("tree/two.txt")).unwrap();
             assert_eq!(meta(&dir.join("tree/one.txt")).unwrap_err().kind(), io::ErrorKind::NotFound);
             // Back down again, and server to server.
+            // Links in a folder being sent: one to a file inside goes, one leading out doesn't.
+            #[cfg(unix)]
+            {
+                fs::create_dir_all(local.join("linky")).unwrap();
+                fs::write(local.join("linky/real.txt"), b"real").unwrap();
+                fs::write(local.join("secret.txt"), b"secret").unwrap();
+                let _ = std::os::unix::fs::symlink(local.join("linky/real.txt"), local.join("linky/in.txt"));
+                let _ = std::os::unix::fs::symlink(local.join("secret.txt"), local.join("linky/out.txt"));
+                copy_tree(&local.join("linky"), &dir.join("linky"), &ctl).unwrap();
+                assert_eq!(meta(&dir.join("linky/in.txt")).unwrap().len, 4);
+                assert_eq!(meta(&dir.join("linky/out.txt")).unwrap_err().kind(), io::ErrorKind::NotFound);
+                // Chosen on its own, a link is followed.
+                copy_tree(&local.join("linky/out.txt"), &dir.join("chosen.txt"), &ctl).unwrap();
+                assert_eq!(meta(&dir.join("chosen.txt")).unwrap().len, 6);
+            }
             let back = local.join(format!("back-{}", url.split(':').next().unwrap()));
             copy_tree(&dir.join("tree"), &back, &ctl).unwrap();
             assert_eq!(fs::read(back.join("sub/big.bin")).unwrap(), big);
@@ -1472,8 +1751,10 @@ mod live {
             assert!(read_bytes(&dir.join("copy/sub/big.bin"), 1 << 20).is_err());
             let mut seen = 0;
             let all = walk(&dir, &std::sync::atomic::AtomicBool::new(false), &mut |_, items| seen += items.len()).unwrap();
-            assert_eq!(seen, 8);
-            assert_eq!(all.len(), 8, "{all:?}");
+            // tree, copy and their insides; on Unix also linky (with two files) and chosen.txt.
+            let want = if cfg!(unix) { 12 } else { 8 };
+            assert_eq!(seen, want);
+            assert_eq!(all.len(), want, "{all:?}");
             // Through the file manager's copy and move, with a name clash and Undo.
             let t = crate::transfer::transfer_with(&[local.join("tree")], &dir, true, &mut |_| crate::transfer::Choice::KeepBoth, &ctl);
             assert!(t.errors.is_empty(), "{:?}", t.errors);
@@ -1531,6 +1812,11 @@ mod live {
             assert!(list(&dir).unwrap().iter().all(|e| !e.name.to_string().contains("dirmap-part")));
             delete(&dir).unwrap();
             assert!(meta(&dir).is_err());
+            // Nothing said about the session holds the password.
+            let secret = std::env::var("DIRMAP_TEST_PASSWORD").unwrap_or_default();
+            let lines = log_of(&site.url());
+            assert!(lines.len() > 5);
+            assert!(secret.is_empty() || lines.iter().all(|l| !l.text.contains(&secret)));
         }
         let _ = fs::remove_dir_all(&local);
     }
@@ -1668,6 +1954,38 @@ mod live_edit {
             assert!(edit::editing().is_empty());
             delete(&p).unwrap();
             asked.lock().unwrap().clear();
+        }
+    }
+}
+
+/// Timing a big folder: `DIRMAP_TEST_BIG="sftp://tester@127.0.0.1:2225/home/tester/big …"`
+/// (through flaky-proxy.py with a delay, for a slow link), with `DIRMAP_TEST_PASSWORD`.
+#[cfg(test)]
+mod live_big {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn live_big_listing() {
+        let urls = std::env::var("DIRMAP_TEST_BIG").expect("DIRMAP_TEST_BIG");
+        let pw = std::env::var("DIRMAP_TEST_PASSWORD").unwrap_or_default();
+        set_asker(move |q| match q {
+            Ask::NewHostKey { .. } | Ask::Insecure { .. } => Answer::Trust { always: false },
+            Ask::Password { .. } => Answer::Secret { text: pw.clone(), remember: false },
+            _ => Answer::Cancel,
+        });
+        for url in urls.split_whitespace() {
+            let p = parse(url).unwrap();
+            let t = std::time::Instant::now();
+            connect(&p).unwrap();
+            let connected = t.elapsed();
+            let t = std::time::Instant::now();
+            let items = list(&p).unwrap();
+            let listed = t.elapsed();
+            let t = std::time::Instant::now();
+            let again = list(&p).unwrap();
+            eprintln!("{url}: connect {connected:?}, {} items in {listed:?}, again in {:?}", items.len(), t.elapsed());
+            assert_eq!(items.len(), again.len());
         }
     }
 }
