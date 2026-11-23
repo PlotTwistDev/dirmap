@@ -24,6 +24,7 @@ version.
 | Duplicate finder | Size, then first 64 KB, then whole-file hash. |
 | Right-click menu in the file manager | Open, Copy, Cut, Paste, Rename, New Folder, Copy Path, reveal, terminals, Refresh, Properties, SHA-256, exclude, Delete, Recycle Bin/Trash, Remove Empty Folders, Empty Folder, Move to, with keyboard shortcuts. |
 | Settings | Appearance, scan exclusions, columns, treemap look and navigation, threads, administrator mode. |
+| Licensing | A 15-day evaluation, then free and Professional features; perpetual and temporary (time-limited, non-renewable) licences, online or offline activation, licence details, certificate and details export, a weekly check. See [Licensing](../settings/licensing.md). |
 | Run as administrator | Windows: ask, always or never, and restart on request. |
 | Command-line report and snapshots | `--cli`, `--top`, `--save-snapshot`, `--compare`, `--all-fs`. |
 | Built-in help | This Help Centre, with search, F1 context help and tooltips. |
@@ -39,6 +40,7 @@ version.
 | Sunburst navigation | No Back/Forward history (the treemap and the file manager have it). |
 | File manager | Copy and Cut work only inside dirmap (the paths go to the clipboard as text), and files can't be dragged to or from other apps. Changes made by other apps show after a Refresh. Real Finder icons on macOS aren't used yet (drawn icons instead). |
 | Size accuracy | File sizes only. Hard links are counted once per name; compressed, sparse and cloud-only files show their full size. See [How sizes are calculated](../disk-usage/sizes.md). |
+| Licensing | Filescape's licence server and shop aren't open yet, so serials can't be bought or activated online. Test mode (`FILESCAPE_LICENCE_DEV=1`) issues serials for trying it out. The app is still called dirmap. |
 | Administrator mode | A restart button on Windows only; on Linux use `sudo`, on macOS Full Disk Access. |
 
 ## Not available

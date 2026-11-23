@@ -93,6 +93,9 @@ pub struct Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.term.is_empty() {
+            return f.write_str(&self.message);
+        }
         write!(f, "“{}”: {}", self.term, self.message)
     }
 }

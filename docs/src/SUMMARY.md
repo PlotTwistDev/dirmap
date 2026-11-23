@@ -54,6 +54,7 @@
 
 - [Settings reference](settings/reference.md)
 - [Running as administrator](settings/administrator.md)
+- [Licensing](settings/licensing.md)
 
 # Reference
 

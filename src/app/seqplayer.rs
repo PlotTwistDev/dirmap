@@ -281,7 +281,7 @@ impl Player {
 impl App {
     /// Open the player on these sequences (the first two).
     pub(super) fn play_sequences(&mut self, clips: Vec<Clip>) {
-        if clips.is_empty() {
+        if clips.is_empty() || !self.premium(crate::licence::Feature::SequencePlayer) {
             return;
         }
         let mut pl = Player::new(clips, &self.files.prefs.player);

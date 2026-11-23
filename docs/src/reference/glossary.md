@@ -1,5 +1,8 @@
 # Glossary
 
+**Activation**: One computer using a licence. A temporary licence can be activated 3 times, a perpetual one 10
+times; deactivating doesn't give an activation back. See [Licensing](../settings/licensing.md#activations).
+
 **Breadcrumbs**: The row of folder names above the map (🏠 *scan* › *folder* › …) showing which folder the map is
 showing. Click one to go there.
 
@@ -27,6 +30,9 @@ tabs and List, Icons, Columns and Tree layouts. See [The file manager](../views/
 **Highlight mode**: Shows filter matches in colour and hides everything else, keeping the map's layout.
 
 **Junction / symbolic link**: A signpost to another folder or file. dirmap never follows them.
+
+**Licence**: What unlocks Filescape Professional: perpetual, or temporary for a set time. See
+[Licensing](../settings/licensing.md).
 
 **Padding**: Leading zeros that give frame numbers a fixed width: `0042` is padded to four digits.
 

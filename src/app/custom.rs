@@ -299,6 +299,15 @@ impl App {
     /// Compile the typed text and, if it's valid, put it into effect now.
     pub(super) fn apply_custom(&mut self) {
         self.custom.edited = None;
+        if !self.custom.text.trim().is_empty() && !self.licence.allows(crate::licence::Feature::CustomFilter) {
+            // Kept, not cleared: it works again as soon as a licence is entered.
+            self.custom.error = Some(crate::pattern::Error {
+                term: String::new(),
+                message: "The Custom filter is part of Filescape Professional. Help > Licence to enter a licence.".into(),
+            });
+            self.filter.custom = None;
+            return;
+        }
         match Filter::compile(&self.custom.text, self.custom.options()) {
             Ok(f) => {
                 self.custom.error = None;
@@ -633,6 +642,9 @@ impl App {
     // ---------- sequences ----------
 
     pub(super) fn start_sequences(&mut self) {
+        if !self.premium(crate::licence::Feature::SequenceFilter) {
+            return;
+        }
         let Some(tree) = self.tree.clone() else { return };
         if let Some((c, _)) = self.seq.job.take() {
             c.store(true, Ordering::Relaxed);

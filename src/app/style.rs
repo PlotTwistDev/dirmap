@@ -322,6 +322,7 @@ const MENU_ICONS: &[(&str, &str)] = &[
     ("Help", "❓"),
     ("Keyboard", "⌨"),
     ("About", "ℹ"),
+    ("Licence", "🔑"),
     ("What's New", "✨"),
     ("Save", "💾"),
     ("Load", "🗁"),

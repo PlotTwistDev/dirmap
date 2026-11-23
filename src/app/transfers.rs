@@ -246,6 +246,11 @@ impl App {
         if !remote::is_remote(dest) && !sources.iter().any(|s| remote::is_remote(s)) {
             return false;
         }
+        // New server transfers need a licence; retries and resumes (Queue::add directly) never
+        // check, so expiry can't interrupt them. Handled either way: no local copy instead.
+        if !self.premium(crate::licence::Feature::RemoteTransfers) {
+            return true;
+        }
         let copy = copy || sources.iter().any(|s| crate::fsys::archive::inside(s));
         let sources: Vec<PathBuf> = sources.iter().filter(|s| copy || s.parent() != Some(dest)).cloned().collect();
         if sources.is_empty() {

@@ -29,8 +29,15 @@ pub const HOUR: Ts = 3_600;
 
 /// Default length of a temporary licence.
 pub const DEFAULT_TEMPORARY_DAYS: u32 = 30;
-/// Default activation limit, for temporary and perpetual licences alike (Rich, 23 Nov 2026).
+/// Activation limit of a temporary licence (the spec: three uses, ever).
 pub const DEFAULT_MAX_ACTIVATIONS: u32 = 3;
+/// Default activation limit of a perpetual licence (Rich, 23 Nov 2026: generous, and adjustable
+/// from the admin site once real numbers are in).
+pub const DEFAULT_PERPETUAL_ACTIVATIONS: u32 = 10;
+/// The admin Activations page flags a licence with more new machines than this in
+/// [`SHARING_WINDOW_DAYS`] as possibly shared.
+pub const SHARING_FLAG_MACHINES: usize = 5;
+pub const SHARING_WINDOW_DAYS: i64 = 30;
 /// Length of the evaluation, counted from the first launch on a machine.
 pub const EVALUATION_DAYS: u32 = 15;
 /// How far behind the latest time already seen the clock may be before time-limited licences lock.

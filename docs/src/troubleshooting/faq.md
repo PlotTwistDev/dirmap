@@ -8,7 +8,17 @@ deleting ones ask first (except Remove Empty Folders, which only removes empty f
 
 ## Does dirmap send anything over the internet?
 
-No. dirmap has no online features, and the help is built in.
+Only what you ask for, and the licence check. The Remote workspace connects to the servers you
+choose. Activating a licence, and a check once a week while you're online, send Filescape's licence
+server the serial (or licence ID) and an anonymous identifier of the computer, made by hashing its
+system ID; nothing about your files is sent. The help is built in. See
+[Licensing](../settings/licensing.md).
+
+## What stops working when a licence or the evaluation ends?
+
+Only starting Professional features. The file browser, the disk map and basic filtering stay free,
+anything already running finishes, and your files, settings and saved data are kept. See
+[Licensing](../settings/licensing.md#free-and-professional-features).
 
 ## Why doesn't dirmap's total match Windows?
 

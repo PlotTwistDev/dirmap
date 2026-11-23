@@ -187,6 +187,7 @@ pub enum Tab {
     FolderList,
     Treemap,
     Advanced,
+    Licensing,
 }
 
 /// The Settings window. Edits a draft; returns true when OK or Apply was pressed.
@@ -221,6 +222,12 @@ impl Dialog {
         self.open = true;
     }
 
+    /// Settings > Licensing.
+    pub fn open_licensing(&mut self, current: &Settings) {
+        self.open(current);
+        self.tab = Tab::Licensing;
+    }
+
     /// The help page for the tab on show.
     pub fn topic(&self) -> &'static str {
         use crate::help::topics;
@@ -230,10 +237,11 @@ impl Dialog {
             Tab::FolderList => topics::SETTINGS_FOLDER_LIST,
             Tab::Treemap => topics::SETTINGS_TREEMAP,
             Tab::Advanced => topics::SETTINGS_ADVANCED,
+            Tab::Licensing => topics::LICENSING,
         }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context) -> Outcome {
+    pub fn show(&mut self, ctx: &egui::Context, licence: &mut crate::licence::Licensing) -> Outcome {
         if !self.open {
             self.rect = None;
             return Outcome::None;
@@ -256,6 +264,7 @@ impl Dialog {
                         (Tab::FolderList, "Folder list"),
                         (Tab::Treemap, "Treemap"),
                         (Tab::Advanced, "Advanced"),
+                        (Tab::Licensing, "Licensing"),
                     ] {
                         ui.selectable_value(&mut self.tab, t, label);
                     }
@@ -272,6 +281,7 @@ impl Dialog {
                         Tab::FolderList => folder_list(ui, d),
                         Tab::Treemap => treemap(ui, d),
                         Tab::Advanced => advanced(ui, d, restart),
+                        Tab::Licensing => licence.panel(ui),
                     }
                 });
                 ui.separator();

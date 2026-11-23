@@ -19,6 +19,7 @@ mod elevate;
 mod fsys;
 mod help;
 mod icons;
+mod licence;
 mod mapview;
 mod netdrives;
 mod pattern;

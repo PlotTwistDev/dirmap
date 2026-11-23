@@ -334,6 +334,9 @@ fn fmt_info(i: Option<Info>) -> String {
 impl App {
     /// Compare the two panes' folders.
     pub(super) fn start_compare(&mut self) {
+        if !self.premium(crate::licence::Feature::FolderCompare) {
+            return;
+        }
         let dirs: Vec<PathBuf> = self
             .files
             .panes

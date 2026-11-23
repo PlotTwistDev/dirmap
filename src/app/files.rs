@@ -1328,7 +1328,9 @@ impl App {
             let saved = self.files.prefs.searches.iter().any(|s| s.dir == dir && s.query == query);
             if style::icon_button(ui, !saved, "☆", if saved { "This search is in the sidebar" } else { "Save this search in the sidebar" }).clicked() {
                 let name = format!("{query} in {}", dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| dir.shown()));
-                self.files.prefs.searches.push(SavedSearch { name, dir, query });
+                if self.premium(crate::licence::Feature::SavedSearches) {
+                    self.files.prefs.searches.push(SavedSearch { name, dir, query });
+                }
             }
         }
         if focused && std::mem::take(&mut self.files.focus_filter) {
@@ -3367,8 +3369,10 @@ impl App {
             } else if let (Some(e), Some(dir)) = (t.entry(i), t.here().dir()) {
                 let path = dir.join(&*e.name);
                 if e.is_dir || (archive::is_archive(&e.name) && !archive::inside(&path)) {
-                    // Archives open like folders.
-                    self.files.go(Location::Dir(path));
+                    // Archives open like folders (with a licence).
+                    if e.is_dir || self.premium(crate::licence::Feature::Archives) {
+                        self.files.go(Location::Dir(path));
+                    }
                 } else {
                     self.open_file(path);
                 }
@@ -3421,7 +3425,8 @@ impl App {
             .unwrap_or_default();
         let Some(a) = item_menu(ui, &m, &self.files.prefs.apps.clone(), &ext) else { return };
         match a {
-            FAction::Open if is_dir || archive => self.files.go(Location::Dir(disk.to_path_buf())),
+            FAction::Open if is_dir || (archive && self.premium(crate::licence::Feature::Archives)) => self.files.go(Location::Dir(disk.to_path_buf())),
+            FAction::Open if archive => {}
             FAction::Open => {
                 let p = disk.to_path_buf();
                 self.files.spawn(move || actions::open(&p));
@@ -3456,6 +3461,9 @@ impl App {
 
     /// Take archives apart into new folders named after them: beside each archive, or in `dest`.
     pub(super) fn extract_archives(&mut self, archives: Vec<PathBuf>, dest: Option<PathBuf>) {
+        if !self.premium(crate::licence::Feature::Archives) {
+            return;
+        }
         if self.ops.job.is_some() {
             self.ops.notice = Some(("Another file operation is still running.".into(), true));
             return;

@@ -191,6 +191,8 @@ const INDENT: f32 = 16.0;
 
 pub struct App {
     settings: Settings,
+    /// Filescape licensing: which licence applies, and the start-only feature checks.
+    pub(crate) licence: crate::licence::Licensing,
     dialog: settings::Dialog,
     icons: Icons,
     /// `--all-fs` on the command line overrides the "stay on drive" setting for this run.
@@ -312,6 +314,7 @@ impl App {
         }
         let mut app = Self {
             settings,
+            licence: crate::licence::Licensing::load(),
             dialog: Default::default(),
             icons: Icons::default(),
             force_all_fs,
@@ -833,6 +836,10 @@ impl App {
                 }
             }
             ui.separator();
+            if ui.add(egui::Button::new(style::mi("Licence"))).clicked() {
+                self.dialog.open_licensing(&self.settings);
+                ui.close();
+            }
             if ui.add(egui::Button::new(style::mi("About dirmap"))).clicked() {
                 self.help.about_open = true;
                 ui.close();
@@ -1454,7 +1461,16 @@ impl App {
         }
     }
 
+    /// Where a premium operation starts: false (and the licence prompt) when it needs a
+    /// licence. Work already running is never checked again.
+    pub(crate) fn premium(&mut self, f: crate::licence::Feature) -> bool {
+        self.licence.begin(f).is_some()
+    }
+
     fn save_snapshot(&mut self) {
+        if !self.premium(crate::licence::Feature::Snapshots) {
+            return;
+        }
         let Some(tree) = &self.tree else { return };
         let label: String = tree.name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
         let name = format!("dirmap {} {}.dmsnap", label.trim_matches('_'), chrono::Local::now().format("%Y-%m-%d %H%M"));
@@ -1474,6 +1490,9 @@ impl App {
     }
 
     fn load_snapshot_from(&mut self, f: PathBuf) {
+        if !self.premium(crate::licence::Feature::Snapshots) {
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(snapshot::load(&f).map_err(|e| format!("Couldn't open {}: {e}", f.display())));
@@ -1581,6 +1600,9 @@ impl App {
     }
 
     fn start_dupes(&mut self) {
+        if !self.premium(crate::licence::Feature::Duplicates) {
+            return;
+        }
         let Some(tree) = &self.tree else { return };
         fn walk(n: &Node, min: u64, path: &mut Vec<u32>, disk: &mut PathBuf, out: &mut Vec<dupes::Candidate>) {
             for (i, c) in n.children.iter().enumerate() {
@@ -2395,7 +2417,12 @@ impl eframe::App for App {
         }
         self.help_regions.clear();
 
-        if let settings::Outcome::Apply = self.dialog.show(&ctx) {
+        self.licence.tick(&ctx);
+        self.licence.prompt(&ctx);
+        if std::mem::take(&mut self.licence.ui.open_settings) {
+            self.dialog.open_licensing(&self.settings);
+        }
+        if let settings::Outcome::Apply = self.dialog.show(&ctx, &mut self.licence) {
             if self.dialog.draft.admin != self.settings.admin {
                 elevate::save_mode(self.dialog.draft.admin);
                 self.admin_prompt = false;
@@ -2497,6 +2524,7 @@ impl eframe::App for App {
         self.drive_filter(&ctx);
         self.poll_sequences(&ctx);
 
+        self.licence.banner(ui);
         let r = egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(2.0);
             if analysis {

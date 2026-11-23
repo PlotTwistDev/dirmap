@@ -387,6 +387,9 @@ impl App {
     /// Connect to a server in the background (asking for what's needed), then open it: the
     /// folder in its address, or the account's own folder.
     pub(super) fn open_server(&mut self, path: PathBuf) {
+        if !self.premium(crate::licence::Feature::Remote) {
+            return;
+        }
         let who = remote::split(&path).map(|(s, _)| s.short()).unwrap_or_default();
         self.ops.notice = Some((format!("Connecting to {who}…"), false));
         self.net_job(move || remote::connect(&path).map(Some));

@@ -300,6 +300,9 @@ pub(super) fn apply(
 impl App {
     /// Open the batch rename window on these items (all in one folder).
     pub(super) fn start_batch_rename(&mut self, paths: Vec<PathBuf>) {
+        if !self.premium(crate::licence::Feature::BatchRename) {
+            return;
+        }
         let t = self.files.cur();
         let names: HashSet<String> = t
             .listing

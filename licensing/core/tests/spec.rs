@@ -456,7 +456,8 @@ fn t19_perpetual_licences_are_unaffected_and_win() {
     let dev = device_hash("machine-1");
     let (pserial, plic) = l.issue_perpetual(Some("Rich".into()), None, Some("txn_01".into()), DEFAULT_UPDATE_MONTHS, ISSUE).unwrap();
     assert_eq!(plic.kind(), LicenceKind::Perpetual);
-    assert_eq!(plic.max_activations, 3);
+    assert_eq!(plic.max_activations, DEFAULT_PERPETUAL_ACTIVATIONS);
+    assert_eq!(plic.max_activations, 10);
     // A resent Paddle webhook doesn't make a second licence.
     assert!(l.issue_perpetual(None, None, Some("txn_01".into()), 12, ISSUE).is_err());
     let (tserial, _) = temp(&l, TemporaryOptions::default());
@@ -475,7 +476,9 @@ fn t19_perpetual_licences_are_unaffected_and_win() {
     // Update entitlement: a build released after it lapses isn't covered.
     let late = Context { now: ISSUE + 500 * DAY, device_hash: &dev, build_date: ISSUE + 400 * DAY, verifier: &v };
     assert!(matches!(evaluate(&late, &st), Standing::Restricted(Reason::TemporaryExpired(_)) | Standing::Restricted(Reason::UpdatesLapsed(_))));
-    // Perpetual licences also stop at 3 activations (Rich, 23 Nov), and support can reset them.
+    // Perpetual licences stop at their limit (10 by default, Rich 23 Nov), which the admin can
+    // change, and support can reset them.
+    l.set_activation_limit(&plic.id, 3, "test", FIRST).unwrap();
     l.activate(&req(&pserial, 2), FIRST).unwrap();
     l.activate(&req(&pserial, 3), FIRST).unwrap();
     assert_eq!(l.activate(&req(&pserial, 4), FIRST), Err(Rejection::ActivationLimitReached));
@@ -515,4 +518,36 @@ fn admin_tools_history_void_and_search() {
     // Revocation reaches activated machines at their next check.
     l.revoke(&lic.id, "chargeback", FIRST + 2 * DAY).unwrap();
     assert_eq!(l.validate(&aid(&serial, 1), &device_hash("machine-1"), FIRST + 2 * DAY), Err(Rejection::Revoked));
+}
+
+#[test]
+fn perpetual_limits_are_adjustable_and_activations_are_monitored() {
+    let (l, _) = ledger();
+    let (serial, lic) = l.issue_perpetual(None, None, None, 12, ISSUE).unwrap();
+    for n in 1..=7 {
+        l.activate(&req(&serial, n), FIRST + i64::from(n) * DAY).unwrap();
+    }
+    // Seven machines in a week: flagged as possibly shared.
+    let report = l.activation_report(FIRST + 8 * DAY);
+    assert_eq!(report[0].licence_id, lic.id);
+    assert!(report[0].flagged);
+    assert_eq!((report[0].activations_used, report[0].max_activations, report[0].recent_machines), (7, 10, 7));
+    // Months later the same licence is no longer flagged.
+    assert!(!l.activation_report(FIRST + 100 * DAY)[0].flagged);
+    // Lowering the limit blocks new machines but keeps the seven working.
+    l.set_activation_limit(&lic.id, 5, "sharing", FIRST + 9 * DAY).unwrap();
+    assert_eq!(l.activate(&req(&serial, 8), FIRST + 9 * DAY), Err(Rejection::ActivationLimitReached));
+    assert!(l.validate(&aid(&serial, 7), &device_hash("machine-7"), FIRST + 9 * DAY).is_ok());
+    // New purchases get the new default; temporary licences keep theirs.
+    l.set_default_perpetual_limit(20).unwrap();
+    assert_eq!(l.issue_perpetual(None, None, None, 12, ISSUE).unwrap().1.max_activations, 20);
+    let (_, t) = temp(&l, TemporaryOptions::default());
+    assert!(l.set_activation_limit(&t.id, 10, "no", FIRST).is_err());
+    assert!(l.set_activation_limit(&lic.id, 0, "no", FIRST).is_err());
+    // The ledger survives a save and reload (the app's test-serial mode keeps one on disk).
+    let json = l.to_json();
+    let pkcs8 = Signer::generate_pkcs8(&SystemRandom::new());
+    let again = MemoryLedger::from_json(Signer::from_pkcs8(&pkcs8).unwrap(), &json).unwrap();
+    assert_eq!(again.licence(&lic.id).unwrap().max_activations, 5);
+    assert_eq!(again.default_perpetual_limit(), 20);
 }

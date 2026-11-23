@@ -101,14 +101,40 @@ pub enum IssueError {
     BadLimit,
     /// This Paddle order already has a licence.
     DuplicateOrder(String),
+    /// Only perpetual licences have adjustable limits; a temporary licence keeps what it was
+    /// issued with.
+    NotPerpetual,
+    NotFound,
 }
 
-#[derive(Default)]
+/// One row of the admin Activations page.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ActivationReportRow {
+    pub licence_id: String,
+    pub kind: LicenceKind,
+    pub owner: Option<String>,
+    pub activations_used: u32,
+    pub max_activations: u32,
+    /// Machines activated in the last [`crate::SHARING_WINDOW_DAYS`] days.
+    pub recent_machines: usize,
+    /// Machines with a live activation now.
+    pub live_machines: usize,
+    /// More than [`crate::SHARING_FLAG_MACHINES`] new machines in the window: maybe shared.
+    pub flagged: bool,
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 struct State {
     licences: HashMap<String, Licence>,
     by_serial: HashMap<String, String>,
     by_order: HashMap<String, String>,
     activations: Vec<Activation>,
+    #[serde(default = "default_perpetual")]
+    perpetual_limit: u32,
+}
+
+fn default_perpetual() -> u32 {
+    crate::DEFAULT_PERPETUAL_ACTIVATIONS
 }
 
 /// The reference licensing server, in memory.
@@ -130,7 +156,79 @@ fn event(lic: &mut Licence, at: Ts, what: &str, detail: impl Into<String>) {
 
 impl MemoryLedger {
     pub fn new(signer: Signer) -> MemoryLedger {
-        MemoryLedger { state: Mutex::new(State::default()), signer, rng: ring::rand::SystemRandom::new() }
+        let state = State { perpetual_limit: default_perpetual(), ..State::default() };
+        MemoryLedger { state: Mutex::new(state), signer, rng: ring::rand::SystemRandom::new() }
+    }
+
+    /// Restores a ledger saved with [`MemoryLedger::to_json`] (the app's test-serial mode keeps
+    /// one on disk).
+    pub fn from_json(signer: Signer, json: &str) -> Result<MemoryLedger, String> {
+        let state: State = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        Ok(MemoryLedger { state: Mutex::new(state), signer, rng: ring::rand::SystemRandom::new() })
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(&*self.state.lock().unwrap()).unwrap()
+    }
+
+    /// Admin: the activation limit new perpetual licences get.
+    pub fn set_default_perpetual_limit(&self, max: u32) -> Result<(), IssueError> {
+        if max == 0 {
+            return Err(IssueError::BadLimit);
+        }
+        self.state.lock().unwrap().perpetual_limit = max;
+        Ok(())
+    }
+
+    pub fn default_perpetual_limit(&self) -> u32 {
+        self.state.lock().unwrap().perpetual_limit
+    }
+
+    /// Admin: change one perpetual licence's limit. Lowering it below the uses already consumed
+    /// blocks new activations only; machines already activated keep working.
+    pub fn set_activation_limit(&self, licence_id: &str, max: u32, reason: &str, now: Ts) -> Result<(), IssueError> {
+        if max == 0 {
+            return Err(IssueError::BadLimit);
+        }
+        let mut st = self.state.lock().unwrap();
+        let lic = st.licences.get_mut(licence_id).ok_or(IssueError::NotFound)?;
+        if lic.kind() != LicenceKind::Perpetual {
+            return Err(IssueError::NotPerpetual);
+        }
+        let before = lic.max_activations;
+        lic.max_activations = max;
+        event(lic, now, "limit changed", format!("{before} to {max}: {reason}"));
+        Ok(())
+    }
+
+    /// Admin Activations page: every licence that has been activated, busiest first.
+    pub fn activation_report(&self, now: Ts) -> Vec<ActivationReportRow> {
+        let st = self.state.lock().unwrap();
+        let since = now - crate::SHARING_WINDOW_DAYS * DAY;
+        let mut rows: Vec<ActivationReportRow> = st
+            .licences
+            .values()
+            .filter(|l| l.first_activated_at.is_some())
+            .map(|l| {
+                let acts = st.activations.iter().filter(|a| a.licence_id == l.id);
+                let mut recent: Vec<&str> = acts.clone().filter(|a| a.created_at >= since).map(|a| a.device_hash.as_str()).collect();
+                recent.sort_unstable();
+                recent.dedup();
+                let live = acts.filter(|a| a.is_live()).count();
+                ActivationReportRow {
+                    licence_id: l.id.clone(),
+                    kind: l.kind(),
+                    owner: l.owner.clone(),
+                    activations_used: l.activations_used,
+                    max_activations: l.max_activations,
+                    recent_machines: recent.len(),
+                    live_machines: live,
+                    flagged: recent.len() > crate::SHARING_FLAG_MACHINES,
+                }
+            })
+            .collect();
+        rows.sort_by(|a, b| b.flagged.cmp(&a.flagged).then(b.recent_machines.cmp(&a.recent_machines)).then(a.licence_id.cmp(&b.licence_id)));
+        rows
     }
 
     pub fn public_key(&self) -> Vec<u8> {
@@ -210,7 +308,8 @@ impl MemoryLedger {
         let serial = serial::generate(LicenceKind::Perpetual, &self.rng);
         // Months as 30.44 days: entitlement is a date, not a calendar computation.
         let updates_until = now + i64::from(update_months) * 2_629_746;
-        let mut lic = self.blank(Validity::Perpetual { updates_until }, crate::DEFAULT_MAX_ACTIVATIONS, now);
+        let limit = st.perpetual_limit;
+        let mut lic = self.blank(Validity::Perpetual { updates_until }, limit, now);
         lic.owner = owner;
         lic.email = email;
         lic.order_ref = order_ref;
