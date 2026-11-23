@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Filescape: a file manager with a map of your disk</title><meta name="description" content="Filescape is a fast file manager for Windows and macOS with a built-in disk map. Free to use, with a low-cost Professional licence."><link rel="stylesheet" href="/style.css"></head><body>
+<header><a class="brand" href="/">Filescape</a><a href="/#pricing">Pricing</a><a href="https://account.filescape.app/">Your licence</a></header><main>
+<section class="hero"><h1>A fast file manager with a map of your disk.</h1>
+<p>Browse, copy and tidy your files, and see at a glance what is filling your drive. Free for everyday use, with Professional tools for a one-off <span class="js-price">$5</span>.</p>
+<a class="btn" id="dl" href="#download">Download free</a> <a class="btn ghost" href="/buy">Buy Professional</a></section>
+<section id="pricing" class="grid">
+<div class="card"><h2>Free</h2><div class="price">$0</div><p class="mute">Forever, on as many computers as you like.</p><ul class="ticks">
+<li>The file browser: tabs, two panes, preview, copy, move, rename and delete</li><li>The disk map: scan a drive, treemap and sunburst views</li><li>Basic filters: file categories, size limits, highlight or show only matches</li><li>A 15-day evaluation of every Professional feature</li></ul></div>
+<div class="card"><h2>Professional</h2><div class="price js-price">$5</div><p class="mute">One payment. A perpetual licence for up to 10 computers, with a year of updates.</p><ul class="ticks">
+<li>Custom pattern filters, presets and numbered sequences</li><li>Remote workspace: SFTP, FTP and WebDAV servers, with transfers</li><li>Image sequence player</li><li>Batch rename, folder compare and the duplicate finder</li><li>Archives, saved searches and snapshots</li></ul><a class="btn" href="/buy">Buy Professional</a></div>
+</section>
+<section id="download" class="card"><h2>Download</h2><p>Filescape runs on Windows 10 and 11, and on macOS.</p>
+<p><a class="btn" id="dl-win" href="#">Windows</a> <a class="btn ghost" id="dl-mac" href="#">macOS</a></p></section>
+</main><footer><span>© 2026 Filescape</span><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/refunds">Refunds</a><a href="mailto:support@filescape.app">support@filescape.app</a></footer><script src="/config.js"></script><script>
+const c=window.FILESCAPE;document.querySelectorAll('.js-price').forEach(e=>e.textContent=c.priceLabel);
+document.getElementById('dl-win').href=c.downloadWindows;document.getElementById('dl-mac').href=c.downloadMac;</script></body></html>

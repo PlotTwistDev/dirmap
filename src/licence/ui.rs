@@ -20,6 +20,8 @@ pub struct State {
     /// The banner was closed for this session.
     pub banner_closed: bool,
     pub(super) serial_for_keychain: Option<String>,
+    /// Deactivate This Computer… was pressed: asking to confirm.
+    confirm_deactivate: bool,
     #[cfg(feature = "licence-dev")]
     test: TestForm,
 }
@@ -213,7 +215,7 @@ impl Licensing {
                     }
                 });
                 if self.standing.is_licensed() && !matches!(self.standing, Standing::Evaluation { .. }) && ui.button("Deactivate This Computer…").on_hover_text("Ends the activation here. The activation it used isn't given back.").clicked() {
-                    self.deactivate();
+                    self.ui.confirm_deactivate = true;
                 }
             }
             // No Renew button for temporary licences: more time means a new serial.
@@ -221,6 +223,20 @@ impl Licensing {
                 ui.ctx().open_url(egui::OpenUrl::new_tab(PURCHASE_URL));
             }
         });
+        if self.ui.confirm_deactivate {
+            ui.group(|ui| {
+                ui.label("Deactivate Filescape on this computer? Professional features stop here, and the activation it used isn't given back.");
+                ui.horizontal(|ui| {
+                    if ui.button("Deactivate").clicked() {
+                        self.ui.confirm_deactivate = false;
+                        self.deactivate();
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.ui.confirm_deactivate = false;
+                    }
+                });
+            });
+        }
     }
 
     fn details(&mut self, ui: &mut egui::Ui) {

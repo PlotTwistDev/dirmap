@@ -1,0 +1,6 @@
+# Local development only (wrangler dev). Copy to .dev.vars, which git ignores.
+SIGNING_KEY=paste from keygen
+SERIAL_KEY=paste from keygen
+DEV=1
+PADDLE_WEBHOOK_SECRET=pdl_local
+PADDLE_PRICE_IDS=pri_01m84qwgg1a8858drzqk2rvzpz

@@ -144,7 +144,8 @@ pub struct MemoryLedger {
     rng: ring::rand::SystemRandom,
 }
 
-fn random_id(rng: &dyn SecureRandom, prefix: &str) -> String {
+/// A random ID such as `LIC-ABCDEFGH2345`.
+pub fn random_id(rng: &dyn SecureRandom, prefix: &str) -> String {
     let mut b = [0u8; 8];
     rng.fill(&mut b).expect("system random number generator failed");
     format!("{prefix}-{}", &data_encoding::BASE32_NOPAD.encode(&b)[..12])
@@ -204,30 +205,17 @@ impl MemoryLedger {
     /// Admin Activations page: every licence that has been activated, busiest first.
     pub fn activation_report(&self, now: Ts) -> Vec<ActivationReportRow> {
         let st = self.state.lock().unwrap();
-        let since = now - crate::SHARING_WINDOW_DAYS * DAY;
+        let since = report_since(now);
         let mut rows: Vec<ActivationReportRow> = st
             .licences
             .values()
             .filter(|l| l.first_activated_at.is_some())
             .map(|l| {
-                let acts = st.activations.iter().filter(|a| a.licence_id == l.id);
-                let mut recent: Vec<&str> = acts.clone().filter(|a| a.created_at >= since).map(|a| a.device_hash.as_str()).collect();
-                recent.sort_unstable();
-                recent.dedup();
-                let live = acts.filter(|a| a.is_live()).count();
-                ActivationReportRow {
-                    licence_id: l.id.clone(),
-                    kind: l.kind(),
-                    owner: l.owner.clone(),
-                    activations_used: l.activations_used,
-                    max_activations: l.max_activations,
-                    recent_machines: recent.len(),
-                    live_machines: live,
-                    flagged: recent.len() > crate::SHARING_FLAG_MACHINES,
-                }
+                let acts: Vec<&Activation> = st.activations.iter().filter(|a| a.licence_id == l.id).collect();
+                report_row(l, &acts, since)
             })
             .collect();
-        rows.sort_by(|a, b| b.flagged.cmp(&a.flagged).then(b.recent_machines.cmp(&a.recent_machines)).then(a.licence_id.cmp(&b.licence_id)));
+        sort_report(&mut rows);
         rows
     }
 
@@ -249,40 +237,13 @@ impl MemoryLedger {
     }
 
     fn blank(&self, validity: Validity, max: u32, now: Ts) -> Licence {
-        Licence {
-            id: random_id(&self.rng, "LIC"),
-            serial_hash: String::new(),
-            serial_hint: String::new(),
-            validity,
-            owner: None,
-            email: None,
-            purpose: None,
-            issued_at: now,
-            first_activated_at: None,
-            expires_at: match validity {
-                Validity::FixedExpiry { expires_at } => Some(expires_at),
-                _ => None,
-            },
-            max_activations: max,
-            activations_used: 0,
-            revoked_at: None,
-            revoke_reason: None,
-            order_ref: None,
-            events: Vec::new(),
-        }
+        new_licence(&self.rng, validity, max, now)
     }
 
     /// Create Temporary Licence: one or more serials. The serials are returned once and never
     /// stored.
     pub fn issue_temporary(&self, opts: &TemporaryOptions, now: Ts) -> Result<Vec<(String, Licence)>, IssueError> {
-        match opts.validity {
-            Validity::FirstActivation { days } if days >= 1 => {}
-            Validity::FixedExpiry { expires_at } if expires_at > now => {}
-            _ => return Err(IssueError::BadValidity),
-        }
-        if opts.max_activations == 0 {
-            return Err(IssueError::BadLimit);
-        }
+        check_temporary(opts, now)?;
         let mut st = self.state.lock().unwrap();
         let mut out = Vec::new();
         for _ in 0..opts.count.max(1) {
@@ -306,8 +267,7 @@ impl MemoryLedger {
             }
         }
         let serial = serial::generate(LicenceKind::Perpetual, &self.rng);
-        // Months as 30.44 days: entitlement is a date, not a calendar computation.
-        let updates_until = now + i64::from(update_months) * 2_629_746;
+        let updates_until = updates_until(now, update_months);
         let limit = st.perpetual_limit;
         let mut lic = self.blank(Validity::Perpetual { updates_until }, limit, now);
         lic.owner = owner;
@@ -318,22 +278,7 @@ impl MemoryLedger {
     }
 
     fn certs(&self, lic: &Licence, a: &Activation, now: Ts) -> (crate::sign::Envelope, crate::sign::Envelope) {
-        let act = ActivationCert {
-            licence_id: lic.id.clone(),
-            kind: lic.kind(),
-            owner: lic.owner.clone(),
-            serial_hint: lic.serial_hint.clone(),
-            activation_id: a.activation_id.clone(),
-            device_hash: a.device_hash.clone(),
-            issued_at: lic.issued_at,
-            first_activated_at: lic.first_activated_at.unwrap_or(a.created_at),
-            expires_at: lic.expires_at,
-            updates_until: lic.validity.updates_until(),
-            activations_used: lic.activations_used,
-            max_activations: lic.max_activations,
-            signed_at: now,
-        };
-        (self.signer.sign(Purpose::Activation, &act), self.signer.sign(Purpose::Issuance, &issuance(lic, now)))
+        certificates(&self.signer, lic, a, now)
     }
 
     /// POST /v1/activate (and the offline upload).
@@ -388,19 +333,8 @@ impl MemoryLedger {
         let mut st = self.state.lock().unwrap();
         let State { licences, activations, .. } = &mut *st;
         let a = activations.iter().find(|a| a.activation_id == activation_id).ok_or(Rejection::NotFound)?;
-        if a.device_hash != device_hash {
-            return Err(Rejection::ActivationIdConflict);
-        }
-        if !a.is_live() {
-            return Err(Rejection::Deactivated);
-        }
         let lic = licences.get_mut(&a.licence_id).unwrap();
-        if lic.revoked_at.is_some() {
-            return Err(Rejection::Revoked);
-        }
-        if lic.expires_at.is_some_and(|e| now >= e) {
-            return Err(Rejection::Expired);
-        }
+        check_validate(lic, a, device_hash, now)?;
         let (activation, issuance) = self.certs(lic, a, now);
         Ok(ActivationResponse { activation, issuance, status: lic.status(now), consumed_use: false })
     }
@@ -521,4 +455,112 @@ pub fn issuance(lic: &Licence, now: Ts) -> IssuanceCert {
         issuer: ISSUER.into(),
         as_of: now,
     }
+}
+
+/// A licence with nothing filled in but its validity and limit, and a fresh ID.
+pub fn new_licence(rng: &dyn SecureRandom, validity: Validity, max: u32, now: Ts) -> Licence {
+    Licence {
+        id: random_id(rng, "LIC"),
+        serial_hash: String::new(),
+        serial_hint: String::new(),
+        validity,
+        owner: None,
+        email: None,
+        purpose: None,
+        issued_at: now,
+        first_activated_at: None,
+        expires_at: match validity {
+            Validity::FixedExpiry { expires_at } => Some(expires_at),
+            _ => None,
+        },
+        max_activations: max,
+        activations_used: 0,
+        revoked_at: None,
+        revoke_reason: None,
+        order_ref: None,
+        events: Vec::new(),
+    }
+}
+
+/// Whether these temporary-licence options can be issued.
+pub fn check_temporary(opts: &TemporaryOptions, now: Ts) -> Result<(), IssueError> {
+    match opts.validity {
+        Validity::FirstActivation { days } if days >= 1 => {}
+        Validity::FixedExpiry { expires_at } if expires_at > now => {}
+        _ => return Err(IssueError::BadValidity),
+    }
+    if opts.max_activations == 0 {
+        return Err(IssueError::BadLimit);
+    }
+    Ok(())
+}
+
+/// The end of a perpetual licence's updates. Months count as 30.44 days: entitlement is a date,
+/// not a calendar computation.
+pub fn updates_until(now: Ts, months: u32) -> Ts {
+    now + i64::from(months) * 2_629_746
+}
+
+/// The weekly check's rules for an existing activation. Never consumes a use.
+pub fn check_validate(lic: &Licence, a: &Activation, device_hash: &str, now: Ts) -> Result<(), Rejection> {
+    if a.device_hash != device_hash {
+        return Err(Rejection::ActivationIdConflict);
+    }
+    if !a.is_live() {
+        return Err(Rejection::Deactivated);
+    }
+    if lic.revoked_at.is_some() {
+        return Err(Rejection::Revoked);
+    }
+    if lic.expires_at.is_some_and(|e| now >= e) {
+        return Err(Rejection::Expired);
+    }
+    Ok(())
+}
+
+/// The signed activation certificate (for this device) and proof of issuance, as of `now`.
+pub fn certificates(signer: &Signer, lic: &Licence, a: &Activation, now: Ts) -> (crate::sign::Envelope, crate::sign::Envelope) {
+    let act = ActivationCert {
+        licence_id: lic.id.clone(),
+        kind: lic.kind(),
+        owner: lic.owner.clone(),
+        serial_hint: lic.serial_hint.clone(),
+        activation_id: a.activation_id.clone(),
+        device_hash: a.device_hash.clone(),
+        issued_at: lic.issued_at,
+        first_activated_at: lic.first_activated_at.unwrap_or(a.created_at),
+        expires_at: lic.expires_at,
+        updates_until: lic.validity.updates_until(),
+        activations_used: lic.activations_used,
+        max_activations: lic.max_activations,
+        signed_at: now,
+    };
+    (signer.sign(Purpose::Activation, &act), signer.sign(Purpose::Issuance, &issuance(lic, now)))
+}
+
+/// The start of the window the Activations page looks at.
+pub fn report_since(now: Ts) -> Ts {
+    now - crate::SHARING_WINDOW_DAYS * DAY
+}
+
+/// One licence's row of the Activations page, from all its activations.
+pub fn report_row(l: &Licence, acts: &[&Activation], since: Ts) -> ActivationReportRow {
+    let mut recent: Vec<&str> = acts.iter().filter(|a| a.created_at >= since).map(|a| a.device_hash.as_str()).collect();
+    recent.sort_unstable();
+    recent.dedup();
+    ActivationReportRow {
+        licence_id: l.id.clone(),
+        kind: l.kind(),
+        owner: l.owner.clone(),
+        activations_used: l.activations_used,
+        max_activations: l.max_activations,
+        recent_machines: recent.len(),
+        live_machines: acts.iter().filter(|a| a.is_live()).count(),
+        flagged: recent.len() > crate::SHARING_FLAG_MACHINES,
+    }
+}
+
+/// Flagged first, then the busiest.
+pub fn sort_report(rows: &mut [ActivationReportRow]) {
+    rows.sort_by(|a, b| b.flagged.cmp(&a.flagged).then(b.recent_machines.cmp(&a.recent_machines)).then(a.licence_id.cmp(&b.licence_id)));
 }

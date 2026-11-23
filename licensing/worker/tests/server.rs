@@ -1,0 +1,526 @@
+//! The licence server against SQLite (which D1 is) and a fake network, through the same
+//! `handle` the Worker calls.
+
+use filescape_licence::model::*;
+use filescape_licence::sign::{Purpose, Signer, Verifier};
+use filescape_licence::{DAY, device_hash};
+use filescape_licence_server::db::{Row, Stmt, V};
+use filescape_licence_server::{AccessConfig, Config, Ctx, Db, Hosts, MailConfig, Net, PaddleConfig, Req, Resp, handle, paddle};
+use std::cell::{Cell, RefCell};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+const T0: i64 = 1_795_392_000; // 23 Nov 2026
+const SCHEMA: &str = include_str!("../migrations/0001_init.sql");
+
+/// Gives way once, so two requests run with `join` interleave like concurrent Workers.
+struct YieldOnce(bool);
+impl Future for YieldOnce {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        if self.0 {
+            Poll::Ready(())
+        } else {
+            self.0 = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    }
+}
+
+struct Sqlite(rusqlite::Connection);
+
+fn params(args: &[V]) -> Vec<rusqlite::types::Value> {
+    args.iter()
+        .map(|v| match v {
+            V::Null => rusqlite::types::Value::Null,
+            V::Int(i) => rusqlite::types::Value::Integer(*i),
+            V::Text(s) => rusqlite::types::Value::Text(s.clone()),
+        })
+        .collect()
+}
+
+impl Db for Sqlite {
+    async fn all(&self, sql: &str, args: Vec<V>) -> Result<Vec<Row>, String> {
+        YieldOnce(false).await;
+        let mut st = self.0.prepare(sql).map_err(|e| e.to_string())?;
+        let names: Vec<String> = st.column_names().iter().map(|s| s.to_string()).collect();
+        let rows = st
+            .query_map(rusqlite::params_from_iter(params(&args)), |r| {
+                let mut m = Row::new();
+                for (i, n) in names.iter().enumerate() {
+                    let v = match r.get_ref(i)? {
+                        rusqlite::types::ValueRef::Null => serde_json::Value::Null,
+                        rusqlite::types::ValueRef::Integer(x) => x.into(),
+                        rusqlite::types::ValueRef::Real(x) => x.into(),
+                        rusqlite::types::ValueRef::Text(t) => String::from_utf8_lossy(t).into_owned().into(),
+                        rusqlite::types::ValueRef::Blob(_) => serde_json::Value::Null,
+                    };
+                    m.insert(n.clone(), v);
+                }
+                Ok(m)
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    async fn batch(&self, stmts: Vec<Stmt>) -> Result<Vec<usize>, String> {
+        YieldOnce(false).await;
+        self.0.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for (sql, args) in &stmts {
+            match self.0.execute(sql, rusqlite::params_from_iter(params(args))) {
+                Ok(n) => out.push(n),
+                Err(e) => {
+                    self.0.execute_batch("ROLLBACK").ok();
+                    return Err(e.to_string());
+                }
+            }
+        }
+        self.0.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+        Ok(out)
+    }
+}
+
+/// Records what was sent; answers Paddle's customer lookups, Resend and Access keys.
+#[derive(Default)]
+struct FakeNet {
+    sent: RefCell<Vec<(String, String, Option<String>)>>,
+    resend_fails: Cell<bool>,
+    access_keys: RefCell<String>,
+}
+
+impl Net for FakeNet {
+    async fn send(&self, method: &str, url: &str, _headers: &[(&str, String)], body: Option<String>) -> Result<(u16, String), String> {
+        self.sent.borrow_mut().push((method.into(), url.into(), body.clone()));
+        if url.starts_with("https://api.resend.com") {
+            return Ok(if self.resend_fails.get() { (500, "down".into()) } else { (200, "{\"id\":\"m1\"}".into()) });
+        }
+        if url.contains("/customers/") {
+            return Ok((200, r#"{"data":{"id":"ctm_1","name":"Ada Buyer","email":"Ada@Example.com"}}"#.into()));
+        }
+        if url.ends_with("/cdn-cgi/access/certs") {
+            return Ok((200, self.access_keys.borrow().clone()));
+        }
+        Ok((404, String::new()))
+    }
+}
+
+impl FakeNet {
+    fn emails(&self) -> Vec<String> {
+        self.sent.borrow().iter().filter(|(_, u, _)| u.contains("resend")).map(|(_, _, b)| b.clone().unwrap_or_default()).collect()
+    }
+}
+
+struct World {
+    db: Sqlite,
+    net: FakeNet,
+    cfg: Config,
+    now: Cell<i64>,
+}
+
+const WEBHOOK_SECRET: &str = "pdl_ntfset_test_secret";
+
+fn world() -> World {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(SCHEMA).unwrap();
+    let pkcs8 = Signer::generate_pkcs8(&ring::rand::SystemRandom::new());
+    World {
+        db: Sqlite(conn),
+        net: FakeNet::default(),
+        cfg: Config {
+            signer: Signer::from_pkcs8(&pkcs8).unwrap(),
+            serial_key: [9u8; 32],
+            paddle: Some(PaddleConfig {
+                webhook_secret: WEBHOOK_SECRET.into(),
+                api_key: Some("pdl_test_key".into()),
+                api_base: "https://sandbox-api.paddle.com".into(),
+                price_ids: vec!["pri_filescape".into()],
+                update_months: 12,
+            }),
+            mail: Some(MailConfig { resend_key: "re_test".into(), from: "Filescape <licences@filescape.app>".into(), reply_to: None }),
+            access: None,
+            dev: true,
+            hosts: Hosts::default(),
+        },
+        now: Cell::new(T0),
+    }
+}
+
+impl World {
+    fn cx(&self) -> Ctx<'_, Sqlite, FakeNet> {
+        Ctx::new(&self.db, &self.net, &self.cfg, self.now.get())
+    }
+
+    fn call(&self, method: &str, host: &str, path: &str, headers: &[(&str, &str)], body: &str) -> Resp {
+        let (path, query) = path.split_once('?').unwrap_or((path, ""));
+        let req = Req {
+            method: method.into(),
+            host: host.into(),
+            path: path.into(),
+            query: query.into(),
+            headers: headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            body: body.as_bytes().to_vec(),
+        };
+        pollster::block_on(handle(&self.cx(), &req))
+    }
+
+    fn api(&self, path: &str, body: &serde_json::Value) -> Resp {
+        self.call("POST", "api.filescape.app", path, &[("content-type", "application/json")], &body.to_string())
+    }
+
+    fn admin(&self, path: &str, form: &str) -> Resp {
+        self.call("POST", "localhost", &format!("/admin{path}"), &[("origin", "http://localhost:8787")], form)
+    }
+
+    fn temp_serial(&self, days: u32, max: u32) -> String {
+        let r = self.admin("/issue", &format!("mode=days&days={days}&max={max}&count=1&owner=Test+Owner"));
+        assert_eq!(r.status, 200, "{}", r.body);
+        let i = r.body.find("FST-").expect("serial shown");
+        r.body[i..i + 27].to_string()
+    }
+
+    fn activate(&self, serial: &str, machine: &str, act: &str) -> Resp {
+        self.api("/v1/activate", &serde_json::json!({ "serial": serial, "activation_id": act, "device_hash": device_hash(machine), "app_version": "2.3.0" }))
+    }
+
+    fn webhook(&self, body: &serde_json::Value) -> Resp {
+        let b = body.to_string();
+        let sig = paddle::sign(WEBHOOK_SECRET, b.as_bytes(), self.now.get());
+        self.call("POST", "api.filescape.app", "/v1/paddle", &[("paddle-signature", &sig)], &b)
+    }
+
+    fn verifier(&self) -> Verifier {
+        Verifier::new(&[self.cfg.signer.public_key()])
+    }
+}
+
+fn ok(r: &Resp) -> ActivationResponse {
+    assert_eq!(r.status, 200, "{}", r.body);
+    serde_json::from_str(&r.body).unwrap()
+}
+
+fn rejection(r: &Resp) -> Rejection {
+    assert!(r.status >= 400, "expected a refusal, got {}: {}", r.status, r.body);
+    #[derive(serde::Deserialize)]
+    struct E {
+        error: Rejection,
+    }
+    serde_json::from_str::<E>(&r.body).unwrap().error
+}
+
+#[test]
+fn activation_follows_the_three_use_rule_and_signs_for_the_app() {
+    let w = world();
+    let serial = w.temp_serial(30, 3);
+    // Computer A: one use, signed certificate the app accepts.
+    let a = ok(&w.activate(&serial, "machine-a", "act-a-000001"));
+    assert!(a.consumed_use);
+    let cert: ActivationCert = w.verifier().verify(&a.activation, Purpose::Activation).unwrap();
+    assert_eq!((cert.activations_used, cert.max_activations), (1, 3));
+    assert_eq!(cert.device_hash, device_hash("machine-a"));
+    assert_eq!(cert.expires_at, Some(T0 + 30 * DAY));
+    // Relaunch / retry with the same ID, or a new ID from the same machine: nothing consumed.
+    assert!(!ok(&w.activate(&serial, "machine-a", "act-a-000001")).consumed_use);
+    assert!(!ok(&w.activate(&serial.to_lowercase().replace('-', " "), "machine-a", "act-a-000002")).consumed_use);
+    // Deactivate A: the use isn't given back.
+    w.now.set(T0 + DAY);
+    let r = w.api("/v1/deactivate", &serde_json::json!({ "activation_id": "act-a-000001", "device_hash": device_hash("machine-a") }));
+    assert_eq!(r.status, 200, "{}", r.body);
+    let b = ok(&w.activate(&serial, "machine-b", "act-b-000001"));
+    let cb: ActivationCert = w.verifier().verify(&b.activation, Purpose::Activation).unwrap();
+    assert_eq!(cb.activations_used, 2);
+    // Expiry was fixed by the first activation.
+    assert_eq!(cb.expires_at, Some(T0 + 30 * DAY));
+    ok(&w.activate(&serial, "machine-c", "act-c-000001"));
+    assert_eq!(rejection(&w.activate(&serial, "machine-d", "act-d-000001")), Rejection::ActivationLimitReached);
+    // A's old activation is gone; activating A again would be a new (refused) use.
+    assert_eq!(rejection(&w.activate(&serial, "machine-a", "act-a-000003")), Rejection::ActivationLimitReached);
+    // Mistakes never reach the database.
+    assert_eq!(rejection(&w.activate("FST-AAAAA-AAAAA-AAAAA-AAAAA", "machine-e", "act-e-000001")), Rejection::BadSerial);
+    let rows = pollster::block_on(w.cx().licence_by_serial(&filescape_licence::serial::normalize(&serial).unwrap().1)).unwrap().unwrap();
+    assert_eq!(rows.lic.activations_used, 3);
+}
+
+#[test]
+fn weekly_check_and_expiry() {
+    let w = world();
+    let serial = w.temp_serial(30, 3);
+    ok(&w.activate(&serial, "m1", "act-m1-00001"));
+    let check = |id: &str, m: &str| w.api("/v1/validate", &serde_json::json!({ "activation_id": id, "device_hash": device_hash(m) }));
+    w.now.set(T0 + 7 * DAY);
+    let v = ok(&check("act-m1-00001", "m1"));
+    assert!(!v.consumed_use);
+    let c: ActivationCert = w.verifier().verify(&v.activation, Purpose::Activation).unwrap();
+    assert_eq!(c.signed_at, T0 + 7 * DAY, "the check also gives the app a trusted time");
+    assert_eq!(rejection(&check("act-m1-00001", "someone-else")), Rejection::ActivationIdConflict);
+    assert_eq!(rejection(&check("act-nope-0001", "m1")), Rejection::NotFound);
+    w.now.set(T0 + 30 * DAY);
+    assert_eq!(rejection(&check("act-m1-00001", "m1")), Rejection::Expired);
+    assert_eq!(rejection(&w.activate(&serial, "m2", "act-m2-00001")), Rejection::Expired);
+}
+
+#[test]
+fn two_computers_racing_for_the_last_use_get_one_between_them() {
+    let w = world();
+    let serial = w.temp_serial(30, 2);
+    ok(&w.activate(&serial, "m1", "act-m1-00001"));
+    let req = |m: &str, id: &str| ActivationRequest { serial: serial.clone(), activation_id: id.into(), device_hash: device_hash(m), app_version: "2.3.0".into() };
+    let (r1, r2) = (req("m2", "act-m2-00001"), req("m3", "act-m3-00001"));
+    let cx = w.cx();
+    let (a, b) = pollster::block_on(futures::future::join(cx.activate(&r1), cx.activate(&r2)));
+    let wins = [a.is_ok(), b.is_ok()].iter().filter(|x| **x).count();
+    assert_eq!(wins, 1, "exactly one gets the last use");
+    let lost = if a.is_ok() { b } else { a };
+    assert!(matches!(lost, Err(filescape_licence_server::store::Fail::No(Rejection::ActivationLimitReached))), "{lost:?}");
+    let lic = pollster::block_on(cx.licence_by_serial(&filescape_licence::serial::normalize(&serial).unwrap().1)).unwrap().unwrap();
+    assert_eq!(lic.lic.activations_used, 2);
+    assert_eq!(pollster::block_on(cx.activations_of(&lic.lic.id)).unwrap().len(), 2);
+}
+
+#[test]
+fn fixed_date_licences_end_on_their_date_whenever_activated() {
+    let w = world();
+    let r = w.admin("/issue", "mode=fixed&until=2026-12-01&max=3&count=2&purpose=trade+show");
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.body.matches("FST-").count(), 2, "both serials shown");
+    let i = r.body.find("FST-").unwrap();
+    let serial = &r.body[i..i + 27];
+    w.now.set(T0 + 3 * DAY);
+    let a = ok(&w.activate(serial, "m1", "act-m1-00001"));
+    let c: ActivationCert = w.verifier().verify(&a.activation, Purpose::Activation).unwrap();
+    assert_eq!(c.expires_at, Some(1_796_083_200)); // 1 Dec 2026, midnight UTC
+    // A date in the past is refused.
+    let r = w.admin("/issue", "mode=fixed&until=2026-01-01&max=3&count=1");
+    assert!(r.body.contains("must be in the future"), "{}", r.body);
+}
+
+#[test]
+fn admin_reset_void_revoke_and_limits() {
+    let w = world();
+    let serial = w.temp_serial(30, 3);
+    for (m, id) in [("m1", "act-m1-00001"), ("m2", "act-m2-00001"), ("m3", "act-m3-00001")] {
+        ok(&w.activate(&serial, m, id));
+    }
+    let cx = w.cx();
+    let id = pollster::block_on(cx.licence_by_serial(&filescape_licence::serial::normalize(&serial).unwrap().1)).unwrap().unwrap().lic.id;
+    // Reset needs a reason, then gives every use back; machines keep working.
+    let r = w.admin(&format!("/licence/{id}/reset"), "reason=");
+    assert!(r.header("location").unwrap().contains("Give%20a%20reason"));
+    w.admin(&format!("/licence/{id}/reset"), "reason=new+computers");
+    ok(&w.activate(&serial, "m4", "act-m4-00001"));
+    ok(&w.api("/v1/validate", &serde_json::json!({ "activation_id": "act-m1-00001", "device_hash": device_hash("m1") })));
+    // Void with the use given back.
+    w.admin(&format!("/licence/{id}/void"), "activation=act-m4-00001&reason=mistake&give_back=1");
+    let l = pollster::block_on(cx.licence(&id)).unwrap().unwrap();
+    assert_eq!(l.lic.activations_used, 0);
+    assert_eq!(rejection(&w.api("/v1/validate", &serde_json::json!({ "activation_id": "act-m4-00001", "device_hash": device_hash("m4") }))), Rejection::Deactivated);
+    // A temporary licence's limit can't be changed.
+    let r = w.admin(&format!("/licence/{id}/limit"), "max=20&reason=x");
+    assert!(r.header("location").unwrap().contains("Only%20perpetual"));
+    // Revoke stops the weekly check; reinstate brings it back.
+    w.admin(&format!("/licence/{id}/revoke"), "reason=shared+online");
+    assert_eq!(rejection(&w.api("/v1/validate", &serde_json::json!({ "activation_id": "act-m1-00001", "device_hash": device_hash("m1") }))), Rejection::Revoked);
+    w.admin(&format!("/licence/{id}/reinstate"), "reason=mistake");
+    ok(&w.api("/v1/validate", &serde_json::json!({ "activation_id": "act-m1-00001", "device_hash": device_hash("m1") })));
+    // The page shows it all, with who did it.
+    let page = w.call("GET", "localhost", &format!("/admin/licence/{id}"), &[], "");
+    for s in ["reset", "voided", "revoked", "reinstated", "new computers", "dev"] {
+        assert!(page.body.contains(s), "history shows {s}");
+    }
+    // Show serial is recorded.
+    let r = w.admin(&format!("/licence/{id}/reveal"), "reason=support");
+    assert!(r.body.contains(&serial));
+    assert!(w.call("GET", "localhost", &format!("/admin/licence/{id}"), &[], "").body.contains("serial shown"));
+}
+
+fn purchase(txn: &str, qty: u32) -> serde_json::Value {
+    serde_json::json!({
+        "event_id": format!("evt_{txn}"),
+        "event_type": "transaction.completed",
+        "occurred_at": "2026-11-23T10:00:00Z",
+        "data": { "id": txn, "status": "completed", "customer_id": "ctm_1",
+                  "items": [ { "price": { "id": "pri_filescape" }, "quantity": qty }, { "price": { "id": "pri_other" }, "quantity": 1 } ] }
+    })
+}
+
+#[test]
+fn paddle_purchase_issues_one_emailed_perpetual_licence() {
+    let w = world();
+    let r = w.webhook(&purchase("txn_01", 1));
+    assert_eq!(r.status, 200, "{}", r.body);
+    let mails = w.net.emails();
+    assert_eq!(mails.len(), 1);
+    let m: serde_json::Value = serde_json::from_str(&mails[0]).unwrap();
+    assert_eq!(m["to"][0], "ada@example.com");
+    let text = m["text"].as_str().unwrap();
+    let i = text.find("FSP-").unwrap();
+    let serial = &text[i..i + 27];
+    assert!(text.contains("up to 10 computers"));
+    // A resent notification (same event, or same transaction in a new event) changes nothing.
+    assert_eq!(w.webhook(&purchase("txn_01", 1)).status, 200);
+    let mut again = purchase("txn_01", 1);
+    again["event_id"] = "evt_other".into();
+    assert_eq!(w.webhook(&again).status, 200);
+    assert_eq!(w.net.emails().len(), 1, "not emailed twice");
+    let cx = w.cx();
+    assert_eq!(pollster::block_on(cx.list("", Default::default(), 100)).unwrap().len(), 1);
+    // The serial works, with 10 activations.
+    let a = ok(&w.activate(serial, "m1", "act-m1-00001"));
+    let c: ActivationCert = w.verifier().verify(&a.activation, Purpose::Activation).unwrap();
+    assert_eq!((c.kind, c.max_activations, c.owner.as_deref()), (LicenceKind::Perpetual, 10, Some("Ada Buyer")));
+    assert_eq!(c.expires_at, None);
+}
+
+#[test]
+fn paddle_signature_quantity_and_email_retry() {
+    let w = world();
+    // Wrong secret, or stale: refused.
+    let b = purchase("txn_02", 2).to_string();
+    let bad = paddle::sign("wrong", b.as_bytes(), T0);
+    assert_eq!(w.call("POST", "api.filescape.app", "/v1/paddle", &[("paddle-signature", &bad)], &b).status, 401);
+    let old = paddle::sign(WEBHOOK_SECRET, b.as_bytes(), T0 - 3600);
+    assert_eq!(w.call("POST", "api.filescape.app", "/v1/paddle", &[("paddle-signature", &old)], &b).status, 401);
+    // Email down: licences are made, Paddle is asked to retry.
+    w.net.resend_fails.set(true);
+    assert_eq!(w.webhook(&purchase("txn_02", 2)).status, 500);
+    let cx = w.cx();
+    assert_eq!(pollster::block_on(cx.list("", filescape_licence_server::store::ListFilter::NotEmailed, 100)).unwrap().len(), 2);
+    // The retry emails the same two licences.
+    w.net.resend_fails.set(false);
+    assert_eq!(w.webhook(&purchase("txn_02", 2)).status, 200);
+    assert_eq!(pollster::block_on(cx.list("", Default::default(), 100)).unwrap().len(), 2, "two units, two licences, none extra");
+    assert_eq!(pollster::block_on(cx.list("", filescape_licence_server::store::ListFilter::NotEmailed, 100)).unwrap().len(), 0);
+    // Other products sold through the same account don't issue anything (and are logged).
+    let mut other = purchase("txn_03", 1);
+    other["data"]["items"] = serde_json::json!([{ "price": { "id": "pri_other" }, "quantity": 1 }]);
+    let r = w.webhook(&other);
+    assert_eq!(r.status, 200);
+    assert!(r.body.contains("not a Filescape purchase"), "{}", r.body);
+    assert_eq!(pollster::block_on(cx.list("", Default::default(), 100)).unwrap().len(), 2);
+    assert!(pollster::block_on(cx.db.first("SELECT outcome FROM webhooks WHERE event_id = 'evt_txn_03'", vec![])).unwrap().is_some(), "logged");
+}
+
+#[test]
+fn refunds_are_flagged_for_the_admin() {
+    let w = world();
+    w.webhook(&purchase("txn_04", 1));
+    let r = w.webhook(&serde_json::json!({ "event_id": "evt_adj", "event_type": "adjustment.created",
+        "data": { "id": "adj_1", "action": "refund", "status": "pending_approval", "transaction_id": "txn_04" } }));
+    assert!(r.body.contains("flagged 1"), "{}", r.body);
+    let cx = w.cx();
+    let rows = pollster::block_on(cx.list("", filescape_licence_server::store::ListFilter::Refunds, 100)).unwrap();
+    assert_eq!(rows[0].refund_flag.as_deref(), Some("refund pending approval"));
+    // A refund of the other product on the same Paddle account is logged and ignored.
+    let r = w.webhook(&serde_json::json!({ "event_id": "evt_adj2", "event_type": "adjustment.created",
+        "data": { "id": "adj_2", "action": "refund", "status": "approved", "transaction_id": "txn_other_product" } }));
+    assert_eq!(r.status, 200);
+    assert!(r.body.contains("not a Filescape purchase"), "{}", r.body);
+    assert!(pollster::block_on(cx.db.first("SELECT outcome FROM webhooks WHERE event_id = 'evt_adj2'", vec![])).unwrap().is_some(), "logged");
+    // Searching by transaction finds it.
+    assert_eq!(pollster::block_on(cx.list("TXN_04", Default::default(), 100)).unwrap().len(), 1);
+}
+
+#[test]
+fn perpetual_default_and_per_licence_limits_from_the_admin() {
+    let w = world();
+    w.admin("/settings", "perpetual_limit=25");
+    w.webhook(&purchase("txn_05", 1));
+    let cx = w.cx();
+    let l = pollster::block_on(cx.licence_by_order("txn_05")).unwrap().unwrap();
+    assert_eq!(l.lic.max_activations, 25);
+    w.admin(&format!("/licence/{}/limit", l.lic.id), "max=40&reason=studio+licence");
+    assert_eq!(pollster::block_on(cx.licence(&l.lic.id)).unwrap().unwrap().lic.max_activations, 40);
+    assert!(w.admin("/settings", "perpetual_limit=0").header("location").unwrap().contains("between%201"));
+}
+
+#[test]
+fn activations_page_flags_possible_sharing() {
+    let w = world();
+    w.webhook(&purchase("txn_06", 1));
+    let text = serde_json::from_str::<serde_json::Value>(&w.net.emails()[0]).unwrap()["text"].as_str().unwrap().to_string();
+    let i = text.find("FSP-").unwrap();
+    let serial = text[i..i + 27].to_string();
+    for n in 0..6 {
+        ok(&w.activate(&serial, &format!("pc-{n}"), &format!("act-pc-{n:05}")));
+    }
+    let page = w.call("GET", "localhost", "/admin/activations", &[], "");
+    assert!(page.body.contains("possibly shared"), "{}", page.body);
+}
+
+#[test]
+fn customers_get_serials_again_by_email_at_most_every_ten_minutes() {
+    let w = world();
+    w.webhook(&purchase("txn_07", 1));
+    let before = w.net.emails().len();
+    let ask = || w.call("POST", "account.filescape.app", "/find", &[], "email=ADA%40example.com");
+    assert!(ask().body.contains("on their way"));
+    assert_eq!(w.net.emails().len(), before + 1);
+    assert!(w.net.emails().last().unwrap().contains("FSP-"));
+    ask();
+    assert_eq!(w.net.emails().len(), before + 1, "rate limited");
+    // An unknown address gets the same answer and no email.
+    assert!(w.call("POST", "account.filescape.app", "/find", &[], "email=nobody%40example.com").body.contains("on their way"));
+    assert_eq!(w.net.emails().len(), before + 1);
+}
+
+#[test]
+fn offline_activation_page_returns_a_response_file() {
+    let w = world();
+    let serial = w.temp_serial(30, 3);
+    let file = serde_json::json!({ "format": OFFLINE_REQUEST_FORMAT, "request": { "serial": serial, "activation_id": "act-off-00001", "device_hash": device_hash("offline-pc"), "app_version": "2.3.0" } });
+    let body = format!("request={}", filescape_licence_server::web::encode(&file.to_string()));
+    let r = w.call("POST", "account.filescape.app", "/activate", &[], &body);
+    assert!(r.header("content-disposition").unwrap().contains("filescape-activation-response.json"));
+    let resp: ActivationResponse = serde_json::from_str(&r.body).unwrap();
+    assert!(resp.consumed_use);
+    let r = w.call("POST", "account.filescape.app", "/activate", &[], "request=nonsense");
+    assert!(r.body.contains("a Filescape activation request file"));
+}
+
+#[test]
+fn admin_needs_cloudflare_access_and_same_site_posts() {
+    let mut w = world();
+    // Posts from elsewhere are refused even in development.
+    let r = w.call("POST", "localhost", "/admin/settings", &[("origin", "https://evil.example")], "perpetual_limit=1");
+    assert_eq!(r.status, 403);
+    // Production: no token, no entry.
+    w.cfg.dev = false;
+    assert_eq!(w.call("GET", "admin.filescape.app", "/", &[], "").status, 403);
+    w.cfg.access = Some(AccessConfig { team_domain: "filescape.cloudflareaccess.com".into(), audience: "aud123".into() });
+    assert_eq!(w.call("GET", "admin.filescape.app", "/", &[], "").status, 403);
+    // A real RS256 token from the team's key gets in.
+    let kp = ring::signature::RsaKeyPair::from_der(include_bytes!("access-test-key.der")).unwrap();
+    let pubk = ring::rsa::PublicKeyComponents::<Vec<u8>>::from(kp.public());
+    let enc = |b: &[u8]| data_encoding::BASE64URL_NOPAD.encode(b);
+    *w.net.access_keys.borrow_mut() = serde_json::json!({ "keys": [ { "kid": "k1", "kty": "RSA", "alg": "RS256", "n": enc(&pubk.n), "e": enc(&pubk.e) } ] }).to_string();
+    let token = |aud: &str, exp: i64| {
+        let h = enc(br#"{"alg":"RS256","kid":"k1","typ":"JWT"}"#);
+        let p = enc(serde_json::json!({ "aud": [aud], "email": "rich@filescape.app", "exp": exp, "iss": "https://filescape.cloudflareaccess.com" }).to_string().as_bytes());
+        let msg = format!("{h}.{p}");
+        let mut sig = vec![0; kp.public().modulus_len()];
+        kp.sign(&ring::signature::RSA_PKCS1_SHA256, &ring::rand::SystemRandom::new(), msg.as_bytes(), &mut sig).unwrap();
+        format!("{msg}.{}", enc(&sig))
+    };
+    let good = token("aud123", T0 + 3600);
+    let r = w.call("GET", "admin.filescape.app", "/", &[("cf-access-jwt-assertion", &good)], "");
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(r.body.contains("rich@filescape.app"));
+    for bad in [token("other-app", T0 + 3600), token("aud123", T0 - 1), format!("{}x", &good[..good.len() - 2])] {
+        assert_eq!(w.call("GET", "admin.filescape.app", "/", &[("cf-access-jwt-assertion", &bad)], "").status, 403);
+    }
+    // The dev path prefixes don't exist in production.
+    assert_ne!(w.call("GET", "api.filescape.app", "/admin/", &[], "").status, 200);
+}
+
+#[test]
+fn health_and_unknown_routes() {
+    let w = world();
+    let r = w.call("GET", "api.filescape.app", "/v1/health", &[], "");
+    assert!(r.body.contains(w.cfg.signer.key_id()));
+    assert_eq!(w.call("GET", "api.filescape.app", "/v1/activate", &[], "").status, 405);
+    assert_eq!(w.call("GET", "api.filescape.app", "/nope", &[], "").status, 404);
+    assert_eq!(w.call("GET", "account.filescape.app", "/thanks", &[], "").status, 200);
+    assert_eq!(rejection(&w.call("POST", "api.filescape.app", "/v1/activate", &[], "not json")), Rejection::BadSerial);
+}

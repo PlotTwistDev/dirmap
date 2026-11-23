@@ -31,7 +31,7 @@ server. Everything here is new.
 |---|---|---|
 | 1 | `licensing/core`: model, serials, Ed25519 envelopes, activation rules, reference ledger, precedence, evaluation, clock checks, exports, spec tests | ✅ 23 Nov |
 | 2 | App: `src/licence/`, keychain store, device ID, gating at start points, Settings → Licensing, exports, offline files, Help Centre; core: adjustable perpetual limits and the activation report | ✅ 23 Nov (test mode until the server exists) |
-| 3 | `licensing/worker` on Cloudflare: D1, activation API, offline page, web admin, customer page, Paddle webhook, Resend, Pages site, R2 downloads | ⏳ |
+| 3 | `licensing/worker` on Cloudflare: D1, activation API, offline page, web admin, customer page, Paddle webhook, Resend, Pages site, R2 downloads | ✅ 23 Nov (code and tests; deploying is Rich's, see `licensing/SETUP.md`) |
 | 4 | Hardening: end-to-end tests against a test Worker, device IDs on all three platforms, key rotation dry run, release | ⏳ |
 
 ## Running the tests
@@ -54,3 +54,22 @@ race on one serial and the admin tools. CI runs them on Windows, macOS and Linux
   `licence-test-server.json`, with its own key and a licence clock offset.
 - `FILESCAPE_LICENCE_PUBKEY` (build time) adds the production public key; `FILESCAPE_LICENCE_SERVER`
   overrides the server URL.
+
+## Phase 3 notes
+
+- `licensing/worker`: one Rust Worker (workers-rs 0.9) for api., account. and admin.filescape.app,
+  with D1 (`migrations/0001_init.sql`). Logic is plain Rust over two traits (`Db`, `Net`); the tests
+  (`tests/server.rs`) run it against SQLite, the engine D1 uses, with a fake network. It was also run
+  in `wrangler dev` with a local D1, and the app activated and deactivated against it.
+- Activation takes the last use atomically: one D1 batch with `UPDATE ... WHERE activations_used = ?`
+  and `INSERT ... WHERE changes() = 1`; a lost race decides again from fresh rows.
+- Serials: looked up by hash; also kept AES-256-GCM encrypted (`SERIAL_KEY`) so customers and the
+  admin can have them emailed again. A database copy alone reveals none.
+- Paddle (live account, shared with another product): only `PADDLE_PRICE_IDS` issue licences;
+  other products' transactions and refunds are logged and ignored. Licences are keyed on the
+  transaction ID; a failed email returns 500 so Paddle retries and the email is resent.
+- Admin: Cloudflare Access in front, and the Worker verifies Access's RS256 token and audience
+  itself. Every change goes in the licence history with the admin's email.
+- Website drafts in `licensing/site` (legal name and refund period to fill in). Setup steps:
+  `licensing/SETUP.md`.
+- App: Deactivate This Computer now asks to confirm.

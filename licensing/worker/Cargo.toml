@@ -1,0 +1,36 @@
+[package]
+name = "filescape-licence-server"
+version = "0.1.0"
+edition = "2024"
+description = "Filescape licence server: Cloudflare Worker (Rust) with D1, admin site, customer pages and the Paddle webhook."
+publish = false
+
+# Built on its own, like licensing/core. Test natively with:
+#   cargo test --manifest-path licensing/worker/Cargo.toml
+# Build and deploy with wrangler (see SETUP.md).
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+filescape-licence = { path = "../core" }
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+data-encoding = "2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ring = { version = "0.17", features = ["wasm32_unknown_unknown_js"] }
+worker = { version = "0.9", features = ["d1"] }
+wasm-bindgen = "0.2"
+
+[dev-dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
+pollster = "0.4"
+futures = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
