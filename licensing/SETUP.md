@@ -112,8 +112,12 @@ there, run `python3 licensing/site-src/build.py` to rebuild `site/index.html`. T
 and price for both checkout buttons are in `licensing/site/config.js`.
 
 ```
-npx wrangler@4 pages deploy licensing/site --project-name filescape-site
+npx wrangler@4 pages deploy licensing/site --project-name filescape-site --branch main
 ```
+
+The first run asks to create the project; give `main` as its production branch. `--branch main`
+matters: without it wrangler uses your checkout's git branch, and anything other than the
+production branch goes to a preview address instead of filescape.app.
 
 In the dashboard, **Workers & Pages > filescape-site > Custom domains**: add `filescape.app` (and
 `www.filescape.app` if you want it). Then submit the domain to Paddle (step 7.4).
