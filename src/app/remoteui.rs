@@ -8,7 +8,7 @@
 //!
 //! See `docs/design/dirmap-2.3-remote.md`.
 
-use super::files::{FPicks, Files, FilesPrefs, Pane, PaneSave, Split, Workspace};
+use super::files::{FAction, FPicks, Files, FilesPrefs, Pane, PaneSave, Split, Workspace};
 use super::netui::{ConnectBox, SavedSite};
 use super::*;
 use crate::fsys::history::Location;
@@ -68,6 +68,124 @@ pub(super) struct RemoteState {
     pub(super) search: String,
     /// The pane a connection being made opens in (clicks on its questions can move the focus).
     pub(super) target: Option<usize>,
+    /// Properties of an item on a server, while the window is open.
+    pub(super) props: Option<RemoteProps>,
+}
+
+/// The Properties window for an item on a server: what the server says about it, and its
+/// permissions to change.
+pub(super) struct RemoteProps {
+    path: PathBuf,
+    rx: Option<mpsc::Receiver<Result<(remote::Meta, Option<String>), String>>>,
+    meta: Option<remote::Meta>,
+    link: Option<String>,
+    error: Option<String>,
+    /// The permissions as edited, and as typed in octal.
+    mode: u32,
+    octal: String,
+    /// Apply to everything inside a folder too.
+    deep: bool,
+    applying: Option<mpsc::Receiver<Result<u64, String>>>,
+    done: Option<Result<u64, String>>,
+}
+
+impl RemoteProps {
+    fn new(path: PathBuf) -> RemoteProps {
+        let (tx, rx) = mpsc::channel();
+        let p = path.clone();
+        std::thread::spawn(move || {
+            let r = remote::meta(&p).map_err(|e| remote::describe(&e)).map(|m| {
+                let link = if m.is_link { remote::link_target(&p).ok() } else { None };
+                (m, link)
+            });
+            let _ = tx.send(r);
+        });
+        RemoteProps { path, rx: Some(rx), meta: None, link: None, error: None, mode: 0, octal: String::new(), deep: false, applying: None, done: None }
+    }
+}
+
+/// `s` quoted for a POSIX shell.
+#[cfg(any(target_os = "macos", test))]
+fn sh_quote(s: &str) -> String {
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "@%_+=:,./-".contains(c)) {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+/// Open the system's terminal running `ssh` to the server, in the folder (or a file's folder).
+fn ssh_terminal(path: &Path) -> Result<(), String> {
+    let caps = remote::caps(path);
+    if !caps.ssh {
+        return Err("A terminal opens only on SFTP (SSH) servers.".into());
+    }
+    // A file: its folder. (One request; this runs on a worker.)
+    let dir = match remote::meta(path) {
+        Ok(m) if !m.is_dir => remote::parent(path).unwrap_or_else(|| path.to_path_buf()),
+        _ => path.to_path_buf(),
+    };
+    let args = remote::ssh_args(&dir).ok_or("That isn't an SFTP address.")?;
+    launch_ssh(&args)
+}
+
+#[cfg(windows)]
+fn launch_ssh(args: &[String]) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x10;
+    std::process::Command::new("ssh.exe").args(args).creation_flags(CREATE_NEW_CONSOLE).spawn().map(|_| ()).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "Windows' SSH client (ssh.exe) isn't installed. Add \"OpenSSH Client\" in Settings > System > Optional features.".to_string()
+        } else {
+            format!("Couldn't start ssh: {e}")
+        }
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn launch_ssh(args: &[String]) -> Result<(), String> {
+    let line = std::iter::once("ssh".to_string()).chain(args.iter().map(|a| sh_quote(a))).collect::<Vec<_>>().join(" ");
+    let script = format!("tell application \"Terminal\"\nactivate\ndo script \"{}\"\nend tell", line.replace('\\', "\\\\").replace('"', "\\\""));
+    std::process::Command::new("osascript").arg("-e").arg(script).spawn().map(|_| ()).map_err(|e| format!("Couldn't open Terminal: {e}"))
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn launch_ssh(args: &[String]) -> Result<(), String> {
+    let mut tried: Vec<(String, Vec<&str>)> = Vec::new();
+    if let Ok(t) = std::env::var("TERMINAL") {
+        tried.push((t, vec!["-e"]));
+    }
+    for (t, run) in [
+        ("x-terminal-emulator", vec!["-e"]),
+        ("gnome-terminal", vec!["--"]),
+        ("konsole", vec!["-e"]),
+        ("xfce4-terminal", vec!["-x"]),
+        ("kitty", vec![]),
+        ("alacritty", vec!["-e"]),
+        ("wezterm", vec!["start", "--"]),
+        ("foot", vec![]),
+        ("xterm", vec!["-e"]),
+    ] {
+        tried.push((t.to_string(), run));
+    }
+    for (t, run) in &tried {
+        if std::process::Command::new(t).args(run).arg("ssh").args(args).spawn().is_ok() {
+            return Ok(());
+        }
+    }
+    Err("Couldn't find a terminal to open (set $TERMINAL to choose one).".into())
+}
+
+/// Permission bits as `rwxr-xr-x`.
+fn rwx(mode: u32) -> String {
+    let mut s = String::new();
+    for shift in [6, 3, 0] {
+        let b = (mode >> shift) & 7;
+        s.push(if b & 4 != 0 { 'r' } else { '-' });
+        s.push(if b & 2 != 0 { 'w' } else { '-' });
+        s.push(if b & 1 != 0 { 'x' } else { '-' });
+    }
+    s
 }
 
 impl Desk {
@@ -328,6 +446,229 @@ impl App {
         use_desk(&mut self.files, ws);
         self.site_manager_window(ctx);
         self.remote_log_window(ctx);
+        self.remote_props_window(ctx);
+    }
+
+    /// Commands that work differently for items on a server. True when handled here.
+    pub(super) fn remote_action(&mut self, a: FAction, paths: &[PathBuf]) -> bool {
+        let here = self.files.here().dir().map(Path::to_path_buf);
+        let first = paths.first().cloned().or(here);
+        match a {
+            FAction::Reload => {
+                self.files.refresh();
+                true
+            }
+            FAction::SshTerminal => {
+                match first.filter(|p| remote::is_remote(p)) {
+                    Some(p) => {
+                        if let Some((s, _)) = remote::split(&p) {
+                            self.ops.notice = Some((format!("Opening an SSH terminal on {}…", s.short()), false));
+                        }
+                        self.files.spawn(move || ssh_terminal(&p));
+                    }
+                    None => self.ops.notice = Some(("An SSH terminal opens on a folder on an SFTP server.".into(), true)),
+                }
+                true
+            }
+            FAction::Properties if first.as_deref().is_some_and(remote::is_remote) => {
+                self.files.rws.props = Some(RemoteProps::new(first.unwrap()));
+                true
+            }
+            FAction::Reveal | FAction::Terminal(_) | FAction::SystemMenu(_) | FAction::CopyUnc if first.as_deref().is_some_and(remote::is_remote) => {
+                let ssh = first.as_deref().is_some_and(|p| remote::caps(p).ssh);
+                self.ops.notice = Some((if ssh { "That's on a server. Use Open SSH Terminal Here (Ctrl+Alt+T) for a terminal there." } else { "That's on a server, so Explorer and the system's commands don't apply." }.into(), true));
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The Remote workspace's own keys. F5 and F6 copy and move to the other pane (with two
+    /// panes), Ctrl+Alt+T opens an SSH terminal. Returns the command to run on the selection.
+    pub(super) fn remote_keys(&mut self, ctx: &egui::Context) -> Option<FAction> {
+        use egui::{Key, Modifiers as M};
+        if self.files.prefs.workspace != Workspace::Remote || self.files.rws.manager.is_some() {
+            return None;
+        }
+        let two = self.files.panes.len() > 1;
+        ctx.input_mut(|i| {
+            if i.consume_key(M::CTRL | M::ALT, Key::T) {
+                Some(FAction::SshTerminal)
+            } else if two && i.consume_key(M::NONE, Key::F5) {
+                Some(FAction::CopyToOther)
+            } else if two && i.consume_key(M::NONE, Key::F6) {
+                Some(FAction::MoveToOther)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Properties of an item on a server, with its permissions.
+    fn remote_props_window(&mut self, ctx: &egui::Context) {
+        let Some(pr) = self.files.rws.props.as_mut() else { return };
+        if let Some(rx) = &pr.rx {
+            match rx.try_recv() {
+                Ok(Ok((m, link))) => {
+                    pr.mode = m.mode.unwrap_or(0);
+                    pr.octal = format!("{:o}", pr.mode);
+                    pr.meta = Some(m);
+                    pr.link = link;
+                    pr.rx = None;
+                }
+                Ok(Err(e)) => {
+                    pr.error = Some(e);
+                    pr.rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
+                Err(mpsc::TryRecvError::Disconnected) => pr.rx = None,
+            }
+        }
+        if let Some(rx) = &pr.applying {
+            match rx.try_recv() {
+                Ok(r) => {
+                    if r.is_ok()
+                        && let Some(m) = pr.meta.as_mut()
+                    {
+                        m.mode = Some(pr.mode);
+                    }
+                    pr.done = Some(r);
+                    pr.applying = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
+                Err(mpsc::TryRecvError::Disconnected) => pr.applying = None,
+            }
+        }
+        let caps = remote::caps(&pr.path);
+        let mut open = true;
+        egui::Window::new("Properties").id(egui::Id::new("remote-props")).open(&mut open).collapsible(false).resizable(false).pivot(Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).show(ctx, |ui| {
+            let (site, rpath) = remote::split(&pr.path).unwrap_or_else(|| (remote::Site { scheme: Scheme::Sftp, user: String::new(), host: String::new(), port: 0 }, String::new()));
+            egui::Grid::new("rprops").num_columns(2).spacing([16.0, 5.0]).show(ui, |ui| {
+                ui.label("Name");
+                ui.strong(rpath.rsplit('/').next().filter(|n| !n.is_empty()).unwrap_or("/"));
+                ui.end_row();
+                ui.label("Server");
+                ui.label(format!("{} {} ({})", lock(Some(site.scheme)), site.short(), site.scheme.title()));
+                ui.end_row();
+                ui.label("Folder");
+                ui.label(rpath.rsplit_once('/').map(|(d, _)| if d.is_empty() { "/" } else { d }).unwrap_or("/"));
+                ui.end_row();
+                if let Some(e) = &pr.error {
+                    ui.label("");
+                    ui.colored_label(ui.visuals().error_fg_color, e);
+                    ui.end_row();
+                }
+                let Some(m) = pr.meta else {
+                    if pr.error.is_none() {
+                        ui.label("");
+                        ui.spinner();
+                        ui.end_row();
+                    }
+                    return;
+                };
+                ui.label("Type");
+                ui.label(if m.is_link && m.is_dir { "Link to a folder" } else if m.is_link { "Link" } else if m.is_dir { "Folder" } else { "File" });
+                ui.end_row();
+                if let Some(t) = &pr.link {
+                    ui.label("Points to");
+                    ui.monospace(t);
+                    ui.end_row();
+                }
+                if !m.is_dir {
+                    ui.label("Size");
+                    ui.label(format!("{} ({} bytes)", scan::human(m.len), m.len));
+                    ui.end_row();
+                }
+                if let Some(t) = m.modified_time() {
+                    let t: chrono::DateTime<chrono::Local> = t.into();
+                    ui.label("Modified");
+                    ui.label(t.format("%Y-%m-%d %H:%M:%S").to_string());
+                    ui.end_row();
+                }
+                if m.uid.is_some() || m.gid.is_some() {
+                    ui.label("Owner, group");
+                    ui.label(format!("{} : {}", m.uid.map(|u| u.to_string()).unwrap_or("?".into()), m.gid.map(|g| g.to_string()).unwrap_or("?".into())));
+                    ui.end_row();
+                }
+                ui.label("Permissions");
+                if m.mode.is_none() && !caps.chmod {
+                    ui.weak("The server doesn't say.");
+                    ui.end_row();
+                    return;
+                }
+                ui.vertical(|ui| {
+                    let busy = pr.applying.is_some();
+                    ui.add_enabled_ui(caps.chmod && !busy, |ui| {
+                        egui::Grid::new("rwx").num_columns(4).spacing([10.0, 2.0]).show(ui, |ui| {
+                            ui.label("");
+                            for h in ["Read", "Write", "Run"] {
+                                ui.weak(h);
+                            }
+                            ui.end_row();
+                            for (who, shift) in [("Owner", 6), ("Group", 3), ("Others", 0)] {
+                                ui.label(who);
+                                for bit in [4u32, 2, 1] {
+                                    let mask = bit << shift;
+                                    let mut on = pr.mode & mask != 0;
+                                    if ui.checkbox(&mut on, "").changed() {
+                                        pr.mode = if on { pr.mode | mask } else { pr.mode & !mask };
+                                        pr.octal = format!("{:o}", pr.mode);
+                                    }
+                                }
+                                ui.end_row();
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Octal");
+                            if ui.add(egui::TextEdit::singleline(&mut pr.octal).desired_width(48.0).char_limit(4)).changed()
+                                && let Ok(v) = u32::from_str_radix(pr.octal.trim(), 8)
+                            {
+                                pr.mode = v & 0o7777;
+                            }
+                            ui.monospace(rwx(pr.mode));
+                        });
+                        if m.is_dir {
+                            ui.checkbox(&mut pr.deep, "Also everything inside").on_hover_text("Files get these permissions; folders also get Run wherever they have Read, so they can still be opened");
+                        }
+                    });
+                    if !caps.chmod {
+                        ui.weak("This kind of server can't change permissions.");
+                    }
+                    let changed = Some(pr.mode) != m.mode || pr.deep;
+                    ui.horizontal(|ui| {
+                        if busy {
+                            ui.spinner();
+                            ui.label("Changing…");
+                        } else if caps.chmod && ui.add_enabled(changed, egui::Button::new("Apply")).clicked() {
+                            let (tx, rx) = mpsc::channel();
+                            let (path, mode, deep) = (pr.path.clone(), pr.mode, pr.deep);
+                            std::thread::spawn(move || {
+                                let dir_mode = mode | ((mode & 0o444) >> 2);
+                                let _ = tx.send(remote::chmod(&path, mode, deep.then_some(dir_mode)).map_err(|e| remote::describe(&e)));
+                            });
+                            pr.applying = Some(rx);
+                            pr.done = None;
+                        }
+                    });
+                    match &pr.done {
+                        Some(Ok(n)) if *n > 1 => {
+                            ui.colored_label(style::pal(ui).accent, format!("✔ Changed {n} items."));
+                        }
+                        Some(Ok(_)) => {
+                            ui.colored_label(style::pal(ui).accent, "✔ Changed.");
+                        }
+                        Some(Err(e)) => {
+                            ui.colored_label(ui.visuals().error_fg_color, e);
+                        }
+                        None => {}
+                    }
+                });
+                ui.end_row();
+            });
+        });
+        if !open {
+            self.files.rws.props = None;
+        }
     }
 
     /// Open a saved site in the Remote workspace: the site in the right-hand pane (connecting
@@ -447,6 +788,12 @@ impl App {
         ui.menu_button(egui::RichText::new(text).color(colour), |ui| {
             if ui.add(egui::Button::new(style::mi("Connection Log…"))).clicked() {
                 self.files.rws.log = Some(url.clone());
+                ui.close();
+            }
+            if remote::caps(&dir).ssh
+                && ui.add(egui::Button::new(style::mi("Open SSH Terminal Here…")).shortcut_text(ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::CTRL | egui::Modifiers::ALT, egui::Key::T)))).clicked()
+            {
+                self.files_action(FAction::SshTerminal, vec![dir.clone()]);
                 ui.close();
             }
             if ui.add_enabled(on, egui::Button::new(style::mi("Disconnect"))).clicked() {
@@ -1008,6 +1355,17 @@ mod tests {
         let g = grouped(&s, "farm b");
         assert_eq!(g.len(), 1);
         assert_eq!(g[0].1, vec![0]);
+    }
+
+    #[test]
+    fn shell_quoting_and_ssh_command() {
+        assert_eq!(sh_quote("render01"), "render01");
+        assert_eq!(sh_quote("it's here"), "'it'\\''s here'");
+        assert_eq!(rwx(0o750), "rwxr-x---");
+        let a = remote::ssh_args(Path::new("sftp:/rich@render01:2222/mnt/my shots/it's")).unwrap();
+        assert_eq!(a[..4], ["-t", "-p", "2222", "rich@render01"]);
+        assert_eq!(a[4], "cd '/mnt/my shots/it'\\''s' && exec \"${SHELL:-/bin/sh}\" -l");
+        assert!(remote::ssh_args(Path::new("ftp:/rich@nas/x")).is_none());
     }
 
     #[test]

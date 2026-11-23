@@ -161,7 +161,11 @@ impl Ftp {
 
 fn meta_of(f: &File) -> Meta {
     let modified = f.modified().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
-    Meta { is_dir: f.is_directory(), is_link: f.is_symlink(), len: f.size() as u64, modified }
+    use suppaftp::list::PosixPexQuery as Q;
+    // LIST gives the rwx columns; MLSD rarely does, and then every bit reads as unset.
+    let bits = |q: Q, shift: u32| ((f.can_read(q) as u32) << 2 | (f.can_write(q) as u32) << 1 | f.can_execute(q) as u32) << shift;
+    let mode = bits(Q::Owner, 6) | bits(Q::Group, 3) | bits(Q::Others, 0);
+    Meta { is_dir: f.is_directory(), is_link: f.is_symlink(), len: f.size() as u64, modified, mode: (mode != 0).then_some(mode), uid: f.uid(), gid: f.gid() }
 }
 
 fn name_of(f: &File) -> String {
@@ -206,6 +210,22 @@ impl Backend for Ftp {
 
     fn rename(&self, from: &str, to: &str) -> io::Result<()> {
         self.op(|c| on!(c, s => s.rename(from, to)).map_err(ftp_err))
+    }
+
+    fn chmod(&self, p: &str, mode: u32) -> io::Result<()> {
+        self.op(|c| on!(c, s => s.site(format!("CHMOD {:o} {p}", mode & 0o7777))).map_err(ftp_err)).and_then(|r| {
+            if r.status.code() / 100 == 2 { Ok(()) } else { Err(err(format!("The server refused to change permissions: {}", String::from_utf8_lossy(&r.body).trim()))) }
+        })
+    }
+
+    fn readlink(&self, p: &str) -> io::Result<String> {
+        let (dir, name) = p.rsplit_once('/').unwrap_or(("", p));
+        let dir = if dir.is_empty() { "/" } else { dir };
+        self.list_files(dir)?
+            .iter()
+            .find(|f| name_of(f) == name)
+            .and_then(|f| f.symlink().map(|t| t.to_string_lossy().to_string()))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Unsupported, "This server doesn't say where the link points."))
     }
 
     fn get(&self, p: &str, out: &mut dyn Write, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()> {

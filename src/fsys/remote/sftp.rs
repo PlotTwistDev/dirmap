@@ -119,7 +119,7 @@ fn sftp_err(e: russh_sftp::client::error::Error) -> io::Error {
 }
 
 fn meta_of(m: &russh_sftp::client::fs::Metadata) -> Meta {
-    Meta { is_dir: m.is_dir(), is_link: m.is_symlink(), len: m.size.unwrap_or(0), modified: m.mtime.map(i64::from).unwrap_or(0) }
+    Meta { is_dir: m.is_dir(), is_link: m.is_symlink(), len: m.size.unwrap_or(0), modified: m.mtime.map(i64::from).unwrap_or(0), mode: m.permissions.map(|p| p & 0o7777), uid: m.uid, gid: m.gid }
 }
 
 /// The key files ssh would try, in its order.
@@ -374,6 +374,16 @@ impl Backend for Sftp {
             f.shutdown().await?;
             Ok(())
         })
+    }
+
+    fn chmod(&self, p: &str, mode: u32) -> io::Result<()> {
+        let mut m = russh_sftp::protocol::FileAttributes::empty();
+        m.permissions = Some(mode & 0o7777);
+        rt().block_on(self.sftp.set_metadata(p, m)).map_err(sftp_err)
+    }
+
+    fn readlink(&self, p: &str) -> io::Result<String> {
+        rt().block_on(self.sftp.read_link(p)).map_err(sftp_err)
     }
 
     fn touch(&self, p: &str, modified: i64) -> io::Result<()> {

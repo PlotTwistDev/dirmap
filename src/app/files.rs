@@ -1078,6 +1078,10 @@ pub(super) enum FAction {
     CopyToOther,
     MoveToOther,
     Properties,
+    /// A terminal on the item's server (SSH), in its folder.
+    SshTerminal,
+    /// Read the folder again (after an error).
+    Reload,
     QuickLook,
     /// Archives: take everything out, next to the archive or into a folder picked.
     ExtractHere,
@@ -2457,9 +2461,14 @@ impl App {
                 } else if let Some(e) = &error {
                     big(ui, "⚠");
                     ui.colored_label(ui.visuals().error_fg_color, e);
-                    if ui.button("Go up").clicked() {
-                        picks.go = Location::Dir(dir.to_path_buf()).up();
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Try Again").clicked() {
+                            picks.menu = Some((FAction::Reload, Vec::new()));
+                        }
+                        if ui.button("Go up").clicked() {
+                            picks.go = Location::Dir(dir.to_path_buf()).up();
+                        }
+                    });
                 } else if total > 0 && !self.files.pane().filter.trim().is_empty() {
                     big(ui, "🔍");
                     ui.label(egui::RichText::new("Nothing here matches the filter").color(pal.weak));
@@ -2978,6 +2987,12 @@ impl App {
             Some(true) => return self.files.forward(),
             None => {}
         }
+        // The Remote workspace with two panes: F5 copies and F6 moves to the other pane, as in
+        // WinSCP's Commander (Ctrl+R reads the folder again).
+        if let Some(a) = self.remote_keys(ctx) {
+            picks.menu = Some((a, self.files.chosen_paths()));
+            return;
+        }
         // Shortcuts that work even while typing in the filter box.
         if ctx.input_mut(|i| i.consume_key(M::NONE, Key::F6)) {
             self.toggle_side_focus(ctx);
@@ -3396,7 +3411,8 @@ impl App {
     pub(super) fn tile_menu(&mut self, ui: &mut egui::Ui, disk: &Path, is_dir: bool) {
         let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
         let colour = self.files.marks.get(disk).and_then(|m| m.colour);
-        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false };
+        let caps = crate::fsys::remote::is_remote(disk).then(|| crate::fsys::remote::caps(disk));
+        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh) };
         let ext = disk
             .file_name()
             .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
@@ -3493,6 +3509,10 @@ impl App {
     }
 
     pub(super) fn files_action(&mut self, a: FAction, paths: Vec<PathBuf>) {
+        // Items on servers: SSH terminal, their own Properties (`remoteui.rs`).
+        if self.remote_action(a, &paths) {
+            return;
+        }
         let other_dir = self.files.other().and_then(|o| self.files.panes[o].tab().here().dir().map(Path::to_path_buf));
         // Archives are only read: changes inside them are refused, with what to do instead.
         let changes = matches!(a, FAction::Cut | FAction::Rename | FAction::Trash | FAction::Delete);
@@ -3609,6 +3629,8 @@ impl App {
                 Ok(crate::shellmenu::Picked::Nothing) => {}
                 Err(e) => self.ops.notice = Some((e, true)),
             },
+            // Handled in `remote_action`.
+            FAction::SshTerminal | FAction::Reload => {}
             FAction::Properties => {
                 if let Some(p) = paths.into_iter().next() {
                     let q = p.clone();
@@ -3668,6 +3690,10 @@ pub(super) struct RowMenu {
     pub archive: bool,
     /// The item is inside an archive: it can be copied out but not changed.
     pub read_only: bool,
+    /// The item is on a server (no Explorer, system menu or local terminal), and whether an SSH
+    /// terminal can open there.
+    pub server: bool,
+    pub ssh: bool,
 }
 
 /// Said when something would change an archive.
@@ -3734,9 +3760,11 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     let read_only = archive::inside(&path);
     let seq = t.seqs.contains_key(&i);
     let colour = c.marks.get(&path).and_then(|m| m.colour);
-    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only };
+    let caps = crate::fsys::remote::is_remote(dir).then(|| crate::fsys::remote::caps(dir));
+    let server = caps.is_some();
+    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh) };
     // Shift+right-click: straight to Windows' own menu, with its Shift extras, as in Explorer.
-    if cfg!(windows) && !read_only && resp.secondary_clicked() && ui.input(|i| i.modifiers.shift) {
+    if cfg!(windows) && !read_only && !server && resp.secondary_clicked() && ui.input(|i| i.modifiers.shift) {
         let paths = if selected { t.chosen_paths() } else { t.row_paths(dir, l, i) };
         picks.menu = Some((FAction::SystemMenu(true), paths));
         return;
@@ -3812,7 +3840,10 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     item(ui, rw, &rename, k(M::NONE, Key::F2), FAction::Rename);
     let bin = if cfg!(windows) { "Delete (to Recycle Bin)…" } else { "Move to Trash…" };
     let bin_key = if cfg!(target_os = "macos") { k(M::COMMAND, Key::Backspace) } else { k(M::NONE, Key::Delete) };
-    item(ui, rw, bin, bin_key, FAction::Trash);
+    // A server has no bin: only Delete Permanently.
+    if !m.server {
+        item(ui, rw, bin, bin_key, FAction::Trash);
+    }
     item(ui, rw, "Delete Permanently…", k(M::SHIFT, Key::Delete), FAction::Delete);
     let mut marked = None;
     if !m.read_only {
@@ -3821,11 +3852,17 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     }
     ui.separator();
     item(ui, true, if many { "Copy Paths" } else { "Copy Path" }, k(M::COMMAND | M::SHIFT, Key::C), FAction::CopyPath);
-    if cfg!(windows) {
+    if cfg!(windows) && !m.server {
         item(ui, true, "Copy Network (UNC) Path", String::new(), FAction::CopyUnc);
     }
     item(ui, true, if many { "Copy Names" } else { "Copy Name" }, String::new(), FAction::CopyName);
-    if !many {
+    if !many && m.server {
+        // On a server: an SSH terminal instead of Explorer and the local terminals.
+        if m.ssh {
+            item(ui, true, "Open SSH Terminal Here…", k(M::CTRL | M::ALT, Key::T), FAction::SshTerminal);
+        }
+        item(ui, true, "Properties", k(M::ALT, Key::Enter), FAction::Properties);
+    } else if !many {
         let reveal = if cfg!(windows) {
             "Show in Explorer"
         } else if cfg!(target_os = "macos") {
@@ -3839,7 +3876,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
         }
         item(ui, true, "Properties", k(M::ALT, Key::Enter), FAction::Properties);
     }
-    if cfg!(windows) && !m.read_only {
+    if cfg!(windows) && !m.read_only && !m.server {
         ui.separator();
         // Explorer's full menu, with what other apps add (7-Zip, Notepad++, Send to…).
         item(ui, true, "Show More Options", k(M::SHIFT, Key::F10), FAction::SystemMenu(false));

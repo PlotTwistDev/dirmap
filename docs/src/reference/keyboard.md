@@ -65,6 +65,15 @@ After you've clicked in the list or the sidebar, unless the cursor is in a text 
 | **Ctrl+U** | **⌘U** | Two panes: swap them. |
 | **Ctrl+J** | **⌘J** | Show or hide the analysis dock (works while typing elsewhere too). |
 
+### Remote workspace
+
+Everything in the Files workspace works here too. These are different or extra.
+
+| Input | Action |
+|---|---|
+| **F5 / F6** | Two panes: copy or move the selected items to the other pane's folder, as in WinSCP. Ctrl+R reads the folder again. |
+| **Ctrl+Alt+T** | Open an SSH terminal in the folder (SFTP servers). |
+
 ### Sequence player
 
 While an image sequence is playing (Enter or double-click on a sequence in Files).

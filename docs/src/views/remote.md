@@ -20,6 +20,49 @@ copy and move with clash handling and Undo, **Swap Panes** and **Compare Folders
 can show this computer or any server, so local beside remote, remote beside remote and local
 beside local all work.
 
+## Working with two panes
+
+With two panes, **F5** copies and **F6** moves the selected items to the other pane's folder, as
+in WinSCP's Commander view (**Shift+F5** and **Shift+F6** do the same, as in Files). **Ctrl+R**
+reads the folder again. Copies and moves run in the background, ask about names already taken,
+and can be undone, as in Files.
+
+On a server, the item menu leaves out what only works on this computer (Show in Explorer, the
+Windows menu, the Recycle Bin, the network path). **Delete Permanently** is the only delete,
+because a server has no bin.
+
+If a folder can't be read (the connection dropped, the server refused), the pane says why, with
+**Try Again** and **Go up**.
+
+## SSH terminal
+
+On an SFTP server, **Open SSH Terminal Here…** (in the item menu, the connection menu in the
+toolbar, or **Ctrl+Alt+T**) opens your system's terminal signed in to the server, in that folder
+(a file's own folder for a file). It runs the system's `ssh` with the server's address, port and
+key file, so it uses your SSH agent, your keys and your `~/.ssh/config`. If the server needs a
+password, `ssh` asks for it in the terminal.
+
+- **Windows** opens a console window running `ssh.exe`. It's part of Windows 10 and 11; if it's
+  missing, add **OpenSSH Client** in Settings > System > Optional features.
+- **macOS** opens Terminal.
+- **Linux** opens `$TERMINAL`, or the first of x-terminal-emulator, GNOME Terminal, Konsole and
+  others that's installed.
+
+`ssh` keeps its own list of known servers (`~/.ssh/known_hosts`), so the first time it may ask you
+to accept the server's key, even if dirmap already knows it.
+
+## Properties and permissions
+
+**Properties** (**Alt+Enter**) on an item on a server shows what the server says about it: its
+type, size, when it was modified, its owner and group (as numbers), where a link points, and its
+permissions.
+
+On SFTP and most FTP servers you can change the permissions: tick **Read**, **Write** and **Run**
+for the owner, the group and others, or type the octal value (`755`), then **Apply**. For a
+folder, **Also everything inside** applies them to every file and folder in it as well; folders
+also get Run wherever they have Read, so they can still be opened. Links inside are left alone.
+WebDAV servers have no permissions to change.
+
 ## Quick connect
 
 Type an address in the **Quick connect** box in the toolbar and press **Enter**:

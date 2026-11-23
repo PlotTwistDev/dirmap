@@ -239,6 +239,11 @@ pub struct Meta {
     pub len: u64,
     /// Seconds since the Unix epoch, 0 when unknown.
     pub modified: i64,
+    /// Unix permission bits (0o755), when the server says.
+    pub mode: Option<u32>,
+    /// Owner and group ids, when the server says.
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
 }
 
 impl Meta {
@@ -260,6 +265,14 @@ trait Backend: Send + Sync {
     /// Upload (replacing what's there).
     fn put(&self, p: &str, input: &mut dyn Read, len: u64, tick: &mut dyn FnMut(u64) -> bool) -> io::Result<()>;
     /// Set the modified time, where the server allows it.
+    /// Change an item's Unix permission bits.
+    fn chmod(&self, _p: &str, _mode: u32) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "This kind of server can't change permissions."))
+    }
+    /// Where a symbolic link points.
+    fn readlink(&self, _p: &str) -> io::Result<String> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "This kind of server doesn't say where links point."))
+    }
     fn touch(&self, _p: &str, _modified: i64) -> io::Result<()> {
         Ok(())
     }
@@ -467,6 +480,90 @@ fn insecure_allowed(site: &Site) -> bool {
 
 fn allow_insecure(site: &Site) {
     insecure_ok().lock().unwrap().insert(site.url());
+}
+
+/// What a server can do, by protocol (the UI greys out the rest, saying why).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Caps {
+    /// Change permissions (chmod).
+    pub chmod: bool,
+    /// Open an SSH terminal on it.
+    pub ssh: bool,
+    /// Say where symbolic links point.
+    pub links: bool,
+}
+
+pub fn caps(path: &Path) -> Caps {
+    match split(path).map(|(s, _)| s.scheme) {
+        Some(Scheme::Sftp) => Caps { chmod: true, ssh: true, links: true },
+        Some(Scheme::Ftp | Scheme::Ftps) => Caps { chmod: true, ssh: false, links: true },
+        _ => Caps::default(),
+    }
+}
+
+/// Change an item's permission bits (and, with `deep`, everything inside a folder: folders get
+/// `dir_mode`, files `mode`).
+pub fn chmod(path: &Path, mode: u32, deep: Option<u32>) -> io::Result<u64> {
+    let (site, p) = site_path(path)?;
+    let c = conn(&site)?;
+    fn walk(c: &dyn Backend, p: &str, mode: u32, dir_mode: u32, n: &mut u64) -> io::Result<()> {
+        for (name, m) in c.list(p)?.into_iter().filter(|(n, _)| safe_name(n)) {
+            let q = join(p, &name);
+            if m.is_link {
+                continue;
+            }
+            if m.is_dir {
+                c.chmod(&q, dir_mode)?;
+                *n += 1;
+                walk(c, &q, mode, dir_mode, n)?;
+            } else {
+                c.chmod(&q, mode)?;
+                *n += 1;
+            }
+        }
+        Ok(())
+    }
+    let m = c.stat(&p)?;
+    let mut n = 1;
+    match deep {
+        Some(dir_mode) if m.is_dir => {
+            c.chmod(&p, dir_mode)?;
+            walk(&*c, &p, mode, dir_mode, &mut n)?;
+        }
+        _ => c.chmod(&p, mode)?,
+    }
+    note(&site, false, format!("Permissions of {p} set to {:o}{}", deep.filter(|_| m.is_dir).unwrap_or(mode), if n > 1 { format!(" ({n} items)") } else { String::new() }));
+    Ok(n)
+}
+
+/// Where a link on a server points.
+pub fn link_target(path: &Path) -> io::Result<String> {
+    let (site, p) = site_path(path)?;
+    with(&site, |c| c.readlink(&p))
+}
+
+/// The command line for `ssh` to open a shell on a server in a folder: the arguments after
+/// `ssh`. SFTP servers only.
+pub fn ssh_args(path: &Path) -> Option<Vec<String>> {
+    let (site, p) = split(path)?;
+    if site.scheme != Scheme::Sftp {
+        return None;
+    }
+    let mut a = vec!["-t".to_string()];
+    if site.port != 22 {
+        a.push("-p".into());
+        a.push(site.port.to_string());
+    }
+    if let Some(k) = options().lock().unwrap().get(&site.url()).and_then(|o| o.key.clone()) {
+        a.push("-i".into());
+        a.push(k.display().to_string());
+    }
+    let host = site.host.trim_start_matches('[').trim_end_matches(']');
+    a.push(if site.user.is_empty() { host.to_string() } else { format!("{}@{host}", site.user) });
+    // The folder, quoted for the server's shell.
+    let quoted = format!("'{}'", p.replace('\'', "'\\''"));
+    a.push(format!("cd {quoted} && exec \"${{SHELL:-/bin/sh}}\" -l"));
+    Some(a)
 }
 
 /// Try a server: connect afresh (asking for what's needed), list the folder, and disconnect.

@@ -457,11 +457,11 @@ Each phase ends with a Windows build on Rich's PC and a review, as before.
 | 5 | Remote sidebar (Sites, Sessions, Recent) | 1 | 🔨 Sites (favourites, groups, search) and Other Connections done; Recent servers not yet |
 | 6 | Capabilities, browse channel apart from transfers | 1 | ○ moved to phase 2/3, with the menus and the queue that need them |
 | 7 | Connection log with redaction | 1 | ✅ `remote::log_of`, `latency`; unsafe listed names refused (`safe_name`, `local_name`) |
-| 8 | Two-pane defaults, F5/F6 to other pane | 2 | ○ |
-| 9 | Capability-aware menus | 2 | ○ |
-| 10 | Remote properties, chmod | 2 | ○ |
-| 11 | SSH terminal (system) | 2 | ○ |
-| 12 | Listing cache, error pane | 2 | ○ |
+| 8 | Two-pane defaults, F5/F6 to other pane | 2 | ✅ `remoteui::remote_keys` (Shift+F5/F6 still work) |
+| 9 | Capability-aware menus | 2 | ✅ `remote::caps`; `RowMenu.server/ssh` drop Explorer, system menu, bin, UNC on servers |
+| 10 | Remote properties, chmod | 2 | ✅ `RemoteProps` window; `Backend::chmod/readlink` (SFTP setstat, FTP SITE CHMOD); recursive option |
+| 11 | SSH terminal (system) | 2 | ✅ `remote::ssh_args`, `remoteui::launch_ssh` (ssh.exe console, Terminal.app, Linux terminals); Ctrl+Alt+T |
+| 12 | Listing cache, error pane | 2 | 🔨 Try Again on errors done; back/forward listing cache moved to phase 3 with the browse channel |
 | 13 | Transfer queue, workers, clash rules | 3 | ○ |
 | 14 | Resume, temp-name uploads | 3 | ○ |
 | 15 | Transfers, History, Log dock tabs; chip | 3 | ○ |

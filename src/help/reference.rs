@@ -28,6 +28,7 @@ const CUSTOM: &str = "src/app/custom.rs";
 const HELP: &str = "src/help/mod.rs";
 const BROWSER: &str = "src/app/browser.rs";
 const FILES: &str = "src/app/files.rs";
+const REMOTE: &str = "src/app/remoteui.rs";
 const DOCK: &str = "src/app/dock.rs";
 const ADDR: &str = "src/app/addr.rs";
 const FAVS: &str = "src/app/favs.rs";
@@ -93,6 +94,14 @@ pub const KEYBOARD: &[Group] = &[
             b("Shift+F5 / Shift+F6", "⇧F5 / ⇧F6", "Two panes: copy or move the selected items to the other pane's folder.", &[(FILES, "if i.consume_key(M::SHIFT, Key::F5) {"), (FILES, "if i.consume_key(M::SHIFT, Key::F6) {")]),
             b("Ctrl+U", "⌘U", "Two panes: swap them.", &[(FILES, "if i.consume_key(M::COMMAND, Key::U) {")]),
             b("Ctrl+J", "⌘J", "Show or hide the analysis dock (works while typing elsewhere too).", &[(FILES, "i.consume_key(M::COMMAND, Key::J)")]),
+        ],
+    },
+    Group {
+        title: "Remote workspace",
+        note: "Everything in the Files workspace works here too. These are different or extra.",
+        bindings: &[
+            b("F5 / F6", "", "Two panes: copy or move the selected items to the other pane's folder, as in WinSCP. Ctrl+R reads the folder again.", &[(REMOTE, "two && i.consume_key(M::NONE, Key::F5)"), (REMOTE, "two && i.consume_key(M::NONE, Key::F6)")]),
+            b("Ctrl+Alt+T", "", "Open an SSH terminal in the folder (SFTP servers).", &[(REMOTE, "i.consume_key(M::CTRL | M::ALT, Key::T)")]),
         ],
     },
     Group {
@@ -208,7 +217,7 @@ pub const MOUSE: &[Group] = &[
             b("Double-click", "", "Open a folder, or a file with its usual app.", &[(FILES, "picks.open = Some(i);")]),
             b("Middle-click a folder, place or tab", "", "Open the folder or place in a new tab; close the tab.", &[(FILES, "if resp.middle_clicked() && e.is_dir {"), (FILES, "picks.close_tab = Some(i);")]),
             b("Right-click", "", "The item's menu: Open, Open With, Copy, Cut, Paste, Rename (several items: Batch Rename), Move to Trash, Colour, Tags and Note, Copy Path, Add to Favourites, Show in Explorer or Finder, Properties, Analyse This Folder and, with two panes, Copy or Move to the other pane. On Windows, Show More Options opens Windows' own menu. On empty space: New, Paste, Undo, Redo, Refresh and more.", &[(FILES, "if let Some(a) = item_menu(ui, &ctx_menu, c.apps, e.ext()) {"), (FILES, "empty.context_menu(|ui| {")]),
-            b("Shift+right-click", "", "Windows: straight to Windows' own menu for the item, with the extra commands Explorer shows with Shift.", &[(FILES, "if cfg!(windows) && !read_only && resp.secondary_clicked() && ui.input(|i| i.modifiers.shift) {")]),
+            b("Shift+right-click", "", "Windows: straight to Windows' own menu for the item, with the extra commands Explorer shows with Shift.", &[(FILES, "if cfg!(windows) && !read_only && !server && resp.secondary_clicked() && ui.input(|i| i.modifiers.shift) {")]),
             b("Drag onto a folder, a tab, a folder in the path, the other pane or a sidebar place", "", "Move the items there when it's on the same drive, copy them when it's another drive. Hold Ctrl or Alt to copy (⌥ on a Mac), Shift to move (⌘ on a Mac). The label by the pointer says which. Hold over a tab to switch to it.", &[(FILES, "egui::DragAndDrop::set_payload(ui.ctx(), dnd::DragItems(items, dirs));"), (FILEOPS, "let op = dnd::op_for(&items.0, dest, ui.input(|i| i.modifiers), &self.drives);"), (FILES, "if now - since > 0.6 {")]),
             b("Ctrl+wheel over the icons (⌘+scroll on a Mac), or pinch", "", "Icons view: make the icons bigger or smaller.", &[(FILES, "let z = ui.input(|i| i.zoom_delta());")]),
             b("Click the view buttons at the bottom right of the list", "", "Show the folder as Details (rows), Icons, Columns or Gallery. Each folder remembers its own view, sort and grouping (View > Remember Each Folder's View).", &[(FILES, "self.files.panes[pane].view = v;"), (FILES, "pub(super) fn keep_looks(&mut self) {")]),
