@@ -42,6 +42,9 @@ jobs:
       - name: Test
         run: cargo test --release
 
+      - name: Test licence core
+        run: cargo test --release --manifest-path licensing/core/Cargo.toml
+
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
