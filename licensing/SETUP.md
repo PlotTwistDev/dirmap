@@ -106,8 +106,9 @@ notifications for your other product too; the server ignores anything without th
 
 ## 8. The website (Cloudflare Pages)
 
-Fill in the drafts first: `[SELLER]` and `[ADDRESS]` in `licensing/site/terms.html` and
-`privacy.html`, and the refund period in `refunds.html`. Then:
+Fill in the drafts first: `[SELLER]` (your trading name; no address is needed, since Paddle is
+the seller of record and the pages give support@filescape.app as the contact) in
+`licensing/site/terms.html` and `privacy.html`, and the refund period in `refunds.html`. Then:
 
 ```
 npx wrangler@4 pages deploy licensing/site --project-name filescape-site
