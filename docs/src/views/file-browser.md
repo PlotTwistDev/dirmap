@@ -1,5 +1,8 @@
 # The file manager
 
+This page is about the file manager in **Storage Analysis**, which shows what was scanned. To
+browse your computer without scanning, use the [Files workspace](file-manager.md).
+
 The top part of the window is a file manager for what you scanned, like Finder or Windows
 Explorer: folders you open by double-clicking, a path you can click, Back and Forward, tabs, and
 the usual list, icon and column layouts. Unlike a file manager, every item shows how much space
@@ -96,10 +99,10 @@ right-click menu of an empty part of the view.
 A copy never replaces anything: if an item of that name is already there, the copy is called
 `name copy.ext` (then `name copy 2.ext` and so on). A move stops and says so instead.
 
-Copy and Cut work inside dirmap: you can't paste the files into Finder or Explorer. Their paths
+Copy and Cut work inside Filescape: you can't paste the files into Finder or Explorer. Their paths
 do go on the clipboard as text, one per line, so you can paste them into a terminal or a
 document. It works the other way too: paste paths copied elsewhere (one per line, such as
-Explorer's **Copy as path**) and dirmap copies those items into the current folder.
+Explorer's **Copy as path**) and Filescape copies those items into the current folder.
 
 ### Drag and drop
 
@@ -155,7 +158,7 @@ page in the file type's colour, with the extension written on the larger icons.
 ## Not yet available
 
 The file manager looks at the scan, so it shows what was there when you scanned, plus the changes
-you make in dirmap. Changes made in other apps show after a **Refresh** (**F5**) or a rescan. You
+you make in Filescape. Changes made in other apps show after a **Refresh** (**F5**) or a rescan. You
 can't drag files in from, or out to, other apps.
 
 ## Related topics

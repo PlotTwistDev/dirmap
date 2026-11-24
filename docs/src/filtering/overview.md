@@ -4,6 +4,9 @@ Filters change **which files the map shows**, without scanning again. They work 
 already in memory, in the background, so even on millions of files the map updates within a
 moment of a change.
 
+Filtering is part of Filescape Professional. Without a licence the map shows every file, and a
+filter that's already on can still be turned off. See [Licensing](../settings/licensing.md#free-and-professional-features).
+
 ![A Custom filter in Highlight mode](../images/filter-highlight.png)
 
 ## The parts of a filter
@@ -47,7 +50,7 @@ filter** if there are none.
 
 ## The match count
 
-Next to the mode buttons, dirmap shows how many files match and how much space they use, for
+Next to the mode buttons, Filescape shows how many files match and how much space they use, for
 example **1,204 files match · 82.1 GB (12.4% of the scan)**. While it's working this out you'll
 see **Counting…** (or **Filtering…** while it rebuilds the map). **No files match** appears in
 orange when nothing matches.
@@ -67,7 +70,7 @@ Custom pattern. The **✖** next to the Custom box clears just the pattern.
 
 ## What is remembered
 
-Filters stay on when you scan another folder, but start empty the next time you open dirmap.
+Filters stay on when you scan another folder, but start empty the next time you open Filescape.
 The **Highlight** / **Show matches only** choice, the Custom filter's options, recent patterns
 and presets are remembered between runs.
 

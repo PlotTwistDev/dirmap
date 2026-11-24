@@ -4,9 +4,20 @@ The treemap is drawn on your graphics card, which lets it add a few effects that
 to read. All of them can be adjusted or turned off under **⚙ Settings > Treemap**, and changes
 show on the map straight away while the Settings window is open.
 
+## Tile style
+
+**Tile style** picks one of two looks:
+
+- **Modern** (the default): each file is a soft pastel tile with a gentle glow, names and sizes
+  are written straight on tiles with room for them, and the folders on screen are outlined with a
+  dark tag giving their name and size. The glow's light follows the pointer. This is the same
+  look as the map on filescape.app.
+- **Classic cushion**: the cushion treemap described below, in stronger colours. The shading
+  settings, presets, grid and block depth effect apply to this style only.
+
 ## Cushion shading
 
-Each folder's area is shaded like a cushion lit from one side, so the edges between folders
+In the Classic cushion style, each folder's area is shaded like a cushion lit from one side, so the edges between folders
 show as creases. This is what lets you see folder boundaries without drawing boxes.
 
 | Setting | Effect |
@@ -23,7 +34,8 @@ show as creases. This is what lets you see folder boundaries without drawing box
 
 ## Interactive lighting
 
-With **Interactive lighting** on, a soft light follows the pointer across the map, the tile under
+With **Interactive lighting** on, a soft light follows the pointer across the map (in the Modern
+style, the glow on every tile leans towards the pointer), the tile under
 the pointer lifts slightly, and the light fades away when the pointer leaves. **Intensity** sets
 how strong it is: **Subtle**, **Normal** or **Strong**. It's purely visual; turn it off if you
 find it distracting.
@@ -37,7 +49,8 @@ apart.
 
 **File names on tiles** (in the filter bar, and under Settings > Treemap > Labels) writes the name
 on any tile at least about 44 × 15 points, and the size as well on taller tiles. Names fade in as
-tiles grow while you zoom.
+tiles grow while you zoom, and get larger on large tiles. They're written in white on a dark
+backing so they read on any colour of tile.
 
 ## Selection border
 

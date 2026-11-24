@@ -9,19 +9,19 @@ new, what was deleted, and what grew or shrank.
 1. Scan the drive or folder.
 2. Open the **Changes** tab and press **💾 Save snapshot…**.
 3. Choose where to save it. The suggested name includes the folder and the date, for example
-   `dirmap Projects 2026-11-12 0930.dmsnap`.
+   `filescape Projects 2026-11-12 0930.dmsnap`.
 
 Snapshots are compact (roughly 30–50 bytes per file) and can be saved anywhere. From a script or
 scheduled task, use the command line:
 
 ```sh
-dirmap --cli D:\Projects --save-snapshot D:\Snapshots\projects.dmsnap
+filescape --cli D:\Projects --save-snapshot D:\Snapshots\projects.dmsnap
 ```
 
 ## Comparing
 
-1. Scan the same drive or folder again (or open dirmap with
-   `dirmap --compare projects.dmsnap D:\Projects`).
+1. Scan the same drive or folder again (or open Filescape with
+   `filescape --compare projects.dmsnap D:\Projects`).
 2. In the **Changes** tab press **📂 Compare with snapshot…** and pick the snapshot file.
 
 The tab then shows:

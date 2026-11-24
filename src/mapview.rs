@@ -55,6 +55,36 @@ pub struct Look {
     pub lighting: bool,
     pub light_level: f32,
     pub bevel: bool,
+    /// The Modern tile style (soft glowing tiles, as on filescape.app) instead of the cushion.
+    pub soft: bool,
+}
+
+/// Where the Modern style's light sits when the pointer isn't over the map (fractions of it),
+/// the same resting place as on the website.
+pub const SOFT_LIGHT_REST: (f32, f32) = (0.35, 0.3);
+
+/// The Modern style's glow for one pixel, as `soft_shade` in the tile shader (kept in step):
+/// `pos` and `size` in pixels, `light` as fractions of the map. Used by the CPU fallback.
+pub fn soft_shade(base: [f32; 3], pos: (f32, f32), size: (f32, f32), light: (f32, f32)) -> [f32; 3] {
+    if size.0.min(size.1) < 3.0 {
+        return base.map(|c| c * 0.75);
+    }
+    let c1 = (size.0 * 0.5, size.1 * 0.5);
+    let c0 = (size.0 * (0.5 + (light.0 - 0.5) * 0.5), size.1 * (0.5 + (light.1 - 0.5) * 0.5));
+    let rr = size.0.max(size.1) * 0.78;
+    let d = (c1.0 - c0.0, c1.1 - c0.1);
+    let q = (pos.0 - c0.0, pos.1 - c0.1);
+    let a = d.0 * d.0 + d.1 * d.1 - rr * rr;
+    let b = q.0 * d.0 + q.1 * d.1;
+    let t = ((b - (b * b - a * (q.0 * q.0 + q.1 * q.1)).max(0.0).sqrt()) / a).clamp(0.0, 1.0);
+    base.map(|c| {
+        if t < 0.55 {
+            let lite = c + (1.0 - c) * 0.38;
+            lite + (c - lite) * (t / 0.55)
+        } else {
+            c + (c * 0.42 - c) * ((t - 0.55) / 0.45)
+        }
+    })
 }
 
 /// A file tile big enough that it may get a label.
@@ -62,7 +92,6 @@ pub struct Label {
     pub rect: DRect,
     /// Path from the scene's folder.
     pub path: Vec<u32>,
-    pub color: Color32,
 }
 
 /// Tiles built for one scene over `cover`, at `ppu` physical pixels per world unit.
@@ -1055,15 +1084,23 @@ impl MapView {
         };
         let k = (bounds_px.0 / (ppu * sv.w()), bounds_px.1 / (ppu * sv.h()));
         let mut opts = 0;
-        if look.bevel {
-            opts |= tilegpu::BEVEL;
-        }
-        if look.grid.is_some() {
-            opts |= tilegpu::GRID;
+        if look.soft {
+            opts |= tilegpu::SOFT;
+        } else {
+            if look.bevel {
+                opts |= tilegpu::BEVEL;
+            }
+            if look.grid.is_some() {
+                opts |= tilegpu::GRID;
+            }
         }
         u.px = [k.0 as f32, k.1 as f32, alpha, opts as f32];
         u.shade = [look.ambient, look.diffuse, look.gain, 0.0];
         u.sun = [look.sun[0], look.sun[1], look.sun[2], 0.0];
+        if look.soft {
+            let (lx, ly) = self.soft_light(view, look, lit);
+            u.sun = [lx, ly, 0.0, 0.0];
+        }
         if let Some(g) = look.grid {
             u.grid = [g.r() as f32 / 255.0, g.g() as f32 / 255.0, g.b() as f32 / 255.0, 1.0];
         }
@@ -1073,7 +1110,7 @@ impl MapView {
             let a = camera::absolute(&set.world, &r);
             (a.x0, a.y0)
         };
-        if lit && self.light > 0.0 {
+        if lit && self.light > 0.0 && !look.soft {
             let (lx, ly) = to_set(self.light_at.0, self.light_at.1);
             let radius = (0.45 * bounds_px.0.min(bounds_px.1)).clamp(220.0, 900.0);
             u.light = [((lx - ox) * ppu) as f32, ((ly - oy) * ppu) as f32, self.light * look.light_level, radius as f32];
@@ -1094,8 +1131,20 @@ impl MapView {
                 u.hover_w[1] = a.max(0.0);
             }
         }
-        let _ = view;
         u
+    }
+
+    /// Where the Modern style's light is, as fractions of the map: at the pointer while it's
+    /// over the map (easing there and back), otherwise at its resting place.
+    fn soft_light(&self, view: &DRect, look: &Look, lit: bool) -> (f32, f32) {
+        let rest = SOFT_LIGHT_REST;
+        if !lit || !look.lighting || self.light <= 0.0 || view.w() <= 0.0 || view.h() <= 0.0 {
+            return rest;
+        }
+        let px = (((self.light_at.0 - view.x0) / view.w()) as f32).clamp(0.0, 1.0);
+        let py = (((self.light_at.1 - view.y0) / view.h()) as f32).clamp(0.0, 1.0);
+        let k = self.light;
+        (rest.0 + (px - rest.0) * k, rest.1 + (py - rest.1) * k)
     }
 }
 
@@ -1289,9 +1338,11 @@ fn build_set(req: &Req) -> Option<TileSet> {
             };
             let [s0, s1, s2, s3] = l.surface;
             let grad = [(2.0 * s0 / ppu) as f32, (2.0 * s0 * ox + s2) as f32, (2.0 * s1 / ppu) as f32, (2.0 * s1 * oy + s3) as f32];
-            inst.push(Instance { rect, grad, color: fill.to_array(), flags: 0 });
+            inst.push(Instance { rect, grad, color: fill.to_array(), flags: tilegpu::PATCH });
             if req.raster {
-                raster.push(RasterTile { rect: l.rect, surface: l.surface, color: fill, flat: false });
+                let flat = req.paint.look.soft;
+                let color = if flat { fill.gamma_multiply(0.8) } else { fill };
+                raster.push(RasterTile { rect: l.rect, surface: l.surface, color: Color32::from_rgb(color.r(), color.g(), color.b()), flat });
             }
             return true;
         }
@@ -1302,7 +1353,7 @@ fn build_set(req: &Req) -> Option<TileSet> {
                     raster.push(RasterTile { rect: l.rect, surface: l.surface, color: dark, flat: true });
                 }
             }
-            Some((fill, label)) => {
+            Some((fill, _)) => {
                 let (w, h) = (l.rect.w() * pt_per_unit, l.rect.h() * pt_per_unit);
                 if req.paint.hidden.is_some() {
                     // Filtering: a match only a pixel or two across would be a speck of noise
@@ -1321,7 +1372,7 @@ fn build_set(req: &Req) -> Option<TileSet> {
                     raster.push(RasterTile { rect: l.rect, surface: l.surface, color: fill, flat: false });
                 }
                 if w >= 26.0 && h >= 9.0 {
-                    labels.push(Label { rect: l.rect, path: l.path.to_vec(), color: label });
+                    labels.push(Label { rect: l.rect, path: l.path.to_vec() });
                 }
             }
         }
@@ -1474,6 +1525,22 @@ fn rasterize(cover: &DRect, ppu: f64, bg: Color32, tiles: &[RasterTile], paint: 
             }
             continue;
         }
+        if look.soft {
+            let size = ((x1 - x0) as f32, (y1 - y0) as f32);
+            let base = [t.color.r() as f32 / 255.0, t.color.g() as f32 / 255.0, t.color.b() as f32 / 255.0];
+            let gap = size.0 > 6.0 && size.1 > 6.0;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let pos = ((x - x0) as f32 + 0.5, (y - y0) as f32 + 0.5);
+                    let mut c = soft_shade(base, pos, size, SOFT_LIGHT_REST);
+                    if gap && (x == x0 || y == y0 || x + 1 == x1 || y + 1 == y1) {
+                        c = c.map(|v| v * 0.5);
+                    }
+                    px[y * w + x] = Color32::from_rgb((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8);
+                }
+            }
+            continue;
+        }
         let [s0, s1, s2, s3] = t.surface;
         // Gradient per pixel index: g = a * i + b.
         let (ax, bx) = ((2.0 * s0 / s) as f32, (2.0 * s0 * (cover.x0 + 0.5 / s) + s2) as f32);
@@ -1510,7 +1577,7 @@ mod tests {
             hidden: None,
             cushion: Cushion { height: 0.38, scale: 0.91 },
             background: Color32::from_gray(45),
-            look: Look { ambient: 0.1, diffuse: 0.9, gain: 1.0, sun: [0.0, 0.0, 1.0], grid: None, lighting: false, light_level: 1.0, bevel: false },
+            look: Look { ambient: 0.1, diffuse: 0.9, gain: 1.0, sun: [0.0, 0.0, 1.0], grid: None, lighting: false, light_level: 1.0, bevel: false, soft: false },
         }
     }
 
@@ -1684,7 +1751,7 @@ mod tests {
             let set = build_set(&req(&tree, world, cover, ppu)).unwrap();
             assert!(set.instances.len() > 1);
             let mv = MapView::new(Backend::None);
-            let look = Look { ambient: 0.1, diffuse: 0.9, gain: 1.0, sun: [0.0, 0.0, 1.0], grid: None, lighting: false, light_level: 1.0, bevel: false };
+            let look = Look { ambient: 0.1, diffuse: 0.9, gain: 1.0, sun: [0.0, 0.0, 1.0], grid: None, lighting: false, light_level: 1.0, bevel: false, soft: false };
             let u = mv.uniforms(&set, &view, &world, &view, (1000.0, 700.0), 1.0, &look, false);
             let mut checked = 0;
             treemap::build(&tree, world, &view, Detail { unit: 1.0 / ppu }, paint().cushion, None, &mut |l| {
@@ -1817,7 +1884,7 @@ mod bench {
             hidden: None,
             cushion: Cushion { height: 0.38, scale: 0.91 },
             background: Color32::from_gray(45),
-            look: Look { ambient: 0.13, diffuse: 0.87, gain: 1.0, sun: [0.0, 0.0, 1.0], grid: None, lighting: true, light_level: 1.0, bevel: true },
+            look: Look { ambient: 0.13, diffuse: 0.87, gain: 1.0, sun: [0.0, 0.0, 1.0], grid: None, lighting: true, light_level: 1.0, bevel: true, soft: false },
         };
         let memo = Arc::new(Memo::default());
         let req = |cover: DRect, ppu: f64| Req {

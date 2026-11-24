@@ -4,6 +4,8 @@ The **Show:** buttons in the filter bar limit the map to kinds of files. Click o
 click more to add other kinds (a file of **any** chosen kind is shown); click **All** to turn them
 all off. Hover over a button to see a summary of what it covers.
 
+The **Show:** buttons are part of Filescape Professional (see [Licensing](../settings/licensing.md#free-and-professional-features)).
+
 A file's category comes from its extension, ignoring case. The complete lists are:
 
 | Category | Extensions |
@@ -15,7 +17,7 @@ A file's category comes from its extension, ignoring case. The complete lists ar
 | 📦 **Archives** | `zip` `7z` `rar` `tar` `gz` `tgz` `bz2` `xz` `zst` `lz4` `cab` `lzma` `z` `arj` |
 | 📄 **Documents** | `pdf` `doc` `docx` `xls` `xlsx` `ppt` `pptx` `odt` `ods` `odp` `rtf` `txt` `md` `epub` `mobi` `csv` `pages` `numbers` `key` `one` `pst` `ost` `msg` `eml` |
 | 💻 **Code** | `rs` `c` `h` `cpp` `hpp` `cc` `cs` `java` `kt` `py` `pyc` `js` `mjs` `tsx` `jsx` `go` `rb` `php` `swift` `m` `sh` `ps1` `bat` `lua` `pl` `scala` `sql` `json` `yaml` `yml` `toml` `xml` `html` `css` `scss` `ipynb` `rlib` `rmeta` `o` `obj` `pdb` `class` `jar` `whl` |
-| ⚙ **Programs** | `exe` `dll` `msi` `sys` `so` `dylib` `app` `apk` `appx` `msix` `deb` `rpm` `a` `lib` `com` `scr` |
+| ⚙ **Programs** | `exe` `dll` `msi` `sys` `so` `dylib` `app` `apk` `appx` `msix` `deb` `rpm` `a` `lib` `com` `scr`, and not Windows' `pagefile.sys`, `swapfile.sys` or `hiberfil.sys`, which are memory saved to disk and count as Other |
 | 💿 **Disk images** | `iso` `vhd` `vhdx` `vmdk` `qcow2` `vdi` `dmg` `img` `wim` `esd` `avhdx` |
 | **Other** | Everything else, including files with no extension. |
 

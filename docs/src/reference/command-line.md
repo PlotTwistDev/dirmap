@@ -1,21 +1,21 @@
 # Command line
 
-dirmap can be started from a terminal (Command Prompt, PowerShell, Terminal) with options. On
-Windows, run `dirmap.exe`; elsewhere `dirmap` (or the full path to it).
+Filescape can be started from a terminal (Command Prompt, PowerShell, Terminal) with options. On
+Windows, run `filescape.exe`; elsewhere `filescape` (or the full path to it).
 
 ```text
-dirmap [PATH]                                  open dirmap and scan PATH
-dirmap --cli [--top N] [--save-snapshot FILE] [--all-fs] PATH
+Filescape [PATH]                                  open Filescape and scan PATH
+filescape --cli [--top N] [--save-snapshot FILE] [--all-fs] PATH
                                                print a text report instead of opening a window
-dirmap --compare FILE [PATH]                   open dirmap comparing with a saved snapshot
-dirmap --help                                  show the usage line
+filescape --compare FILE [PATH]                   open Filescape comparing with a saved snapshot
+filescape --help                                  show the usage line
 ```
 
 ## Options
 
 | Option | Effect |
 |---|---|
-| `PATH` | The drive or folder to scan. In the window, scanning starts straight away. Without it, dirmap opens on the drive list. For `--cli` the default is the current folder. |
+| `PATH` | The drive or folder to scan. In the window, scanning starts straight away. Without it, Filescape opens on the drive list. For `--cli` the default is the current folder. |
 | `--cli` | Don't open a window: scan, print a report and exit. |
 | `--top N` | With `--cli`: how many rows to print in each part of the report (default 15). |
 | `--save-snapshot FILE` | With `--cli`: also save the scan as a snapshot file for comparing later. |
@@ -26,7 +26,7 @@ dirmap --help                                  show the usage line
 ## The text report
 
 ```text
-$ dirmap --cli --top 5 ~/Projects
+$ filescape --cli --top 5 ~/Projects
 /home/me/Projects: 182.4 GB in 1204311 files, 98770 folders (14.21s, 0 unreadable)
 
 Largest entries:
@@ -49,28 +49,29 @@ space. The scan exclusions from the Settings window are not applied on the comma
 Scan a drive in the window:
 
 ```sh
-dirmap D:\
+filescape D:\
 ```
 
 Save a snapshot every night (for example from Task Scheduler or cron), then compare in the
 morning:
 
 ```sh
-dirmap --cli --save-snapshot D:\Snapshots\projects.dmsnap D:\Projects
-dirmap --compare D:\Snapshots\projects.dmsnap D:\Projects
+filescape --cli --save-snapshot D:\Snapshots\projects.dmsnap D:\Projects
+filescape --compare D:\Snapshots\projects.dmsnap D:\Projects
 ```
 
 The 20 biggest items in your home folder, without opening a window:
 
 ```sh
-dirmap --cli --top 20 ~
+filescape --cli --top 20 ~
 ```
 
 ## Environment variables
 
 | Variable | Effect |
 |---|---|
-| `DIRMAP_RENDERER=glow` | Draw with OpenGL instead of the default GPU renderer. Try it if the window is blank or garbled. |
+| `DIRMAP_RENDERER=glow` | Draw with OpenGL. This is already the default on Windows. Elsewhere, try it if the window is blank or garbled. |
+| `DIRMAP_RENDERER=wgpu` | Draw with wgpu (DirectX 12 on Windows, Vulkan or Metal elsewhere). This is the default on Linux and macOS. On Windows the panels can shake while you resize the window. |
 | `TERMINAL` | Linux: the terminal program used by **Open in Terminal…**. |
 
 ## Related topics

@@ -2,11 +2,11 @@
 
 ## Starting a scan
 
-- **A whole drive:** click its name or **Scan** in the drive list. The list appears when dirmap
+- **A whole drive:** click its name or **Scan** in the drive list. The list appears when Filescape
   starts, and from **🖴 Drives…** in the toolbar once a scan is open.
 - **A folder:** type its path in the folder box and press **Enter** or **⟳ Scan**, or use
   **Browse…**.
-- **From the command line:** `dirmap D:\Projects` opens dirmap and scans that folder straight
+- **From the command line:** `filescape D:\Projects` opens Filescape and scans that folder straight
   away. See [Command line](../reference/command-line.md).
 
 On Windows, typing just a drive letter such as `D:` scans the whole drive `D:\`.
@@ -48,7 +48,7 @@ status bar shows **Scan settings changed. Rescan**; click **Rescan** to apply it
 - Symbolic links and junctions are **never followed**, so nothing is counted twice through a
   link. See [Links, junctions and mounted drives](../disk-usage/links-and-mounts.md).
 - On Linux and macOS, other drives mounted inside the scanned folder are skipped unless you turn
-  off **Stay on the scanned drive** (Settings > Advanced) or start dirmap with `--all-fs`.
+  off **Stay on the scanned drive** (Settings > Advanced) or start Filescape with `--all-fs`.
 - Folders and files you've excluded under **⚙ Settings > Filtering**. See
   [Scan exclusions](../filtering/scan-filters.md).
 - Folders the scan isn't allowed to read are counted as **unreadable** and left out. See

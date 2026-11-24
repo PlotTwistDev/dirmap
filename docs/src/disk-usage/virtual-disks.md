@@ -1,6 +1,6 @@
 # Virtual disk files (VHDX, VDI, VMDK)
 
-Virtual machines, WSL, Docker and some backup tools keep a whole disk inside one large file. dirmap
+Virtual machines, WSL, Docker and some backup tools keep a whole disk inside one large file. Filescape
 shows each of these as a single rectangle, often one of the biggest on the drive.
 
 | Extension | Used by |
@@ -19,12 +19,12 @@ up at once.
 
 Most virtual disks are **dynamically expanding**: the file grows as the virtual machine writes
 data, but **doesn't shrink** when data is deleted inside it. A WSL distribution that once held
-100 GB of build files keeps a 100 GB `ext4.vhdx` after you delete them. The size dirmap shows is
+100 GB of build files keeps a 100 GB `ext4.vhdx` after you delete them. The size Filescape shows is
 the real size of the file on your drive; the space used *inside* it can be much less.
 
 To get the space back you have to compact the disk with the virtual machine's own tools (for
 example `Optimize-VHD` in PowerShell, `diskpart`'s `compact vdisk`, or `VBoxManage modifymedium
---compact`). dirmap doesn't do this itself; see [Feature status](../about/feature-status.md).
+--compact`). Filescape doesn't do this itself; see [Feature status](../about/feature-status.md).
 
 **Snapshots and checkpoints** (`.avhdx` files, VirtualBox `Snapshots` folders, VMware
 `-000001.vmdk` files) record changes since a snapshot was taken and can grow as large as the

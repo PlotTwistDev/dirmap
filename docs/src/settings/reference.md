@@ -6,7 +6,7 @@ them and leaves it open, and **Cancel** (or closing the window) throws them away
 puts every setting, on every tab (including the administrator choice), back to its default; press
 **OK** or **Apply** to keep that.
 
-Settings are saved when dirmap closes and are used the next time it starts. Settings marked
+Settings are saved when Filescape closes and are used the next time it starts. Settings marked
 **needs a rescan** change what a scan finds; after changing one the status bar shows **Scan
 settings changed. Rescan**.
 
@@ -51,6 +51,7 @@ These change only how the treemap looks and moves; they never need a rescan. See
 
 | Setting | Default | Effect |
 |---|---|---|
+| **Tile style** <!-- setting:tile_style --> | Modern | **Modern**: soft pastel tiles with names on them and dark name tags on the folders, the same look as the map on filescape.app. **Classic cushion**: shaded cushion tiles in strong colours, tuned by the settings below (which apply to Classic only). |
 | **Brightness** <!-- setting:brightness --> | 88 | Overall brightness of the tiles (0–100). |
 | **Cushion shading** <!-- setting:cushion --> | 87 | Strength of the shading that shows folder boundaries (0 = flat). |
 | **Height** <!-- setting:height --> | 38 | How rounded each folder's cushion is. |
@@ -76,7 +77,13 @@ These change only how the treemap looks and moves; they never need a rescan. See
 | **Stay on the scanned drive** <!-- setting:one_file_system --> | On | **Needs a rescan.** Linux and macOS: don't scan other drives mounted inside the scanned folder. The `--all-fs` command-line option turns it off for one run. Windows never follows drives mounted in folders either way. See [Links, junctions and mounted drives](../disk-usage/links-and-mounts.md). |
 | **Skip hidden files and folders** <!-- setting:skip_hidden --> | Off | **Needs a rescan.** Leaves out hidden (and on Windows, system) files and folders. |
 | **Scanner threads** <!-- setting:threads --> | 0 (automatic) | How many folders are read at once. 0 uses one per processor core (the number on this computer is shown). Network drives often scan faster with more, such as 32. Applies from the next scan. |
-| **When dirmap starts** <!-- setting:admin --> | Ask if it isn't | Windows only: **Always run as administrator**, **Ask if it isn't**, or **Never (don't ask)**. **🛡 Restart as administrator now** restarts straight away. See [Running as administrator](administrator.md). |
+| **When Filescape starts** <!-- setting:admin --> | Ask if it isn't | Windows only: **Always run as administrator**, **Ask if it isn't**, or **Never (don't ask)**. **🛡 Restart as administrator now** restarts straight away. See [Running as administrator](administrator.md). |
+
+## Licensing
+
+Shows the licence in use, the evaluation or what's needed, with **Activate**, **Copy Serial**,
+**Export Licence**, **Deactivate This Computer** and offline activation. It has no settings of its
+own. See [Licensing](licensing.md).
 
 ## Remembered outside the Settings window
 
@@ -95,12 +102,13 @@ These are changed where you use them and also saved between runs:
 
 | System | Location |
 |---|---|
-| Windows | `%APPDATA%\dirmap\data\` |
-| Linux | `~/.local/share/dirmap/` (or `$XDG_DATA_HOME/dirmap/`) |
-| macOS | `~/Library/Application Support/dirmap/` |
+| Windows | `%APPDATA%\Filescape\data\` |
+| Linux | `~/.local/share/filescape/` (or `$XDG_DATA_HOME/filescape/`) |
+| macOS | `~/Library/Application Support/Filescape/` |
 
 The folder holds `app.ron` (all of the above) and `admin-mode` (the administrator choice, kept
-separately because it's needed before the window opens). To start afresh, close dirmap and delete
+separately because it's needed before the window opens). `licence.json` holds the signed licence
+record; deleting it doesn't remove a licence (enter the serial again) or restart the evaluation. To start afresh, close Filescape and delete
 the folder, or use **Reset all**.
 
 ## Related topics
@@ -108,3 +116,4 @@ the folder, or use **Reset all**.
 - [Scan exclusions](../filtering/scan-filters.md)
 - [Lighting and visual effects](../views/visual-effects.md)
 - [Running as administrator](administrator.md)
+- [Licensing](licensing.md)

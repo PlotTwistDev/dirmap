@@ -15,7 +15,7 @@ are.
 ## Method 2: with the Custom filter
 
 1. Press **Ctrl+F** (or click **🔍 Custom**).
-2. Type the extension, for example `iso` or `*.iso`. As you type, dirmap suggests extensions found
+2. Type the extension, for example `iso` or `*.iso`. As you type, Filescape suggests extensions found
    in the scan; press **Tab** to complete one.
 3. The count next to **Highlight** / **Show matches only** shows how many files match and how
    much space they use.

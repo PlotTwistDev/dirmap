@@ -123,22 +123,35 @@ fn walk(dir: &Node, path: &[u32], min: usize, cancel: &AtomicBool, out: &mut Vec
     Some(())
 }
 
-/// One numbered file: (value, digit count, has leading zero, size).
-type Frame = (u64, u8, bool, u64);
+/// One numbered file: (value, digit count, has leading zero, size, index in the list).
+type Frame = (u64, u8, bool, u64, usize);
 
 fn in_folder(dir: &Node, path: &[u32], min: usize) -> Vec<Sequence> {
-    let files = dir.children.iter().filter(|c| !c.is_dir);
-    if files.clone().count() < min {
+    let files: Vec<(&str, u64)> = dir.children.iter().filter(|c| !c.is_dir).map(|c| (&*c.name, c.size)).collect();
+    in_names(&files, min)
+        .into_iter()
+        .map(|(mut s, _)| {
+            s.folder = path.to_vec();
+            s
+        })
+        .collect()
+}
+
+/// The sequences among one folder's files, given as (name, size): each with the indices of its
+/// frames in `files`. For the file list, which groups frames without a scan.
+pub fn in_names(files: &[(&str, u64)], min: usize) -> Vec<(Sequence, Vec<usize>)> {
+    let min = min.max(2);
+    if files.len() < min {
         return Vec::new();
     }
     let mut groups: HashMap<(&str, &str), Vec<Frame>> = HashMap::new();
-    for f in files {
-        if let Some((pre, digits, suf)) = last_number(&f.name) {
+    for (i, &(name, size)) in files.iter().enumerate() {
+        if let Some((pre, digits, suf)) = last_number(name) {
             if digits.len() > 18 || !is_extension(suf) {
                 continue;
             }
             let v: u64 = digits.parse().unwrap_or(0);
-            groups.entry((pre, suf)).or_default().push((v, digits.len() as u8, digits.len() > 1 && digits.starts_with('0'), f.size));
+            groups.entry((pre, suf)).or_default().push((v, digits.len() as u8, digits.len() > 1 && digits.starts_with('0'), size, i));
         }
     }
     let mut out = Vec::new();
@@ -149,9 +162,9 @@ fn in_folder(dir: &Node, path: &[u32], min: usize) -> Vec<Sequence> {
         let same_width = frames.iter().all(|f| f.1 == frames[0].1);
         let padded = frames.iter().any(|f| f.2);
         if same_width {
-            out.extend(build(path, pre, suf, Some(frames[0].1), &frames, min));
+            out.extend(build(pre, suf, Some(frames[0].1), &frames, min));
         } else if !padded {
-            out.extend(build(path, pre, suf, None, &frames, min));
+            out.extend(build(pre, suf, None, &frames, min));
         } else {
             // Mixed: padded frames of different widths are different sequences.
             let mut by_width: HashMap<u8, Vec<Frame>> = HashMap::new();
@@ -160,7 +173,7 @@ fn in_folder(dir: &Node, path: &[u32], min: usize) -> Vec<Sequence> {
             }
             for (w, fs) in by_width {
                 if fs.len() >= min {
-                    out.extend(build(path, pre, suf, Some(w), &fs, min));
+                    out.extend(build(pre, suf, Some(w), &fs, min));
                 }
             }
         }
@@ -168,7 +181,7 @@ fn in_folder(dir: &Node, path: &[u32], min: usize) -> Vec<Sequence> {
     out
 }
 
-fn build(path: &[u32], pre: &str, suf: &str, padding: Option<u8>, frames: &[Frame], min: usize) -> Option<Sequence> {
+fn build(pre: &str, suf: &str, padding: Option<u8>, frames: &[Frame], min: usize) -> Option<(Sequence, Vec<usize>)> {
     let mut values: Vec<u64> = frames.iter().map(|f| f.0).collect();
     values.sort_unstable();
     values.dedup();
@@ -188,8 +201,10 @@ fn build(path: &[u32], pre: &str, suf: &str, padding: Option<u8>, frames: &[Fram
             gaps.push((w[0] + step, w[1] - step));
         }
     }
-    Some(Sequence {
-        folder: path.to_vec(),
+    let mut members: Vec<(u64, usize)> = frames.iter().map(|f| (f.0, f.4)).collect();
+    members.sort_unstable();
+    let seq = Sequence {
+        folder: Vec::new(),
         prefix: pre.to_string(),
         suffix: suf.to_string(),
         padding,
@@ -200,7 +215,8 @@ fn build(path: &[u32], pre: &str, suf: &str, padding: Option<u8>, frames: &[Fram
         bytes: frames.iter().map(|f| f.3).sum(),
         missing: expected - values.len() as u64,
         gaps,
-    })
+    };
+    Some((seq, members.into_iter().map(|m| m.1).collect()))
 }
 
 fn gcd(a: u64, b: u64) -> u64 {

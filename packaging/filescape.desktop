@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=dirmap
+Name=Filescape
 GenericName=Disk Usage Analyzer
 Comment=See what is taking up space on your drives
-Exec=dirmap %f
-Icon=drive-harddisk
+Exec=filescape %f
+Icon=filescape
 Terminal=false
 Categories=Utility;System;Filesystem;

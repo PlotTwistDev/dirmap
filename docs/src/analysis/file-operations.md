@@ -12,7 +12,7 @@ tab), as long as you're not typing in a text box.
 | Command | Shortcut | What it does |
 |---|---|---|
 | **Expand** / **Collapse** | | Tree layout, folders only: opens or closes the folder in the tree. |
-| **Open Folder** | **Enter** | Folders, in the List, Icons and Columns layouts: opens the folder in dirmap's file manager. |
+| **Open Folder** | **Enter** | Folders, in the List, Icons and Columns layouts: opens the folder in Filescape's file manager. |
 | **Open…** | **Enter** | Opens the file with its usual app, or the folder in Explorer, Finder or your file manager. |
 | **Copy** / **Cut** | **Ctrl+C** / **Ctrl+X** | Remembers the items, to copy or move them with **Paste**. Their paths also go on the clipboard as text. |
 | **Paste Into Folder** | | Folders: copies or moves what you copied or cut into this folder. **Ctrl+V** pastes into the folder on screen. |
@@ -25,7 +25,7 @@ tab), as long as you're not typing in a text box.
 | **Open in PowerShell…** | **Ctrl+S** | Windows: opens PowerShell in the folder. |
 | **Open in Terminal…** | **Ctrl+P** | macOS and Linux: opens a terminal in the folder. On Linux, set `$TERMINAL` to choose which one. |
 | **Refresh Selected** | **F5** | Reads the item from disk again and updates the tree and map. On the top item, rescans everything. |
-| **Properties** | **Alt+Enter** | Windows: the Explorer Properties dialog. Elsewhere: dirmap's own window with size, file count, dates, permissions and whether it's read-only. |
+| **Properties** | **Alt+Enter** | Windows: the Explorer Properties dialog. Elsewhere: Filescape's own window with size, file count, dates, permissions and whether it's read-only. |
 | **Compute Hash (SHA-256)** | **Ctrl+H** | Files only. Reads the file and shows its SHA-256 hash with a **Copy** button. Closing the window cancels it. |
 | **Add to Exclusion Filter** | | Adds the folder (or the file's name) to the scan exclusions, for the next scan. See [Scan exclusions](../filtering/scan-filters.md). |
 | **Delete Permanently…** | **Shift+Delete** | Deletes the item for good after asking. It does **not** go to the Recycle Bin or Trash. |
@@ -41,7 +41,7 @@ On a Mac, use **⌘** instead of **Ctrl**.
 - **Delete Permanently**, **Delete (to Recycle Bin)** and **Empty Folder** always show what will be
   deleted (path, size and number of files) and wait for you to confirm. **Escape** or **Cancel**
   backs out.
-- The top item of the scan can't be deleted or moved from dirmap, and a whole drive can't be
+- The top item of the scan can't be deleted or moved from Filescape, and a whole drive can't be
   emptied.
 - **Remove Empty Folders** doesn't ask first, because it only removes folders with nothing in them.
 - Only one file operation runs at a time; while one is running, the commands that change files
@@ -54,10 +54,10 @@ On a Mac, use **⌘** instead of **Ctrl**.
 ### Platform notes
 
 - **Windows:** the Recycle Bin is used exactly as Explorer would. If part of a folder is in use or
-  protected, dirmap reports that some of it couldn't be moved.
+  protected, Filescape reports that some of it couldn't be moved.
 - **macOS:** items go to the Trash through Finder, so Finder's **Put Back** works.
 - **Linux:** moving to the Trash uses `gio trash`, KDE's `kioclient` or `trash-put` (trash-cli),
-  whichever is installed. If none is available nothing is deleted and dirmap says so.
+  whichever is installed. If none is available nothing is deleted and Filescape says so.
 - **Delete Permanently** clears the read-only flag on files that have it.
 - **Move to…** won't replace anything: if an item with the same name is already in the
   destination, it stops and says so. It also refuses to move a folder into itself.

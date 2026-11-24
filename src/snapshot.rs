@@ -28,7 +28,7 @@ pub fn load(file: &Path) -> io::Result<Snapshot> {
     let mut magic = [0u8; 8];
     r.read_exact(&mut magic)?;
     if &magic != MAGIC {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "not a dirmap snapshot"));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "not a Filescape snapshot"));
     }
     let root = PathBuf::from(read_str(&mut r)?);
     let taken = i64::from_le_bytes(read_arr(&mut r)?);

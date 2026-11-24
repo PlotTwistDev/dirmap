@@ -1,6 +1,6 @@
 # Scanning millions of files
 
-dirmap is built for drives and storage systems with millions of files. This page explains what
+Filescape is built for drives and storage systems with millions of files. This page explains what
 affects speed and memory, and how to get the best from very large scans.
 
 ## How fast is scanning?
@@ -8,7 +8,7 @@ affects speed and memory, and how to get the best from very large scans.
 The scan reads folder listings only, never file contents, using many threads at once. On a local
 SSD, expect hundreds of thousands of files per second once the system has the folder listings
 cached; the first scan after a restart is slower because they have to come from the disk. Network
-storage is usually limited by the network's round-trip time rather than by dirmap; see
+storage is usually limited by the network's round-trip time rather than by Filescape; see
 [External and network drives](network-drives.md).
 
 The scanning screen shows files per second, so you can compare settings.
@@ -54,11 +54,11 @@ When you scan again, the previous scan is freed in the background.
 
 ## Command line
 
-`dirmap --cli PATH` scans without opening a window and prints the largest entries and extensions,
+`filescape --cli PATH` scans without opening a window and prints the largest entries and extensions,
 which is handy over SSH or in scheduled jobs. See [Command line](../reference/command-line.md).
 
 ## Related topics
 
 - [Working with very large maps](../views/large-maps.md)
-- [How dirmap works](architecture.md)
+- [How Filescape works](architecture.md)
 - [System requirements](../getting-started/system-requirements.md)

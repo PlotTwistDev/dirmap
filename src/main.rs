@@ -16,24 +16,37 @@ mod categories;
 mod drives;
 mod dupes;
 mod elevate;
+mod fsys;
 mod help;
 mod icons;
+mod licence;
 mod mapview;
+mod netdrives;
 mod pattern;
+mod player;
 mod settings;
+mod shellmenu;
 mod subset;
 mod scan;
 mod sequences;
 mod snapshot;
 mod sunburst;
+mod templates;
 mod tilegpu;
+mod transfer;
+mod media;
 mod treemap;
 
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+/// The product name. Also names the settings folder (see `templates::app_folder`).
+pub const APP_ID: &str = "Filescape";
+
 fn main() -> eframe::Result {
+    templates::migrate_old_folder();
+    crash_log();
     let mut cli = false;
     let mut top = 15usize;
     let mut path = None;
@@ -49,10 +62,10 @@ fn main() -> eframe::Result {
             "--top" => top = args.next().and_then(|s| s.parse().ok()).unwrap_or(top),
             "--save-snapshot" => save_snapshot = args.next().map(PathBuf::from),
             "--compare" => compare = args.next().map(PathBuf::from),
-            // Added when dirmap restarts itself as administrator; stops it trying twice.
+            // Added when Filescape restarts itself as administrator; stops it trying twice.
             elevate::ELEVATED_FLAG => restarted = true,
             "-h" | "--help" => {
-                println!("usage: dirmap [--cli [--top N] [--save-snapshot FILE]] [--compare FILE] [--all-fs] [PATH]");
+                println!("usage: filescape [--cli [--top N] [--save-snapshot FILE]] [--compare FILE] [--all-fs] [PATH]");
                 return Ok(());
             }
             _ => path = Some(PathBuf::from(a)),
@@ -80,22 +93,42 @@ fn main() -> eframe::Result {
         return Ok(());
     }
 
-    // Try the default GPU renderer first and fall back to OpenGL (old GPUs, VMs, remote desktops).
+    // Try one renderer and fall back to the other (old GPUs, VMs, remote desktops).
     let run = |renderer, path: Option<PathBuf>| {
         let native = eframe::NativeOptions {
             viewport: eframe::egui::ViewportBuilder::default()
-                .with_title("dirmap")
-                .with_inner_size([1280.0, 820.0]),
+                .with_title(APP_ID)
+                .with_inner_size([1280.0, 820.0])
+                .with_min_inner_size([640.0, 420.0])
+                .with_icon(app_icon()),
             renderer,
+            wgpu_options: wgpu_options(),
             ..Default::default()
         };
         let all_fs = !opts.one_file_system;
         let compare = compare.clone();
-        eframe::run_native("dirmap", native, Box::new(move |cc| Ok(Box::new(app::App::new(cc, path, all_fs, compare)))))
+        eframe::run_native(APP_ID, native, Box::new(move |cc| Ok(Box::new(app::App::new(cc, path, all_fs, compare)))))
     };
-    // DIRMAP_RENDERER=glow forces OpenGL (for testing that path).
-    if std::env::var("DIRMAP_RENDERER").is_ok_and(|r| r.eq_ignore_ascii_case("glow")) {
-        return run(eframe::Renderer::Glow, path);
+    // On Windows, OpenGL comes first: with DirectX 12 and Vulkan the panels shake while the
+    // window edge is dragged (Rich, 18 Nov 2026). DIRMAP_RENDERER=glow or wgpu picks one.
+    let choice = std::env::var("DIRMAP_RENDERER").unwrap_or_default().to_ascii_lowercase();
+    let glow_first = match choice.as_str() {
+        "glow" | "opengl" => true,
+        "wgpu" => false,
+        _ => cfg!(windows),
+    };
+    if glow_first {
+        return match run(eframe::Renderer::Glow, path.clone()) {
+            Err(eframe::Error::Glutin(e)) if choice.is_empty() => {
+                eprintln!("OpenGL unavailable ({e}), trying wgpu");
+                run(eframe::Renderer::Wgpu, path)
+            }
+            Err(eframe::Error::NoGlutinConfigs(_, e)) if choice.is_empty() => {
+                eprintln!("OpenGL unavailable ({e}), trying wgpu");
+                run(eframe::Renderer::Wgpu, path)
+            }
+            r => r,
+        };
     }
     match run(eframe::Renderer::Wgpu, path.clone()) {
         Err(eframe::Error::Wgpu(e)) => {
@@ -138,4 +171,60 @@ fn report(root: &std::path::Path, opts: scan::Options, top: usize, save_snapshot
             Err(e) => eprintln!("\nCouldn't save the snapshot: {e}"),
         }
     }
+}
+
+/// The wgpu setup (used when DIRMAP_RENDERER=wgpu on Windows). Use DirectX 12 rather than letting wgpu pick: its Vulkan path
+/// presents several frames late on many machines, so highlights trail behind the mouse.
+/// `WGPU_BACKEND` (vulkan, dx12, gl) still overrides it, for testing.
+fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    #[allow(unused_mut)]
+    let mut opts = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
+    #[cfg(windows)]
+    if std::env::var_os("WGPU_BACKEND").is_none() {
+        let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+        setup.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
+        opts.wgpu_setup = eframe::egui_wgpu::WgpuSetup::CreateNew(setup);
+    }
+    opts
+}
+
+/// On a panic, write what happened to `crash.log` in dirmap's settings folder, and on Windows
+/// say so in a message box: the window has no console, so the message would otherwise be lost.
+fn crash_log() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default(info);
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+        let text = format!(
+            "Filescape {} crashed ({}, thread {thread})\n\n{info}\n\n{backtrace}\n",
+            env!("CARGO_PKG_VERSION"),
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+        );
+        let file = eframe::storage_dir(APP_ID).map(|d| d.join("crash.log"));
+        let saved = file.as_ref().is_some_and(|f| std::fs::create_dir_all(f.parent().unwrap_or(f)).and_then(|_| std::fs::write(f, &text)).is_ok());
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+            let where_ = if saved { format!("\n\nThe details are saved in\n{}", file.as_ref().unwrap().display()) } else { String::new() };
+            let msg = format!("Filescape stopped because of a bug:\n\n{info}{where_}");
+            let w = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+            unsafe { MessageBoxW(std::ptr::null_mut(), w(&msg).as_ptr(), w("Filescape crashed").as_ptr(), MB_OK | MB_ICONERROR) };
+        }
+        let _ = saved;
+    }));
+}
+
+/// The window and taskbar icon: the tile-grid logo from filescape.app (packaging/filescape.svg).
+fn app_icon() -> std::sync::Arc<eframe::egui::IconData> {
+    let png = include_bytes!("../packaging/filescape-window.png");
+    let icon = match image::load_from_memory_with_format(png, image::ImageFormat::Png) {
+        Ok(img) => {
+            let img = img.to_rgba8();
+            let (width, height) = img.dimensions();
+            eframe::egui::IconData { rgba: img.into_raw(), width, height }
+        }
+        Err(_) => eframe::egui::IconData::default(),
+    };
+    std::sync::Arc::new(icon)
 }

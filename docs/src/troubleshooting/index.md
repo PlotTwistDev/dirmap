@@ -12,13 +12,13 @@ Find the problem below, or search this help for words from an error message.
   Check the spelling; on Windows use `D:\`, not `D:` followed by a folder name without a
   backslash. A path can be pasted from Explorer's address bar.
 - **A network drive is slow or stalls.** See [External and network drives](../advanced/network-drives.md).
-- **macOS: folders under your home or Library are empty.** Give dirmap **Full Disk Access** in
+- **macOS: folders under your home or Library are empty.** Give Filescape **Full Disk Access** in
   **System Settings > Privacy & Security** and restart it.
 
 ## Access denied errors
 
-dirmap doesn't stop for folders it can't read: it counts them as **unreadable** and carries on.
-The progress line and the status bar say how many there were. To read them, run dirmap as
+Filescape doesn't stop for folders it can't read: it counts them as **unreadable** and carries on.
+The progress line and the status bar say how many there were. To read them, run Filescape as
 administrator on Windows (**⚙ Settings > Advanced > 🛡 Restart as administrator now**), give it
 Full Disk Access on macOS, or start it with `sudo` on Linux. See
 [Hidden, system and unreadable files](../disk-usage/hidden-and-unreadable.md).
@@ -46,7 +46,7 @@ Check, in order:
 
 ## Files cannot be found
 
-- dirmap's filters match **file names**, not folders or paths: `Renders*` finds files whose names
+- Filescape's filters match **file names**, not folders or paths: `Renders*` finds files whose names
   start with "Renders", not files in a folder called Renders. Open the folder on the map instead.
 - Check the matching options in the Custom filter's **⏷** menu: **Case-sensitive** or **Match all
   terms (AND)** may be on.
@@ -55,14 +55,14 @@ Check, in order:
 
 ## Unexpected disk usage
 
-dirmap's total and Windows' (or the drive's) used space measure different things. See
+Filescape's total and Windows' (or the drive's) used space measure different things. See
 [Why is free space lower than expected?](../tutorials/missing-space.md) for a step-by-step check.
 
 ## Differences between file sizes and Windows' disk usage
 
-dirmap shows each file's **size**, like the **Size** in Explorer's Properties, not **Size on disk**.
+Filescape shows each file's **size**, like the **Size** in Explorer's Properties, not **Size on disk**.
 They differ for compressed files, sparse files, cloud placeholders and hard links, and by up to
-one cluster (usually 4 KB) per file. Folder totals in dirmap also include hidden and system files
+one cluster (usually 4 KB) per file. Folder totals in Filescape also include hidden and system files
 by default, which Explorer may hide. See [How sizes are calculated](../disk-usage/sizes.md).
 
 ## Zooming or rendering is slow
@@ -72,20 +72,22 @@ by default, which Explorer may hide. See [How sizes are calculated](../disk-usag
 - **Turn off effects** in **⚙ Settings > Treemap**: **Interactive lighting**, **Block depth
   effect** and **File names on tiles** all cost a little time per frame.
 - **Turn off Smooth zoom** if animations feel sluggish on a slow computer.
-- **Remote desktop and virtual machines** may have no GPU acceleration. dirmap falls back to
-  OpenGL automatically; if the window is blank, garbled or very slow, start dirmap with the
+- **Panels shake while you resize the window** (Windows): Filescape draws with OpenGL on Windows
+  because DirectX 12 and Vulkan do this. If you set `DIRMAP_RENDERER=wgpu`, remove it.
+- **Remote desktop and virtual machines** may have no GPU acceleration. Filescape falls back to
+  OpenGL automatically; if the window is blank, garbled or very slow, start Filescape with the
   environment variable `DIRMAP_RENDERER=glow` set (see [Command line](../reference/command-line.md)).
 - **Update your graphics driver** if the window flickers or shows corrupted colours.
 
 ## Large scans consume excessive memory
 
-dirmap keeps the whole scan in memory: roughly 150–250 MB per million files. To use less:
+Filescape keeps the whole scan in memory: roughly 150–250 MB per million files. To use less:
 
 - Scan a smaller folder rather than the whole drive.
 - Add large folders you don't care about (backups, caches) to **Folders to skip**.
 - Close a snapshot comparison (**Stop comparing**) and switch **Show matches only** back to
   **Highlight**: each holds an extra copy of the tree.
-- Close and reopen dirmap after very large scans to return all memory to the system.
+- Close and reopen Filescape after very large scans to return all memory to the system.
 
 See [Scanning millions of files](../advanced/millions-of-files.md).
 
@@ -119,21 +121,21 @@ snapshot…**. See [Comparing with a snapshot](../analysis/snapshots.md).
 
 ## Delete or Move doesn't work
 
-- The top item of the scan can't be deleted or moved from dirmap; open its parent folder instead.
+- The top item of the scan can't be deleted or moved from Filescape; open its parent folder instead.
 - Commands are greyed out while another file operation is running.
 - **Linux:** moving to the Trash needs `gio`, `kioclient` or `trash-cli`.
 - Files in use by a program can't be deleted on Windows; close the program and try again.
 
 ## Settings aren't remembered
 
-Settings are saved when dirmap closes normally. If it's ended forcibly (Task Manager, a crash),
+Settings are saved when Filescape closes normally. If it's ended forcibly (Task Manager, a crash),
 changes since it started may be lost. Check that the settings folder is writable; see
 [Where settings are stored](../settings/reference.md#where-settings-are-stored).
 
-## macOS says dirmap can't be opened
+## macOS says Filescape can't be opened
 
-dirmap isn't notarised by Apple. Right-click it and choose **Open**, or run
-`xattr -dr com.apple.quarantine dirmap.app`. See [Installation and first launch](../getting-started/installation.md).
+Filescape isn't notarised by Apple. Right-click it and choose **Open**, or run
+`xattr -dr com.apple.quarantine Filescape.app`. See [Installation and first launch](../getting-started/installation.md).
 
 ## Related topics
 

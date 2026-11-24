@@ -2,7 +2,7 @@
 
 ## File size
 
-dirmap uses each file's **size**: the number of bytes in it, the same figure Explorer shows as
+Filescape uses each file's **size**: the number of bytes in it, the same figure Explorer shows as
 "Size" and `ls -l` shows on Linux and macOS. It doesn't read the files to get it; the size comes
 from the folder listing, which is why scanning is fast.
 
@@ -10,16 +10,16 @@ from the folder listing, which is why scanning is fast.
 
 The space a file actually occupies on the drive ("Size on disk" in Explorer) can be different:
 
-| Situation | Space on disk compared with the size dirmap shows |
+| Situation | Space on disk compared with the size Filescape shows |
 |---|---|
 | Ordinary files | Slightly **more**: space is handed out in clusters (usually 4 KB), so a 1-byte file still takes 4 KB. Millions of tiny files can add up to several GB of slack. |
 | Very small files on NTFS | Can be **less**: files under about 700 bytes may live inside the file table itself. |
-| Compressed files (NTFS compression, APFS, Btrfs) | **Less**. dirmap shows the uncompressed size. |
-| Sparse files (some databases, virtual disks, downloads in progress) | Often much **less**: the unused parts aren't stored. dirmap shows the full size. |
-| Cloud placeholders (OneDrive, iCloud, Dropbox "online-only" files) | Almost **nothing** until downloaded. dirmap shows the full size. |
-| Hard links (the same file under several names) | dirmap counts the file once **for each name**; the disk stores it once. Windows uses hard links heavily in `C:\Windows\WinSxS`. |
+| Compressed files (NTFS compression, APFS, Btrfs) | **Less**. Filescape shows the uncompressed size. |
+| Sparse files (some databases, virtual disks, downloads in progress) | Often much **less**: the unused parts aren't stored. Filescape shows the full size. |
+| Cloud placeholders (OneDrive, iCloud, Dropbox "online-only" files) | Almost **nothing** until downloaded. Filescape shows the full size. |
+| Hard links (the same file under several names) | Filescape counts the file once **for each name**; the disk stores it once. Windows uses hard links heavily in `C:\Windows\WinSxS`. |
 
-dirmap currently has no "size on disk" mode, so treat its numbers as "how much data is here",
+Filescape currently has no "size on disk" mode, so treat its numbers as "how much data is here",
 not "how much this would free". See [Feature status](../about/feature-status.md).
 
 ## Folder size

@@ -1,7 +1,7 @@
 # Render farms and VFX projects
 
 Visual effects, animation and games projects produce huge numbers of large, numbered files:
-render frames, simulation caches, textures and plates. dirmap has several features aimed at them.
+render frames, simulation caches, textures and plates. Filescape has several features aimed at them.
 
 ## A typical investigation
 
@@ -23,7 +23,7 @@ render frames, simulation caches, textures and plates. dirmap has several featur
 
 ## Useful patterns
 
-All of these are checked against dirmap's matcher. See [Custom filter syntax](../filtering/syntax.md).
+All of these are checked against Filescape's matcher. See [Custom filter syntax](../filtering/syntax.md).
 
 | Pattern | Finds |
 |---|---|
@@ -54,7 +54,7 @@ search reads less. See [Duplicate files](../analysis/duplicates.md).
 - Sequences are recognised only when the frame number is the last number before the extension
   (`name.1001.exr`, `name_1001.exr`). The Custom filter can match other layouts.
 - Frame numbers can have up to 18 digits.
-- dirmap shows file sizes as the storage reports them; compression or deduplication on the server
+- Filescape shows file sizes as the storage reports them; compression or deduplication on the server
   isn't reflected.
 
 ## Related topics

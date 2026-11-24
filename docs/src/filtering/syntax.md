@@ -6,7 +6,7 @@ Type a pattern; the map updates as you type.
 
 ![The Custom filter with its examples](../images/custom-filter.png)
 
-Every example on this page is checked automatically against dirmap's pattern matcher, so they
+Every example on this page is checked automatically against Filescape's pattern matcher, so they
 behave exactly as shown.
 
 ## The basics
@@ -81,7 +81,7 @@ Press **Aa** next to the box (or tick **Case-sensitive** in the **⏷** menu).
 
 ## Frame numbers and padding
 
-For numbered files such as rendered frames, dirmap has symbols that match **a whole number**:
+For numbered files such as rendered frames, Filescape has symbols that match **a whole number**:
 
 | Symbol | Means |
 |---|---|
@@ -114,7 +114,7 @@ For numbered files such as rendered frames, dirmap has symbols that match **a wh
 | `*_####.exr` | `v12_2345.exr` | `v12_12345.exr` |
 
 For the same reason a frame symbol can't sit right next to a digit or another frame symbol
-(`v1####` or `{frame}{frame}`): dirmap explains the problem under the box instead.
+(`v1####` or `{frame}{frame}`): Filescape explains the problem under the box instead.
 
 ## Brackets, braces and special characters
 
@@ -141,7 +141,7 @@ To match a character that is otherwise special (`*`, `?`, `#`, `,`, `!` at the s
 | `\!important.txt` | `!important.txt` | `important.txt` |
 | `\[1-2].txt` | `[1-2].txt` | `1.txt` |
 
-## Mistakes dirmap explains
+## Mistakes Filescape explains
 
 If a pattern can't work, an orange **⚠** message under the box says why, and the last pattern that
 worked stays in effect until you fix it.

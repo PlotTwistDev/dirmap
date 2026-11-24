@@ -31,7 +31,7 @@ The menu also has the matching options, which apply to every pattern:
 ## What is remembered
 
 Recent patterns, presets, the matching options and the **Highlight** / **Show matches only**
-choice are saved when dirmap closes and are there next time. The pattern in the box isn't: dirmap
+choice are saved when Filescape closes and are there next time. The pattern in the box isn't: Filescape
 always starts with no filter.
 
 ## Related topics

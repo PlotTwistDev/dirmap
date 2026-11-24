@@ -1,5 +1,6 @@
 //! The desktop GUI: directory tree, extension list and treemap.
 
+use crate::fsys::PathShow;
 use crate::categories::{self, Category};
 use crate::drives::{self, Drive};
 use crate::dupes;
@@ -9,7 +10,7 @@ use crate::camera::{self, Feel};
 use crate::icons::Icons;
 use crate::mapview::{self, Look, MapView, Paint};
 use crate::scan::{self, ExtStat, LiveDir, Node, Options, Progress};
-use crate::settings::{self, Settings};
+use crate::settings::{self, Settings, TileStyle};
 use crate::snapshot::{self, Change, DiffNode, Snapshot};
 use crate::sunburst;
 use crate::tilegpu::Backend;
@@ -30,6 +31,26 @@ use std::time::{Duration, Instant};
 
 mod custom;
 mod browser;
+mod files;
+mod dock;
+mod dnd;
+mod favs;
+mod fileops;
+mod addr;
+mod batchren;
+mod compare;
+mod marksui;
+mod openwith;
+mod netui;
+mod remoteui;
+mod transfers;
+mod siteimport;
+mod preview;
+mod seqplayer;
+mod thumbs;
+mod views;
+pub(crate) mod style;
+use files::Workspace;
 
 #[derive(PartialEq, Clone, Copy)]
 enum SortBy {
@@ -47,6 +68,9 @@ struct Job {
     started: Instant,
     /// Used space on the drive when scanning a whole drive, to estimate percent complete.
     expected: Option<u64>,
+    /// Refreshing a folder inside the current analysis: swap the result into the tree instead
+    /// of replacing it.
+    merge: bool,
 }
 
 /// Which files the maps show; everything else is blanked out. Doesn't need a rescan.
@@ -168,6 +192,8 @@ const INDENT: f32 = 16.0;
 
 pub struct App {
     settings: Settings,
+    /// Filescape licensing: which licence applies, and the start-only feature checks.
+    pub(crate) licence: crate::licence::Licensing,
     dialog: settings::Dialog,
     icons: Icons,
     /// `--all-fs` on the command line overrides the "stay on drive" setting for this run.
@@ -187,6 +213,11 @@ pub struct App {
     scan_secs: f32,
     exts: Vec<ExtStat>,
     colors: HashMap<String, Color32>,
+    /// The tile style `colors` were picked for (each style has its own palette).
+    colors_style: TileStyle,
+    /// Modern style: the folder name tags drawn last frame (on screen) and the folders they open
+    /// (paths from the scan root), so clicking a tag zooms into its folder.
+    map_tags: Vec<(Rect, Vec<u32>)>,
     selected: Option<Vec<u32>>,
     reveal: bool,
     zoom: Vec<u32>,
@@ -195,12 +226,25 @@ pub struct App {
     highlight_ext: Option<String>,
     /// The treemap: camera, tiles and navigation.
     map: MapView,
+    /// The map is drawn in the File Manager's dock: right-click opens the item menu instead of
+    /// zooming out, and the keys only reach it while the pointer is over it.
+    map_in_dock: bool,
+    /// The tile under the pointer last frame, as a path in the shown tree.
+    map_hover: Option<Vec<u32>>,
+    /// The analysis dock in the File Manager.
+    dock: dock::Dock,
+    /// When the analysis on screen was made (seconds since the Unix epoch).
+    scanned_at: i64,
     /// Paint inputs the map was last given (`paint_key`).
     map_paint: Option<u64>,
     expanded: HashSet<Box<[u32]>>,
     rows: Option<Vec<Row>>,
     drives: Vec<Drive>,
-    drives_rx: Option<mpsc::Receiver<Vec<Drive>>>,
+    drives_rx: Option<mpsc::Receiver<(Vec<Drive>, Vec<PathBuf>)>>,
+    /// WSL distributions (Windows), shown under Linux in the File Manager's sidebar.
+    wsl: Vec<PathBuf>,
+    /// The window's handle on Windows (for the system's own right-click menu), else 0.
+    hwnd: isize,
     show_drives: bool,
     filter: ViewFilter,
     /// (filter, matching files, matching bytes) for the filter summary.
@@ -222,6 +266,8 @@ pub struct App {
     map_kind: MapKind,
     /// The file manager at the top: tabs, layouts, history, selection and clipboard.
     browser: browser::Browser,
+    /// The File Manager workspace: browsing the disk directly, without a scan.
+    files: files::Files,
     side_tab: SideTab,
     /// Bumped whenever something that changes tile colors (other than the cache's own keys) changes.
     paint_gen: u32,
@@ -262,11 +308,19 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext, path: Option<PathBuf>, force_all_fs: bool, compare: Option<PathBuf>) -> Self {
+        style::install(&cc.egui_ctx);
         let mut settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, "settings")).unwrap_or_default();
         settings.admin = elevate::load_mode();
         let admin_prompt = elevate::can_elevate() && !elevate::is_elevated() && settings.admin == AdminMode::Ask;
+        let mut files_prefs: files::FilesPrefs = cc.storage.and_then(|s| eframe::get_value(s, "files")).unwrap_or_default();
+        // Asked to scan something (a path, a snapshot to compare, a test tree): start in Storage
+        // Analysis. Otherwise open where the user left off, the File Manager the first time.
+        if path.is_some() || compare.is_some() || std::env::var("DIRMAP_SYNTHETIC").is_ok() {
+            files_prefs.workspace = Workspace::Analysis;
+        }
         let mut app = Self {
             settings,
+            licence: crate::licence::Licensing::load(),
             dialog: Default::default(),
             icons: Icons::default(),
             force_all_fs,
@@ -274,7 +328,7 @@ impl App {
             path_input: path
                 .clone()
                 .or_else(|| std::env::current_dir().ok())
-                .map(|p| p.display().to_string())
+                .map(|p| p.shown())
                 .unwrap_or_default(),
             scanned_path: PathBuf::new(),
             scanned_with: None,
@@ -285,18 +339,26 @@ impl App {
             scan_secs: 0.0,
             exts: Vec::new(),
             colors: HashMap::new(),
+            colors_style: TileStyle::default(),
+            map_tags: Vec::new(),
             selected: None,
             reveal: false,
             zoom: Vec::new(),
             sort: SortBy::Size,
             sort_desc: true,
             highlight_ext: None,
+            map_in_dock: false,
+            map_hover: None,
+            dock: Default::default(),
+            scanned_at: 0,
             map: MapView::new(Backend::new(cc)),
             map_paint: None,
             expanded: HashSet::new(),
             rows: None,
             drives: Vec::new(),
             drives_rx: None,
+            wsl: Vec::new(),
+            hwnd: window_handle(cc),
             show_drives: false,
             filter: ViewFilter::default(),
             filter_stats: None,
@@ -313,6 +375,7 @@ impl App {
             color_mode: ColorMode::Type,
             map_kind: MapKind::Treemap,
             browser: Default::default(),
+            files: files::Files::new(files_prefs),
             side_tab: SideTab::Types,
             paint_gen: 0,
             hist: None,
@@ -335,8 +398,14 @@ impl App {
             help: Default::default(),
             help_regions: Vec::new(),
             scan_errors: 0,
-            renderer: if cc.wgpu_render_state.is_some() {
-                "WebGPU (wgpu)"
+            renderer: if let Some(rs) = &cc.wgpu_render_state {
+                match rs.adapter.get_info().backend {
+                    eframe::wgpu::Backend::Dx12 => "WebGPU (wgpu, DirectX 12)",
+                    eframe::wgpu::Backend::Vulkan => "WebGPU (wgpu, Vulkan)",
+                    eframe::wgpu::Backend::Metal => "WebGPU (wgpu, Metal)",
+                    eframe::wgpu::Backend::Gl => "WebGPU (wgpu, OpenGL)",
+                    _ => "WebGPU (wgpu)",
+                }
             } else if cc.gl.is_some() {
                 "OpenGL (glow)"
             } else {
@@ -398,7 +467,12 @@ impl App {
             input.push('\\');
             self.path_input = input.clone();
         }
-        let path = PathBuf::from(input);
+        self.start_scan_of(PathBuf::from(input), false);
+    }
+
+    /// Scan `path` in the background. With `merge`, the result replaces that folder inside the
+    /// current analysis (Refresh Analysis); otherwise it becomes the analysis.
+    fn start_scan_of(&mut self, path: PathBuf, merge: bool) {
         if let Some(job) = &self.job {
             job.progress.cancel.store(true, Ordering::Relaxed);
         }
@@ -407,7 +481,7 @@ impl App {
         let (tx, rx) = mpsc::channel();
         let (p, l, opts, root) = (progress.clone(), live.clone(), self.scan_options(), path.clone());
         std::thread::spawn(move || {
-            let tree = scan::scan(&root, &opts, &p, &l);
+            let tree = if crate::fsys::remote::is_remote(&root) { scan::scan_remote(&root, &p) } else { scan::scan(&root, &opts, &p, &l) };
             // Summarise here too, so the window doesn't stall when a big scan lands.
             let exts = scan::ext_stats(&tree);
             let _ = tx.send((tree, exts));
@@ -415,18 +489,34 @@ impl App {
         self.live_open.clear();
         self.live_order.clear();
         self.live_open.insert(Arc::as_ptr(&live) as usize);
-        self.job = Some(Job { root: path, progress, live, rx, started: Instant::now(), expected: None });
+        self.job = Some(Job { root: path, progress, live, rx, started: Instant::now(), expected: None, merge });
     }
 
     fn finish_scan(&mut self, root: PathBuf, tree: Node, exts: Vec<ExtStat>, secs: f32) {
-        self.scanned_path = root;
-        self.scanned_with = Some(self.settings.clone());
-        self.exts = exts;
-        self.colors = self.exts.iter().enumerate().map(|(i, e)| (e.ext.clone(), ext_color(&e.ext, i))).collect();
-        // Freeing millions of nodes can take a while; do it off the UI thread.
-        if let Some(old) = self.tree.replace(Arc::new(tree)) {
-            std::thread::spawn(move || drop(old));
+        let with = Some(self.settings.clone());
+        self.adopt_analysis(root, Arc::new(tree), exts, secs, dock::unix_now(), with);
+    }
+
+    /// Make `tree` the analysis on screen. The one it replaces is kept for a while (see
+    /// `dock::Past`), so going back to a folder it covers doesn't need a rescan.
+    fn adopt_analysis(&mut self, root: PathBuf, tree: Arc<Node>, exts: Vec<ExtStat>, secs: f32, at: i64, with: Option<Settings>) {
+        if let Some(old) = self.tree.take() {
+            let past = dock::Past {
+                root: std::mem::take(&mut self.scanned_path),
+                tree: old,
+                exts: std::mem::take(&mut self.exts),
+                secs: self.scan_secs,
+                at: self.scanned_at,
+                with: self.scanned_with.take(),
+            };
+            self.dock.remember(past, &root);
         }
+        self.scanned_path = root;
+        self.scanned_with = with;
+        self.scanned_at = at;
+        self.exts = exts;
+        self.pick_colors();
+        self.tree = Some(tree);
         self.scan_secs = secs;
         self.selected = None;
         self.zoom.clear();
@@ -473,7 +563,7 @@ impl App {
                 .resizable(false)
                 .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
                 .show(ctx, |ui| {
-                    ui.label("Windows didn't start dirmap as administrator, so it's carrying on as it is.");
+                    ui.label("Windows didn't start Filescape as administrator, so it's carrying on as it is.");
                     if ui.button("OK").clicked() {
                         self.admin_declined = false;
                     }
@@ -494,7 +584,7 @@ impl App {
             .show(ctx, |ui| {
                 ui.set_max_width(440.0);
                 ui.label(
-                    "dirmap isn't running as administrator. Windows keeps some folders (other users' files, parts of \
+                    "Filescape isn't running as administrator. Windows keeps some folders (other users' files, parts of \
                      Windows itself) closed to ordinary programs, so they would be counted as unreadable and \
                      left out of the totals.",
                 );
@@ -568,6 +658,13 @@ impl App {
         s
     }
 
+    /// A colour for each file type, biggest types first, from the tile style's palette.
+    fn pick_colors(&mut self) {
+        let style = self.view().tile_style;
+        self.colors_style = style;
+        self.colors = self.exts.iter().enumerate().map(|(i, e)| (e.ext.clone(), ext_color(&e.ext, i, style))).collect();
+    }
+
     fn color_for_ext(&self, ext: &str) -> Color32 {
         match self.colors.get(ext) {
             Some(&c) => c,
@@ -605,7 +702,7 @@ impl App {
     fn refresh_drives(&mut self) {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(drives::list());
+            let _ = tx.send((drives::list(), drives::wsl()));
         });
         self.drives_rx = Some(rx);
     }
@@ -626,7 +723,7 @@ impl App {
             ui.end_row();
             for d in &self.drives {
                 let name = if d.label.is_empty() {
-                    d.root.display().to_string()
+                    d.root.shown()
                 } else {
                     format!("{}  ({})", d.root.display(), d.label)
                 };
@@ -656,7 +753,7 @@ impl App {
     }
 
     fn scan_root(&mut self, root: PathBuf) {
-        self.path_input = root.display().to_string();
+        self.path_input = root.shown();
         self.show_drives = false;
         self.start_scan();
     }
@@ -665,6 +762,7 @@ impl App {
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
+            self.workspace_switch(ui);
             if ui.button("🖴 Drives…").clicked() {
                 self.show_drives = !self.show_drives;
                 if self.show_drives {
@@ -674,7 +772,7 @@ impl App {
             let edit = ui.add(egui::TextEdit::singleline(&mut self.path_input).desired_width(380.0).hint_text("Folder to scan"));
             if ui.button("Browse…").clicked() {
                 if let Some(dir) = rfd::FileDialog::new().set_directory(self.path_input.trim()).pick_folder() {
-                    self.path_input = dir.display().to_string();
+                    self.path_input = dir.shown();
                     self.start_scan();
                 }
             }
@@ -747,13 +845,17 @@ impl App {
                 ("What's New", "", topics::WHATS_NEW),
             ];
             for (label, key, topic) in pages {
-                if ui.add(egui::Button::new(label).shortcut_text(key)).clicked() {
+                if ui.add(egui::Button::new(style::mi(label)).shortcut_text(key)).clicked() {
                     self.help.show_topic(topic);
                     ui.close();
                 }
             }
             ui.separator();
-            if ui.button("About dirmap").clicked() {
+            if ui.add(egui::Button::new(style::mi("Licence"))).clicked() {
+                self.dialog.open_licensing(&self.settings);
+                ui.close();
+            }
+            if ui.add(egui::Button::new(style::mi("About Filescape"))).clicked() {
                 self.help.about_open = true;
                 ui.close();
             }
@@ -1164,7 +1266,7 @@ impl App {
                             files: 1,
                             modified: *modified,
                             busy: false,
-                            color: ext_color(&scan::ext_of(name).to_lowercase(), usize::MAX),
+                            color: ext_color(&scan::ext_of(name).to_lowercase(), usize::MAX, self.view().tile_style),
                             dim: false,
                         };
                         self.paint_line(ui, rect, &line, false, resp.hovered(), stripe);
@@ -1265,7 +1367,9 @@ impl App {
         if let Some((a, ext)) = menu_pick {
             self.ext_action(a, ext);
         }
-        if let Some(t) = toggle {
+        if let Some(t) = toggle
+            && (self.highlight_ext.as_ref() == Some(&t) || self.premium(crate::licence::Feature::Filters))
+        {
             self.highlight_ext = if self.highlight_ext.as_ref() == Some(&t) { None } else { Some(t) };
         }
     }
@@ -1368,17 +1472,28 @@ impl App {
                 }
             }
         });
-        if let Some((lo, hi)) = pick {
+        if let Some((lo, hi)) = pick
+            && ((lo, hi) == (0, 0) || self.premium(crate::licence::Feature::Filters))
+        {
             self.filter.larger = lo;
             self.filter.smaller = hi;
         }
     }
 
+    /// Where a premium operation starts: false (and the licence prompt) when it needs a
+    /// licence. Work already running is never checked again.
+    pub(crate) fn premium(&mut self, f: crate::licence::Feature) -> bool {
+        self.licence.begin(f).is_some()
+    }
+
     fn save_snapshot(&mut self) {
+        if !self.premium(crate::licence::Feature::Snapshots) {
+            return;
+        }
         let Some(tree) = &self.tree else { return };
         let label: String = tree.name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
-        let name = format!("dirmap {} {}.dmsnap", label.trim_matches('_'), chrono::Local::now().format("%Y-%m-%d %H%M"));
-        let dialog = rfd::FileDialog::new().add_filter("dirmap snapshot", &["dmsnap"]).set_file_name(name);
+        let name = format!("Filescape {} {}.dmsnap", label.trim_matches('_'), chrono::Local::now().format("%Y-%m-%d %H%M"));
+        let dialog = rfd::FileDialog::new().add_filter("Filescape snapshot", &["dmsnap"]).set_file_name(name);
         if let Some(f) = dialog.save_file() {
             self.snap_msg = Some(match snapshot::save(&f, &self.scanned_path, tree) {
                 Ok(()) => format!("Saved {}", f.display()),
@@ -1388,12 +1503,15 @@ impl App {
     }
 
     fn load_snapshot(&mut self) {
-        if let Some(f) = rfd::FileDialog::new().add_filter("dirmap snapshot", &["dmsnap"]).pick_file() {
+        if let Some(f) = rfd::FileDialog::new().add_filter("Filescape snapshot", &["dmsnap"]).pick_file() {
             self.load_snapshot_from(f);
         }
     }
 
     fn load_snapshot_from(&mut self, f: PathBuf) {
+        if !self.premium(crate::licence::Feature::Snapshots) {
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(snapshot::load(&f).map_err(|e| format!("Couldn't open {}: {e}", f.display())));
@@ -1501,6 +1619,9 @@ impl App {
     }
 
     fn start_dupes(&mut self) {
+        if !self.premium(crate::licence::Feature::Duplicates) {
+            return;
+        }
         let Some(tree) = &self.tree else { return };
         fn walk(n: &Node, min: u64, path: &mut Vec<u32>, disk: &mut PathBuf, out: &mut Vec<dupes::Candidate>) {
             for (i, c) in n.children.iter().enumerate() {
@@ -1593,7 +1714,7 @@ impl App {
                         let name = f.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                         let icon = Rect::from_min_size(pos2(rect.left() + 14.0, cy - 8.0), vec2(16.0, 16.0));
                         self.icons.paint(ui, icon, false, scan::ext_of(&name), Color32::GRAY);
-                        let shown = f.path.strip_prefix(&self.scanned_path).unwrap_or(&f.path).display().to_string();
+                        let shown = f.path.strip_prefix(&self.scanned_path).unwrap_or(&f.path).shown();
                         let tc = if selected { vis.selection.stroke.color } else { vis.text_color() };
                         let clip = Rect::from_min_max(pos2(rect.left() + 34.0, rect.top()), pos2(rect.right() - 4.0, rect.bottom()));
                         ui.painter().with_clip_rect(clip.intersect(ui.clip_rect())).text(
@@ -1603,7 +1724,7 @@ impl App {
                             font.clone(),
                             tc,
                         );
-                        if resp.on_hover_text(f.path.display().to_string()).clicked() {
+                        if resp.on_hover_text(f.path.shown()).clicked() {
                             clicked = Some(f.tree_path.clone());
                         }
                     }
@@ -1819,12 +1940,17 @@ impl App {
             lighting: v.lighting,
             light_level: v.light_level.factor(),
             bevel: v.depth_effect,
+            soft: v.tile_style == TileStyle::Modern,
         }
     }
 
     /// Give the map new colouring inputs when anything that changes tile colours has changed.
     fn update_map_paint(&mut self) {
         use std::hash::{Hash, Hasher};
+        if self.colors_style != self.view().tile_style {
+            self.pick_colors();
+            self.paint_gen += 1;
+        }
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key()).hash(&mut h);
         self.shown.as_ref().map(|s| Arc::as_ptr(&s.tree) as usize).hash(&mut h);
@@ -1895,17 +2021,80 @@ impl App {
             });
             f
         });
-        let background = if filtering || dupes_only { Color32::from_gray(24) } else { Color32::from_gray(45) };
+        let background = if filtering || dupes_only {
+            Color32::from_gray(24)
+        } else if self.view().tile_style == TileStyle::Modern {
+            Color32::BLACK
+        } else {
+            Color32::from_gray(45)
+        };
         let v = self.view();
         let cushion = Cushion { height: v.height as f64, scale: v.scale as f64 };
         let look = self.look();
         self.map.set_paint(Paint { key, colorize, hidden, cushion, background, look });
     }
 
-    fn treemap_panel(&mut self, ui: &mut egui::Ui) {
+    /// Modern style: outline the folders that make up what's on screen (the subfolders of the
+    /// deepest folder that holds the whole view) and tag each big enough with its name and size,
+    /// as the website's map does. Returns the on-screen rectangle of the one under the pointer.
+    fn folder_tags(&mut self, painter: &egui::Painter, tree: &Node, root: &[u32], bounds: Rect, hover: Option<&[u32]>) -> Option<Rect> {
+        self.map_tags.clear();
+        let zroot = tree.at(root)?;
+        // The deepest folder holding the whole view: follow the path under the view's centre.
+        let (rel, _) = self.map.hit(tree, bounds, bounds.center())?;
+        let mut depth = 0;
+        for k in (0..rel.len()).rev() {
+            if !zroot.at(&rel[..k]).is_some_and(|n| n.is_dir) {
+                continue;
+            }
+            let covers = k == 0 || self.map.locate(tree, &rel[..k]).map(|r| self.map.to_screen(bounds, &r)).is_some_and(|r| r.expand(1.0).contains_rect(bounds));
+            if covers {
+                depth = k;
+                break;
+            }
+        }
+        let folder = zroot.at(&rel[..depth])?;
+        let hover = hover.filter(|h| h.len() > depth && h[..depth] == rel[..depth]).map(|h| h[depth]);
+        let p = painter.with_clip_rect(bounds.intersect(painter.clip_rect()));
+        let font = FontId::monospace(11.0);
+        let mut path = rel[..depth].to_vec();
+        let mut hovered = None;
+        for (i, c) in folder.children.iter().enumerate().take(400) {
+            if !c.is_dir {
+                continue;
+            }
+            path.push(i as u32);
+            let r = self.map.locate(tree, &path).map(|r| self.map.to_screen(bounds, &r));
+            path.pop();
+            let Some(r) = r.filter(|r| r.intersects(bounds) && r.width() >= 2.0 && r.height() >= 2.0) else { continue };
+            if hover == Some(i as u32) {
+                hovered = Some(r);
+            } else {
+                p.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_black_alpha(140)), egui::StrokeKind::Inside);
+            }
+            let vis = r.intersect(bounds);
+            if vis.width() < 90.0 || vis.height() < 28.0 {
+                continue;
+            }
+            let label = format!("{}/  {}", c.name, scan::human(c.size));
+            let g = p.layout_no_wrap(label, font.clone(), Color32::WHITE);
+            let w = (g.size().x + 14.0).min(vis.width() - 12.0);
+            let tag = Rect::from_min_size(pos2(vis.left() + 6.0, vis.bottom() - 28.0), vec2(w, 20.0));
+            // Nearly opaque, so small bright tiles behind don't show through the text.
+            p.rect_filled(tag, 5.0, Color32::from_rgba_unmultiplied(4, 5, 6, 235));
+            let mut abs = root.to_vec();
+            abs.extend_from_slice(&path);
+            abs.push(i as u32);
+            self.map_tags.push((tag, abs));
+            p.with_clip_rect(tag.intersect(p.clip_rect())).galley(pos2(tag.left() + 7.0, tag.center().y - g.size().y / 2.0), g, Color32::WHITE);
+        }
+        hovered
+    }
+
+    fn treemap_panel(&mut self, ui: &mut egui::Ui) -> Option<egui::Response> {
         let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let bounds = resp.rect;
-        let Some(tree) = self.shown_tree() else { return };
+        let Some(tree) = self.shown_tree() else { return None };
         if tree.at(&self.zoom).is_none() {
             self.zoom.clear();
         }
@@ -1923,8 +2112,8 @@ impl App {
         let help_hovered = self.help.hovered;
         // The keys go to the map unless the file manager was clicked last; the side buttons go to
         // whichever is under the pointer.
-        let keys = !typing && !self.browser_has_keys();
-        let fm = self.browser.rect;
+        let keys = !typing && if self.map_in_dock { resp.hovered() } else { !self.browser_has_keys() };
+        let fm = if self.map_in_dock { None } else { self.browser.rect };
         let (wheel, pinch, back, forward, home, plus, minus) = ui.input(|i| {
             let side = !help_hovered && !i.pointer.hover_pos().is_some_and(|p| fm.is_some_and(|r| r.contains(p)));
             let mut wheel = 0.0f64;
@@ -1983,7 +2172,18 @@ impl App {
             ctx.set_cursor_icon(egui::CursorIcon::Grab);
         }
         let mut select = None;
-        if first_pass && (resp.clicked() || resp.double_clicked()) && !self.map.in_transition() {
+        // Modern style: a folder's name tag opens that folder.
+        let on_tag = pointer.and_then(|p| self.map_tags.iter().find(|(r, _)| r.contains(p)).map(|(_, path)| path.clone()));
+        if on_tag.is_some() && !self.map.dragging {
+            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if let Some(path) = on_tag.filter(|_| first_pass && resp.clicked() && !self.map.in_transition()) {
+            if path.len() > self.zoom.len() && path.starts_with(&self.zoom) {
+                self.zoom = path;
+            } else {
+                self.map.frame_path(&tree, &path, &feel);
+            }
+        } else if first_pass && (resp.clicked() || resp.double_clicked()) && !self.map.in_transition() {
             if let Some(p) = resp.interact_pointer_pos() {
                 if let Some((rel, rect)) = self.map.hit(&tree, bounds, p) {
                     let mut abs = self.map.root().unwrap_or(&[]).to_vec();
@@ -2009,7 +2209,7 @@ impl App {
             }
         }
         if first_pass {
-            if resp.secondary_clicked() {
+            if resp.secondary_clicked() && !self.map_in_dock {
                 self.map.zoom_out(&tree, &feel);
             }
             if back {
@@ -2033,22 +2233,61 @@ impl App {
         let root = self.map.root().unwrap_or(&[]).to_vec();
         let zroot = tree.at(&root).unwrap_or(&tree);
 
+        let modern = self.view().tile_style == TileStyle::Modern;
+        // Modern: name and size written straight on the tile, as on the website.
+        if self.view().show_labels && modern {
+            let labels: Vec<(Rect, Vec<u32>, f32)> = self
+                .map
+                .labels(bounds)
+                .into_iter()
+                .filter(|(r, _, _)| r.width() >= 80.0 && r.height() >= 22.0)
+                .take(2500)
+                .map(|(r, l, a)| (r, l.path.clone(), a))
+                .collect();
+            let name_font = FontId::monospace(12.0);
+            let size_font = FontId::monospace(11.0);
+            for (r, path, a) in labels {
+                let Some(n) = zroot.at(&path) else { continue };
+                let mut abs = root.clone();
+                abs.extend_from_slice(&path);
+                // Dark text on light tiles, light text on dark ones (Age and Change colours).
+                let c = self.node_color(n, &abs);
+                let lum = (0.2126 * c.r() as f32 + 0.7152 * c.g() as f32 + 0.0722 * c.b() as f32) / 255.0;
+                let ink = if lum > 0.42 { Color32::from_rgb(10, 10, 12) } else { Color32::WHITE };
+                let p = painter.with_clip_rect(r.shrink(2.0).intersect(painter.clip_rect()));
+                let at = r.min + vec2(6.0, 6.0);
+                p.text(at, Align2::LEFT_TOP, &*n.name, name_font.clone(), ink.gamma_multiply(0.86 * a));
+                if r.height() >= 36.0 {
+                    p.text(at + vec2(0.0, 15.0), Align2::LEFT_TOP, scan::human(n.size), size_font.clone(), ink.gamma_multiply(0.64 * a));
+                }
+            }
+        }
+        // Modern: the folders that make up the view outlined, each with a dark name tag.
+        if !modern || self.map.in_transition() {
+            self.map_tags.clear();
+        }
+        let hover_group = if modern && !self.map.in_transition() { self.folder_tags(&painter, &tree, &root, bounds, frame.hover.as_ref().map(|h| &h.0[..])) } else { None };
+
         // File names on tiles with room for them, fading in with size.
-        if self.view().show_labels {
-            let font = FontId::proportional(11.0);
+        if self.view().show_labels && !modern {
             let labels = self.map.labels(bounds);
             for (r, l, a) in labels.into_iter().take(2500) {
                 let Some(n) = zroot.at(&l.path) else { continue };
-                let dark_text = luma(l.color) > 140.0;
-                let tc = if dark_text { Color32::from_black_alpha(220) } else { Color32::from_white_alpha(235) };
-                let shadow = if dark_text { Color32::from_white_alpha(60) } else { Color32::from_black_alpha(110) };
+                // Bigger tiles get bigger names, so zooming in helps.
+                let font = FontId::proportional((r.width().min(r.height() * 2.0) / 10.0).clamp(11.0, 17.0));
                 let p = painter.with_clip_rect(r.shrink(1.0).intersect(painter.clip_rect()));
                 let at = r.min + vec2(3.0, 2.0);
-                p.text(at + vec2(0.0, 1.0), Align2::LEFT_TOP, &*n.name, font.clone(), shadow.gamma_multiply(a));
-                p.text(at, Align2::LEFT_TOP, &*n.name, font.clone(), tc.gamma_multiply(a));
-                let sa = a * mapview_smooth(26.0, 32.0, r.height());
-                if sa > 0.02 {
-                    p.text(r.min + vec2(3.0, 15.0), Align2::LEFT_TOP, scan::human(n.size), font.clone(), tc.gamma_multiply(0.8 * sa));
+                // White text on a dark chip reads on any tile, however it's coloured or lit.
+                let name = p.layout_no_wrap(n.name.to_string(), font.clone(), Color32::WHITE);
+                let sa = a * mapview_smooth(font.size * 2.4, font.size * 2.9, r.height());
+                let size = (sa > 0.02).then(|| p.layout_no_wrap(scan::human(n.size), font.clone(), Color32::WHITE));
+                let w = name.size().x.max(size.as_ref().map_or(0.0, |g| g.size().x));
+                let h = name.size().y + size.as_ref().map_or(0.0, |g| g.size().y * sa);
+                let chip = Rect::from_min_size(at - vec2(2.0, 1.0), vec2(w + 4.0, h + 2.0));
+                p.rect_filled(chip, 3.0, Color32::from_black_alpha((120.0 * a) as u8));
+                p.galley_with_override_text_color(at, name.clone(), Color32::from_white_alpha(245).gamma_multiply(a));
+                if let Some(g) = size {
+                    p.galley_with_override_text_color(at + vec2(0.0, name.size().y), g, Color32::from_white_alpha(215).gamma_multiply(sa));
                 }
             }
         }
@@ -2061,7 +2300,9 @@ impl App {
             for sel in all.filter(|s| s.starts_with(&root)) {
                 let rel = &sel[root.len()..];
                 let rects = treemap::ancestors(zroot, self.map.camera.world(), rel);
-                if let Some(r) = rects.iter().rev().map(|r| self.map.to_screen(bounds, r)).find(|r| r.width() >= 3.0 && r.height() >= 3.0) {
+                // The nearest ancestor big enough to see; never the whole folder on show, which
+                // would just frame the map.
+                if let Some(r) = rects.iter().skip(1).rev().map(|r| self.map.to_screen(bounds, r)).find(|r| r.width() >= 3.0 && r.height() >= 3.0) {
                     let stroke = Stroke::new(2.0, self.view().selection_color);
                     painter.with_clip_rect(bounds).rect_stroke(r, 0.0, stroke, egui::StrokeKind::Inside);
                 }
@@ -2069,9 +2310,16 @@ impl App {
         }
 
         let prev_status = self.hover_status.take();
+        self.map_hover = frame.hover.as_ref().map(|(rel, _)| {
+            let mut abs = root.clone();
+            abs.extend_from_slice(rel);
+            abs
+        });
         if let Some((rel, _)) = &frame.hover {
-            // The folder around the hovered tile, faintly.
-            if let Some((_, parent)) = rel.split_last() {
+            // The folder around the hovered tile: faintly, or in Modern the tagged folder it's in.
+            if let Some(r) = hover_group {
+                painter.with_clip_rect(bounds).rect_stroke(r, 0.0, Stroke::new(1.5, Color32::from_white_alpha(230)), egui::StrokeKind::Inside);
+            } else if let Some((_, parent)) = rel.split_last() {
                 if let Some(pr) = self.map.locate(&tree, parent).filter(|_| !parent.is_empty()) {
                     let stroke = Stroke::new(1.0, Color32::from_white_alpha(110));
                     painter.with_clip_rect(bounds).rect_stroke(self.map.to_screen(bounds, &pr), 0.0, stroke, egui::StrokeKind::Inside);
@@ -2099,6 +2347,7 @@ impl App {
         if frame.animating || selecting || self.map.labels_fading() || self.hover_status != prev_status {
             ctx.request_repaint();
         }
+        Some(resp)
     }
 
     /// Breadcrumbs for the zoomed folder, plus the "show only" filters for the treemap.
@@ -2180,7 +2429,7 @@ impl App {
             }
             for c in Category::ALL {
                 let on = self.filter.kinds & c.bit() != 0;
-                if ui.selectable_label(on, c.label()).on_hover_text(c.tooltip()).clicked() {
+                if ui.selectable_label(on, c.label()).on_hover_text(c.tooltip()).clicked() && (on || self.premium(crate::licence::Feature::Filters)) {
                     self.filter.kinds ^= c.bit();
                 }
             }
@@ -2188,10 +2437,17 @@ impl App {
         });
         self.custom_row(ui);
         ui.horizontal_wrapped(|ui| {
-            ui.label("Larger than");
-            size_edit(ui, &mut self.filter.larger);
-            ui.label("Smaller than");
-            size_edit(ui, &mut self.filter.smaller);
+            // Without a licence the limits can only be cleared, not set; the lock opens the prompt.
+            let sizes = self.licence.allows(crate::licence::Feature::Filters) || self.filter.larger > 0 || self.filter.smaller > 0;
+            ui.add_enabled_ui(sizes, |ui| {
+                ui.label("Larger than");
+                size_edit(ui, &mut self.filter.larger);
+                ui.label("Smaller than");
+                size_edit(ui, &mut self.filter.smaller);
+            });
+            if !sizes && ui.small_button("🔒 Pro").on_hover_text("Filtering by type or size is part of Filescape Professional").clicked() {
+                self.premium(crate::licence::Feature::Filters);
+            }
             if (self.filter.active() || self.custom.error.is_some()) && ui.button("Clear filters").clicked() {
                 self.filter = ViewFilter::default();
                 self.clear_custom();
@@ -2284,6 +2540,7 @@ impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "settings", &self.settings);
         eframe::set_value(storage, "custom_filter", &self.custom.prefs);
+        eframe::set_value(storage, "files", &self.files.to_save());
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -2302,7 +2559,12 @@ impl eframe::App for App {
         }
         self.help_regions.clear();
 
-        if let settings::Outcome::Apply = self.dialog.show(&ctx) {
+        self.licence.tick(&ctx);
+        self.licence.prompt(&ctx);
+        if std::mem::take(&mut self.licence.ui.open_settings) {
+            self.dialog.open_licensing(&self.settings);
+        }
+        if let settings::Outcome::Apply = self.dialog.show(&ctx, &mut self.licence) {
             if self.dialog.draft.admin != self.settings.admin {
                 elevate::save_mode(self.dialog.draft.admin);
                 self.admin_prompt = false;
@@ -2317,13 +2579,20 @@ impl eframe::App for App {
             self.restart_as_admin(&ctx);
         }
         self.admin_question(&ctx);
-        self.tree_shortcuts(&ctx);
+        self.workspace_keys(&ctx);
+        let analysis = self.files.prefs.workspace == Workspace::Analysis;
+        // Shortcuts that act on the scan only work where the scan is on screen.
+        if analysis {
+            self.tree_shortcuts(&ctx);
+        }
+        self.transfers_poll(&ctx);
         self.ops_ui(&ctx);
 
         if let Some(rx) = &self.drives_rx {
             match rx.try_recv() {
-                Ok(d) => {
+                Ok((d, wsl)) => {
                     self.drives = d;
+                    self.wsl = wsl;
                     self.drives_rx = None;
                 }
                 Err(_) => ctx.request_repaint_after(Duration::from_millis(100)),
@@ -2341,7 +2610,11 @@ impl eframe::App for App {
                 let job = self.job.take().unwrap();
                 if !job.progress.cancel.load(Ordering::Relaxed) {
                     self.scan_errors = job.progress.errors.load(Ordering::Relaxed);
-                    self.finish_scan(job.root, tree, exts, job.started.elapsed().as_secs_f32());
+                    if job.merge && self.tree.is_some() && job.root.starts_with(&self.scanned_path) {
+                        self.merge_scan(job.root, tree);
+                    } else {
+                        self.finish_scan(job.root, tree, exts, job.started.elapsed().as_secs_f32());
+                    }
                 } else {
                     std::thread::spawn(move || drop(tree));
                 }
@@ -2387,16 +2660,27 @@ impl eframe::App for App {
             }
         }
 
-        self.custom_shortcut(&ctx);
+        if analysis {
+            self.custom_shortcut(&ctx);
+        }
         self.drive_filter(&ctx);
         self.poll_sequences(&ctx);
 
+        self.licence.banner(ui);
         let r = egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(2.0);
-            self.toolbar(ui);
+            if analysis {
+                self.toolbar(ui);
+            } else {
+                self.files_toolbar(ui);
+            }
             ui.add_space(2.0);
         });
-        self.help_regions.push((r.response.rect, topics::TOOLBAR));
+        self.help_regions.push((r.response.rect, if analysis { topics::TOOLBAR } else { topics::FILE_MANAGER }));
+        if !analysis {
+            self.files_workspace(ui);
+            return;
+        }
 
         if self.show_drives && self.tree.is_some() {
             let mut open = true;
@@ -2416,6 +2700,19 @@ impl eframe::App for App {
                 if let Some(op) = &self.ops.job {
                     ui.spinner();
                     ui.label(format!("{}…", op.label));
+                    if let Some(ctl) = op.ctl.clone() {
+                        let paused = ctl.paused.load(Ordering::Relaxed);
+                        if ui.small_button(if paused { "Resume" } else { "Pause" }).clicked() {
+                            ctl.paused.store(!paused, Ordering::Relaxed);
+                        }
+                        if ui.small_button("Stop").clicked() {
+                            ctl.stop.store(true, Ordering::Relaxed);
+                            ctl.paused.store(false, Ordering::Relaxed);
+                        }
+                    }
+                    if !self.ops.queued.is_empty() {
+                        ui.weak(format!("+{} waiting", self.ops.queued.len()));
+                    }
                     ui.separator();
                 } else if let Some((text, error)) = self.ops.notice.clone() {
                     if error {
@@ -2423,8 +2720,16 @@ impl eframe::App for App {
                     } else {
                         ui.label(text);
                     }
+                    if !error
+                        && self.ops.undo_fresh
+                        && let Some(what) = self.ops.undo_label()
+                        && ui.small_button("Undo").on_hover_text(format!("Undo {what} ({})", if cfg!(target_os = "macos") { "⌘Z" } else { "Ctrl+Z" })).clicked()
+                    {
+                        self.undo_last();
+                    }
                     if ui.small_button("✖").on_hover_text("Dismiss").clicked() {
                         self.ops.notice = None;
+                        self.ops.undo_fresh = false;
                     }
                     ui.separator();
                 }
@@ -2449,7 +2754,7 @@ impl eframe::App for App {
                             format!("{} items couldn't be read.", group(self.scan_errors))
                         };
                         ui.colored_label(ui.visuals().warn_fg_color, text).on_hover_text(
-                            "Folders or files dirmap wasn't allowed to open (or that vanished during the scan). \
+                            "Folders or files Filescape wasn't allowed to open (or that vanished during the scan). \
                              Their space isn't counted. Press F1 for why and what to do.",
                         );
                     }
@@ -2468,13 +2773,13 @@ impl eframe::App for App {
                 }
                 if let Some(sel) = self.selected.as_ref().filter(|_| self.job.is_none() && self.hover_status.is_none()) {
                     ui.separator();
-                    ui.label(self.full_path(sel).display().to_string());
+                    ui.label(self.full_path(sel).shown());
                 }
             });
         });
         self.help_regions.push((r.response.rect, if self.scan_errors > 0 { topics::UNREADABLE } else { topics::RESULTS }));
         if rescan {
-            self.path_input = self.scanned_path.display().to_string();
+            self.path_input = self.scanned_path.shown();
             self.start_scan();
         }
 
@@ -2489,7 +2794,7 @@ impl eframe::App for App {
                 ui.horizontal(|ui| {
                     ui.heading("Pick a drive to scan, or type a folder above");
                     ui.add_space(16.0);
-                    if ui.link("New to dirmap? Read the Quick Start").clicked() {
+                    if ui.link("New to Filescape? Read the Quick Start").clicked() {
                         self.help.show_topic(topics::QUICK_START);
                     }
                 });
@@ -2521,7 +2826,9 @@ impl eframe::App for App {
         let r = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let rect = ui.max_rect();
             match self.map_kind {
-                MapKind::Treemap => self.treemap_panel(ui),
+                MapKind::Treemap => {
+                    self.treemap_panel(ui);
+                }
                 MapKind::Sunburst => self.sunburst_panel(ui),
             }
             if self.shown.as_ref().is_some_and(|s| s.tree.files == 0) {
@@ -2571,7 +2878,7 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
         secs as u64 / 60,
         secs as u64 % 60,
     );
-    let current = p.current.lock().map(|c| c.display().to_string()).unwrap_or_default();
+    let current = p.current.lock().map(|c| c.shown()).unwrap_or_default();
 
     if compact {
         ui.horizontal(|ui| {
@@ -2791,8 +3098,22 @@ fn fmt_time(secs: i64) -> String {
         .unwrap_or_default()
 }
 
+/// The Modern style's palette, for the 16 biggest file types in order: the same soft colours as
+/// the map on filescape.app (which picks them the same way, so keep the two lists in step).
+pub(crate) const PASTELS: [u32; 16] = [
+    0xe27ae6, 0xb8d36a, 0x61c9b8, 0x6fe0e0, 0xf0b45f, 0x7aa7f5, 0xf08585, 0xc7a3f5, 0xe8c27a, 0xef7fb4, 0xd8d06a, 0x9db0c8,
+    0x7fd9a0, 0xa68af0, 0xf28d72, 0x8fc7f0,
+];
+
 /// The biggest extensions get bright, well-separated hues; the long tail gets muted ones.
-fn ext_color(ext: &str, rank: usize) -> Color32 {
+fn ext_color(ext: &str, rank: usize, style: TileStyle) -> Color32 {
+    if style == TileStyle::Modern {
+        if let Some(&c) = PASTELS.get(rank) {
+            return Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
+        }
+        let h = ext.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
+        return Hsva::new((h % 360) as f32 / 360.0, 0.28, 0.78, 1.0).into();
+    }
     if rank < 16 {
         let hue = (rank as f32 * 0.618_034).fract();
         Hsva::new(hue, 0.75, 0.95, 1.0).into()
@@ -2836,4 +3157,19 @@ mod filter_tests {
         assert!(ViewFilter { custom: custom("*.exr"), ..Default::default() } == ViewFilter { custom: custom("*.exr"), ..Default::default() });
         assert!(ViewFilter { custom: custom("*.exr"), ..Default::default() } != ViewFilter { custom: custom("*.png"), ..Default::default() });
     }
+}
+
+/// The native window handle, for the Windows shell menu.
+fn window_handle(cc: &eframe::CreationContext) -> isize {
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(h) = cc.window_handle()
+            && let RawWindowHandle::Win32(w) = h.as_raw()
+        {
+            return w.hwnd.get();
+        }
+    }
+    let _ = cc;
+    0
 }

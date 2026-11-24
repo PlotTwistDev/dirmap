@@ -42,7 +42,7 @@ pub fn is_elevated() -> bool {
 }
 
 fn pref_file() -> Option<PathBuf> {
-    eframe::storage_dir("dirmap").map(|d| d.join("admin-mode"))
+    eframe::storage_dir(crate::APP_ID).map(|d| d.join("admin-mode"))
 }
 
 pub fn load_mode() -> AdminMode {

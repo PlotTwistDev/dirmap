@@ -42,8 +42,8 @@ the kinds of files using the most space. Click a row to light up just those file
 
 ## Why the total may differ from Windows
 
-dirmap adds up the sizes of files it can read. Windows' "used space" also includes the
-Recycle Bin, restore points, system files dirmap can't read, file-system overhead, and the
+Filescape adds up the sizes of files it can read. Windows' "used space" also includes the
+Recycle Bin, restore points, system files Filescape can't read, file-system overhead, and the
 difference between a file's size and the space it occupies on disk. See
 [Why is free space lower than expected?](../tutorials/missing-space.md) and
 [How sizes are calculated](../disk-usage/sizes.md).

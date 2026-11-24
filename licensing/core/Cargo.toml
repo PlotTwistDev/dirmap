@@ -1,0 +1,20 @@
+[package]
+name = "filescape-licence"
+version = "0.1.0"
+edition = "2024"
+description = "Filescape licence core: licence types, serials, signed certificates, activation rules and precedence. No I/O."
+publish = false
+
+# Built on its own (not part of the app's workspace yet), so it can also be compiled into the
+# Cloudflare Worker. Test with: cargo test --manifest-path licensing/core/Cargo.toml
+[workspace]
+
+[dependencies]
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+data-encoding = "2"
+
+# In the Cloudflare Worker (WebAssembly), randomness comes from the Web Crypto API.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ring = { version = "0.17", features = ["wasm32_unknown_unknown_js"] }

@@ -3,17 +3,17 @@
 ## Why it matters
 
 Windows keeps some folders closed to ordinary programs: other users' profiles, parts of Windows
-itself, and folders whose permissions have been restricted. Without administrator rights dirmap
+itself, and folders whose permissions have been restricted. Without administrator rights Filescape
 can't look inside them, so their contents are counted as **unreadable** and left out of the
 totals. On a system drive this can be many gigabytes.
 
-Running as administrator lets dirmap read almost everything. It doesn't change what dirmap does:
+Running as administrator lets Filescape read almost everything. It doesn't change what Filescape does:
 it still only reads, unless you use a right-click command such as Delete. Keep in mind that, as
 administrator, those commands can also delete files Windows would otherwise protect.
 
 ## The question at start
 
-The first time dirmap starts on Windows without administrator rights, it asks:
+The first time Filescape starts on Windows without administrator rights, it asks:
 
 | Answer | Effect |
 |---|---|
@@ -22,15 +22,15 @@ The first time dirmap starts on Windows without administrator rights, it asks:
 | **No, don't ask again** | Stays as it is and stops asking. |
 
 Restarting shows Windows' usual permission prompt (User Account Control). If you decline it,
-dirmap says **Windows didn't start dirmap as administrator, so it's carrying on as it is**, and
+Filescape says **Windows didn't start Filescape as administrator, so it's carrying on as it is**, and
 keeps running normally.
 
 ## Changing it later
 
-**⚙ Settings > Advanced > Administrator** shows whether dirmap is running as administrator, and
+**⚙ Settings > Advanced > Administrator** shows whether Filescape is running as administrator, and
 has:
 
-- **When dirmap starts:** **Always run as administrator**, **Ask if it isn't**, or **Never (don't
+- **When Filescape starts:** **Always run as administrator**, **Ask if it isn't**, or **Never (don't
   ask)**.
 - **🛡 Restart as administrator now**, shown when it isn't.
 
@@ -41,8 +41,8 @@ again in the new window.
 
 There's no restart button on Linux and macOS:
 
-- **Linux:** start dirmap with `sudo` from a terminal to read every user's files.
-- **macOS:** give dirmap **Full Disk Access** in **System Settings > Privacy & Security** instead.
+- **Linux:** start Filescape with `sudo` from a terminal to read every user's files.
+- **macOS:** give Filescape **Full Disk Access** in **System Settings > Privacy & Security** instead.
   That's what macOS uses to protect other apps' data; running with `sudo` doesn't get around it.
 
 ## Related topics

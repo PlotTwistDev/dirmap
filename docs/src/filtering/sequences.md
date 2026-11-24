@@ -26,11 +26,11 @@ Each sequence is shown once, largest first, for example:
 Hover over a sequence to see its folder, its extension and padding, and exactly which frames are
 missing (the first 20 gaps).
 
-**Click a sequence** to filter the map to it: dirmap puts a matching pattern in the Custom
+**Click a sequence** to filter the map to it: Filescape puts a matching pattern in the Custom
 filter (for example `shot010_comp.####.exr`) and selects the folder that holds it. Use
 **Show matches only** to see just that sequence.
 
-## How dirmap decides what a sequence is
+## How Filescape decides what a sequence is
 
 So that unrelated numbered files aren't lumped together, a sequence must:
 

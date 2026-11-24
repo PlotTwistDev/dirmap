@@ -127,3 +127,44 @@ fn statvfs(path: &std::path::Path) -> Option<(u64, u64)> {
 pub fn list() -> Vec<Drive> {
     Vec::new()
 }
+
+/// The WSL distributions installed for this user, as `\\wsl.localhost\<name>` roots, the way
+/// Explorer lists them under Linux. Read from the registry, so nothing starts WSL.
+#[cfg(windows)]
+pub fn wsl() -> Vec<PathBuf> {
+    use windows_sys::Win32::System::Registry::{RegCloseKey, RegEnumKeyExW, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, KEY_READ, RRF_RT_REG_SZ};
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let mut out = Vec::new();
+    unsafe {
+        let mut key: HKEY = std::ptr::null_mut();
+        if RegOpenKeyExW(HKEY_CURRENT_USER, wide(r"Software\Microsoft\Windows\CurrentVersion\Lxss").as_ptr(), 0, KEY_READ, &mut key) != 0 {
+            return out;
+        }
+        let value = wide("DistributionName");
+        for i in 0.. {
+            let mut sub = [0u16; 256];
+            let mut len = sub.len() as u32;
+            let r = RegEnumKeyExW(key, i, sub.as_mut_ptr(), &mut len, std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+            if r != 0 {
+                break;
+            }
+            let mut name = [0u16; 256];
+            let mut bytes = (name.len() * 2) as u32;
+            if RegGetValueW(key, sub.as_ptr(), value.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), name.as_mut_ptr().cast(), &mut bytes) == 0 {
+                let n = String::from_utf16_lossy(&name[..(bytes as usize / 2).saturating_sub(1)]);
+                // docker-desktop's own distributions aren't for browsing.
+                if !n.is_empty() && !n.starts_with("docker-desktop") {
+                    out.push(PathBuf::from(format!(r"\\wsl.localhost\{n}")));
+                }
+            }
+        }
+        RegCloseKey(key);
+    }
+    out.sort_by_key(|p| p.to_string_lossy().to_lowercase());
+    out
+}
+
+#[cfg(not(windows))]
+pub fn wsl() -> Vec<PathBuf> {
+    Vec::new()
+}

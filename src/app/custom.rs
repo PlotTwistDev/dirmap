@@ -2,6 +2,7 @@
 //! background job that counts matches or builds the "Show matches only" tree, and the optional
 //! sequence finder.
 
+use crate::fsys::PathShow;
 use super::*;
 use crate::pattern::{self, Filter};
 use crate::sequences::{self, Sequence};
@@ -298,6 +299,15 @@ impl App {
     /// Compile the typed text and, if it's valid, put it into effect now.
     pub(super) fn apply_custom(&mut self) {
         self.custom.edited = None;
+        if !self.custom.text.trim().is_empty() && !self.licence.allows(crate::licence::Feature::CustomFilter) {
+            // Kept, not cleared: it works again as soon as a licence is entered.
+            self.custom.error = Some(crate::pattern::Error {
+                term: String::new(),
+                message: "The Custom filter is part of Filescape Professional. Help > Licence to enter a licence.".into(),
+            });
+            self.filter.custom = None;
+            return;
+        }
         match Filter::compile(&self.custom.text, self.custom.options()) {
             Ok(f) => {
                 self.custom.error = None;
@@ -632,6 +642,9 @@ impl App {
     // ---------- sequences ----------
 
     pub(super) fn start_sequences(&mut self) {
+        if !self.premium(crate::licence::Feature::SequenceFilter) {
+            return;
+        }
         let Some(tree) = self.tree.clone() else { return };
         if let Some((c, _)) = self.seq.job.take() {
             c.store(true, Ordering::Relaxed);
@@ -730,7 +743,7 @@ impl App {
                 );
                 ui.painter().text(pos2(rect.right() - 4.0, top), Align2::RIGHT_CENTER, scan::human(s.bytes), font.clone(), vis.text_color());
                 let resp = resp.on_hover_ui(|ui| {
-                    ui.label(self.full_path_of_full(&s.folder).display().to_string());
+                    ui.label(self.full_path_of_full(&s.folder).shown());
                     let pad = s.padding.map_or("not padded".to_string(), |w| format!("{w} digits"));
                     ui.label(format!(".{} · {pad}", s.extension()));
                     if s.missing > 0 {

@@ -1,9 +1,12 @@
 //! Right-click menus for the directory tree and the extension list, their keyboard shortcuts,
 //! and the windows and background jobs behind them (confirmations, hashing, properties).
 
+use crate::fsys::PathShow;
 use super::*;
 use crate::actions::{self, Terminal};
 use std::path::Path;
+use crate::transfer::{self, Choice, Clash, Step};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 
 /// Something to do with an item of the tree.
@@ -64,6 +67,15 @@ pub(super) struct ItemInfo {
 pub(super) struct OpJob {
     pub label: String,
     rx: mpsc::Receiver<OpDone>,
+    /// Pause, stop and progress, for copies and moves.
+    pub ctl: Option<Arc<transfer::Ctl>>,
+}
+
+/// A copy or move asked for while another was running.
+pub(super) struct Queued {
+    pub sources: Vec<PathBuf>,
+    pub dest: PathBuf,
+    pub copy: bool,
 }
 
 struct OpDone {
@@ -83,6 +95,8 @@ pub(super) struct Confirm {
     pub is_dir: bool,
     pub size: u64,
     pub files: u64,
+    /// The size is known (folders from the Files list have no size until they're analysed).
+    pub sized: bool,
 }
 
 /// The Rename box.
@@ -121,16 +135,69 @@ pub(super) struct Ops {
     pub then_rename: bool,
     hash: Option<HashJob>,
     /// Item shown in dirmap's own Properties window (where the system has none).
-    props: Option<PathBuf>,
+    pub props: Option<PathBuf>,
     type_files: Option<TypeFiles>,
     /// Last result, shown in the status bar: (text, is an error).
     pub notice: Option<(String, bool)>,
+    /// The batch rename window, while it's open.
+    pub batch: Option<super::batchren::BatchRename>,
+    /// What can be undone, the latest last.
+    pub undo: Vec<UndoEntry>,
+    /// What was undone and can be redone, the latest last. Any new change clears it.
+    pub redo: Vec<UndoEntry>,
+    /// The running operation is an Undo or Redo: (what it records goes to `redo`, the label).
+    pub undoing: Option<(bool, String)>,
+    /// The steps of the running operation, as it records them.
+    pub recording: Option<Arc<Mutex<Vec<Step>>>>,
+    /// The latest change has just finished: the status bar offers Undo beside its note.
+    pub undo_fresh: bool,
+    /// A copy or move asking what to do about a name that's taken.
+    pub clash: Option<ClashAsk>,
+    /// Copies and moves waiting for the running one.
+    pub queued: std::collections::VecDeque<Queued>,
 }
+
+/// Something that can be undone: what to call it, and the steps to play back.
+pub(super) struct UndoEntry {
+    pub label: String,
+    pub steps: Vec<Step>,
+}
+
+/// The reply to a clash: the choice, and whether it goes for the rest of this kind too.
+pub(super) type ClashReply = mpsc::Sender<(Choice, bool)>;
+
+/// A running copy or move's questions about clashes.
+pub(super) struct ClashAsk {
+    pub rx: mpsc::Receiver<(Clash, ClashReply)>,
+    pub current: Option<(Clash, ClashReply)>,
+    pub all: bool,
+    pub copy: bool,
+}
+
+/// How many changes Undo remembers.
+pub(super) const UNDO_MAX: usize = 30;
 
 impl Ops {
     /// A window of ours is up and owns the keyboard.
     pub(super) fn modal(&self) -> bool {
-        self.confirm.is_some() || self.rename.is_some()
+        self.confirm.is_some() || self.rename.is_some() || self.batch.is_some() || self.clash.as_ref().is_some_and(|c| c.current.is_some())
+    }
+
+    /// Start recording the steps of the operation about to run, for Undo.
+    pub(super) fn record(&mut self) -> Arc<Mutex<Vec<Step>>> {
+        let r = Arc::new(Mutex::new(Vec::new()));
+        self.recording = Some(r.clone());
+        r
+    }
+
+    /// The name of what Ctrl+Y would redo.
+    pub(super) fn redo_label(&self) -> Option<&str> {
+        self.redo.last().map(|u| u.label.as_str())
+    }
+
+    /// The name of what Ctrl+Z would undo.
+    pub(super) fn undo_label(&self) -> Option<&str> {
+        self.undo.last().map(|u| u.label.as_str())
     }
 }
 
@@ -140,7 +207,7 @@ fn shortcut(ctx: &egui::Context, mods: egui::Modifiers, key: egui::Key) -> Strin
 
 /// A menu item with its shortcut on the right; true when clicked.
 fn item(ui: &mut egui::Ui, enabled: bool, text: impl Into<egui::WidgetText>, keys: &str) -> bool {
-    ui.add_enabled(enabled, egui::Button::new(text).shortcut_text(keys)).clicked()
+    ui.add_enabled(enabled, egui::Button::new(super::style::mi(text)).shortcut_text(keys)).clicked()
 }
 
 impl App {
@@ -207,18 +274,18 @@ impl App {
         let mut pick = None;
         ui.set_min_width(220.0);
         let name = if ext.is_empty() { "files without an extension".to_string() } else { format!(".{ext} files") };
-        if ui.button(egui::RichText::new(format!("🔍 Find all {name}")).strong()).clicked() {
+        if ui.add(egui::Button::new(crate::app::style::mi(egui::RichText::new(format!("Find All {name}")).strong()))).clicked() {
             pick = Some(ExtAction::Find);
         }
-        if ui.button(if highlighted { "Clear Highlight" } else { "Highlight in Map" }).clicked() {
+        if ui.add(egui::Button::new(crate::app::style::mi(if highlighted { "Clear Highlight" } else { "Highlight in Map" }))).clicked() {
             pick = Some(ExtAction::Highlight);
         }
         ui.separator();
-        if ui.add_enabled(!ext.is_empty(), egui::Button::new("Copy Extension")).clicked() {
+        if ui.add_enabled(!ext.is_empty(), egui::Button::new(crate::app::style::mi("Copy Extension"))).clicked() {
             pick = Some(ExtAction::Copy);
         }
         let ex = ui
-            .add_enabled(!ext.is_empty(), egui::Button::new("Add to Exclusion Filter"))
+            .add_enabled(!ext.is_empty(), egui::Button::new(crate::app::style::mi("Add to Exclusion Filter")))
             .on_hover_text(format!("Skip *.{ext} files from the next scan on"));
         if ex.clicked() {
             pick = Some(ExtAction::Exclude);
@@ -318,7 +385,7 @@ impl App {
             }
             TreeAction::Open => actions::open(&disk),
             TreeAction::CopyPath => {
-                self.ctx_copy = Some(disk.display().to_string());
+                self.ctx_copy = Some(disk.shown());
                 self.ops.notice = Some((format!("Copied {}", disk.display()), false));
                 Ok(())
             }
@@ -336,7 +403,7 @@ impl App {
             }
             TreeAction::Exclude => {
                 let (list, entry) = if n.is_dir {
-                    (&mut self.settings.exclude_folders, disk.display().to_string())
+                    (&mut self.settings.exclude_folders, disk.shown())
                 } else {
                     (&mut self.settings.exclude_files, n.name.to_string())
                 };
@@ -345,11 +412,11 @@ impl App {
                 Ok(())
             }
             TreeAction::Delete | TreeAction::Recycle | TreeAction::Empty => {
-                self.ops.confirm = Some(Confirm { action: a, paths: vec![disk], is_dir: n.is_dir, size: n.size, files: n.files });
+                self.ops.confirm = Some(Confirm { action: a, paths: vec![disk], is_dir: n.is_dir, size: n.size, files: n.files, sized: true });
                 Ok(())
             }
             TreeAction::Refresh if path.is_empty() => {
-                self.path_input = self.scanned_path.display().to_string();
+                self.path_input = self.scanned_path.shown();
                 self.start_scan();
                 Ok(())
             }
@@ -375,17 +442,7 @@ impl App {
             TreeAction::MoveTo => {
                 let start = disk.parent().map(Path::to_path_buf).unwrap_or_default();
                 if let Some(dest) = rfd::FileDialog::new().set_title("Move to folder").set_directory(start).pick_folder() {
-                    let root = self.scanned_path.clone();
-                    self.run_op(format!("Moving {}", n.name), move || match actions::move_into(&disk, &dest) {
-                        Ok(to) => {
-                            let mut affected = vec![disk];
-                            if to.starts_with(&root) {
-                                affected.push(to.clone());
-                            }
-                            (Ok(Some(format!("Moved to {}", to.display()))), affected)
-                        }
-                        Err(e) => (Err(e), vec![disk]),
-                    });
+                    self.transfer(vec![disk], dest, false);
                 }
                 Ok(())
             }
@@ -398,6 +455,9 @@ impl App {
     pub(super) fn ext_action(&mut self, a: ExtAction, ext: String) {
         match a {
             ExtAction::Highlight => {
+                if self.highlight_ext.as_ref() != Some(&ext) && !self.premium(crate::licence::Feature::Filters) {
+                    return;
+                }
                 self.highlight_ext = if self.highlight_ext.as_ref() == Some(&ext) { None } else { Some(ext) };
             }
             ExtAction::Copy => {
@@ -449,10 +509,14 @@ impl App {
             return;
         }
         let opts = self.options_for(self.scanned_with.as_ref().unwrap_or(&self.settings));
+        // Only what's inside the analysis is read again for the tree; the Files lists re-read
+        // their folders themselves.
+        let root = self.tree.is_some().then(|| self.scanned_path.clone());
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let (r, affected, select) = work();
-            let updates = affected.into_iter().map(|p| {
+            let inside = |p: &PathBuf| root.as_ref().is_some_and(|r| p.starts_with(r));
+            let updates = affected.into_iter().filter(inside).map(|p| {
                 let n = reread(&p, &opts);
                 (p, n)
             });
@@ -464,7 +528,8 @@ impl App {
             let _ = tx.send(OpDone { error, note, updates, select });
         });
         self.ops.notice = None;
-        self.ops.job = Some(OpJob { label, rx });
+        self.ops.undo_fresh = false;
+        self.ops.job = Some(OpJob { label, rx, ctl: None });
     }
 
     fn start_hash(&mut self, path: PathBuf, size: u64) {
@@ -489,31 +554,225 @@ impl App {
             match job.rx.try_recv() {
                 Ok(done) => {
                     self.ops.job = None;
+                    self.ops.clash = None;
+                    if let Some(rec) = self.ops.recording.take() {
+                        let steps = std::mem::take(&mut *rec.lock().unwrap());
+                        self.marks_follow(&steps);
+                        let undoing = self.ops.undoing.take();
+                        if let Some((to_redo, label)) = undoing {
+                            // An Undo's steps can be redone, and a Redo's undone again.
+                            if !steps.is_empty() {
+                                let stack = if to_redo { &mut self.ops.redo } else { &mut self.ops.undo };
+                                stack.push(UndoEntry { label, steps });
+                            }
+                        } else if !steps.is_empty() {
+                            self.ops.redo.clear();
+                            self.ops.undo.push(UndoEntry { label: transfer::describe(&steps), steps });
+                            if self.ops.undo.len() > UNDO_MAX {
+                                self.ops.undo.remove(0);
+                            }
+                            self.ops.undo_fresh = true;
+                        }
+                    }
                     self.apply_updates(done.updates);
                     self.ops.notice = done.error.map(|e| (e, true)).or(done.note.map(|n| (n, false)));
                     // A renamed item, a new folder or pasted items get selected.
                     let mut then = done.select;
                     then.extend(self.ops.then_select.take());
                     let rename = std::mem::take(&mut self.ops.then_rename);
-                    if let Some(p) = then.last().cloned() {
-                        if let Some(tp) = self.tree_path_of(&p) {
-                            self.select(tp);
-                            if rename {
-                                self.start_rename(p);
-                            }
+                    let in_files = self.files.prefs.workspace != files::Workspace::Analysis;
+                    if let Some(p) = then.last().cloned()
+                        && let Some(tp) = self.tree_path_of(&p)
+                    {
+                        self.select(tp);
+                        if rename && !in_files {
+                            self.start_rename(p);
                         }
                     }
+                    self.files_after_op(&then, rename && in_files);
                     self.browser_pick_later(then);
                 }
                 Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
-                Err(mpsc::TryRecvError::Disconnected) => self.ops.job = None,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.ops.job = None;
+                    self.ops.clash = None;
+                    self.ops.recording = None;
+                }
             }
         }
+        // The next copy or move in the queue.
+        if self.ops.job.is_none()
+            && let Some(q) = self.ops.queued.pop_front()
+        {
+            let notice = self.ops.notice.clone();
+            self.transfer(q.sources, q.dest, q.copy);
+            // Keep the last one's result on show until this one finishes.
+            if self.ops.notice.is_none() {
+                self.ops.notice = notice;
+            }
+        }
+        self.clash_window(ctx);
         self.confirm_window(ctx);
         self.rename_window(ctx);
+        self.batch_rename_window(ctx);
         self.hash_window(ctx);
         self.props_window(ctx);
         self.type_files_window(ctx);
+    }
+
+    /// The running copy or move in the status bar: how far it's got, Pause or Resume, Stop, and
+    /// what's waiting. Laid out right to left.
+    pub(super) fn transfer_strip(&mut self, ui: &mut egui::Ui) {
+        let Some(job) = &self.ops.job else { return };
+        let Some(ctl) = job.ctl.clone() else { return };
+        let label = job.label.clone();
+        let paused = ctl.paused.load(Ordering::Relaxed);
+        let stopping = ctl.stop.load(Ordering::Relaxed);
+        if !self.ops.queued.is_empty() {
+            let n = self.ops.queued.len();
+            ui.menu_button(format!("+{n} waiting"), |ui| {
+                for (k, q) in self.ops.queued.iter().enumerate() {
+                    let what = if q.sources.len() == 1 { q.sources[0].file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default() } else { format!("{} items", q.sources.len()) };
+                    ui.label(format!("{}. {} {what} to {}", k + 1, if q.copy { "Copy" } else { "Move" }, q.dest.display()));
+                }
+                ui.separator();
+                if ui.button("Cancel the Waiting Ones").clicked() {
+                    self.ops.queued.clear();
+                    ui.close();
+                }
+            })
+            .response
+            .on_hover_text("Copies and moves run one at a time, in the order you asked for them");
+        }
+        if ui.add_enabled(!stopping, egui::Button::new("Stop").small()).on_hover_text("Stop after the file being copied; what's done so far stays (Undo removes it)").clicked() {
+            ctl.stop.store(true, Ordering::Relaxed);
+            ctl.paused.store(false, Ordering::Relaxed);
+        }
+        if ui.add_enabled(!stopping, egui::Button::new(if paused { "Resume" } else { "Pause" }).small()).clicked() {
+            ctl.paused.store(!paused, Ordering::Relaxed);
+        }
+        let (bt, bd) = (ctl.bytes_total.load(Ordering::Relaxed), ctl.bytes_done.load(Ordering::Relaxed));
+        let (it, id) = (ctl.items_total.load(Ordering::Relaxed), ctl.items_done.load(Ordering::Relaxed));
+        let frac = if bt > 0 { bd as f32 / bt as f32 } else if it > 0 { id as f32 / it as f32 } else { 0.0 };
+        let text = if ctl.counting.load(Ordering::Relaxed) {
+            "Counting…".to_string()
+        } else if bt > 0 {
+            format!("{} of {}", scan::human(bd.min(bt)), scan::human(bt))
+        } else {
+            format!("{} of {}", id.min(it), it)
+        };
+        let text = if stopping { "Stopping…".to_string() } else if paused { format!("Paused · {text}") } else { text };
+        ui.add(egui::ProgressBar::new(frac.clamp(0.0, 1.0)).desired_width(170.0).text(egui::RichText::new(text).size(11.0)));
+        let current = ctl.current.lock().map(|c| c.clone()).unwrap_or_default();
+        let tip = if current.is_empty() { label.clone() } else { format!("{label}\nNow: {current}") };
+        ui.label(egui::RichText::new(&label).size(12.0)).on_hover_text(tip);
+        ui.ctx().request_repaint_after(Duration::from_millis(200));
+    }
+
+    /// Undo the last change (Ctrl+Z), in the background.
+    pub(super) fn undo_last(&mut self) {
+        self.undo_or_redo(false);
+    }
+
+    pub(super) fn redo_last(&mut self) {
+        self.undo_or_redo(true);
+    }
+
+    fn undo_or_redo(&mut self, redo: bool) {
+        if self.ops.job.is_some() {
+            self.ops.notice = Some(("Another file operation is still running.".into(), true));
+            return;
+        }
+        let stack = if redo { &mut self.ops.redo } else { &mut self.ops.undo };
+        let Some(e) = stack.pop() else {
+            self.ops.notice = Some((if redo { "There's nothing to redo." } else { "There's nothing to undo." }.into(), false));
+            return;
+        };
+        let label = e.label;
+        let steps = e.steps;
+        let keep = label.clone();
+        let rec = self.ops.record();
+        let verb = if redo { "Redo" } else { "Undo" };
+        self.run_op(format!("{verb}ing {label}"), move || {
+            let (errors, touched, inverse) = transfer::undo(&steps);
+            *rec.lock().unwrap() = inverse;
+            let done = if redo { "Redid" } else { "Undid" };
+            let r = if errors.is_empty() { Ok(Some(format!("{done} {label}."))) } else { Err(format!("{verb} {label}: {}", errors.join(" "))) };
+            (r, touched)
+        });
+        self.ops.undoing = Some((!redo, keep));
+    }
+
+    /// Asks what to do when a copy or move finds a name taken. The copy waits meanwhile.
+    pub(super) fn clash_window(&mut self, ctx: &egui::Context) {
+        let Some(c) = &mut self.ops.clash else { return };
+        if c.current.is_none() {
+            match c.rx.try_recv() {
+                Ok(x) => c.current = Some(x),
+                Err(_) => return,
+            }
+        }
+        let Some((clash, _)) = &c.current else { return };
+        let name = clash.dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let folder = clash.dest.parent().map(|p| p.shown()).unwrap_or_default();
+        let both_dirs = clash.src_dir && clash.dest_dir;
+        let what = |d: bool| if d { "folder" } else { "file" };
+        let mut pick = None;
+        egui::Modal::new(egui::Id::new("clash")).show(ctx, |ui| {
+            ui.set_width(460.0);
+            ui.heading(if both_dirs { "This folder is already there" } else { "Replace or skip?" });
+            ui.add_space(6.0);
+            ui.label(format!("{folder} already has a {} called {name}.", what(clash.dest_dir)));
+            if let Some(from) = clash.src.parent() {
+                ui.weak(format!("{} from {}", if c.copy { "Copying" } else { "Moving" }, from.display()));
+            }
+            ui.add_space(6.0);
+            let when = |t: Option<std::time::SystemTime>| {
+                t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| fmt_time(d.as_secs() as i64)).unwrap_or_default()
+            };
+            egui::Grid::new("clash-grid").num_columns(3).spacing([14.0, 4.0]).show(ui, |ui| {
+                let newer = |a: Option<std::time::SystemTime>, b: Option<std::time::SystemTime>| matches!((a, b), (Some(a), Some(b)) if a > b);
+                ui.weak(if c.copy { "Copying" } else { "Moving" });
+                ui.label(if clash.src_dir { "Folder".to_string() } else { scan::human(clash.src_size) });
+                ui.label(format!("{}{}", when(clash.src_modified), if newer(clash.src_modified, clash.dest_modified) { "  (newer)" } else { "" }));
+                ui.end_row();
+                ui.weak("Already there");
+                ui.label(if clash.dest_dir { "Folder".to_string() } else { scan::human(clash.dest_size) });
+                ui.label(format!("{}{}", when(clash.dest_modified), if newer(clash.dest_modified, clash.src_modified) { "  (newer)" } else { "" }));
+                ui.end_row();
+            });
+            ui.add_space(8.0);
+            let bin = actions::BIN;
+            ui.horizontal_wrapped(|ui| {
+                if both_dirs && ui.button("Merge").on_hover_text("Put the contents together, asking about any files with the same name").clicked() {
+                    pick = Some(Choice::Merge);
+                }
+                if ui.button("Replace").on_hover_text(format!("The {} that's there goes to the {bin}, and this one takes its place", what(clash.dest_dir))).clicked() {
+                    pick = Some(Choice::Replace);
+                }
+                if ui.button("Keep Both").on_hover_text("This one gets a new name, like \"photo 2.jpg\"").clicked() {
+                    pick = Some(Choice::KeepBoth);
+                }
+                if ui.button("Skip").on_hover_text("Leave this one where it is").clicked() {
+                    pick = Some(Choice::Skip);
+                }
+                if ui.button("Stop").on_hover_text(format!("{} nothing more; what's done so far stays (Undo puts it back)", if c.copy { "Copy" } else { "Move" })).clicked()
+                    || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                {
+                    pick = Some(Choice::Stop);
+                }
+            });
+            ui.add_space(4.0);
+            ui.checkbox(&mut c.all, format!("Do the same for other {}s that clash", if both_dirs { "folder" } else { "file" }));
+        });
+        if let Some(choice) = pick {
+            ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            });
+            let (_, reply) = c.current.take().unwrap();
+            let _ = reply.send((choice, c.all && choice != Choice::Stop));
+            c.all = false;
+        }
     }
 
     fn confirm_window(&mut self, ctx: &egui::Context) {
@@ -526,7 +785,13 @@ impl App {
             _ => ("Empty folder", "Empty Folder", format!("Everything inside this folder will be deleted for good. It won't go to the {}.", actions::BIN)),
         };
         let warn = if many { warn.replacen("This ", "These ", 1) } else { warn };
-        let amount = if c.is_dir || many { format!("{} in {}", scan::human(c.size), files_text(c.files)) } else { scan::human(c.size) };
+        let amount = if !c.sized {
+            String::new()
+        } else if c.is_dir || many {
+            format!("{} in {}", scan::human(c.size), files_text(c.files))
+        } else {
+            scan::human(c.size)
+        };
         let mut go = false;
         let mut cancel = false;
         egui::Modal::new(egui::Id::new("confirm-delete")).show(ctx, |ui| {
@@ -534,12 +799,14 @@ impl App {
             ui.heading(title);
             ui.add_space(6.0);
             for p in c.paths.iter().take(8) {
-                ui.label(egui::RichText::new(p.display().to_string()).strong());
+                ui.label(egui::RichText::new(p.shown()).strong());
             }
             if c.paths.len() > 8 {
                 ui.label(format!("and {} more", c.paths.len() - 8));
             }
-            ui.label(&amount);
+            if !amount.is_empty() {
+                ui.label(&amount);
+            }
             ui.add_space(6.0);
             ui.colored_label(if c.action == TreeAction::Recycle { ui.visuals().text_color() } else { ui.visuals().warn_fg_color }, warn);
             ui.add_space(10.0);
@@ -548,6 +815,12 @@ impl App {
                 cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
             });
         });
+        if cancel || go {
+            ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            });
+        }
         if cancel {
             self.ops.confirm = None;
         } else if go {
@@ -562,10 +835,25 @@ impl App {
                     let r = paths.iter().try_for_each(|p| actions::delete(p)).map(|_| None).map_err(|e| format!("Couldn't delete everything: {e}"));
                     (r, paths)
                 }),
-                TreeAction::Recycle => self.run_op(format!("Moving {name} to the {}", actions::BIN), move || {
-                    let r = paths.iter().try_for_each(|p| actions::trash(p)).map(|_| None);
-                    (r, paths)
-                }),
+                TreeAction::Recycle => {
+                    let rec = self.ops.record();
+                    self.run_op(format!("Moving {name} to the {}", actions::BIN), move || {
+                        // Each item goes to the bin, noting where it went so Undo can put it back.
+                        let mut steps = Vec::new();
+                        let mut r = Ok(None);
+                        for p in &paths {
+                            match actions::trash_keep(p) {
+                                Ok(receipt) => steps.push(Step::Trashed { original: p.clone(), receipt }),
+                                Err(e) => {
+                                    r = Err(e);
+                                    break;
+                                }
+                            }
+                        }
+                        *rec.lock().unwrap() = steps;
+                        (r, paths)
+                    })
+                }
                 _ => self.run_op(format!("Emptying {name}"), move || {
                     let r = paths.iter().try_for_each(|p| actions::empty_folder(p)).map(|_| None).map_err(|e| format!("Couldn't delete everything: {e}"));
                     (r, paths)
@@ -583,7 +871,7 @@ impl App {
             ui.set_min_width(380.0);
             ui.heading("Rename");
             ui.add_space(6.0);
-            ui.weak(r.path.parent().map(|p| p.display().to_string()).unwrap_or_default());
+            ui.weak(r.path.parent().map(|p| p.shown()).unwrap_or_default());
             let resp = ui.add(egui::TextEdit::singleline(&mut r.text).desired_width(360.0).id(egui::Id::new("rename-box")));
             if r.fresh {
                 r.fresh = false;
@@ -610,6 +898,13 @@ impl App {
                 cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
             });
         });
+        // The Enter or Escape that closed the box mustn't also reach the list behind it.
+        if cancel || go {
+            ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            });
+        }
         if cancel {
             self.ops.rename = None;
         } else if go {
@@ -627,9 +922,13 @@ impl App {
             self.ops.rename = None;
             let dest = path.with_file_name(&text);
             self.ops.then_select = Some(dest.clone());
+            let rec = self.ops.record();
             self.run_op(format!("Renaming {}", path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()), move || {
                 match actions::rename(&path, &text) {
-                    Ok(new) => (Ok(None), vec![path, new]),
+                    Ok(new) => {
+                        rec.lock().unwrap().push(Step::Moved { from: path.clone(), to: new.clone() });
+                        (Ok(None), vec![path, new])
+                    }
                     Err(e) => (Err(e), vec![]),
                 }
             });
@@ -648,7 +947,7 @@ impl App {
         let mut open = true;
         let mut copy = None;
         egui::Window::new("SHA-256").open(&mut open).pivot(Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).collapsible(false).resizable(false).show(ctx, |ui| {
-            ui.label(h.path.display().to_string());
+            ui.label(h.path.shown());
             ui.add_space(4.0);
             match &h.result {
                 None => {
@@ -683,12 +982,12 @@ impl App {
         let mut open = true;
         egui::Window::new("Properties").open(&mut open).pivot(Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).collapsible(false).resizable(false).show(ctx, |ui| {
             egui::Grid::new("props").num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
-                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.display().to_string());
+                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.shown());
                 ui.label("Name");
                 ui.strong(name);
                 ui.end_row();
                 ui.label("Location");
-                ui.label(path.parent().map(|p| p.display().to_string()).unwrap_or_default());
+                ui.label(path.parent().map(|p| p.shown()).unwrap_or_default());
                 ui.end_row();
                 if let Some((size, files, modified, is_dir)) = node {
                     ui.label("Type");
@@ -780,9 +1079,9 @@ impl App {
                     let clip = Rect::from_min_max(rect.min, pos2(rect.right() - 90.0, rect.bottom()));
                     ui.painter()
                         .with_clip_rect(clip.intersect(ui.clip_rect()))
-                        .text(pos2(rect.left() + 4.0, cy), Align2::LEFT_CENTER, rel.display().to_string(), font.clone(), tc);
+                        .text(pos2(rect.left() + 4.0, cy), Align2::LEFT_CENTER, rel.shown(), font.clone(), tc);
                     ui.painter().text(pos2(rect.right() - 4.0, cy), Align2::RIGHT_CENTER, scan::human(*size), font, tc);
-                    if resp.on_hover_text(root.join(&rel).display().to_string()).clicked() {
+                    if resp.on_hover_text(root.join(&rel).shown()).clicked() {
                         pick = Some(path.clone());
                     }
                 }
@@ -813,7 +1112,7 @@ impl App {
 
     /// Put fresh copies of changed items into the tree (or take them out), keeping the
     /// selection, the zoomed folder and the open folders where they were.
-    fn apply_updates(&mut self, updates: Vec<(PathBuf, Option<Node>)>) {
+    pub(super) fn apply_updates(&mut self, updates: Vec<(PathBuf, Option<Node>)>) {
         if updates.is_empty() || self.tree.is_none() {
             return;
         }
@@ -860,8 +1159,9 @@ impl App {
 
         let tree = self.tree.clone().unwrap();
         self.exts = scan::ext_stats(&tree);
+        let style = self.colors_style;
         for (i, e) in self.exts.iter().enumerate() {
-            self.colors.entry(e.ext.clone()).or_insert_with(|| ext_color(&e.ext, i));
+            self.colors.entry(e.ext.clone()).or_insert_with(|| ext_color(&e.ext, i, style));
         }
         self.rows = None;
         self.filter_stats = None;
@@ -899,6 +1199,14 @@ fn add_line(list: &mut String, line: &str) {
 
 /// Read one item from disk again, as the scan would see it. `None` if it's gone.
 fn reread(path: &Path, opts: &Options) -> Option<Node> {
+    if crate::fsys::remote::is_remote(path) {
+        let m = crate::fsys::remote::meta(path).ok()?;
+        return Some(if m.is_dir && !m.is_link {
+            scan::scan_remote(path, &Progress::default())
+        } else {
+            Node { name: scan::root_name(path), size: m.len, files: 1, modified: m.modified, is_dir: false, children: Vec::new() }
+        });
+    }
     let md = std::fs::symlink_metadata(path).ok()?;
     if md.is_dir() {
         Some(scan::scan(path, opts, &Progress::default(), &scan::new_live(path)))

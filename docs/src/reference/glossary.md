@@ -1,5 +1,8 @@
 # Glossary
 
+**Activation**: One computer using a licence. A perpetual licence can be active on 3 computers at once, and
+deactivating one frees its place; a temporary licence can be activated 3 times, ever. See [Licensing](../settings/licensing.md#activations).
+
 **Breadcrumbs**: The row of folder names above the map (🏠 *scan* › *folder* › …) showing which folder the map is
 showing. Click one to go there.
 
@@ -22,16 +25,19 @@ tabs and List, Icons, Columns and Tree layouts. See [The file manager](../views/
 **Frame number**: The number in the name of each file of a numbered sequence, such as `1001` in
 `shot010.1001.exr`. Matched with `#`, `{frame}` or `[1001-1100]`.
 
-**Hard link**: A second name for the same file. dirmap counts the file under each name.
+**Hard link**: A second name for the same file. Filescape counts the file under each name.
 
 **Highlight mode**: Shows filter matches in colour and hides everything else, keeping the map's layout.
 
-**Junction / symbolic link**: A signpost to another folder or file. dirmap never follows them.
+**Junction / symbolic link**: A signpost to another folder or file. Filescape never follows them.
+
+**Licence**: What unlocks Filescape Professional: perpetual, or temporary for a set time. See
+[Licensing](../settings/licensing.md).
 
 **Padding**: Leading zeros that give frame numbers a fixed width: `0042` is padded to four digits.
 
 **Scan**: Reading a drive or folder to find every file and its size. The result stays in memory until you
-scan again or close dirmap.
+scan again or close Filescape.
 
 **Scan exclusions**: Settings that leave folders or files out of a scan entirely. See
 [Scan exclusions](../filtering/scan-filters.md).
@@ -55,7 +61,7 @@ very small files).
 
 **Treemap**: The main map, where every file is a rectangle with an area proportional to its size.
 
-**Unreadable**: A folder or file dirmap wasn't allowed to read, so isn't included in the totals.
+**Unreadable**: A folder or file Filescape wasn't allowed to read, so isn't included in the totals.
 
 ## Related topics
 

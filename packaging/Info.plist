@@ -3,13 +3,15 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>dirmap</string>
+    <string>Filescape</string>
     <key>CFBundleDisplayName</key>
-    <string>dirmap</string>
+    <string>Filescape</string>
     <key>CFBundleIdentifier</key>
-    <string>com.plottwistdev.dirmap</string>
+    <string>app.filescape.Filescape</string>
     <key>CFBundleExecutable</key>
-    <string>dirmap</string>
+    <string>filescape</string>
+    <key>CFBundleIconFile</key>
+    <string>filescape</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>

@@ -29,6 +29,18 @@ impl Icons {
     }
 }
 
+impl Icons {
+    /// Draw a big icon (the Icons view). The system's icons are only 32 pixels, so above 48 the
+    /// drawn icon is used instead, which stays sharp at any size.
+    pub fn paint_big(&mut self, ui: &egui::Ui, rect: Rect, is_dir: bool, ext: &str, tint: Color32) {
+        if rect.height() <= 48.0 {
+            self.paint(ui, rect, is_dir, ext, tint);
+        } else {
+            paint_glyph(ui.painter(), rect, is_dir, ext, tint);
+        }
+    }
+}
+
 /// Fallback icons: a manila folder, or a page with a folded corner in the extension's color.
 /// Drawn in proportion, so they work from list size (16 px) up to the Files view's big icons,
 /// where the page also carries the extension.
@@ -83,6 +95,12 @@ fn load(ctx: &egui::Context, key: &str) -> Option<TextureHandle> {
     let rgba = win::shell_icon(key)?;
     let img = egui::ColorImage::from_rgba_unmultiplied([rgba.0, rgba.1], &rgba.2);
     Some(ctx.load_texture(format!("icon:{key}"), img, egui::TextureOptions::LINEAR))
+}
+
+/// A bitmap as top-down 32-bit BGRA (for media thumbnails).
+#[cfg(windows)]
+pub(crate) fn win_dib(bmp: windows_sys::Win32::Graphics::Gdi::HBITMAP, w: usize, h: usize) -> Option<Vec<u8>> {
+    unsafe { win::dib(bmp, w, h) }
 }
 
 #[cfg(windows)]
@@ -162,7 +180,7 @@ mod win {
     }
 
     /// Read a bitmap as top-down 32-bit BGRA.
-    unsafe fn dib(bmp: windows_sys::Win32::Graphics::Gdi::HBITMAP, w: usize, h: usize) -> Option<Vec<u8>> {
+    pub(crate) unsafe fn dib(bmp: windows_sys::Win32::Graphics::Gdi::HBITMAP, w: usize, h: usize) -> Option<Vec<u8>> {
         unsafe {
             let mut bmi: BITMAPINFO = std::mem::zeroed();
             bmi.bmiHeader = BITMAPINFOHEADER {

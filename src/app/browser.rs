@@ -3,8 +3,10 @@
 //! usual file commands. It follows the map: opening a folder here zooms the map to it, zooming
 //! the map moves it here, and the selection is shared.
 
+use crate::fsys::PathShow;
 use super::*;
 use crate::actions;
+use crate::transfer;
 use menus::{ItemInfo, TreeAction};
 use std::cmp::Ordering as Cmp;
 use std::collections::BTreeSet;
@@ -95,12 +97,13 @@ pub(super) struct Tab {
 
 /// Items copied or cut, waiting to be pasted.
 pub(super) struct Clip {
-    paths: Vec<PathBuf>,
-    cut: bool,
+    pub paths: Vec<PathBuf>,
+    pub cut: bool,
 }
 
 /// What's being dragged.
-pub(super) struct DragItems(Vec<PathBuf>);
+/// What's being dragged: the paths, and which of them are folders.
+pub(super) struct DragItems(pub Vec<PathBuf>, pub Vec<bool>);
 
 pub(super) struct Browser {
     tabs: Vec<Tab>,
@@ -123,7 +126,7 @@ pub(super) struct Browser {
     pub map_rect: Option<Rect>,
     /// Where the file manager was drawn, so the map leaves the mouse's side buttons to it.
     pub rect: Option<Rect>,
-    clip: Option<Clip>,
+    pub clip: Option<Clip>,
     /// The map's folder and the selection as of last frame, to notice changes made elsewhere.
     seen_zoom: Option<Vec<u32>>,
     seen_sel: Option<Vec<u32>>,
@@ -176,6 +179,11 @@ impl Browser {
         &mut self.tabs[self.active]
     }
 
+    /// The folder on screen, as a path in the scan.
+    pub fn current_folder(&self) -> &[u32] {
+        &self.folder
+    }
+
     pub fn layout(&self) -> Layout {
         self.tabs[self.active].layout
     }
@@ -188,14 +196,19 @@ const COL_W: f32 = 250.0;
 
 /// What a folder's entry is: "Folder", "PNG image", "File".
 pub(super) fn kind_of(n: &Node) -> String {
-    if n.is_dir {
+    kind_for(&n.name, n.is_dir)
+}
+
+/// What an item is, from its name: "Folder", "PNG image", "File".
+pub(super) fn kind_for(name: &str, is_dir: bool) -> String {
+    if is_dir {
         return "Folder".into();
     }
-    let ext = n.ext();
+    let ext = scan::ext_of(name);
     if ext.is_empty() {
         return "File".into();
     }
-    let noun = match categories::of(&n.name) {
+    let noun = match categories::of(name) {
         Category::Audio => "audio",
         Category::Video => "video",
         Category::Images => "image",
@@ -211,40 +224,52 @@ pub(super) fn kind_of(n: &Node) -> String {
 }
 
 /// Case-insensitive, with runs of digits compared as numbers: "shot2" before "shot10".
+/// Allocation-free, since sorting a 100,000-item folder calls it a couple of million times.
 pub(super) fn natural_cmp(a: &str, b: &str) -> Cmp {
-    let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
+    let (ab, bb) = (a.as_bytes(), b.as_bytes());
+    let (mut i, mut j) = (0, 0);
     loop {
-        match (a.peek().copied(), b.peek().copied()) {
+        match (ab.get(i), bb.get(j)) {
             (None, None) => return Cmp::Equal,
             (None, _) => return Cmp::Less,
             (_, None) => return Cmp::Greater,
             (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
-                let mut na = String::new();
-                while let Some(c) = a.peek().copied().filter(char::is_ascii_digit) {
-                    na.push(c);
-                    a.next();
-                }
-                let mut nb = String::new();
-                while let Some(c) = b.peek().copied().filter(char::is_ascii_digit) {
-                    nb.push(c);
-                    b.next();
-                }
-                let (ta, tb) = (na.trim_start_matches('0'), nb.trim_start_matches('0'));
+                let run = |s: &[u8], from: usize| from + s[from..].iter().take_while(|c| c.is_ascii_digit()).count();
+                let (ea, eb) = (run(ab, i), run(bb, j));
+                let (na, nb) = (&ab[i..ea], &bb[j..eb]);
+                let (ta, tb) = (trim_zeros(na), trim_zeros(nb));
                 let o = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb)).then_with(|| na.len().cmp(&nb.len()));
                 if o != Cmp::Equal {
                     return o;
                 }
+                i = ea;
+                j = eb;
             }
-            (Some(x), Some(y)) => {
-                let o = x.to_lowercase().cmp(y.to_lowercase());
+            (Some(x), Some(y)) if x.is_ascii() && y.is_ascii() => {
+                let o = x.to_ascii_lowercase().cmp(&y.to_ascii_lowercase());
                 if o != Cmp::Equal {
                     return o;
                 }
-                a.next();
-                b.next();
+                i += 1;
+                j += 1;
+            }
+            _ => {
+                // Non-ASCII: compare one whole character, lowercased.
+                let (ca, cb) = (a[i..].chars().next().unwrap(), b[j..].chars().next().unwrap());
+                let o = ca.to_lowercase().cmp(cb.to_lowercase());
+                if o != Cmp::Equal {
+                    return o;
+                }
+                i += ca.len_utf8();
+                j += cb.len_utf8();
             }
         }
     }
+}
+
+fn trim_zeros(n: &[u8]) -> &[u8] {
+    let z = n.iter().take_while(|&&c| c == b'0').count();
+    &n[z..]
 }
 
 /// The order to list a folder's children in.
@@ -333,7 +358,7 @@ impl App {
     }
 
     /// Go to a folder, remembering where we were for Back, and take the map there too.
-    fn browse_to(&mut self, folder: Vec<u32>) {
+    pub(super) fn browse_to(&mut self, folder: Vec<u32>) {
         if folder != self.browser.folder {
             let from = self.full_path(&self.browser.folder);
             let t = self.browser.tab();
@@ -539,6 +564,9 @@ impl App {
 
     /// Paths of the items picked along with the selection, for the maps to outline too.
     pub(super) fn picked_paths(&self) -> Vec<Vec<u32>> {
+        if self.files.prefs.workspace != super::Workspace::Analysis {
+            return self.dock.picked.clone();
+        }
         if self.browser.picked.len() < 2 || self.browser.layout() == Layout::Tree {
             return Vec::new();
         }
@@ -634,6 +662,7 @@ impl App {
                     is_dir: nodes[0].is_dir,
                     size: nodes.iter().map(|n| n.size).sum(),
                     files: nodes.iter().map(|n| n.files).sum(),
+                    sized: true,
                 });
             }
             TreeAction::MoveTo => {
@@ -675,15 +704,11 @@ impl App {
             return;
         }
         let dir = self.full_path(&self.browser.folder);
-        self.ops.then_rename = true;
-        self.run_op_select("Making a new folder".into(), move || match actions::new_folder(&dir) {
-            Ok(p) => (Ok(None), vec![p.clone()], vec![p]),
-            Err(e) => (Err(e), vec![], vec![]),
-        });
+        self.make_new("Making a new folder".into(), move || actions::new_folder(&dir));
     }
 
     /// Paste what was copied or cut into `dest`.
-    fn paste_into(&mut self, dest: PathBuf) {
+    pub(super) fn paste_into(&mut self, dest: PathBuf) {
         let Some(clip) = &self.browser.clip else { return };
         let (paths, cut) = (clip.paths.clone(), clip.cut);
         if cut {
@@ -694,56 +719,90 @@ impl App {
     }
 
     /// Copy or move items into a folder, in the background, then select the last of them.
-    fn transfer(&mut self, sources: Vec<PathBuf>, dest: PathBuf, copy: bool) {
-        if self.ops.job.is_some() {
-            self.ops.notice = Some(("Another file operation is still running.".into(), true));
+    pub(super) fn transfer(&mut self, sources: Vec<PathBuf>, dest: PathBuf, copy: bool) {
+        // To or from a server: the transfer queue, several at once in the background.
+        if self.queue_transfer(&sources, &dest, copy) {
             return;
         }
+        if self.ops.job.is_some() {
+            // Wait for the one running: copies and moves run one at a time, in the order asked.
+            let n = self.ops.queued.len() + 1;
+            self.ops.queued.push_back(menus::Queued { sources, dest, copy });
+            self.ops.notice = Some((format!("Queued: starts when the {} before it finish{}.", if n == 1 { "one".to_string() } else { format!("{n} operations") }, if n == 1 { "es" } else { "" }), false));
+            return;
+        }
+        if crate::fsys::archive::split(&dest).is_some() {
+            self.ops.notice = Some((files::READ_ONLY_NOTE.into(), true));
+            return;
+        }
+        // Out of an archive is always a copy (a cut there can't remove anything).
+        let copy = copy || sources.iter().any(|s| crate::fsys::archive::inside(s));
         // Moving something to where it already is does nothing.
         let sources: Vec<PathBuf> = sources.into_iter().filter(|s| copy || s.parent() != Some(dest.as_path())).collect();
         if sources.is_empty() {
             return;
         }
-        let name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| dest.display().to_string());
+        let name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| dest.shown());
         let what = if sources.len() == 1 {
             sources[0].file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
         } else {
             format!("{} items", sources.len())
         };
         let label = format!("{} {what} to {name}", if copy { "Copying" } else { "Moving" });
-        let root = self.scanned_path.clone();
         // Select the results only when they land in the folder on screen (a paste); a drop
         // onto another folder leaves you where you are, as in Finder and Explorer.
-        let here = dest == self.full_path(&self.browser.folder);
+        let here = (self.shown_tree().is_some() && dest == self.full_path(&self.browser.folder)) || self.files.here().dir() == Some(dest.as_path());
+        // Clashes are asked about while the work waits; "for the rest" is remembered here,
+        // separately for files and for folders.
+        let (ask_tx, ask_rx) = mpsc::channel();
+        self.ops.clash = Some(menus::ClashAsk { rx: ask_rx, current: None, all: false, copy });
+        let rec = self.ops.record();
+        let ctl = Arc::new(transfer::Ctl::default());
+        let c2 = ctl.clone();
         self.run_op_select(label, move || {
-            let mut affected = Vec::new();
-            let mut made = Vec::new();
-            let mut errors = Vec::new();
-            for s in &sources {
-                let r = if copy { actions::copy_into(s, &dest) } else { actions::move_into(s, &dest) };
-                match r {
-                    Ok(to) => {
-                        if !copy {
-                            affected.push(s.clone());
-                        }
-                        if to.starts_with(&root) {
-                            affected.push(to.clone());
-                        }
-                        made.push(to);
-                    }
-                    Err(e) => errors.push(e),
+            let ctl = c2;
+            let (mut for_files, mut for_dirs) = (None, None);
+            let mut ask = |c: &transfer::Clash| {
+                let slot = if c.src_dir && c.dest_dir { &mut for_dirs } else { &mut for_files };
+                if let Some(ch) = *slot {
+                    return ch;
                 }
-            }
-            let note = match (copy, sources.len() - errors.len()) {
-                (_, 0) => None,
-                (true, 1) => Some(format!("Copied to {}", dest.display())),
-                (false, 1) => Some(format!("Moved to {}", dest.display())),
-                (true, n) => Some(format!("Copied {n} items to {}", dest.display())),
-                (false, n) => Some(format!("Moved {n} items to {}", dest.display())),
+                let (tx, rx) = mpsc::channel();
+                if ask_tx.send((c.clone(), tx)).is_err() {
+                    return transfer::Choice::Stop;
+                }
+                match rx.recv() {
+                    Ok((ch, all)) => {
+                        if all {
+                            *slot = Some(ch);
+                        }
+                        ch
+                    }
+                    Err(_) => transfer::Choice::Stop,
+                }
             };
-            let r = if errors.is_empty() { Ok(note) } else { Err(errors.join(" ")) };
-            (r, affected, if here { made } else { Vec::new() })
+            let out = transfer::transfer_with(&sources, &dest, copy, &mut ask, &ctl);
+            *rec.lock().unwrap() = out.steps;
+            let done = out.made.len();
+            let mut note = match (copy, done) {
+                (_, 0) => String::new(),
+                (true, 1) => format!("Copied to {}", dest.display()),
+                (false, 1) => format!("Moved to {}", dest.display()),
+                (true, n) => format!("Copied {n} items to {}", dest.display()),
+                (false, n) => format!("Moved {n} items to {}", dest.display()),
+            };
+            if out.skipped > 0 {
+                note.push_str(&format!("{}{} skipped", if note.is_empty() { "" } else { "; " }, if out.skipped == 1 { "1 item".into() } else { format!("{} items", out.skipped) }));
+            }
+            if out.stopped {
+                note.push_str(if note.is_empty() { "Stopped" } else { "; stopped" });
+            }
+            let r = if out.errors.is_empty() { Ok((!note.is_empty()).then_some(note)) } else { Err(out.errors.join(" ")) };
+            (r, out.touched, if here { out.made } else { Vec::new() })
         });
+        if let Some(j) = &mut self.ops.job {
+            j.ctl = Some(ctl);
+        }
     }
 
     // ---------- tabs ----------
@@ -795,7 +854,7 @@ impl App {
                 return n;
             }
         }
-        t.folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| t.folder.display().to_string())
+        t.folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| t.folder.shown())
     }
 
     // ---------- the panel ----------
@@ -855,13 +914,13 @@ impl App {
             empty.context_menu(|ui| {
                 let ctx = ui.ctx().clone();
                 let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
-                if ui.add_enabled(!busy, egui::Button::new("New Folder").shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::N))).clicked() {
+                if ui.add_enabled(!busy, egui::Button::new(crate::app::style::mi("New Folder")).shortcut_text(k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::N))).clicked() {
                     picks.new_folder = true;
                 }
-                if ui.add_enabled(can_paste, egui::Button::new("Paste").shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::V))).clicked() {
+                if ui.add_enabled(can_paste, egui::Button::new(crate::app::style::mi("Paste")).shortcut_text(k(egui::Modifiers::COMMAND, egui::Key::V))).clicked() {
                     picks.paste = true;
                 }
-                if ui.button("Open in New Tab").clicked() {
+                if ui.add(egui::Button::new(crate::app::style::mi("Open in New Tab"))).clicked() {
                     picks.new_tab = Some(self.full_path(&folder));
                 }
             });
@@ -870,8 +929,9 @@ impl App {
             }
             if picks.drop.is_none() {
                 if let Some(p) = empty.dnd_release_payload::<DragItems>() {
-                    let copy = ui.input(|i| i.modifiers.alt);
-                    picks.drop = Some((p.0.clone(), self.full_path(&folder), copy));
+                    let dest = self.full_path(&folder);
+                    let copy = dnd::op_for(&p.0, &dest, ui.input(|i| i.modifiers), &self.drives) == dnd::DropOp::Copy;
+                    picks.drop = Some((p.0.clone(), dest, copy));
                 }
             }
             let footer = Rect::from_min_max(pos2(rect.left(), body.bottom()), pos2(rect.right(), body.bottom() + footer_h));
@@ -947,24 +1007,12 @@ impl App {
         }
     }
 
-    /// While dragging: what will happen, next to the pointer.
+    /// While dragging: what will happen, next to the pointer (when it's over a drop target).
     fn drag_preview(&self, ctx: &egui::Context) {
         let Some(items) = egui::DragAndDrop::payload::<DragItems>(ctx) else { return };
-        let Some(p) = ctx.pointer_latest_pos() else { return };
-        let copy = ctx.input(|i| i.modifiers.alt);
-        let what = match items.0.len() {
-            1 => items.0[0].file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
-            n => format!("{n} items"),
-        };
-        let alt = if cfg!(target_os = "macos") { "⌥" } else { "Alt" };
-        let text = if copy { format!("Copy {what}") } else { format!("Move {what}  (hold {alt} to copy)") };
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("fm-drag")));
-        let font = FontId::proportional(13.0);
-        let galley = painter.layout_no_wrap(text, font, Color32::WHITE);
-        let r = Rect::from_min_size(p + vec2(14.0, 10.0), galley.size() + vec2(12.0, 6.0));
-        painter.rect_filled(r, 4.0, Color32::from_rgba_unmultiplied(30, 90, 170, 235));
-        painter.galley(r.min + vec2(6.0, 3.0), galley, Color32::WHITE);
-        ctx.request_repaint();
+        let what = dnd::what(&items.0);
+        let keys = if cfg!(target_os = "macos") { "⌥ copies, ⌘ moves" } else { "Ctrl copies, Shift moves" };
+        dnd::pointer_label(ctx, &format!("{what}: drop on a folder  ({keys})"), false);
     }
 
     /// Tabs above the path bar; each can take a drop.
@@ -980,7 +1028,7 @@ impl App {
                 let short = if title.chars().count() > 24 { format!("{short}…") } else { short };
                 let on = i == self.browser.active;
                 let text = if on { egui::RichText::new(short.clone()).strong() } else { egui::RichText::new(short) };
-                let resp = ui.add(egui::Button::selectable(on, text)).on_hover_text(self.browser.tabs[i].folder.display().to_string());
+                let resp = ui.add(egui::Button::selectable(on, text)).on_hover_text(self.browser.tabs[i].folder.shown());
                 if resp.clicked() && !on {
                     picks.switch_tab = Some(i);
                 }
@@ -991,8 +1039,8 @@ impl App {
                     ui.painter().rect_stroke(resp.rect, 3.0, Stroke::new(2.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
                 }
                 if let Some(p) = resp.dnd_release_payload::<DragItems>() {
-                    let copy = ui.input(|i| i.modifiers.alt);
                     let dest = if on { self.full_path(&self.browser.folder) } else { self.browser.tabs[i].folder.clone() };
+                    let copy = dnd::op_for(&p.0, &dest, ui.input(|i| i.modifiers), &self.drives) == dnd::DropOp::Copy;
                     picks.drop = Some((p.0.clone(), dest, copy));
                 }
                 if n > 1 {
@@ -1053,8 +1101,9 @@ impl App {
                     ui.painter().rect_stroke(resp.rect, 3.0, Stroke::new(2.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
                 }
                 if let Some(p) = resp.dnd_release_payload::<DragItems>() {
-                    let copy = ui.input(|i| i.modifiers.alt);
-                    picks.drop = Some((p.0.clone(), self.full_path(&self.browser.folder[..depth]), copy));
+                    let dest = self.full_path(&self.browser.folder[..depth]);
+                    let copy = dnd::op_for(&p.0, &dest, ui.input(|i| i.modifiers), &self.drives) == dnd::DropOp::Copy;
+                    picks.drop = Some((p.0.clone(), dest, copy));
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1078,7 +1127,7 @@ impl App {
                 }
                 let t = self.browser.tab();
                 for (layout, label, tip) in [
-                    (Layout::Columns, "◫ Columns", "A column per folder, from the top of the scan down to here"),
+                    (Layout::Columns, "☰ Columns", "A column per folder, from the top of the scan down to here"),
                     (Layout::Icons, "⊞ Icons", "Large icons in a grid"),
                     (Layout::List, "☰ List", "One line per item, with sizes and dates"),
                     (Layout::Tree, "🌲 Tree", "The whole scan as a folder tree"),
@@ -1171,6 +1220,8 @@ impl App {
             NextTab(bool),
             NewFolder,
             Paste(String),
+            Undo,
+            Redo,
             Find(String),
         }
         let layout = self.browser.layout();
@@ -1204,6 +1255,12 @@ impl App {
             }
             if i.consume_key(M::COMMAND | M::SHIFT, Key::N) {
                 return Some(Do::NewFolder);
+            }
+            if i.consume_key(M::COMMAND | M::SHIFT, Key::Z) || i.consume_key(M::COMMAND, Key::Y) {
+                return Some(Do::Redo);
+            }
+            if i.consume_key(M::COMMAND, Key::Z) {
+                return Some(Do::Undo);
             }
             let pasted = i.events.iter().find_map(|e| match e {
                 egui::Event::Paste(t) => Some(t.clone()),
@@ -1295,6 +1352,8 @@ impl App {
                 picks.switch_tab = Some(if fwd { (self.browser.active + 1) % n } else { (self.browser.active + n - 1) % n });
             }
             Do::NewFolder => picks.new_folder = true,
+            Do::Undo => self.undo_last(),
+            Do::Redo => self.redo_last(),
             Do::Paste(text) => {
                 let ours = self.browser.clip.as_ref().is_some_and(|c| text_of(&c.paths) == text.trim_end());
                 if ours || self.browser.clip.is_some() && text.trim().is_empty() {
@@ -1504,20 +1563,19 @@ impl App {
         // Drag what's selected (or just this, if it isn't), drop onto folders.
         if resp.drag_started() && !path.is_empty() {
             let chosen = self.chosen();
-            let items: Vec<PathBuf> = if chosen.iter().any(|c| c == path) {
-                chosen.iter().map(|c| self.full_path(c)).collect()
-            } else {
-                vec![self.full_path(path)]
-            };
-            resp.dnd_set_drag_payload(DragItems(items));
+            let picked: Vec<Vec<u32>> = if chosen.iter().any(|c| c == path) { chosen } else { vec![path.to_vec()] };
+            let tree = self.shown_tree();
+            let dirs = picked.iter().map(|c| tree.as_ref().and_then(|t| t.at(c)).is_some_and(|n| n.is_dir)).collect();
+            let items: Vec<PathBuf> = picked.iter().map(|c| self.full_path(c)).collect();
+            resp.dnd_set_drag_payload(DragItems(items, dirs));
         }
         if n.is_dir {
             if resp.dnd_hover_payload::<DragItems>().is_some() {
                 ui.painter().rect_stroke(resp.rect, 3.0, Stroke::new(2.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
             }
             if let Some(p) = resp.dnd_release_payload::<DragItems>() {
-                let copy = ui.input(|i| i.modifiers.alt);
                 let dest = self.full_path(path);
+                let copy = dnd::op_for(&p.0, &dest, ui.input(|i| i.modifiers), &self.drives) == dnd::DropOp::Copy;
                 if !p.0.contains(&dest) {
                     picks.drop = Some((p.0.clone(), dest, copy));
                 }
@@ -1663,7 +1721,9 @@ impl App {
                         ui.painter().rect_stroke(col_rect, 0.0, Stroke::new(1.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
                     }
                     if let Some(p) = col_resp.dnd_release_payload::<DragItems>() {
-                        picks.drop = Some((p.0.clone(), self.full_path(folder_path), ui.input(|i| i.modifiers.alt)));
+                        let dest = self.full_path(folder_path);
+                        let copy = dnd::op_for(&p.0, &dest, ui.input(|i| i.modifiers), &self.drives) == dnd::DropOp::Copy;
+                        picks.drop = Some((p.0.clone(), dest, copy));
                     }
                     if order.is_empty() {
                         Self::empty_note(&mut cui, self.shown.is_some());
@@ -1779,7 +1839,7 @@ impl App {
 
 /// Paths as clipboard text, one per line.
 fn text_of(paths: &[PathBuf]) -> String {
-    paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n")
+    paths.iter().map(|p| p.shown()).collect::<Vec<_>>().join("\n")
 }
 
 fn fs_exists(p: &Path) -> bool {
@@ -1788,7 +1848,7 @@ fn fs_exists(p: &Path) -> bool {
 
 /// Scroll offset that brings a row at `y` (height `h`) into a view last at `(offset, height)`,
 /// moving as little as possible.
-fn keep_in_view(view: (f32, f32), y: f32, h: f32) -> f32 {
+pub(super) fn keep_in_view(view: (f32, f32), y: f32, h: f32) -> f32 {
     let (off, height) = view;
     if y < off {
         y
@@ -1823,6 +1883,11 @@ mod tests {
         assert_eq!(natural_cmp("Apple", "banana"), Cmp::Less);
         assert_eq!(natural_cmp("a01", "a1"), Cmp::Greater);
         assert_eq!(natural_cmp("a", "a"), Cmp::Equal);
+        assert_eq!(natural_cmp("a", "a1"), Cmp::Less);
+        assert_eq!(natural_cmp("file_000010", "file_9"), Cmp::Greater);
+        assert_eq!(natural_cmp("Été", "été2"), Cmp::Less);
+        assert_eq!(natural_cmp("Zoë", "zoe"), Cmp::Greater);
+        assert_eq!(natural_cmp("ÄB", "äa"), Cmp::Greater);
     }
 
     #[test]
