@@ -9,7 +9,7 @@ header{padding:14px 0}
 .bar{display:flex;align-items:center;gap:22px;padding:8px 16px;border:1px solid var(--line);border-radius:14px;background:var(--ink);font-size:14px;flex-wrap:wrap}
 .bar a{text-decoration:none;color:var(--text-2)}.bar a:hover{color:var(--text)}
 .brand{display:inline-flex;align-items:center;gap:10px;font-weight:600;color:var(--text)!important;margin-right:auto}
-.brand::before{content:"";width:16px;height:16px;border-radius:4px;background:linear-gradient(135deg,var(--coral) 0 55%,var(--key) 55%)}
+.brand::before{content:"";width:20px;height:20px;flex:none;background:url(/logo.svg) center/contain no-repeat} /* same tile-grid logo as the homepage */
 main{padding:40px 0 8px}
 h1{color:var(--text);font-size:clamp(30px,5vw,44px);line-height:1.1;letter-spacing:-.03em;font-weight:600;margin:0 0 14px}
 h2{color:var(--text);font-size:19px;font-weight:600;letter-spacing:-.01em;margin:32px 0 8px}
