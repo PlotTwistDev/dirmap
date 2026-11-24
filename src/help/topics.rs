@@ -17,6 +17,7 @@ pub const PERCENTAGES: &str = "disk-usage/sizes.md#percentages";
 pub const FILE_TYPES: &str = "disk-usage/file-types.md#the-file-types-list";
 pub const UNREADABLE: &str = "disk-usage/hidden-and-unreadable.md#unreadable-folders-and-files";
 pub const TREEMAP: &str = "views/treemap.md";
+pub const MAP_SUMMARY: &str = "views/treemap.md#the-summary-under-the-map";
 pub const TREEMAP_NAV: &str = "views/treemap-navigation.md";
 pub const ZOOM_TO_SELECTION: &str = "views/treemap-navigation.md#zooming-to-the-selection";
 pub const BACK_FORWARD: &str = "views/treemap-navigation.md#back-and-forward";
@@ -58,7 +59,7 @@ pub const ABOUT: &str = "about/about.md";
 #[cfg(test)]
 pub const ALL: &[&str] = &[
     HOME, QUICK_START, INTERFACE, TOOLBAR, SCANNING, WHILE_SCANNING, RESULTS, SIZES, PERCENTAGES, FILE_TYPES, UNREADABLE,
-    TREEMAP, TREEMAP_NAV, ZOOM_TO_SELECTION, BACK_FORWARD, SUNBURST, TREE, BROWSER, FILE_MANAGER, WORKSPACES, ANALYSIS_DOCK, COLOR_MODES, FILTERING, HIGHLIGHT_OR_ONLY,
+    TREEMAP, MAP_SUMMARY, TREEMAP_NAV, ZOOM_TO_SELECTION, BACK_FORWARD, SUNBURST, TREE, BROWSER, FILE_MANAGER, WORKSPACES, ANALYSIS_DOCK, COLOR_MODES, FILTERING, HIGHLIGHT_OR_ONLY,
     CATEGORIES, SYNTAX, EXAMPLES, SEQUENCES, PRESETS, SCAN_FILTERS, HISTOGRAM, DUPLICATES, DUPLICATES_HOW, SNAPSHOTS,
     FILE_OPERATIONS, SETTINGS, SETTINGS_GENERAL, SETTINGS_FILTERING, SETTINGS_FOLDER_LIST, SETTINGS_TREEMAP,
     SETTINGS_ADVANCED, ADMINISTRATOR, LICENSING, KEYBOARD, MOUSE, TROUBLESHOOTING, WHATS_NEW, ABOUT,

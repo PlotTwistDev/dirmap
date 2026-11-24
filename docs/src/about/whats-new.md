@@ -12,6 +12,11 @@
 
 ### A new look for the treemap
 
+- Under the Storage Analysis map, a summary shows the scanned folder, its size and file count,
+  and the file types taking the most space, each in its map colour. It follows the filters, so
+  with **Larger than** or **Smaller than** set you see how much space the matching files take
+  and of which types. Click a type to highlight it. See
+  [The summary under the map](../views/treemap.md#the-summary-under-the-map).
 - The treemap has a new **Modern** tile style, the same look as the map on filescape.app: soft
   pastel tiles, names and sizes written on the tiles, and the folders on screen outlined with dark
   name tags. The cushion look is still there as **Classic cushion** under

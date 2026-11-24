@@ -25,6 +25,26 @@ swatches in the **File types** list. Other colour modes show age or change since
 [Colour modes](color-modes.md). Empty dark areas are files a filter has hidden; see
 [Filtering overview](../filtering/overview.md).
 
+## The summary under the map
+
+A line under the map sums up what it shows, like the map on filescape.app:
+
+![The summary under the map, with size filters on](../images/map-summary.png)
+
+- the scanned folder, its total size and its number of files;
+- a chip for each of the ten file types taking the most space, with its map colour and how much
+  space those files take.
+
+The summary **follows the filters.** Pick a category, set **Larger than** or **Smaller than**, or
+type a Custom filter, and the totals become those of the matching files only, written as
+"12.1 GB of 66.2 GB · 311 of 2,411 files", followed by the filters in words. The type chips are
+recounted from the matches too, so raising **Larger than** shows at a glance which types the big
+files are. While a new filter is being counted, a spinner shows beside the whole scan's totals.
+
+**Click a chip** to highlight that type on the map, as clicking it in the **File types** list does;
+click it again, or **Clear**, to stop. Hover a chip to see its share of the total. With **Color
+by: Age** or **Change** only the totals line is shown, since the colours then mean something else.
+
 ## Finding out what something is
 
 - **Hover** over a rectangle: the status bar shows its full path, size and modification date.
