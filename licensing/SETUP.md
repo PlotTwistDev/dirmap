@@ -7,7 +7,13 @@ emails through Resend.
 
 This is done once. It takes about an hour. Commands run from the repository folder on your own
 computer. You need Rust, Node.js 20 or later, and the filescape.app domain on Cloudflare (DNS
-managed there).
+managed there). The Worker is compiled to WebAssembly, so also run this once:
+
+```
+rustup target add wasm32-unknown-unknown
+rustup component add llvm-tools
+cargo install worker-build
+```
 
 **Secrets never go in chat, email or the repository.** You paste them straight into Cloudflare
 (`wrangler secret put …` asks for the value) and keep a copy in your password manager.
@@ -85,8 +91,8 @@ The admin site refuses everyone until this is set up.
 npx wrangler@4 deploy
 ```
 
-It builds the Rust code (the first build installs `worker-build` and takes a few minutes) and
-creates the three hostnames. Check https://api.filescape.app/v1/health: `key_id` must match the
+Run it from `licensing/worker`. It builds the Rust code (`build.sh`; the first build takes a few
+minutes) and creates the three hostnames. Check https://api.filescape.app/v1/health: `key_id` must match the
 key ID keygen printed.
 
 ## 7. Paddle
