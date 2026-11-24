@@ -25,3 +25,4 @@ footer{margin-top:80px;border-top:1px solid var(--line);padding:28px 0 44px}
 footer .wrap{display:flex;flex-wrap:wrap;gap:14px 26px;font-size:13px;color:var(--text-3)}
 footer a{color:var(--text-3);text-decoration:none}footer a:hover{color:var(--text)}
 @media (max-width:480px){.bar{gap:16px}.bar .wide{display:none}}
+.js-list{opacity:.6;font-weight:400}

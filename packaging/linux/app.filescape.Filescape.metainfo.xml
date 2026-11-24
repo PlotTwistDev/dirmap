@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- What software centres (GNOME Software, KDE Discover) show for an installed .deb, .rpm or
+     AppImage. The version and date in <releases> are filled in by package.sh. -->
+<component type="desktop-application">
+  <id>app.filescape.Filescape</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <name>Filescape</name>
+  <summary>See what is taking up space on your drives</summary>
+  <description>
+    <p>
+      Filescape scans a drive or folder and draws everything on it as a map, where each file is a
+      tile sized by how much space it takes. Big files and folders stand out at once.
+    </p>
+    <p>
+      Filter the map by name, size, type or age, find duplicates, compare snapshots over time and
+      manage files in the built-in file manager, including on remote servers over SFTP and FTP.
+    </p>
+  </description>
+  <launchable type="desktop-id">filescape.desktop</launchable>
+  <icon type="stock">filescape</icon>
+  <url type="homepage">https://filescape.app/</url>
+  <url type="help">https://filescape.app/#download</url>
+  <developer id="app.filescape">
+    <name>Filescape</name>
+  </developer>
+  <categories>
+    <category>Utility</category>
+    <category>System</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>filescape</binary>
+  </provides>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

@@ -503,7 +503,7 @@ async fn releases<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, msg: Option<&str
          <label>Release date <span class=\"mute\">(date of the commit it was built from, YYYY-MM-DD; or exact Unix seconds from <span class=\"mono\">git log -1 --format=%ct v0.3.0</span>). Licences with updates until at least this date are told they're covered.</span><input name=\"released_at\" required value=\"{today}\" size=\"16\"></label>\
          <label>Summary <span class=\"mute\">(optional, one or two lines)</span><input name=\"summary\" maxlength=\"300\" value=\"{}\" style=\"width:100%\"></label>\
          <label>Release notes link <span class=\"mute\">(optional, https on filescape.app)</span><input name=\"notes_url\" value=\"{}\" style=\"width:100%\"></label>\
-         <details><summary>Download links <span class=\"mute\">(leave empty for downloads.filescape.app/latest/&lt;os&gt;)</span></summary>\
+         <details><summary>Download links <span class=\"mute\">(leave empty for downloads.filescape.app/latest/&lt;os&gt;, or the website's download section on Linux)</span></summary>\
          <label>Windows<input name=\"windows\" value=\"{}\" style=\"width:100%\"></label><label>macOS<input name=\"macos\" value=\"{}\" style=\"width:100%\"></label><label>Linux<input name=\"linux\" value=\"{}\" style=\"width:100%\"></label></details>\
          <div><button class=\"primary\">Announce</button></div></form>",
         v(|r| r.summary.as_deref()),

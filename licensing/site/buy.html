@@ -1,7 +1,7 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Buy Filescape Professional</title><meta name="description" content="Buy a perpetual Filescape Professional licence."><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"></head><body>
 <header><div class="wrap"><nav class="bar" aria-label="Main"><a class="brand" href="/">Filescape</a><a class="wide" href="/#features">Features</a><a href="/#pricing">Pricing</a><a class="wide" href="/#download">Download</a><a href="https://account.filescape.app/">Your licence</a></nav></div></header><main><div class="wrap">
-<section class="hero"><h1>Filescape Professional</h1><p>A perpetual licence for 3 of your computers at once, with every Professional feature and a year of updates. <span class="js-price">$5</span>, paid once.</p>
+<section class="hero"><h1>Filescape Professional</h1><p>A perpetual licence for 3 of your computers at once, with every Professional feature and a year of updates. <s class="js-list">$9.99</s> <span class="js-price">$4.99</span>, paid once<span class="js-launch"> (launch price)</span>.</p>
 <button class="btn" id="buy">Buy now</button>
 <p class="mute" style="margin-top:14px">Your serial number is emailed straight after payment. Checkout is handled by Paddle, our reseller, who also sends the receipt.</p>
 <p class="mute" id="err" hidden>The checkout couldn't open. Please try again, or email <a href="mailto:support@filescape.app">support@filescape.app</a>.</p></section>
@@ -9,6 +9,7 @@
 <p class="mute">Lost the email later? Get your serial again at <a href="https://account.filescape.app/">account.filescape.app</a>.</p></div>
 </div></main><footer><div class="wrap"><span>© 2026 Filescape</span><a href="https://account.filescape.app/">Your licence</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/refunds">Refunds</a><a href="mailto:support@filescape.app">support@filescape.app</a></div></footer><script src="/config.js"></script><script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script><script>
 const c=window.FILESCAPE;document.querySelectorAll('.js-price').forEach(e=>e.textContent=c.priceLabel);
+if(!c.listPriceLabel)document.querySelectorAll('.js-list,.js-launch').forEach(e=>e.remove());else document.querySelectorAll('.js-list').forEach(e=>e.textContent=c.listPriceLabel);
 try{if(c.paddleEnvironment==="sandbox")Paddle.Environment.set("sandbox");Paddle.Initialize({token:c.paddleClientToken});}catch(e){document.getElementById('err').hidden=false}
 document.getElementById('buy').onclick=()=>{try{Paddle.Checkout.open({items:[{priceId:c.priceId,quantity:1}],settings:{successUrl:c.successUrl}})}catch(e){document.getElementById('err').hidden=false}};
 if(location.hash==="#checkout")document.getElementById('buy').click();</script></body></html>

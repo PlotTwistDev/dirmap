@@ -98,9 +98,13 @@ key ID keygen printed.
 
 ## 7. Paddle
 
-The Filescape product and price are already on your live Paddle account
-(`pri_01m84qwgg1a8858drzqk2rvzpz`, set in `wrangler.toml` as `PADDLE_PRICE_IDS`). Paddle sends
-notifications for your other product too; the server ignores anything without this price.
+The Filescape product and its prices are already on your live Paddle account: standard $9.99
+(`pri_01m86kecyaqrsp7d702v4hc679`), launch $4.99 (`pri_01m86kf4h9r8tj5p6rtgez78v6`, the one the
+website sells now) and the old $5.00 (`pri_01m84qwgg1a8858drzqk2rvzpz`, to be archived). All three
+are in `wrangler.toml` as `PADDLE_PRICE_IDS`, so any of them issues a licence. Paddle sends
+notifications for your other product too; the server ignores anything without these prices.
+To end the launch price, change `licensing/site/config.js` (priceId, priceLabel, listPriceLabel)
+and redeploy the website (step 8).
 
 1. **Developer tools > Notifications > New destination**: URL `https://api.filescape.app/v1/paddle`,
    events `transaction.completed`, `adjustment.created`, `adjustment.updated`. Save, open it, copy
@@ -132,14 +136,37 @@ In the dashboard, **Workers & Pages > filescape-site > Custom domains**: add `fi
 ## 9. Downloads (R2)
 
 1. **R2 > Create bucket** `filescape-downloads`. **Settings > Custom domains**: `downloads.filescape.app`.
-2. Upload each release under the names the website's download buttons use (`latest/windows`,
-   `latest/macos`, `latest/linux`). `--cd` gives the downloaded file a proper name:
+2. Get the files from CI: a tag push (or **Actions > build > Run workflow** with a version) puts
+   them on a GitHub release; any run also keeps them as artifacts named `Filescape-windows`,
+   `Filescape-macos` and `Filescape-linux`. Linux has four files:
+
+   | File | For | R2 object |
+   |---|---|---|
+   | `Filescape-windows.zip` | Windows 10 and 11 | `latest/windows` |
+   | `Filescape-macos.dmg` | macOS 11 and later | `latest/macos` |
+   | `Filescape-linux.AppImage` | any Linux, no install (the main Linux button) | `latest/linux-appimage` |
+   | `Filescape-linux.deb` | Ubuntu, Debian, Mint, Pop!_OS | `latest/linux-deb` |
+   | `Filescape-linux.rpm` | Fedora, RHEL, openSUSE | `latest/linux-rpm` |
+   | `Filescape-linux.tar.gz` | any Linux, unpack and run | `latest/linux` |
+
+   All Linux builds need glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36 and newer).
+3. Upload each one under its object name, from the folder the files are in. `--cd` gives the
+   downloaded file its proper name:
    ```
    npx wrangler@4 r2 object put filescape-downloads/latest/windows --file Filescape-windows.zip --ct application/zip --cd "attachment; filename=Filescape-windows.zip" --remote
    npx wrangler@4 r2 object put filescape-downloads/latest/macos --file Filescape-macos.dmg --ct application/x-apple-diskimage --cd "attachment; filename=Filescape-macos.dmg" --remote
+   npx wrangler@4 r2 object put filescape-downloads/latest/linux-appimage --file Filescape-linux.AppImage --ct application/vnd.appimage --cd "attachment; filename=Filescape-linux.AppImage" --remote
+   npx wrangler@4 r2 object put filescape-downloads/latest/linux-deb --file Filescape-linux.deb --ct application/vnd.debian.binary-package --cd "attachment; filename=filescape_amd64.deb" --remote
+   npx wrangler@4 r2 object put filescape-downloads/latest/linux-rpm --file Filescape-linux.rpm --ct application/x-rpm --cd "attachment; filename=filescape.x86_64.rpm" --remote
    npx wrangler@4 r2 object put filescape-downloads/latest/linux --file Filescape-linux.tar.gz --ct application/gzip --cd "attachment; filename=Filescape-linux.tar.gz" --remote
    ```
-   Uploading again replaces the file. Attach the same files to a GitHub release as a mirror.
+   Uploading again replaces the file. The GitHub release keeps the same files as a mirror.
+4. Check each link downloads with the right name: `curl -sI https://downloads.filescape.app/latest/linux-deb`
+   shows the `content-disposition` line.
+
+To build the Linux packages yourself on Ubuntu (22.04 for the widest reach):
+`sudo apt install rpm`, `cargo build --release`, then
+`packaging/linux/package.sh target/release/filescape dist`.
 
 ## 10. App builds for sale
 
@@ -173,7 +200,8 @@ shows nothing.
 5. https://admin.filescape.app/releases: version `0.3.0`, release date (paste the number from
    step 4, or type the date), an optional one-line summary and release notes link (on
    filescape.app), then **Announce**. Download links can stay empty: they default to
-   `downloads.filescape.app/latest/<os>`.
+   `downloads.filescape.app/latest/windows` and `/latest/macos`, and on Linux to the website's
+   download section, where people pick the AppImage, .deb, .rpm or .tar.gz.
 6. Copies of Filescape show the notice the next time they start (answers are cached for up to 5
    minutes). A licence whose updates ended before the release date is told so, with a link to buy;
    free and evaluation users are told it's a free update.

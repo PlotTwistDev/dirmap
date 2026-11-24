@@ -50,7 +50,12 @@ pub struct Downloads {
 
 /// The website's download buttons use these (R2 bucket `filescape-downloads`).
 pub fn default_download(os: &str) -> String {
-    format!("https://downloads.filescape.app/latest/{os}")
+    match os {
+        // Linux has four downloads (AppImage, .deb, .rpm, .tar.gz): let people pick the one they
+        // installed from, on the website's download section.
+        "linux" => "https://filescape.app/#download".into(),
+        _ => format!("https://downloads.filescape.app/latest/{os}"),
+    }
 }
 
 /// Manifests signed longer than this before the build's own release date are ignored, so an old
@@ -276,7 +281,8 @@ mod tests {
     fn only_filescape_links_are_used() {
         let mut m = ReleaseManifest { version: "0.3.0".into(), released_at: NOW, signed_at: NOW, summary: None, notes_url: Some("javascript:alert(1)".into()), downloads: Downloads::default() };
         assert_eq!(m.notes(), None);
-        assert_eq!(m.download_for("linux"), "https://downloads.filescape.app/latest/linux");
+        assert_eq!(m.download_for("linux"), "https://filescape.app/#download");
+        assert_eq!(m.download_for("windows"), "https://downloads.filescape.app/latest/windows");
         m.notes_url = Some("https://filescape.app/whats-new".into());
         assert_eq!(m.notes(), Some("https://filescape.app/whats-new"));
         m.downloads.linux = Some("https://filescape.app/#download".into());
