@@ -88,6 +88,7 @@ impl Db for Sqlite {
 struct FakeNet {
     sent: RefCell<Vec<(String, String, Option<String>)>>,
     resend_fails: Cell<bool>,
+    lookup_fails: Cell<bool>,
     access_keys: RefCell<String>,
 }
 
@@ -98,6 +99,9 @@ impl Net for FakeNet {
             return Ok(if self.resend_fails.get() { (500, "down".into()) } else { (200, "{\"id\":\"m1\"}".into()) });
         }
         if url.contains("/customers/") {
+            if self.lookup_fails.get() {
+                return Ok((401, "expired key".into()));
+            }
             return Ok((200, r#"{"data":{"id":"ctm_1","name":"Ada Buyer","email":"Ada@Example.com"}}"#.into()));
         }
         if url.ends_with("/cdn-cgi/access/certs") {
@@ -523,4 +527,92 @@ fn health_and_unknown_routes() {
     assert_eq!(w.call("GET", "api.filescape.app", "/nope", &[], "").status, 404);
     assert_eq!(w.call("GET", "account.filescape.app", "/thanks", &[], "").status, 200);
     assert_eq!(rejection(&w.call("POST", "api.filescape.app", "/v1/activate", &[], "not json")), Rejection::BadSerial);
+}
+
+/// The signed status statement in an error reply, if any.
+fn status_of(w: &World, r: &Resp) -> Option<filescape_licence::model::StatusStatement> {
+    let v: serde_json::Value = serde_json::from_str(&r.body).ok()?;
+    let env: filescape_licence::sign::Envelope = serde_json::from_value(v.get("status")?.clone()).ok()?;
+    w.verifier().verify(&env, Purpose::Status).ok()
+}
+
+#[test]
+fn only_revoked_and_deactivated_come_with_a_signed_statement() {
+    let w = world();
+    let serial = w.temp_serial(30, 3);
+    ok(&w.activate(&serial, "m1", "act-m1-00001"));
+    ok(&w.activate(&serial, "m2", "act-m2-00001"));
+    let check = |id: &str, m: &str| w.api("/v1/validate", &serde_json::json!({ "activation_id": id, "device_hash": device_hash(m) }));
+    // Unknown activations and other devices get a bare error, which the app ignores.
+    assert!(status_of(&w, &check("act-nope-0001", "m1")).is_none());
+    assert!(status_of(&w, &check("act-m1-00001", "someone-else")).is_none());
+    // Deactivated: signed, for that activation and device.
+    w.api("/v1/deactivate", &serde_json::json!({ "activation_id": "act-m2-00001", "device_hash": device_hash("m2") }));
+    let st = status_of(&w, &check("act-m2-00001", "m2")).expect("signed");
+    assert_eq!((st.status, st.activation_id.as_str(), st.device_hash), (Rejection::Deactivated, "act-m2-00001", device_hash("m2")));
+    // Revoked: signed too.
+    let cx = w.cx();
+    let id = pollster::block_on(cx.licence_by_serial(&filescape_licence::serial::normalize(&serial).unwrap().1)).unwrap().unwrap().lic.id;
+    w.admin(&format!("/licence/{id}/revoke"), "reason=refund");
+    let st = status_of(&w, &check("act-m1-00001", "m1")).expect("signed");
+    assert_eq!((st.status, st.licence_id), (Rejection::Revoked, id));
+    // Expiry isn't a reason to take anything away: no statement.
+    w.now.set(T0 + 31 * DAY);
+    w.admin(&format!("/licence/{}/reinstate", st_licence(&w, &serial)), "reason=x");
+    assert!(status_of(&w, &check("act-m1-00001", "m1")).is_none());
+}
+
+fn st_licence(w: &World, serial: &str) -> String {
+    pollster::block_on(w.cx().licence_by_serial(&filescape_licence::serial::normalize(serial).unwrap().1)).unwrap().unwrap().lic.id
+}
+
+#[test]
+fn a_failed_buyer_lookup_still_issues_the_licence_and_a_retry_emails_it() {
+    let w = world();
+    w.net.lookup_fails.set(true);
+    let r = w.webhook(&purchase("txn_lookup", 1));
+    assert_eq!(r.status, 500, "Paddle should retry: {}", r.body);
+    let cx = w.cx();
+    let row = pollster::block_on(cx.licence_by_order("txn_lookup")).unwrap().expect("issued before the lookup");
+    assert!(row.lic.email.is_none() && row.emailed_at.is_none());
+    assert_eq!(pollster::block_on(cx.list("", filescape_licence_server::store::ListFilter::NotEmailed, 100)).unwrap().len(), 1);
+    // Paddle's retry: same licence, now with the buyer, emailed once.
+    w.net.lookup_fails.set(false);
+    let r = w.webhook(&purchase("txn_lookup", 1));
+    assert_eq!(r.status, 200, "{}", r.body);
+    let again = pollster::block_on(cx.licence_by_order("txn_lookup")).unwrap().unwrap();
+    assert_eq!(again.lic.id, row.lic.id);
+    assert_eq!(again.lic.email.as_deref(), Some("ada@example.com"));
+    assert_eq!(again.lic.owner.as_deref(), Some("Ada Buyer"));
+    assert!(again.emailed_at.is_some());
+    assert_eq!(w.net.emails().len(), 1);
+}
+
+#[test]
+fn approved_refunds_and_chargebacks_revoke_and_a_reversal_reinstates() {
+    let w = world();
+    let adj = |evt: &str, action: &str, status: &str, txn: &str, kind: &str| {
+        w.webhook(&serde_json::json!({ "event_id": evt, "event_type": "adjustment.updated",
+            "data": { "id": format!("adj_{evt}"), "action": action, "status": status, "type": kind, "transaction_id": txn } }))
+    };
+    let cx = w.cx();
+    let revoked = |txn: &str| pollster::block_on(cx.licence_by_order(txn)).unwrap().unwrap().lic.revoked_at.is_some();
+    w.webhook(&purchase("txn_r1", 1));
+    assert!(adj("e1", "refund", "pending_approval", "txn_r1", "full").body.contains("flagged"));
+    assert!(!revoked("txn_r1"));
+    assert!(adj("e2", "refund", "approved", "txn_r1", "partial").body.contains("flagged"));
+    assert!(!revoked("txn_r1"), "a partial refund only flags");
+    assert!(adj("e3", "refund", "approved", "txn_r1", "full").body.contains("revoked"));
+    assert!(revoked("txn_r1"));
+    // A chargeback, then its reversal.
+    w.webhook(&purchase("txn_r2", 1));
+    assert!(adj("e4", "chargeback_warning", "approved", "txn_r2", "full").body.contains("flagged"));
+    assert!(!revoked("txn_r2"));
+    adj("e5", "chargeback", "approved", "txn_r2", "full");
+    assert!(revoked("txn_r2"));
+    assert!(adj("e6", "chargeback_reverse", "approved", "txn_r2", "full").body.contains("reinstated"));
+    assert!(!revoked("txn_r2"));
+    // A reversal never undoes a revoke made for another reason.
+    adj("e7", "chargeback_reverse", "approved", "txn_r1", "full");
+    assert!(revoked("txn_r1"));
 }

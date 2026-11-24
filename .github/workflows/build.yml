@@ -42,6 +42,10 @@ jobs:
       - name: Test
         run: cargo test --release
 
+      - name: Test licensing in the app (with test mode, which release builds refuse)
+        if: runner.os == 'Linux'
+        run: cargo test --features licence-dev licence
+
       - name: Test licence core
         run: cargo test --release --manifest-path licensing/core/Cargo.toml
 
@@ -61,6 +65,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cargo build --release
+          # The build for sale must never contain the test-serial mode.
+          if grep -q FILESCAPE_LICENCE_DEV target/release/filescape; then echo "test mode in release build" >&2; exit 1; fi
           mkdir -p dist/filescape
           cp target/release/filescape README.md packaging/filescape.desktop packaging/filescape.png dist/filescape/
           tar -C dist -czf dist/filescape-${{ matrix.name }}.tar.gz filescape

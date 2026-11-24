@@ -39,9 +39,10 @@ ureq = { version = "3", default-features = false, features = ["rustls", "platfor
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs", "deflate64", "lzma", "xz", "bzip2", "ppmd"] }
 
 [features]
-default = ["licence-dev"]
-# Test-serial mode (FILESCAPE_LICENCE_DEV=1) until the licensing server is live. To be removed
-# from release builds before launch.
+default = []
+# Test-serial mode (FILESCAPE_LICENCE_DEV=1): an in-app licence server that issues serials, for
+# developers only. Never on by default and never in a release build; build.rs refuses a release
+# build with it unless FILESCAPE_ALLOW_LICENCE_DEV=1. Test with `cargo test --features licence-dev`.
 licence-dev = []
 
 [target."cfg(windows)".dependencies]

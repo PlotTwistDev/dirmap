@@ -22,6 +22,9 @@ pub enum Purpose {
     Issuance,
     /// The server's clock, for the app's clock checks.
     Time,
+    /// The server's authenticated word that an activation ended or its licence was revoked
+    /// ([`crate::model::StatusStatement`]). Unlocks nothing.
+    Status,
 }
 
 impl Purpose {
@@ -30,6 +33,7 @@ impl Purpose {
             Purpose::Activation => "activation",
             Purpose::Issuance => "issuance",
             Purpose::Time => "time",
+            Purpose::Status => "status",
         }
     }
 }

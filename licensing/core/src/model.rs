@@ -194,6 +194,19 @@ pub struct IssuanceCert {
     pub as_of: Ts,
 }
 
+/// Signed with [`crate::sign::Purpose::Status`]. The app removes or locks a licence only on one
+/// of these, never on an unsigned error reply, so a server fault, a database restored to the wrong
+/// point or a proxy's error page can't take anyone's licence away.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusStatement {
+    pub licence_id: String,
+    pub activation_id: String,
+    pub device_hash: String,
+    /// `Revoked` or `Deactivated`; the app ignores anything else.
+    pub status: Rejection,
+    pub signed_at: Ts,
+}
+
 /// What the app sends to activate (online, or saved as a file for offline activation).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActivationRequest {
@@ -204,7 +217,7 @@ pub struct ActivationRequest {
 }
 
 /// The offline request file: an [`ActivationRequest`] carried to any computer with internet
-/// access and uploaded at api.filescape.app/activate.
+/// access and uploaded at account.filescape.app/activate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OfflineRequest {
     pub format: String,

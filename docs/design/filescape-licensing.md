@@ -73,3 +73,23 @@ race on one serial and the admin tools. CI runs them on Windows, macOS and Linux
 - Website drafts in `licensing/site` (legal name and refund period to fill in). Setup steps:
   `licensing/SETUP.md`.
 - App: Deactivate This Computer now asks to confirm.
+
+## Phase 1b (launch fixes, 24 Nov 2026)
+
+From the audit in the shared doc "Filescape licensing audit and enterprise proposal".
+
+- Test mode (`licence-dev`) is no longer a default feature, and `build.rs` refuses a release build
+  with it (override with `FILESCAPE_ALLOW_LICENCE_DEV=1` for a local test build only). Run its
+  tests with `cargo test --features licence-dev`. It was removed from the public Help Centre;
+  usage: start a `--features licence-dev` build with `FILESCAPE_LICENCE_DEV=1`, then Settings >
+  Licensing > Test mode issues serials and moves the licence clock.
+- The production public key is in `src/licence/mod.rs` (`PRODUCTION_KEYS`, key ID
+  `204a936d1dae0b1d`). `FILESCAPE_LICENCE_PUBKEY` still adds a test Worker's key at build time.
+- `RELEASE_DATE` comes from build.rs: `SOURCE_DATE_EPOCH`, else the commit date.
+- The weekly check removes or locks a licence only on a server-signed `StatusStatement`
+  (purpose `status`); unsigned errors, including "not found", change nothing. A successful check
+  clears a licence from the local revoked list (an un-revoke now unlocks the app).
+- Paddle: licences are issued before the customer lookup, which fills in owner and email
+  afterwards. An approved full refund or chargeback revokes; pending, partial and chargeback
+  warnings only flag; an approved chargeback reversal reinstates what a chargeback revoked.
+- `ACCESS_AUD` is a Worker secret, not a `wrangler.toml` variable; `keep_vars = true`.

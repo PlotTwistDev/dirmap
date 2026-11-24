@@ -115,6 +115,11 @@ async fn customer<D: Db, N: Net>(cx: &Ctx<'_, D, N>, customer_id: &str) -> Resul
 }
 
 /// `Ok(Ok(outcome))`, or `Ok(Err(why))` to have Paddle retry.
+///
+/// The licences are issued first, before anything that can fail (the Paddle customer lookup, the
+/// email), so a paid order always has its licences. A failure after that returns 500: Paddle sends
+/// the notification again, which finds the same licences (keyed on the transaction) and retries
+/// the lookup and the email. If Paddle gives up, the licences sit in the admin's "Not emailed" list.
 async fn completed<D: Db, N: Net>(cx: &Ctx<'_, D, N>, data: &Value) -> Result<Result<String, String>, String> {
     let pc = cx.cfg.paddle.as_ref().unwrap();
     let txn = data["id"].as_str().unwrap_or_default();
@@ -128,51 +133,77 @@ async fn completed<D: Db, N: Net>(cx: &Ctx<'_, D, N>, data: &Value) -> Result<Re
     if n == 0 {
         return Ok(Ok(format!("ignored {txn}: not a Filescape purchase")));
     }
-    let (name, email) = match customer(cx, data["customer_id"].as_str().unwrap_or_default()).await {
-        Ok(c) => c,
-        Err(e) => return Ok(Err(e)),
-    };
     let mut issued = Vec::new();
-    let mut mail_errors = Vec::new();
     for i in 0..n {
         let order = if i == 0 { txn.to_string() } else { format!("{txn}#{}", i + 1) };
-        let (serial, row) = cx.issue_perpetual(name.clone(), email.clone(), &order, "paddle").await?;
-        if row.emailed_at.is_none()
-            && let Some(to) = &row.lic.email
-        {
-            match mail::send(cx, &mail::licence_message(&row, &serial, to)).await {
+        issued.push(cx.issue_perpetual(None, None, &order, "paddle").await?);
+    }
+    let ids: Vec<String> = issued.iter().map(|(_, r)| r.lic.id.clone()).collect();
+    if issued.iter().all(|(_, r)| r.emailed_at.is_some()) {
+        return Ok(Ok(format!("{txn}: issued {}", ids.join(", "))));
+    }
+    let (name, email) = match customer(cx, data["customer_id"].as_str().unwrap_or_default()).await {
+        Ok(c) => c,
+        Err(e) => return Ok(Err(format!("licence issued ({}) but the buyer lookup failed: {e}", ids.join(", ")))),
+    };
+    let mut mail_errors = Vec::new();
+    for (serial, row) in &issued {
+        if row.emailed_at.is_some() {
+            continue;
+        }
+        cx.fill_buyer(&row.lic.id, name.as_deref(), email.as_deref()).await?;
+        let row = cx.licence(&row.lic.id).await?.ok_or("licence vanished")?;
+        if let Some(to) = &row.lic.email {
+            match mail::send(cx, &mail::licence_message(&row, serial, to)).await {
                 Ok(true) => cx.mark_emailed(&row.lic.id, to, "paddle").await?,
                 Ok(false) => {}
                 Err(e) => mail_errors.push(e),
             }
         }
-        issued.push(row.lic.id);
     }
     if let Some(e) = mail_errors.first() {
         return Ok(Err(format!("licence issued but not emailed: {e}")));
     }
-    Ok(Ok(format!("{txn}: issued {}", issued.join(", "))))
+    Ok(Ok(format!("{txn}: issued {}", ids.join(", "))))
 }
 
+/// Refunds and chargebacks. A full refund or chargeback that Paddle has approved revokes the
+/// licences it paid for (the refunds page promises this); one still pending, a chargeback warning
+/// or a partial refund only flags them for the admin. A reversed chargeback reinstates licences
+/// that a chargeback revoked.
 async fn adjustment<D: Db, N: Net>(cx: &Ctx<'_, D, N>, data: &Value) -> Result<String, String> {
     let action = data["action"].as_str().unwrap_or_default();
     let status = data["status"].as_str().unwrap_or_default();
     let txn = data["transaction_id"].as_str().unwrap_or_default();
+    let adj = data["id"].as_str().unwrap_or_default();
     if txn.is_empty() || !matches!(action, "refund" | "chargeback" | "chargeback_warning" | "chargeback_reverse") {
         return Ok(format!("ignored adjustment {action}"));
     }
-    let flag = format!("{action} {status}").replace('_', " ");
-    let rows = cx.db.all("SELECT id FROM licences WHERE order_ref = ?1 OR order_ref LIKE ?2", vec![txn.into(), format!("{txn}#%").into()]).await?;
-    let mut stmts = Vec::new();
-    for r in &rows {
-        let id = crate::db::text(r, "id").unwrap_or_default();
-        stmts.push(("UPDATE licences SET refund_flag = ?1 WHERE id = ?2", vec![(&flag).into(), (&id).into()]));
-        stmts.push(event_stmt(&id, cx.now, "paddle", &format!("{flag} ({})", data["id"].as_str().unwrap_or_default()), "paddle"));
-    }
+    let full = data["type"].as_str().is_none_or(|t| t == "full");
+    let flag = format!("{action} {status}{}", if full { "" } else { " (partial)" }).replace('_', " ");
+    let rows = cx.db.all("SELECT id, revoke_reason FROM licences WHERE order_ref = ?1 OR order_ref LIKE ?2 ESCAPE '\\'", vec![txn.into(), format!("{}#%", txn.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")).into()]).await?;
     if rows.is_empty() {
         // A refund of another product sold through the same Paddle account.
         return Ok(format!("ignored {action} on {txn}: not a Filescape purchase"));
     }
+    let revoke = full && status == "approved" && matches!(action, "refund" | "chargeback");
+    let reinstate = status == "approved" && action == "chargeback_reverse";
+    let reason = format!("Paddle {} {adj}", action.replace('_', " "));
+    let mut stmts = Vec::new();
+    for r in &rows {
+        let id = crate::db::text(r, "id").unwrap_or_default();
+        stmts.push(("UPDATE licences SET refund_flag = ?1 WHERE id = ?2", vec![(&flag).into(), (&id).into()]));
+        stmts.push(event_stmt(&id, cx.now, "paddle", &format!("{flag} ({adj})"), "paddle"));
+        if revoke {
+            stmts.push(("UPDATE licences SET revoked_at = ?1, revoke_reason = ?2 WHERE id = ?3 AND revoked_at IS NULL", vec![cx.now.into(), (&reason).into(), (&id).into()]));
+            stmts.push(event_stmt(&id, cx.now, "revoked", &reason, "paddle"));
+        }
+        if reinstate && crate::db::text(r, "revoke_reason").is_some_and(|w| w.starts_with("Paddle chargeback")) {
+            stmts.push(("UPDATE licences SET revoked_at = NULL, revoke_reason = NULL WHERE id = ?1", vec![(&id).into()]));
+            stmts.push(event_stmt(&id, cx.now, "reinstated", &reason, "paddle"));
+        }
+    }
     cx.db.batch(stmts).await?;
-    Ok(format!("{txn}: flagged {} licence(s): {flag}", rows.len()))
+    let what = if revoke { "revoked" } else if reinstate { "reinstated" } else { "flagged" };
+    Ok(format!("{txn}: {what} {} licence(s): {flag}", rows.len()))
 }

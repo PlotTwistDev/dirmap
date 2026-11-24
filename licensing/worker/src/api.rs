@@ -28,6 +28,11 @@ fn answer<T: serde::Serialize>(r: Result<T, Fail>) -> Result<Resp, String> {
     match r {
         Ok(v) => Ok(Resp::json(200, &v)),
         Err(Fail::No(r)) => Ok(rejected(r)),
+        Err(Fail::Signed(r, env)) => {
+            let mut resp = rejected(r);
+            resp.body = serde_json::to_string(&serde_json::json!({ "error": r, "message": r.message(), "status": env })).unwrap();
+            Ok(resp)
+        }
         Err(Fail::Err(e)) => Err(e),
     }
 }

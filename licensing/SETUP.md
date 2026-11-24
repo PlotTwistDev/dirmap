@@ -28,7 +28,7 @@ It prints three values. Save all three in your password manager now:
 
 - `SIGNING_KEY`: signs every licence. A Worker secret.
 - `SERIAL_KEY`: encrypts stored serials so they can be emailed again. A Worker secret.
-- `FILESCAPE_LICENCE_PUBKEY`: the public half, built into the app (step 10). Not secret.
+- The public half. Not secret. The production one is built into the app (step 10).
 
 Run it once only. A new signing key means app builds with the old public key stop accepting new
 licences.
@@ -74,7 +74,8 @@ The admin site refuses everyone until this is set up.
 2. **Access > Applications > Add an application > Self-hosted**. Domain `admin.filescape.app`.
    Add a policy: Action **Allow**, Include **Emails**, your address. One-time PIN login is fine.
 3. Open the application's **Overview** and copy the **Application Audience (AUD) Tag**.
-4. In `wrangler.toml`, set `ACCESS_TEAM_DOMAIN` to the team domain and `ACCESS_AUD` to the tag.
+4. In `wrangler.toml`, set `ACCESS_TEAM_DOMAIN` to the team domain. Store the tag with
+   `wrangler secret put ACCESS_AUD` (run in `licensing/worker`), so later deploys never blank it.
 
 ## 5. Email (Resend) and support mail
 
@@ -142,15 +143,18 @@ In the dashboard, **Workers & Pages > filescape-site > Custom domains**: add `fi
 
 ## 10. App builds for sale
 
-Build with the public key from step 1, and without test mode:
+A plain release build is the build for sale:
 
 ```
-set FILESCAPE_LICENCE_PUBKEY=<public key>          (Windows; export … on macOS)
-cargo build --release --no-default-features
+cargo build --release
 ```
 
-`--no-default-features` removes the test-serial mode (`FILESCAPE_LICENCE_DEV`). Phase 4 makes
-that the default.
+The production public key (key ID `204a936d1dae0b1d`) is built into the app
+(`src/licence/mod.rs`, `PRODUCTION_KEYS`), and test mode is off unless asked for with
+`--features licence-dev`, which a release build refuses. The release date that update entitlement
+is checked against comes from the commit being built (or `SOURCE_DATE_EPOCH`), so there's nothing
+to edit at release time. If you ever make a new signing key, add its public half to
+`PRODUCTION_KEYS` and ship that build *before* switching the Worker to the new key.
 
 ## 11. Try a real purchase
 
@@ -178,7 +182,7 @@ npx wrangler@4 dev
 
 With `DEV=1` the admin site is at http://localhost:8787/admin/ and the customer pages at
 http://localhost:8787/account/. Run the app against it with
-`FILESCAPE_LICENCE_SERVER=http://localhost:8787` and `FILESCAPE_LICENCE_PUBKEY` set to the
+`FILESCAPE_LICENCE_SERVER=http://localhost:8787`, built with `FILESCAPE_LICENCE_PUBKEY` set to the
 `public_key` shown at http://localhost:8787/v1/health.
 
 Tests: `cargo test --manifest-path licensing/worker/Cargo.toml` (runs against SQLite, the engine

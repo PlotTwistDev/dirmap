@@ -15,6 +15,8 @@ use filescape_licence::{Ts, serial};
 #[derive(Debug)]
 pub enum Fail {
     No(Rejection),
+    /// A rejection the app acts on (revoked, deactivated), with the signed statement it needs to.
+    Signed(Rejection, filescape_licence::sign::Envelope),
     Err(String),
 }
 
@@ -253,6 +255,17 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
         Ok((serial, row))
     }
 
+    /// Fill in the buyer's name and email where the licence has none yet (a paid licence is issued
+    /// before the Paddle customer lookup).
+    pub async fn fill_buyer(&self, licence_id: &str, owner: Option<&str>, email: Option<&str>) -> Result<(), String> {
+        let o = owner.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        let e = email.map(|e| e.trim().to_lowercase()).filter(|s| !s.is_empty());
+        self.db
+            .run("UPDATE licences SET owner = coalesce(owner, ?1), email = coalesce(email, ?2) WHERE id = ?3", vec![o.into(), e.into(), licence_id.into()])
+            .await
+            .map(|_| ())
+    }
+
     pub fn serial_of(&self, row: &LicenceRow) -> Option<String> {
         row.serial_enc.as_deref().and_then(|s| secret::open(&self.cfg.serial_key, s))
     }
@@ -335,7 +348,13 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
     pub async fn validate(&self, activation_id: &str, device_hash: &str) -> Result<ActivationResponse, Fail> {
         let a = self.activation(activation_id).await?.ok_or(Rejection::NotFound)?.a;
         let lic = self.licence(&a.licence_id).await?.ok_or(Rejection::NotFound)?.lic;
-        rules::check_validate(&lic, &a, device_hash, self.now)?;
+        if let Err(why) = rules::check_validate(&lic, &a, device_hash, self.now) {
+            // Only for the device that owns the activation: anyone else gets the bare rejection.
+            return Err(match rules::status_statement(&self.cfg.signer, &lic, &a, why, self.now) {
+                Some(env) if a.device_hash == device_hash => Fail::Signed(why, env),
+                _ => Fail::No(why),
+            });
+        }
         self.db.run("UPDATE activations SET last_seen_at = ?1 WHERE activation_id = ?2", vec![self.now.into(), activation_id.into()]).await?;
         Ok(self.respond(&lic, &a, false))
     }

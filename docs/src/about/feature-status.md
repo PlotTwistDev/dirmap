@@ -40,7 +40,7 @@ version.
 | Sunburst navigation | No Back/Forward history (the treemap and the file manager have it). |
 | File manager | Copy and Cut work only inside Filescape (the paths go to the clipboard as text), and files can't be dragged to or from other apps. Changes made by other apps show after a Refresh. Real Finder icons on macOS aren't used yet (drawn icons instead). |
 | Size accuracy | File sizes only. Hard links are counted once per name; compressed, sparse and cloud-only files show their full size. See [How sizes are calculated](../disk-usage/sizes.md). |
-| Licensing | Filescape's licence server and shop aren't open yet, so serials can't be bought or activated online. Test mode (`FILESCAPE_LICENCE_DEV=1`) issues serials for trying it out. The app is still called Filescape. |
+| Licensing | Filescape Professional is sold at filescape.app; serials activate online or with offline request files. Licences for organisations (seat pools, deployment) are planned. |
 | Administrator mode | A restart button on Windows only; on Linux use `sudo`, on macOS Full Disk Access. |
 
 ## Not available

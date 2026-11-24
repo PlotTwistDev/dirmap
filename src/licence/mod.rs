@@ -16,7 +16,7 @@
 pub mod ui;
 
 use filescape_licence as core;
-use core::model::{ActivationCert, ActivationRequest, ActivationResponse, IssuanceCert, OFFLINE_REQUEST_FORMAT, OfflineRequest, Rejection};
+use core::model::{ActivationCert, ActivationRequest, ActivationResponse, IssuanceCert, OFFLINE_REQUEST_FORMAT, OfflineRequest, Rejection, StatusStatement};
 use core::sign::{Envelope, Purpose, Verifier};
 use core::standing::{Context, LocalState, Standing};
 use core::{DAY, Ts};
@@ -29,18 +29,39 @@ use std::time::{Duration, Instant};
 /// The licensing server. `FILESCAPE_LICENCE_SERVER` overrides it (for a test Worker).
 pub const SERVER: &str = "https://api.filescape.app";
 pub const PURCHASE_URL: &str = "https://filescape.app/buy";
-/// Release date of this build, for perpetual update entitlement. Set at each release.
-pub const RELEASE_DATE: Ts = 1_795_392_000; // 23 Nov 2026
+/// Release date of this build, for perpetual update entitlement. build.rs takes it from the commit
+/// being built (or `SOURCE_DATE_EPOCH`), so it can't be left stale at release time.
+pub const RELEASE_DATE: Ts = parse_ts(env!("FILESCAPE_RELEASE_DATE"));
+
+const fn parse_ts(s: &str) -> Ts {
+    let b = s.as_bytes();
+    let mut i = 0;
+    let mut n: Ts = 0;
+    while i < b.len() {
+        assert!(b[i].is_ascii_digit(), "FILESCAPE_RELEASE_DATE must be Unix seconds");
+        n = n * 10 + (b[i] - b'0') as Ts;
+        i += 1;
+    }
+    n
+}
 const KEYCHAIN: &str = "filescape-licence";
 /// How often to re-check the standing while running (also on regaining focus).
 const RECHECK: Duration = Duration::from_secs(60);
 /// The weekly online check, when the machine is online. A failed check never locks anything.
 const REVALIDATE_EVERY: Ts = 7 * DAY;
 
-/// Public keys of the licensing server. Empty until the production key is made (phase 3);
-/// `FILESCAPE_LICENCE_PUBKEY` (base64url) adds one at build time.
+/// Public keys of the production licensing server (base64url Ed25519), newest last. Not secret: they
+/// only check signatures. To rotate, add the new key here and ship that build before the Worker
+/// switches to it; keep the old one so existing certificates stay valid.
+pub const PRODUCTION_KEYS: &[&str] = &[
+    // key ID 204a936d1dae0b1d, made 23 Nov 2026 (api.filescape.app/v1/health)
+    "ZEzWQGLrJ_Myeeihfp1vDd3PW-GD4m6zaJMMI5jOKiw",
+];
+
+/// The production keys, plus one more from `FILESCAPE_LICENCE_PUBKEY` (base64url) at build time,
+/// for a build that talks to a test Worker.
 fn trusted_keys() -> Vec<Vec<u8>> {
-    let mut keys = Vec::new();
+    let mut keys: Vec<Vec<u8>> = PRODUCTION_KEYS.iter().filter_map(|k| data_encoding::BASE64URL_NOPAD.decode(k.as_bytes()).ok()).collect();
     if let Some(k) = option_env!("FILESCAPE_LICENCE_PUBKEY")
         && let Ok(k) = data_encoding::BASE64URL_NOPAD.decode(k.trim().as_bytes())
     {
@@ -77,7 +98,9 @@ enum Server {
 
 enum Answer {
     Activated(Result<ActivationResponse, String>),
-    Validated(Vec<(String, Result<ActivationResponse, Rejection>)>),
+    /// Per activation: a fresh certificate, or the server's signed statement that it ended or was
+    /// revoked. Unsigned errors (offline, server faults, "not found") aren't passed on at all.
+    Validated(Vec<(String, Result<ActivationResponse, Envelope>)>),
     Deactivated(String, Result<(), String>),
 }
 
@@ -325,7 +348,7 @@ impl Licensing {
         Ok(serde_json::to_string_pretty(&OfflineRequest { format: OFFLINE_REQUEST_FORMAT.into(), request: req }).unwrap())
     }
 
-    /// Offline activation, step 2: the response file from api.filescape.app/activate.
+    /// Offline activation, step 2: the response file from account.filescape.app/activate.
     pub fn offline_response(&mut self, text: &str) {
         let a = serde_json::from_str::<ActivationResponse>(text).map_err(|_| "That isn't a Filescape activation response file.".to_string());
         self.answer(Answer::Activated(a));
@@ -367,15 +390,27 @@ impl Licensing {
                         Ok(r) => {
                             if let Ok(c) = self.stored.state.store(&self.verifier, r.activation) {
                                 self.stored.state.trusted_time(c.signed_at);
+                                // Valid again (an admin undid a revoke): unlock it.
+                                self.stored.state.revoked.retain(|l| *l != c.licence_id);
                             }
                         }
-                        Err(Rejection::Revoked) => {
-                            if let Some(c) = self.stored.state.certs.iter().filter_map(|e| self.cert(e)).find(|c| c.activation_id == activation_id) {
-                                self.stored.state.revoked.push(c.licence_id);
+                        Err(env) => {
+                            // Only a statement signed by the licence server, about this activation
+                            // on this computer, takes a licence away.
+                            let Ok(st) = self.verifier.verify::<StatusStatement>(&env, Purpose::Status) else { continue };
+                            if st.activation_id != activation_id || st.device_hash != self.device {
+                                continue;
+                            }
+                            match st.status {
+                                Rejection::Revoked => {
+                                    if !self.stored.state.revoked.contains(&st.licence_id) {
+                                        self.stored.state.revoked.push(st.licence_id);
+                                    }
+                                }
+                                Rejection::Deactivated => self.stored.state.forget(&self.verifier, &activation_id),
+                                _ => {}
                             }
                         }
-                        Err(Rejection::Deactivated | Rejection::NotFound) => self.stored.state.forget(&self.verifier, &activation_id),
-                        Err(_) => {}
                     }
                 }
                 self.stored.last_validated = self.now();
@@ -399,7 +434,7 @@ impl Licensing {
         match &mut self.server {
             #[cfg(feature = "licence-dev")]
             Server::Test(t) => {
-                let r = ids.into_iter().map(|id| (id.clone(), t.validate(&id, &device, now))).collect();
+                let r = ids.into_iter().filter_map(|id| t.validate(&id, &device, now).map(|r| (id, r))).collect();
                 self.answer(Answer::Validated(r));
             }
             Server::Online(base) => {
@@ -409,14 +444,12 @@ impl Licensing {
                     let mut out = Vec::new();
                     for id in ids {
                         let body = serde_json::json!({ "activation_id": id, "device_hash": device });
-                        match post::<_, ActivationResponse>(&url, &body) {
+                        match post_full::<_, ActivationResponse>(&url, &body) {
                             Ok(r) => out.push((id, Ok(r))),
-                            Err(e) => {
-                                // Offline or the server is down: try again next week.
-                                if let Some(r) = rejection_of(&e) {
-                                    out.push((id, Err(r)));
-                                }
-                            }
+                            Err(PostError { status: Some(env), .. }) => out.push((id, Err(env))),
+                            // Offline, the server is down, or an unsigned error: change nothing,
+                            // try again next week.
+                            Err(_) => {}
                         }
                     }
                     let _ = tx.send(Answer::Validated(out));
@@ -461,23 +494,18 @@ fn new_activation_id() -> String {
     format!("act_{}", data_encoding::HEXLOWER.encode(&b))
 }
 
-/// The server's error replies are `{"error": "<rejection>"}`; the message is shown as is.
-fn rejection_of(message: &str) -> Option<Rejection> {
-    [
-        Rejection::BadSerial,
-        Rejection::UnknownSerial,
-        Rejection::Revoked,
-        Rejection::Expired,
-        Rejection::ActivationLimitReached,
-        Rejection::ActivationIdConflict,
-        Rejection::Deactivated,
-        Rejection::NotFound,
-    ]
-    .into_iter()
-    .find(|r| r.message() == message)
+fn post<B: Serialize, R: serde::de::DeserializeOwned>(url: &str, body: &B) -> Result<R, String> {
+    post_full(url, body).map_err(|e| e.message)
 }
 
-fn post<B: Serialize, R: serde::de::DeserializeOwned>(url: &str, body: &B) -> Result<R, String> {
+struct PostError {
+    message: String,
+    /// The signed status statement the server sends with a revoked or deactivated reply.
+    status: Option<Envelope>,
+}
+
+fn post_full<B: Serialize, R: serde::de::DeserializeOwned>(url: &str, body: &B) -> Result<R, PostError> {
+    let fail = |message: String| PostError { message, status: None };
     let tls = ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build();
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
@@ -489,16 +517,21 @@ fn post<B: Serialize, R: serde::de::DeserializeOwned>(url: &str, body: &B) -> Re
         .post(url)
         .header("Content-Type", "application/json")
         .send(serde_json::to_string(body).unwrap())
-        .map_err(|_| "Couldn't reach the Filescape licence server. Check the connection, or use offline activation below.".to_string())?;
-    let text = resp.body_mut().read_to_string().map_err(|e| e.to_string())?;
+        .map_err(|_| fail("Couldn't reach the Filescape licence server. Check the connection, or use offline activation below.".to_string()))?;
+    let text = resp.body_mut().read_to_string().map_err(|e| fail(e.to_string()))?;
     if resp.status().is_success() {
-        serde_json::from_str(&text).map_err(|_| "The licence server's answer couldn't be read.".to_string())
+        serde_json::from_str(&text).map_err(|_| fail("The licence server's answer couldn't be read.".to_string()))
     } else {
         #[derive(Deserialize)]
         struct E {
             error: Rejection,
+            #[serde(default)]
+            status: Option<Envelope>,
         }
-        Err(serde_json::from_str::<E>(&text).map(|e| e.error.message().to_string()).unwrap_or_else(|_| format!("The licence server said no ({}).", resp.status())))
+        Err(match serde_json::from_str::<E>(&text) {
+            Ok(e) => PostError { message: e.error.message().to_string(), status: e.status },
+            Err(_) => fail(format!("The licence server said no ({}).", resp.status())),
+        })
     }
 }
 
@@ -555,7 +588,7 @@ mod device_id {
 #[cfg(feature = "licence-dev")]
 pub mod dev {
     use filescape_licence as core;
-    use core::model::{ActivationRequest, ActivationResponse, Rejection};
+    use core::model::{ActivationRequest, ActivationResponse};
     use core::rules::{MemoryLedger, TemporaryOptions};
     use core::sign::Signer;
     use core::Ts;
@@ -610,8 +643,12 @@ pub mod dev {
             r
         }
 
-        pub fn validate(&mut self, id: &str, device: &str, now: Ts) -> Result<ActivationResponse, Rejection> {
-            self.ledger.validate(id, device, now)
+        /// `None` where the real server would send only an unsigned error.
+        pub fn validate(&mut self, id: &str, device: &str, now: Ts) -> Option<Result<ActivationResponse, core::sign::Envelope>> {
+            match self.ledger.validate(id, device, now) {
+                Ok(r) => Some(Ok(r)),
+                Err(why) => self.ledger.status(id, why, now).map(Err),
+            }
         }
 
         pub fn deactivate(&mut self, id: &str, device: &str, now: Ts) -> Result<(), String> {
@@ -643,6 +680,22 @@ pub mod dev {
             core::model::Validity::FixedExpiry { expires_at } => format!("until {}", core::export::date_time(*expires_at)),
             core::model::Validity::Perpetual { .. } => "perpetual".into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod build_tests {
+    use super::*;
+
+    #[test]
+    fn the_production_key_is_built_in() {
+        let keys = trusted_keys();
+        assert!(keys.iter().any(|k| core::sign::key_id(k) == "204a936d1dae0b1d"), "production key missing");
+    }
+
+    #[test]
+    fn the_release_date_comes_from_the_build() {
+        assert!(RELEASE_DATE >= 1_795_392_000, "older than the first release: {RELEASE_DATE}");
     }
 }
 
@@ -727,6 +780,32 @@ mod tests {
         assert!(l.begin(Feature::BatchRename).is_none());
         assert_eq!(l.ui.prompt, Some(Feature::BatchRename));
         assert!(l.begin(Feature::FileBrowser).is_some() && l.begin(Feature::DiskMap).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_a_signed_statement_takes_a_licence_away_and_reinstating_unlocks() {
+        let dir = temp_dir("signed");
+        let mut l = open(&dir);
+        let now = l.now();
+        test_server(&mut l).issue_perpetual(now);
+        let serial = test_server(&mut l).issued[0].0.clone();
+        l.activate(&serial);
+        let Standing::Perpetual(cert) = l.standing.clone() else { panic!("{:?}", l.standing) };
+        // An unsigned or forged answer changes nothing.
+        l.answer(Answer::Validated(vec![(cert.activation_id.clone(), Err(Envelope { format: "x".into(), purpose: "status".into(), key_id: "x".into(), payload: String::new(), signature: String::new() }))]));
+        assert!(matches!(l.standing, Standing::Perpetual(_)));
+        // Past the 15-day evaluation, so only the licence counts.
+        test_server(&mut l).offset_days = 20;
+        let now = l.now();
+        // The server revokes it: the signed statement locks it.
+        test_server(&mut l).ledger.revoke(&cert.licence_id, "refund", now).unwrap();
+        l.revalidate();
+        assert!(matches!(l.standing, Standing::Restricted(Reason::Revoked)), "{:?}", l.standing);
+        // Reinstated by mistake-fix: the next check unlocks it without typing the serial again.
+        test_server(&mut l).ledger.unrevoke(&cert.licence_id, "mistake", now).unwrap();
+        l.revalidate();
+        assert!(matches!(l.standing, Standing::Perpetual(_)), "{:?}", l.standing);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

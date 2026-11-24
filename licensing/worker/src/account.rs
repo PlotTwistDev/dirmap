@@ -94,7 +94,7 @@ async fn offline<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, req: &Req) -> Re
             out.headers.push(("content-disposition".into(), "attachment; filename=\"filescape-activation-response.json\"".into()));
             Ok(out)
         }
-        Err(Fail::No(why)) => Ok(offline_page(base, Some(why.message()))),
+        Err(Fail::No(why) | Fail::Signed(why, _)) => Ok(offline_page(base, Some(why.message()))),
         Err(Fail::Err(e)) => Err(e),
     }
 }

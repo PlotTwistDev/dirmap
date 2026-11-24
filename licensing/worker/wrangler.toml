@@ -2,6 +2,8 @@
 name = "filescape-licence"
 main = "build/index.js"
 compatibility_date = "2025-09-01"
+# Keep variables set in the Cloudflare dashboard that aren't in this file (ACCESS_AUD, below).
+keep_vars = true
 
 # One Worker, three hostnames (Cloudflare creates the DNS records and certificates).
 # Must sit above the [[d1_databases]] table, or TOML reads it as part of that table.
@@ -31,7 +33,9 @@ MAIL_REPLY_TO = "support@filescape.app"
 # Cloudflare Access: your team domain (e.g. filescape.cloudflareaccess.com) and the admin
 # application's Audience (AUD) tag. Until both are set the admin site refuses everyone.
 ACCESS_TEAM_DOMAIN = "late-river-d752.cloudflareaccess.com"
-ACCESS_AUD = ""
+# ACCESS_AUD is deliberately not listed here: `wrangler deploy` replaces the Worker's variables
+# with this file's, so an empty value here blanked the dashboard's on every deploy. Set it once
+# with `wrangler secret put ACCESS_AUD` (secrets survive deploys; the Worker reads either).
 
 # Secrets (wrangler secret put NAME), never in this file:
 #   SIGNING_KEY, SERIAL_KEY            from `cargo run --example keygen`

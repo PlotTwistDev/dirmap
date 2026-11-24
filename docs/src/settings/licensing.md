@@ -94,14 +94,6 @@ A computer kept offline for good can't be checked, so a determined person could 
 licence going there by changing the clock and Filescape's files together. The weekly check catches
 this as soon as the computer goes online.
 
-## Test mode
-
-Builds made for testing can run against a licence server built into the app. Start Filescape with
-the environment variable `FILESCAPE_LICENCE_DEV=1` and the Licensing tab gets a **Test mode**
-section: issue temporary or perpetual serials, then use them as a customer would. **Licence
-clock** moves the licence's time forward so you can see a licence expire without waiting. Test
-serials work only on the computer that issued them, and release builds don't have test mode.
-
 ## Related topics
 
 - [Settings reference](reference.md)

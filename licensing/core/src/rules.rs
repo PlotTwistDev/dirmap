@@ -339,6 +339,15 @@ impl MemoryLedger {
         Ok(ActivationResponse { activation, issuance, status: lic.status(now), consumed_use: false })
     }
 
+    /// The signed statement to go with a validation that failed with `why` (see
+    /// [`status_statement`]).
+    pub fn status(&self, activation_id: &str, why: Rejection, now: Ts) -> Option<crate::sign::Envelope> {
+        let st = self.state.lock().unwrap();
+        let a = st.activations.iter().find(|a| a.activation_id == activation_id)?;
+        let lic = st.licences.get(&a.licence_id)?;
+        status_statement(&self.signer, lic, a, why, now)
+    }
+
     /// POST /v1/deactivate: ends this device's activation. The use is not given back.
     pub fn deactivate(&self, activation_id: &str, device_hash: &str, now: Ts) -> Result<(), Rejection> {
         let mut st = self.state.lock().unwrap();
@@ -363,6 +372,17 @@ impl MemoryLedger {
             lic.revoked_at = Some(now);
             lic.revoke_reason = Some(reason.into());
             event(lic, now, "revoked", reason);
+        }
+        Ok(())
+    }
+
+    /// Admin: undo a revoke (a mistake). Existing activations work again at their next check.
+    pub fn unrevoke(&self, licence_id: &str, reason: &str, now: Ts) -> Result<(), Rejection> {
+        let mut st = self.state.lock().unwrap();
+        let lic = st.licences.get_mut(licence_id).ok_or(Rejection::NotFound)?;
+        if lic.revoked_at.take().is_some() {
+            lic.revoke_reason = None;
+            event(lic, now, "reinstated", reason);
         }
         Ok(())
     }
@@ -536,6 +556,17 @@ pub fn certificates(signer: &Signer, lic: &Licence, a: &Activation, now: Ts) -> 
         signed_at: now,
     };
     (signer.sign(Purpose::Activation, &act), signer.sign(Purpose::Issuance, &issuance(lic, now)))
+}
+
+/// A signed statement that this activation can no longer be used, for the rejections the app acts
+/// on (revoked, deactivated). Other rejections get none: the app ignores them.
+pub fn status_statement(signer: &Signer, lic: &Licence, a: &Activation, why: Rejection, now: Ts) -> Option<crate::sign::Envelope> {
+    matches!(why, Rejection::Revoked | Rejection::Deactivated).then(|| {
+        signer.sign(
+            Purpose::Status,
+            &StatusStatement { licence_id: lic.id.clone(), activation_id: a.activation_id.clone(), device_hash: a.device_hash.clone(), status: why, signed_at: now },
+        )
+    })
 }
 
 /// The start of the window the Activations page looks at.
