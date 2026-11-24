@@ -51,7 +51,7 @@ pub fn feature_name(f: Feature) -> &'static str {
     match f {
         Feature::FileBrowser => "The file browser",
         Feature::DiskMap => "The disk map",
-        Feature::BasicFilters => "Basic filtering",
+        Feature::Filters => "Filtering by type or size",
         Feature::CustomFilter => "The Custom filter",
         Feature::SequenceFilter => "Finding numbered sequences",
         Feature::Remote => "Connecting to servers",

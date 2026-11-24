@@ -1,18 +1,21 @@
 # Licensing
 
-Filescape is being released as **Filescape**. The file browser, the disk map and basic filtering are
-free for good. The rest is **Filescape Professional**, unlocked by a licence. Open
+Filescape is being released as **Filescape**. Browsing your files and the disk map are free for
+good: you can look around and navigate by hand. The rest is **Filescape Professional**, unlocked by a licence. Open
 **⚙ Settings > Licensing**, or **Help > Licence**, to see your licence or enter one.
 
 ## Free and Professional features
 
 | Free | Filescape Professional |
 |---|---|
-| The Files workspace: browsing, tabs, the address bar, the preview, opening files, copy, move, rename, delete and New | The **Custom** filter, filter presets and recent filters |
-| Scanning, the treemap, the sunburst, the directory tree and the File types list | Finding numbered sequences, and the sequence player |
-| The **Show:** category buttons, size limits, Highlight and Show matches only | The Remote workspace: connecting to servers and starting transfers |
-| Scan exclusions | Batch rename, Compare Folders and the duplicate finder |
+| The Files workspace: browsing, tabs, the address bar, the filter box, the preview, opening files, copy, move, rename, delete and New | Filtering by type or size: the **Show:** buttons and the Files **Show** menu, **Larger than** and **Smaller than**, picking a range on the size chart, and highlighting a file type on the map |
+| Scanning, the treemap, the sunburst, the directory tree and the File types list | The **Custom** filter, filter presets and recent filters |
+| Scan exclusions | Finding numbered sequences, and the sequence player |
+| | The Remote workspace: connecting to servers and starting transfers |
+| | Batch rename, Compare Folders and the duplicate finder |
 | | Browsing and extracting archives, saved searches and snapshots |
+
+Without a licence, a filter that's already on can still be turned off or cleared.
 
 Professional features are checked only when you **start** something. Work that's already running,
 such as a copy, a transfer, a batch rename or an extraction, always finishes, even if a licence

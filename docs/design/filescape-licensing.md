@@ -10,8 +10,9 @@ server. Everything here is new.
 ## Decisions (Rich, 23 Nov 2026)
 
 - Product name **Filescape**, at filescape.app. The app itself is not renamed yet.
-- Free: the file browser, the disk map and basic filtering (category buttons, size limits,
-  Highlight / Show matches only, scan exclusions). Everything else is premium
+- Free: the file browser and the disk map, plus scan exclusions. Filtering by type or size
+  (Show buttons, the Files Show menu, size limits, the size chart, type highlight) became
+  premium on 24 Nov: the free app is a viewer you navigate by hand. Everything else is premium
   (`licensing/core/src/features.rs` is the one table).
 - Temporary licences: 30 days by default, or any admin-set length or fixed date; 3 activations
   ever; non-renewable.

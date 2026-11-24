@@ -1,5 +1,6 @@
-//! What is free and what needs a licence (Rich, 23 Nov 2026: the file browser, the disk map and
-//! basic filtering are free; everything else is premium).
+//! What is free and what needs a licence (Rich, 23 Nov 2026: the file browser and the disk map are
+//! free; 24 Nov: filtering by type or size is premium too, so the free app is a viewer you navigate
+//! by hand; everything else is premium). Scan exclusions are a scan setting and never checked.
 //!
 //! Checks happen only when an operation starts: [`begin`] hands out a [`Permit`], which has no
 //! expiry and is never checked again. Work already queued or running (transfers, moves, renames,
@@ -14,9 +15,10 @@ pub enum Feature {
     FileBrowser,
     /// Scanning, treemap, sunburst, directory tree, file types, sizes.
     DiskMap,
-    /// Show category buttons, size limits, Highlight or Show matches only, scan exclusions.
-    BasicFilters,
     // Premium
+    /// Filtering by type or size: the Show buttons and the Files Show menu, Larger than and
+    /// Smaller than, picking a range on the size chart, and highlighting a file type on the map.
+    Filters,
     /// Custom pattern filter (Ctrl+F), filter presets and recent filters.
     CustomFilter,
     /// The frame-number (sequence) filter.
@@ -38,7 +40,7 @@ impl Feature {
     pub const ALL: [Feature; 14] = [
         Feature::FileBrowser,
         Feature::DiskMap,
-        Feature::BasicFilters,
+        Feature::Filters,
         Feature::CustomFilter,
         Feature::SequenceFilter,
         Feature::Remote,
@@ -54,7 +56,7 @@ impl Feature {
 
     /// The one table of free features.
     pub fn is_free(self) -> bool {
-        matches!(self, Feature::FileBrowser | Feature::DiskMap | Feature::BasicFilters)
+        matches!(self, Feature::FileBrowser | Feature::DiskMap)
     }
 }
 

@@ -4,6 +4,8 @@ The **Show:** buttons in the filter bar limit the map to kinds of files. Click o
 click more to add other kinds (a file of **any** chosen kind is shown); click **All** to turn them
 all off. Hover over a button to see a summary of what it covers.
 
+The **Show:** buttons are part of Filescape Professional (see [Licensing](../settings/licensing.md#free-and-professional-features)).
+
 A file's category comes from its extension, ignoring case. The complete lists are:
 
 | Category | Extensions |

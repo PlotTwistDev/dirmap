@@ -16,7 +16,7 @@ system ID; nothing about your files is sent. The help is built in. See
 
 ## What stops working when a licence or the evaluation ends?
 
-Only starting Professional features. The file browser, the disk map and basic filtering stay free,
+Only starting Professional features. The file browser and the disk map stay free,
 anything already running finishes, and your files, settings and saved data are kept. See
 [Licensing](../settings/licensing.md#free-and-professional-features).
 

@@ -702,7 +702,7 @@ impl App {
             }
             ui.painter().rect_filled(Rect::from_center_size(pos2(r.left() + 10.0, r.center().y), vec2(9.0, 9.0)), 2.0, color);
             ui.painter().text(pos2(r.left() + 20.0, r.center().y), Align2::LEFT_CENTER, text, font, if on { pal.strong } else { pal.text });
-            if resp.on_hover_text(if on { "Click to stop highlighting" } else { "Click to highlight these files on the map" }).clicked() {
+            if resp.on_hover_text(if on { "Click to stop highlighting" } else { "Click to highlight these files on the map" }).clicked() && (on || self.premium(crate::licence::Feature::Filters)) {
                 self.highlight_ext = if on { None } else { Some(ext.clone()) };
             }
         }

@@ -4,6 +4,9 @@ Filters change **which files the map shows**, without scanning again. They work 
 already in memory, in the background, so even on millions of files the map updates within a
 moment of a change.
 
+Filtering is part of Filescape Professional. Without a licence the map shows every file, and a
+filter that's already on can still be turned off. See [Licensing](../settings/licensing.md#free-and-professional-features).
+
 ![A Custom filter in Highlight mode](../images/filter-highlight.png)
 
 ## The parts of a filter

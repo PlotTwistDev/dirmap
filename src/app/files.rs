@@ -1385,7 +1385,9 @@ impl App {
             .0
             .on_hover_text("Show only some kinds of file: audio, video, images, documents…");
         });
-        if let Some(k) = picked {
+        if let Some(k) = picked
+            && (k & !kinds == 0 || self.premium(crate::licence::Feature::Filters))
+        {
             self.files.pane_mut().kinds = k;
         }
     }

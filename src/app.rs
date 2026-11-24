@@ -1367,7 +1367,9 @@ impl App {
         if let Some((a, ext)) = menu_pick {
             self.ext_action(a, ext);
         }
-        if let Some(t) = toggle {
+        if let Some(t) = toggle
+            && (self.highlight_ext.as_ref() == Some(&t) || self.premium(crate::licence::Feature::Filters))
+        {
             self.highlight_ext = if self.highlight_ext.as_ref() == Some(&t) { None } else { Some(t) };
         }
     }
@@ -1470,7 +1472,9 @@ impl App {
                 }
             }
         });
-        if let Some((lo, hi)) = pick {
+        if let Some((lo, hi)) = pick
+            && ((lo, hi) == (0, 0) || self.premium(crate::licence::Feature::Filters))
+        {
             self.filter.larger = lo;
             self.filter.smaller = hi;
         }
@@ -2425,7 +2429,7 @@ impl App {
             }
             for c in Category::ALL {
                 let on = self.filter.kinds & c.bit() != 0;
-                if ui.selectable_label(on, c.label()).on_hover_text(c.tooltip()).clicked() {
+                if ui.selectable_label(on, c.label()).on_hover_text(c.tooltip()).clicked() && (on || self.premium(crate::licence::Feature::Filters)) {
                     self.filter.kinds ^= c.bit();
                 }
             }
@@ -2433,10 +2437,17 @@ impl App {
         });
         self.custom_row(ui);
         ui.horizontal_wrapped(|ui| {
-            ui.label("Larger than");
-            size_edit(ui, &mut self.filter.larger);
-            ui.label("Smaller than");
-            size_edit(ui, &mut self.filter.smaller);
+            // Without a licence the limits can only be cleared, not set; the lock opens the prompt.
+            let sizes = self.licence.allows(crate::licence::Feature::Filters) || self.filter.larger > 0 || self.filter.smaller > 0;
+            ui.add_enabled_ui(sizes, |ui| {
+                ui.label("Larger than");
+                size_edit(ui, &mut self.filter.larger);
+                ui.label("Smaller than");
+                size_edit(ui, &mut self.filter.smaller);
+            });
+            if !sizes && ui.small_button("🔒 Pro").on_hover_text("Filtering by type or size is part of Filescape Professional").clicked() {
+                self.premium(crate::licence::Feature::Filters);
+            }
             if (self.filter.active() || self.custom.error.is_some()) && ui.button("Clear filters").clicked() {
                 self.filter = ViewFilter::default();
                 self.clear_custom();
