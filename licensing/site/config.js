@@ -10,4 +10,8 @@ window.FILESCAPE = {
   priceLabel: "$4.99",                // shown before Paddle's checkout gives the exact price with tax
   listPriceLabel: "$9.99",            // shown struck through before priceLabel; "" for none
   successUrl: "https://account.filescape.app/thanks",
+  // The contact form (filescape.app/contact) posts here; messages appear on admin.filescape.app/messages.
+  contactUrl: "https://api.filescape.app/v1/contact",
+  // Cloudflare Turnstile site key for the contact form (optional, SETUP.md step 11). "" for none.
+  turnstileSiteKey: "",
 };

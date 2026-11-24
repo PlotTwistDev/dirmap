@@ -6,7 +6,8 @@
 //! - `api.filescape.app`: the JSON API the app uses ([`api`]) and the Paddle webhook ([`paddle`])
 //! - `account.filescape.app`: customer pages: offline activation, "email me my licence", the
 //!   page after a purchase ([`account`])
-//! - `admin.filescape.app`: the web admin, behind Cloudflare Access ([`admin`])
+//! - `admin.filescape.app`: the web admin, behind Cloudflare Access ([`admin`]), including the
+//!   contact form's messages ([`contact`], which also takes `POST api.filescape.app/v1/contact`)
 //!
 //! Everything but [`cf`] (the Worker entry point and D1) is plain Rust over two small traits,
 //! [`Db`] and [`Net`], so the tests run natively against SQLite (which D1 is) with a fake network.
@@ -17,6 +18,7 @@ pub mod access;
 pub mod account;
 pub mod admin;
 pub mod api;
+pub mod contact;
 pub mod db;
 pub mod mail;
 pub mod paddle;
@@ -53,6 +55,17 @@ pub struct Config {
     /// Local development: `/admin/…` and `/account/…` reach those sites on any host.
     pub dev: bool,
     pub hosts: Hosts,
+    pub contact: ContactConfig,
+}
+
+/// The contact form ([`contact`]).
+#[derive(Default)]
+pub struct ContactConfig {
+    /// Where new messages are announced by email (`CONTACT_NOTIFY_TO`, a secret so the address
+    /// isn't in the repository). `None`: messages only appear on the admin site.
+    pub notify_to: Option<String>,
+    /// Cloudflare Turnstile secret key (`TURNSTILE_SECRET`). When set, the form must pass it.
+    pub turnstile_secret: Option<String>,
 }
 
 pub struct PaddleConfig {

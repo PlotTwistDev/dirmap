@@ -9,7 +9,7 @@ use crate::{Ctx, Db, Net, Req, Resp, mail};
 use filescape_licence::model::{LicenceKind, Validity};
 
 fn nav(base: &str) -> String {
-    format!("<b>Filescape</b><a href=\"{base}/\">Your licence</a><a href=\"{base}/activate\">Offline activation</a><a href=\"https://filescape.app/\">filescape.app</a>")
+    format!("<b>Filescape</b><a href=\"{base}/\">Your licence</a><a href=\"{base}/activate\">Offline activation</a><a href=\"https://filescape.app/contact\">Contact</a><a href=\"https://filescape.app/\">filescape.app</a>")
 }
 
 /// A form posted from this site (not another one). Session cookies are SameSite=Lax as well.
@@ -75,7 +75,7 @@ fn home(base: &str, msg: Option<&str>) -> Resp {
              <div class=\"card\"><h2 style=\"margin-top:0\">Lost your serial number?</h2><p>Enter the email address you bought with, and we'll send every serial number registered to it.</p>\
              <form method=\"post\" action=\"{base}/find\" class=\"row\"><label>Email<input name=\"email\" type=\"email\" required size=\"32\"></label><button class=\"primary\">Email my serial numbers</button></form></div>\
              <div class=\"card\"><h2 style=\"margin-top:0\">Activating a computer without internet access?</h2><p>Use <a href=\"{base}/activate\">offline activation</a>.</p></div>\
-             <div class=\"card\"><h2 style=\"margin-top:0\">Moved to a new computer?</h2><p>Deactivate Filescape on the old one (<b>Help &gt; Licence &gt; Deactivate</b>), or sign in above and release it. If the old computer is gone and you can't sign in, contact <a href=\"mailto:support@filescape.app\">support@filescape.app</a> with your serial number.</p></div>"
+             <div class=\"card\"><h2 style=\"margin-top:0\">Moved to a new computer?</h2><p>Deactivate Filescape on the old one (<b>Help &gt; Licence &gt; Deactivate</b>), or sign in above and release it. If the old computer is gone and you can't sign in, <a href=\"https://filescape.app/contact?topic=licence\">contact us</a> with your serial number.</p></div>"
         ),
     )
 }

@@ -56,7 +56,7 @@ cat > "$deb/DEBIAN/control" <<CONTROL
 Package: filescape
 Version: $version
 Architecture: amd64
-Maintainer: Filescape <support@filescape.app>
+Maintainer: Filescape <noreply@filescape.app>
 Installed-Size: $(du -sk "$root" | cut -f1)
 Depends: libc6 (>= $glibc), libgcc-s1, libxkbcommon0, libegl1 | libgl1
 Recommends: libxkbcommon-x11-0, libx11-6, libxcursor1, libxi6, libxrandr2, libwayland-client0, libwayland-egl1, xdg-desktop-portal

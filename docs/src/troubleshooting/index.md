@@ -137,6 +137,15 @@ changes since it started may be lost. Check that the settings folder is writable
 Filescape isn't notarised by Apple. Right-click it and choose **Open**, or run
 `xattr -dr com.apple.quarantine Filescape.app`. See [Installation and first launch](../getting-started/installation.md).
 
+## Still stuck? Contact us
+
+Choose **❓ Help > Contact Filescape…** to open the contact form at
+<https://filescape.app/contact>, and we'll reply by email. For a problem report, first press
+**Copy details** in **❓ Help > About Filescape** and paste them into your message, with what you
+did and what happened. For a licence problem, include your serial number or the email address you
+bought with. Lost serials and freeing up a computer don't need us: use
+<https://account.filescape.app>.
+
 ## Related topics
 
 - [Frequently asked questions](faq.md)

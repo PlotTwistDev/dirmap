@@ -1,5 +1,6 @@
 //! Email through Resend (https://resend.com): the licence after a purchase, a temporary licence
-//! from the admin, and "email me my licence".
+//! from the admin, "email me my licence", and the contact form's notices and replies
+//! ([`crate::contact`]).
 
 use crate::db::LicenceRow;
 use crate::web::{date, esc};
@@ -10,6 +11,8 @@ pub struct Message {
     pub to: String,
     pub subject: String,
     pub text: String,
+    /// Overrides `MAIL_REPLY_TO` for this message; `Some("")` sends none.
+    pub reply_to: Option<String>,
 }
 
 /// Whether it was accepted. `Ok(false)`: no mail settings.
@@ -26,7 +29,7 @@ pub async fn send<D: Db, N: Net>(cx: &Ctx<'_, D, N>, m: &Message) -> Result<bool
             .collect::<String>()
     );
     let mut body = serde_json::json!({ "from": mc.from, "to": [m.to], "subject": m.subject, "text": m.text, "html": html });
-    if let Some(r) = &mc.reply_to {
+    if let Some(r) = m.reply_to.as_ref().or(mc.reply_to.as_ref()).filter(|r| !r.is_empty()) {
         body["reply_to"] = r.clone().into();
     }
     let (status, text) = cx
@@ -65,9 +68,10 @@ pub fn licence_message(row: &LicenceRow, serial: &str, to: &str) -> Message {
         to: to.into(),
         subject: if paid { "Your Filescape licence".into() } else { "Your temporary Filescape licence".into() },
         text: format!(
-            "{hello}\n\n{intro}\n\n{serial}\n\n{}\n\n{HOW}\n\nKeep this email: you can also get your serial again at https://account.filescape.app.\n\nFilescape (filescape.app)",
+            "{hello}\n\n{intro}\n\n{serial}\n\n{}\n\n{HOW}\n\nKeep this email: you can also get your serial again at https://account.filescape.app.\n\nQuestions? Write to us at https://filescape.app/contact (replies to this email aren't read).\n\nFilescape (filescape.app)",
             what(row)
         ),
+        reply_to: None,
     }
 }
 
@@ -80,7 +84,8 @@ pub fn reminder_message(rows: &[(LicenceRow, String)], to: &str) -> Message {
     Message {
         to: to.into(),
         subject: "Your Filescape serial numbers".into(),
-        text: format!("Hello,\n\nYou asked for the Filescape serial numbers registered to this address:\n\n{list}\n\n{HOW}\n\nIf you didn't ask for this, you can ignore this email.\n\nFilescape (filescape.app)"),
+        text: format!("Hello,\n\nYou asked for the Filescape serial numbers registered to this address:\n\n{list}\n\n{HOW}\n\nIf you didn't ask for this, you can ignore this email.\n\nQuestions? Write to us at https://filescape.app/contact (replies to this email aren't read).\n\nFilescape (filescape.app)"),
+        reply_to: None,
     }
 }
 
@@ -89,7 +94,8 @@ pub fn login_message(link: &str, to: &str) -> Message {
         to: to.into(),
         subject: "Sign in to your Filescape account".into(),
         text: format!(
-            "Hello,\n\nUse this link to sign in at account.filescape.app. It works once, for 15 minutes:\n\n{link}\n\nIf you didn't ask for this, you can ignore this email: nobody can sign in without the link.\n\nFilescape (filescape.app)"
+            "Hello,\n\nUse this link to sign in at account.filescape.app. It works once, for 15 minutes:\n\n{link}\n\nIf you didn't ask for this, you can ignore this email: nobody can sign in without the link.\n\nQuestions? Write to us at https://filescape.app/contact (replies to this email aren't read).\n\nFilescape (filescape.app)"
         ),
+        reply_to: None,
     }
 }

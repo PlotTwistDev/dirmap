@@ -30,6 +30,8 @@ use std::time::{Duration, Instant};
 /// The licensing server. `FILESCAPE_LICENCE_SERVER` overrides it (for a test Worker).
 pub const SERVER: &str = "https://api.filescape.app";
 pub const PURCHASE_URL: &str = "https://filescape.app/buy";
+/// The contact form (there's no support email address).
+pub const CONTACT_URL: &str = "https://filescape.app/contact";
 /// Release date of this build, for perpetual update entitlement. build.rs takes it from the commit
 /// being built (or `SOURCE_DATE_EPOCH`), so it can't be left stale at release time.
 pub const RELEASE_DATE: Ts = parse_ts(env!("FILESCAPE_RELEASE_DATE"));

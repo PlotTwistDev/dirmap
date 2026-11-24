@@ -73,6 +73,8 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str) -> 
             Err(resp) => Ok(resp),
         },
         ("POST", "/v1/paddle") => crate::paddle::webhook(cx, req).await,
+        // The contact form on filescape.app.
+        (_, "/v1/contact") => crate::contact::route(cx, req).await,
         // The app's update check at launch. A plain GET: nothing about the user or the computer
         // is sent, and the answer is the same for everyone, so caches may keep it a few minutes.
         ("GET", "/v1/release") => {

@@ -1,4 +1,5 @@
 //! admin.filescape.app: licences, Create Temporary Licence, revoke, reset activations, limits,
+//! contact form messages (read, reply, close),
 //! the Activations page and settings. Signed in through Cloudflare Access ([`crate::access`]);
 //! every change is recorded in the licence's history with the admin's email.
 
@@ -20,7 +21,7 @@ impl A<'_> {
     fn nav(&self) -> String {
         let b = self.base;
         format!(
-            "<b>Filescape admin</b><a href=\"{b}/\">Licences</a><a href=\"{b}/issue\">Create temporary licence</a><a href=\"{b}/activations\">Activations</a><a href=\"{b}/releases\">Releases</a><a href=\"{b}/settings\">Settings</a><span class=\"mute\" style=\"margin-left:auto\">{}</span>",
+            "<b>Filescape admin</b><a href=\"{b}/\">Licences</a><a href=\"{b}/issue\">Create temporary licence</a><a href=\"{b}/activations\">Activations</a><a href=\"{b}/messages\">Messages</a><a href=\"{b}/releases\">Releases</a><a href=\"{b}/settings\">Settings</a><span class=\"mute\" style=\"margin-left:auto\">{}</span>",
             esc(self.actor)
         )
     }
@@ -41,6 +42,9 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
         ("GET", ["issue"]) => Ok(issue_form(&a, None)),
         ("POST", ["issue"]) => issue(cx, &a, &form).await,
         ("GET", ["activations"]) => activations(cx, &a).await,
+        ("GET", ["messages"]) => messages(cx, &a, req.query_param("f").as_deref() == Some("all")).await,
+        ("GET", ["messages", id]) => message(cx, &a, id, req.query_param("msg").as_deref()).await,
+        ("POST", ["messages", id, action]) => message_action(cx, &a, id, action, &form).await,
         ("GET", ["releases"]) => releases(cx, &a, req.query_param("msg").as_deref()).await,
         ("POST", ["releases"]) => {
             let msg = if form.has("withdraw") {
@@ -113,13 +117,19 @@ async fn home<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, req: &Req) -> Result
         _ => ListFilter::All,
     };
     let [total, perpetual, temp_live, live_acts] = cx.counts().await?;
+    let new_messages = cx.new_message_count().await?;
     let rows = cx.list(&q, filter, 200).await?;
     let opts = [("", "All"), ("perpetual", "Perpetual"), ("temporary", "Temporary"), ("expiring", "Ending in 7 days"), ("revoked", "Revoked"), ("refunds", "Refunds and chargebacks"), ("unmailed", "Paid, not emailed")]
         .iter()
         .map(|(v, l)| format!("<option value=\"{v}\"{}>{l}</option>", if *v == f { " selected" } else { "" }))
         .collect::<String>();
+    let unread = match new_messages {
+        0 => String::new(),
+        1 => format!("<div class=\"card\"><a href=\"{}/messages\"><b>1 new message</b></a> from the contact form.</div>", a.base),
+        n => format!("<div class=\"card\"><a href=\"{}/messages\"><b>{n} new messages</b></a> from the contact form.</div>", a.base),
+    };
     let mut body = format!(
-        "<h1>Licences</h1><div class=\"stats\"><div><b>{total}</b>licences</div><div><b>{perpetual}</b>perpetual</div><div><b>{temp_live}</b>temporary, not expired</div><div><b>{live_acts}</b>computers activated</div></div>\
+        "<h1>Licences</h1>{unread}<div class=\"stats\"><div><b>{total}</b>licences</div><div><b>{perpetual}</b>perpetual</div><div><b>{temp_live}</b>temporary, not expired</div><div><b>{live_acts}</b>computers activated</div></div>\
          <form class=\"card row\" method=\"get\" action=\"{b}/\"><label>Search<input name=\"q\" value=\"{}\" placeholder=\"Serial, licence ID, name, email or Paddle transaction\" size=\"44\"></label>\
          <label>Show<select name=\"f\">{opts}</select></label><button class=\"primary\">Search</button></form>",
         esc(&q),
@@ -534,4 +544,138 @@ async fn settings<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, msg: Option<&str
         date(cx.now),
     );
     Ok(a.page("Settings", &body))
+}
+
+// ---------- contact form messages ----------
+
+fn message_pill(status: &str) -> &'static str {
+    match status {
+        "new" => "<span class=\"pill warn\">New</span>",
+        "answered" => "<span class=\"pill good\">Answered</span>",
+        _ => "<span class=\"pill mute\">Closed</span>",
+    }
+}
+
+fn snippet(s: &str, n: usize) -> String {
+    let one: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one.chars().count() > n { format!("{}…", one.chars().take(n).collect::<String>()) } else { one }
+}
+
+async fn messages<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, all: bool) -> Result<Resp, String> {
+    let rows = cx.messages(!all, 300).await?;
+    let b = a.base;
+    let mut body = format!(
+        "<h1>Messages</h1><p class=\"mute\">From the contact form at filescape.app/contact. Replies go out from Filescape's address, so yours stays private.{}</p>\
+         <p>{}</p>",
+        if cx.cfg.contact.notify_to.is_some() { " New messages are also emailed to you." } else { " Set the CONTACT_NOTIFY_TO secret to be emailed when one arrives." },
+        if all { format!("Showing all. <a href=\"{b}/messages\">Show open only</a>") } else { format!("Showing open messages. <a href=\"{b}/messages?f=all\">Show closed too</a>") }
+    );
+    if rows.is_empty() {
+        body.push_str("<p class=\"mute\">No messages.</p>");
+    } else {
+        body.push_str("<div class=\"scroll\"><table><tr><th>Received</th><th>From</th><th>Topic</th><th>Message</th><th>Status</th></tr>");
+        for m in &rows {
+            body.push_str(&format!(
+                "<tr><td>{}</td><td>{}<br><span class=\"mute\">{}</span></td><td>{}</td><td><a href=\"{b}/messages/{}\">{}</a></td><td>{}</td></tr>",
+                date(m.created_at),
+                esc(m.name.as_deref().unwrap_or("")),
+                esc(&m.email),
+                esc(&m.topic),
+                esc(&m.id),
+                esc(&snippet(&m.body, 120)),
+                message_pill(&m.status),
+            ));
+        }
+        body.push_str("</table></div>");
+    }
+    Ok(a.page("Messages", &body))
+}
+
+async fn message<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, id: &str, msg: Option<&str>) -> Result<Resp, String> {
+    let Some(m) = cx.message(id).await? else { return Ok(Resp::html(404, page("Not found", &a.nav(), "<h1>Message not found</h1>"))) };
+    let b = a.base;
+    let note = msg.map(|t| format!("<div class=\"card\">{}</div>", esc(t))).unwrap_or_default();
+    let replies = cx.replies(&m.id).await?;
+    let others: Vec<_> = cx.messages_from(&m.email).await?.into_iter().filter(|o| o.id != m.id).collect();
+    let licences = cx.licences_by_email(&m.email).await?;
+    let mut body = format!(
+        "<p><a href=\"{b}/messages\">← Messages</a></p><h1>{} {}</h1>{note}\
+         <div class=\"card\"><table><tr><th>From</th><td>{} &lt;{}&gt;</td></tr><tr><th>Received</th><td>{}</td></tr><tr><th>Notified</th><td>{}</td></tr><tr><th>Licences</th><td>{}</td></tr></table>\
+         <div style=\"white-space:pre-wrap;margin-top:12px;overflow-wrap:anywhere\">{}</div></div>",
+        esc(&m.topic),
+        message_pill(&m.status),
+        esc(m.name.as_deref().unwrap_or("")),
+        esc(&m.email),
+        date(m.created_at),
+        opt_date(m.notified_at),
+        if licences.is_empty() { "None for this address".to_string() } else { format!("<a href=\"{b}/?q={}\">{} licence{}</a>", encode(&m.email), licences.len(), if licences.len() == 1 { "" } else { "s" }) },
+        esc(&m.body),
+    );
+    for r in &replies {
+        body.push_str(&format!(
+            "<div class=\"card\"><p class=\"mute\" style=\"margin-top:0\">Reply by {} on {}</p><div style=\"white-space:pre-wrap;overflow-wrap:anywhere\">{}</div></div>",
+            esc(&r.actor),
+            date(r.at),
+            esc(&r.body)
+        ));
+    }
+    let mail_ready = cx.cfg.mail.is_some();
+    body.push_str(&format!(
+        "<h2>Reply</h2><form method=\"post\" action=\"{b}/messages/{id}/reply\" class=\"card\" style=\"display:grid;gap:10px;max-width:760px\">\
+         <p class=\"mute\" style=\"margin:0\">Emailed to {email} from Filescape's address, with their message quoted below it and a link back to the contact form. Your own address isn't shown.</p>\
+         <textarea name=\"reply\" rows=\"10\" required style=\"width:100%\"{dis}></textarea><div class=\"row\"><button class=\"primary\"{dis}>Send reply</button>{why}</div></form>",
+        id = esc(&m.id),
+        email = esc(&m.email),
+        dis = if mail_ready { "" } else { " disabled" },
+        why = if mail_ready { "" } else { "<span class=\"warn\">Email isn't set up (RESEND_API_KEY, MAIL_FROM).</span>" },
+    ));
+    let toggle = if m.status == "closed" { ("reopen", "Reopen") } else { ("close", "Close") };
+    body.push_str(&format!(
+        "<div class=\"row\"><form method=\"post\" action=\"{b}/messages/{id}/{}\"><button>{}</button></form>\
+         <form method=\"post\" action=\"{b}/messages/{id}/delete\" onsubmit=\"return confirm('Delete this message and its replies for good?')\"><button class=\"danger\">Delete</button></form></div>",
+        toggle.0,
+        toggle.1,
+        id = esc(&m.id),
+    ));
+    if !others.is_empty() {
+        body.push_str("<h2>Other messages from this address</h2><div class=\"scroll\"><table><tr><th>Received</th><th>Topic</th><th>Message</th><th>Status</th></tr>");
+        for o in &others {
+            body.push_str(&format!(
+                "<tr><td>{}</td><td>{}</td><td><a href=\"{b}/messages/{}\">{}</a></td><td>{}</td></tr>",
+                date(o.created_at),
+                esc(&o.topic),
+                esc(&o.id),
+                esc(&snippet(&o.body, 100)),
+                message_pill(&o.status)
+            ));
+        }
+        body.push_str("</table></div>");
+    }
+    Ok(a.page("Message", &body))
+}
+
+async fn message_action<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, id: &str, action: &str, form: &Form) -> Result<Resp, String> {
+    let Some(m) = cx.message(id).await? else { return Ok(Resp::html(404, page("Not found", &a.nav(), "<h1>Message not found</h1>"))) };
+    let b = a.base;
+    let back = |msg: &str| Ok(Resp::redirect(&format!("{b}/messages/{}?msg={}", encode(&m.id), encode(msg))));
+    match action {
+        "reply" => match cx.reply_to_message(&m, &form.get("reply"), a.actor).await? {
+            Ok(()) => back(&format!("Reply sent to {}.", m.email)),
+            Err(why) => back(&why),
+        },
+        "close" => {
+            cx.set_message_status(&m.id, "closed").await?;
+            Ok(Resp::redirect(&format!("{b}/messages")))
+        }
+        "reopen" => {
+            let status = if cx.replies(&m.id).await?.is_empty() { "new" } else { "answered" };
+            cx.set_message_status(&m.id, status).await?;
+            back("Reopened.")
+        }
+        "delete" => {
+            cx.delete_message(&m.id).await?;
+            Ok(Resp::redirect(&format!("{b}/messages")))
+        }
+        _ => Ok(Resp::html(404, page("Not found", &a.nav(), "<h1>Not found</h1>"))),
+    }
 }
