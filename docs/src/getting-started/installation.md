@@ -46,11 +46,33 @@ appears in your application menu with its icon.
 
 ## macOS
 
+Filescape isn't notarised by Apple yet, so macOS blocks it the first time you open it. You only
+need to allow it once.
+
 1. Download `Filescape-macos.dmg`, open it and drag `Filescape.app` onto **Applications**.
-2. Filescape isn't notarised by Apple, so the first time, **right-click** it and choose **Open**,
-   then **Open** again. (Or run `xattr -dr com.apple.quarantine Filescape.app` in Terminal.)
-3. To scan your whole disk including other apps' data, give Filescape **Full Disk Access** in
-   **System Settings > Privacy & Security**. Without it, those folders are counted as unreadable.
+2. Open Filescape from your Applications folder. macOS says **"Filescape" Not Opened**. Click
+   **Done**, not **Move to Trash**.
+3. Open **System Settings > Privacy & Security** and scroll down to **Security**, where it says
+   **"Filescape" was blocked to protect your Mac**. Click **Open Anyway**.
+4. Enter your password or use Touch ID, then click **Open Anyway** once more. From now on
+   Filescape opens normally.
+
+The **Open Anyway** button only shows for about an hour after the blocked attempt; if it's gone,
+open Filescape again and repeat step 3. On **macOS 14 Sonoma and earlier** there's a shortcut
+instead: Control-click (or right-click) Filescape in Applications, choose **Open**, then **Open**
+again.
+
+**Advanced:** if you're comfortable with Terminal, this removes the download flag macOS puts on
+the app, so it opens straight away:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Filescape.app
+```
+
+To scan your whole disk including other apps' data, give Filescape **Full Disk Access** in
+**System Settings > Privacy & Security**. Without it, those folders are counted as unreadable.
+
+The same steps are at <https://filescape.app/mac>.
 
 ## Building from source
 

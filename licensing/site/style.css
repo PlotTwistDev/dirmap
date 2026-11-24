@@ -31,3 +31,5 @@ footer a{color:var(--text-3);text-decoration:none}footer a:hover{color:var(--tex
 .form textarea{resize:vertical;min-height:180px}.form input:focus,.form select:focus,.form textarea:focus{outline:2px solid var(--coral);outline-offset:1px;border-color:transparent}
 .form .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}.btn:disabled{opacity:.6;cursor:default}
 [hidden]{display:none!important}
+pre.code{margin:12px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px 14px;background:var(--void);border:1px solid var(--line-strong);border-radius:10px;overflow-x:auto;font:13px/1.5 var(--mono);color:var(--text);user-select:all}
+.card li+li{margin-top:6px}

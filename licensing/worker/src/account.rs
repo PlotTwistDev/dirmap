@@ -58,6 +58,7 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
             "Thank you",
             "<h1>Thank you for buying Filescape</h1><div class=\"card\"><p>Your serial number is on its way to the email address you gave at checkout. It usually arrives within a minute; check your spam folder if it doesn't.</p>\
              <p>To activate: open Filescape, choose <b>Help &gt; Licence</b>, paste the serial number and press <b>Activate</b>.</p>\
+             <p>On a Mac? The first launch needs one extra step because Filescape isn't notarised by Apple yet. <a href=\"https://filescape.app/mac\">Here's how to open it</a>.</p>\
              <p class=\"mute\">Paddle, our reseller, sends the receipt separately.</p></div><p>No email after a few minutes? <a href=\"./\">Send my serial numbers again</a>.</p>",
         )),
         _ => Ok(Resp::html(404, page("Not found", &nav(base), "<h1>Not found</h1>"))),

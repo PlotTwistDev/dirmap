@@ -1,0 +1,19 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Opening Filescape on a Mac · Filescape</title><meta name="description" content="How to open Filescape the first time on macOS, when it says it can't verify the app."><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"></head><body>
+<header><div class="wrap"><nav class="bar" aria-label="Main"><a class="brand" href="/">Filescape</a><a class="wide" href="/#features">Features</a><a href="/#pricing">Pricing</a><a class="wide" href="/#download">Download</a><a href="https://account.filescape.app/">Your licence</a></nav></div></header><main><div class="wrap"><article class="legal"><h1>Opening Filescape on a Mac</h1>
+<p>Filescape isn't notarised by Apple yet, so the first time you open it, macOS stops it and says it can't check it for malware. You only need to let it through once. After that it opens like any other app.</p>
+<div class="card"><h2>macOS 15 Sequoia and later</h2><ol>
+<li>Open <b>Filescape-macos.dmg</b> and drag <b>Filescape</b> onto <b>Applications</b>.</li>
+<li>Open Filescape from your Applications folder. macOS says <b>"Filescape" Not Opened</b>. Click <b>Done</b> (not <b>Move to Trash</b>).</li>
+<li>Open <b>System Settings &gt; Privacy &amp; Security</b> and scroll down to <b>Security</b>. You'll see <b>"Filescape" was blocked to protect your Mac</b>. Click <b>Open Anyway</b>.</li>
+<li>Enter your password or use Touch ID, then click <b>Open Anyway</b> once more.</li>
+</ol><p class="note">The <b>Open Anyway</b> button only shows for about an hour after you tried to open the app. If it's gone, open Filescape again and go straight back to step 3.</p></div>
+<div class="card"><h2>macOS 14 Sonoma and earlier</h2><ol>
+<li>Drag <b>Filescape</b> onto <b>Applications</b> as above.</li>
+<li>In your Applications folder, <b>Control-click</b> (or right-click) Filescape and choose <b>Open</b>.</li>
+<li>Click <b>Open</b> in the message that appears.</li>
+</ol></div>
+<div class="card"><h2>Advanced: use Terminal instead</h2><p>If you're comfortable with Terminal, this removes the download flag macOS puts on the app, so it opens straight away. It's also the fix if macOS says Filescape <b>is damaged and can't be opened</b>.</p>
+<pre class="code"><code>xattr -dr com.apple.quarantine /Applications/Filescape.app</code></pre></div>
+<h2>Scanning your whole disk</h2><p>To include other apps' data and your protected folders in a scan, give Filescape <b>Full Disk Access</b> in <b>System Settings &gt; Privacy &amp; Security &gt; Full Disk Access</b>, then restart it. Without it, those folders show as unreadable.</p>
+<p>Still stuck? <a href="/contact">Contact us</a> and we'll help.</p></article></div></main><footer><div class="wrap"><span>© 2026 Filescape</span><a href="https://account.filescape.app/">Your licence</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/refunds">Refunds</a><a href="/contact">Contact</a></div></footer></body></html>
