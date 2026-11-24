@@ -200,7 +200,8 @@ shows nothing.
 5. https://admin.filescape.app/releases: version `0.3.0`, release date (paste the number from
    step 4, or type the date), an optional one-line summary and release notes link (on
    filescape.app), then **Announce**. Download links can stay empty: they default to
-   `downloads.filescape.app/latest/<os>`.
+   `downloads.filescape.app/latest/windows` and `/latest/macos`, and on Linux to the website's
+   download section, where people pick the AppImage, .deb, .rpm or .tar.gz.
 6. Copies of Filescape show the notice the next time they start (answers are cached for up to 5
    minutes). A licence whose updates ended before the release date is told so, with a link to buy;
    free and evaluation users are told it's a free update.
