@@ -215,6 +215,9 @@ pub struct App {
     colors: HashMap<String, Color32>,
     /// The tile style `colors` were picked for (each style has its own palette).
     colors_style: TileStyle,
+    /// Modern style: the folder name tags drawn last frame (on screen) and the folders they open
+    /// (paths from the scan root), so clicking a tag zooms into its folder.
+    map_tags: Vec<(Rect, Vec<u32>)>,
     selected: Option<Vec<u32>>,
     reveal: bool,
     zoom: Vec<u32>,
@@ -337,6 +340,7 @@ impl App {
             exts: Vec::new(),
             colors: HashMap::new(),
             colors_style: TileStyle::default(),
+            map_tags: Vec::new(),
             selected: None,
             reveal: false,
             zoom: Vec::new(),
@@ -2030,6 +2034,7 @@ impl App {
     /// deepest folder that holds the whole view) and tag each big enough with its name and size,
     /// as the website's map does. Returns the on-screen rectangle of the one under the pointer.
     fn folder_tags(&mut self, painter: &egui::Painter, tree: &Node, root: &[u32], bounds: Rect, hover: Option<&[u32]>) -> Option<Rect> {
+        self.map_tags.clear();
         let zroot = tree.at(root)?;
         // The deepest folder holding the whole view: follow the path under the view's centre.
         let (rel, _) = self.map.hit(tree, bounds, bounds.center())?;
@@ -2071,7 +2076,12 @@ impl App {
             let g = p.layout_no_wrap(label, font.clone(), Color32::WHITE);
             let w = (g.size().x + 14.0).min(vis.width() - 12.0);
             let tag = Rect::from_min_size(pos2(vis.left() + 6.0, vis.bottom() - 28.0), vec2(w, 20.0));
-            p.rect_filled(tag, 5.0, Color32::from_rgba_unmultiplied(4, 5, 6, 200));
+            // Nearly opaque, so small bright tiles behind don't show through the text.
+            p.rect_filled(tag, 5.0, Color32::from_rgba_unmultiplied(4, 5, 6, 235));
+            let mut abs = root.to_vec();
+            abs.extend_from_slice(&path);
+            abs.push(i as u32);
+            self.map_tags.push((tag, abs));
             p.with_clip_rect(tag.intersect(p.clip_rect())).galley(pos2(tag.left() + 7.0, tag.center().y - g.size().y / 2.0), g, Color32::WHITE);
         }
         hovered
@@ -2158,7 +2168,18 @@ impl App {
             ctx.set_cursor_icon(egui::CursorIcon::Grab);
         }
         let mut select = None;
-        if first_pass && (resp.clicked() || resp.double_clicked()) && !self.map.in_transition() {
+        // Modern style: a folder's name tag opens that folder.
+        let on_tag = pointer.and_then(|p| self.map_tags.iter().find(|(r, _)| r.contains(p)).map(|(_, path)| path.clone()));
+        if on_tag.is_some() && !self.map.dragging {
+            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if let Some(path) = on_tag.filter(|_| first_pass && resp.clicked() && !self.map.in_transition()) {
+            if path.len() > self.zoom.len() && path.starts_with(&self.zoom) {
+                self.zoom = path;
+            } else {
+                self.map.frame_path(&tree, &path, &feel);
+            }
+        } else if first_pass && (resp.clicked() || resp.double_clicked()) && !self.map.in_transition() {
             if let Some(p) = resp.interact_pointer_pos() {
                 if let Some((rel, rect)) = self.map.hit(&tree, bounds, p) {
                     let mut abs = self.map.root().unwrap_or(&[]).to_vec();
@@ -2238,6 +2259,9 @@ impl App {
             }
         }
         // Modern: the folders that make up the view outlined, each with a dark name tag.
+        if !modern || self.map.in_transition() {
+            self.map_tags.clear();
+        }
         let hover_group = if modern && !self.map.in_transition() { self.folder_tags(&painter, &tree, &root, bounds, frame.hover.as_ref().map(|h| &h.0[..])) } else { None };
 
         // File names on tiles with room for them, fading in with size.

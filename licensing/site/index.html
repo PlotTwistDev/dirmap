@@ -757,7 +757,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
       ctx.font = "500 11px " + mono;
       const tw = Math.min(ctx.measureText(label).width + 14, vx1 - vx0 - 12);
       ctx.globalAlpha = labelFade;
-      ctx.fillStyle = "rgba(4,5,6,.78)";
+      ctx.fillStyle = "rgba(4,5,6,.92)";
       roundRect(vx0 + 6, vy1 - 28, tw, 20, 5); ctx.fill();
       ctx.save(); ctx.beginPath(); ctx.rect(vx0 + 6, vy1 - 28, tw, 20); ctx.clip();
       ctx.fillStyle = "#fff"; ctx.textBaseline = "middle";
