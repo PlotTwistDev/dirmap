@@ -147,6 +147,15 @@ this in Terminal and open it again:
 xattr -dr com.apple.quarantine /Applications/Filescape.app
 ```
 
+## macOS keeps asking for folder access, or scans are incomplete
+
+macOS asks separately for your Desktop, Documents, Downloads and each external drive, and keeps
+other apps' data closed. Give Filescape **Full Disk Access** in **System Settings > Privacy &
+Security > Full Disk Access** (click **+** and choose Filescape if it isn't listed), then quit and
+reopen it. After a scan with unreadable items, the status bar's **Allow Full Disk Access…** button
+opens that page. If you clicked **Don't Allow** for a folder, turn it back on under **Files &
+Folders > Filescape**. See [Folder access on macOS](../disk-usage/hidden-and-unreadable.md#folder-access-on-macos).
+
 ## Still stuck? Contact us
 
 Choose **❓ Help > Contact Filescape…** to open the contact form at

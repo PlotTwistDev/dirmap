@@ -538,8 +538,16 @@ fn advanced(ui: &mut egui::Ui, d: &mut Settings, restart: &mut bool) {
         if !elevated && ui.button("🛡 Restart as administrator now").clicked() {
             *restart = true;
         }
+    } else if cfg!(target_os = "macos") {
+        ui.label("On macOS, give Filescape Full Disk Access so it can read other apps' data and protected folders.");
+        if ui.button("Open Full Disk Access settings…").clicked() {
+            elevate::open_full_disk_access_settings();
+        }
+        if elevate::missing_full_disk_access() {
+            ui.weak("Filescape doesn't have Full Disk Access yet. After turning it on, quit and reopen Filescape.");
+        }
     } else if !elevated {
-        ui.label("On Linux and macOS, start it from a terminal with sudo to read other users' files.");
+        ui.label("On Linux, start it from a terminal with sudo to read other users' files.");
     }
 }
 

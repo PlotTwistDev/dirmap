@@ -302,6 +302,8 @@ pub struct App {
     help_regions: Vec<(egui::Rect, &'static str)>,
     /// Folders and files the last scan couldn't read.
     scan_errors: u64,
+    /// macOS: the last scan had unreadable items and Filescape lacks Full Disk Access.
+    needs_full_disk_access: bool,
     /// The renderer in use, for About.
     renderer: &'static str,
 }
@@ -398,6 +400,7 @@ impl App {
             help: Default::default(),
             help_regions: Vec::new(),
             scan_errors: 0,
+            needs_full_disk_access: false,
             renderer: if let Some(rs) = &cc.wgpu_render_state {
                 match rs.adapter.get_info().backend {
                     eframe::wgpu::Backend::Dx12 => "WebGPU (wgpu, DirectX 12)",
@@ -2615,6 +2618,7 @@ impl eframe::App for App {
                 let job = self.job.take().unwrap();
                 if !job.progress.cancel.load(Ordering::Relaxed) {
                     self.scan_errors = job.progress.errors.load(Ordering::Relaxed);
+                    self.needs_full_disk_access = self.scan_errors > 0 && crate::elevate::missing_full_disk_access();
                     if job.merge && self.tree.is_some() && job.root.starts_with(&self.scanned_path) {
                         self.merge_scan(job.root, tree);
                     } else {
@@ -2763,6 +2767,17 @@ impl eframe::App for App {
                             "Folders or files Filescape wasn't allowed to open (or that vanished during the scan). \
                              Their space isn't counted. Press F1 for why and what to do.",
                         );
+                        if self.needs_full_disk_access
+                            && ui
+                                .small_button("Allow Full Disk Access…")
+                                .on_hover_text(
+                                    "macOS keeps some folders closed to apps without Full Disk Access. Opens System Settings: \
+                                     turn on Filescape (or add it with +), then quit and reopen Filescape and scan again.",
+                                )
+                                .clicked()
+                        {
+                            crate::elevate::open_full_disk_access_settings();
+                        }
                     }
                     if let Some(s) = &self.shown {
                         ui.separator();
