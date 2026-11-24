@@ -109,6 +109,11 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
   .readout { white-space: normal; overflow-wrap: anywhere; flex-basis: 100%; }
   .chip { padding: 7px 10px; }
 }
+.demo-badge { flex: none; display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; color: var(--coral); background: var(--ember); border: 1px solid rgba(255,99,99,.3); white-space: nowrap; }
+.demo-badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--coral); }
+.demo-cap { margin: 14px auto 0; max-width: 72ch; font-size: 13px; line-height: 1.5; color: var(--text-3); text-align: center; }
+.demo-cap a { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.demo-cap a:hover { color: var(--text); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 12px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--text-3); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { width: 8px; height: 8px; border-radius: 2px; }
@@ -208,6 +213,12 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   .dl-row { flex-direction: column; align-items: stretch; max-width: 320px; margin-inline: auto; }
   .map-wrap { aspect-ratio: 4 / 5; }
   .hint-mouse { display: none; }
+  .demo-long { display: none; }
+  .dots { display: none; }
+  .win-bar { gap: 8px; }
+  .demo-badge { letter-spacing: .04em; padding-inline: 7px; }
+  .demo-badge::before { display: none; }
+  .demo-cap { font-size: 12px; padding-inline: 4px; }
   .keys, .plans { grid-template-columns: minmax(0, 1fr); }
   .fact b { font-size: 22px; }
   section { padding-block: 80px 0; }
