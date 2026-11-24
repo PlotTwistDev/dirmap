@@ -49,6 +49,7 @@ mod preview;
 mod seqplayer;
 mod thumbs;
 mod views;
+mod summary;
 pub(crate) mod style;
 use files::Workspace;
 
@@ -2840,6 +2841,13 @@ impl eframe::App for App {
         });
         let custom_focused = ctx.memory(|m| m.has_focus(egui::Id::new("custom-filter-input")));
         self.help_regions.push((r.response.rect, if custom_focused { topics::SYNTAX } else { topics::FILTERING }));
+        // Under the map: the folder, its size and the biggest types, following the filters.
+        let r = egui::Panel::bottom("summary").show(ui, |ui| {
+            ui.add_space(3.0);
+            self.summary_bar(ui);
+            ui.add_space(3.0);
+        });
+        self.help_regions.push((r.response.rect, topics::MAP_SUMMARY));
         let map_topic = match self.map_kind {
             MapKind::Treemap => topics::TREEMAP_NAV,
             MapKind::Sunburst => topics::SUNBURST,

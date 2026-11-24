@@ -124,7 +124,7 @@ pub struct Hits {
     pub last: u32,
     /// (child index, its hits) for child folders holding matches, by index.
     pub dirs: Vec<(u32, Hits)>,
-    /// Matching bytes per lowercased extension (only on the root: the whole result).
+    /// Matching bytes per lowercased extension, biggest first (only on the root: the whole result).
     pub exts: Vec<(String, u64)>,
 }
 
@@ -156,6 +156,8 @@ where
 {
     let mut exts = Vec::new();
     let mut h = hits_in(root, keep, cancel, &mut exts)?;
+    // Biggest first, like the File types list.
+    exts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     h.exts = exts;
     Some(h)
 }
