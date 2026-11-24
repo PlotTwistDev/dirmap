@@ -20,6 +20,7 @@ mod elevate;
 mod fsys;
 mod help;
 mod icons;
+mod kit;
 mod licence;
 mod mapview;
 mod netdrives;

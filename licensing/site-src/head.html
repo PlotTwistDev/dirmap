@@ -97,9 +97,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 /* Hold a finger on a tile: its name, size and type in a label above the finger */
 .map-tip { position: absolute; z-index: 1; pointer-events: none; max-width: min(78%, 360px); padding: 7px 10px; border-radius: 8px; background: rgba(8,9,11,.94); border: 1px solid var(--line-strong); box-shadow: 0 8px 24px rgba(0,0,0,.6); font-family: var(--mono); font-size: 11px; line-height: 1.45; color: var(--text-2); }
 .map-tip b { display: block; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.win-foot { display: flex; gap: 16px; align-items: center; padding: 9px 12px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--text-3); min-width: 0; }
-.readout { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); flex: 1; }
-.hint { flex: none; }
+.win-foot { display: flex; gap: 16px; align-items: center; padding: 9px 12px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--text-3); min-width: 0; flex-wrap: wrap; row-gap: 4px; }
+.readout { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); flex: 1 1 auto; }
+.hint { flex: 1 0 100%; }  /* own line, so a long path never loses out to it and the footer never changes height */
 .hint-touch { display: none; }
 /* Phones and tablets: the finger hint, bigger buttons, and a readout that wraps instead of cutting off the size */
 @media (hover: none) and (pointer: coarse) {

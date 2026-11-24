@@ -1715,6 +1715,7 @@ checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 name = "filescape"
 version = "0.2.0"
 dependencies = [
+ "arboard",
  "bytemuck",
  "bzip2",
  "chrono",
