@@ -111,11 +111,13 @@ Every push to `main` builds Windows, Linux and macOS versions on GitHub Actions 
 workflow; open a run and download from *Artifacts*). Pushing a tag such as `v0.2.0` also attaches them
 to a GitHub release.
 
-- **Windows**: `filescape-windows-x64.zip` contains `filescape.exe`. No install needed.
-- **Linux**: `filescape-linux-x64.tar.gz` contains the `filescape` binary and a `filescape.desktop` launcher
-  (copy it to `~/.local/share/applications/`). Needs X11 or Wayland plus `libxkbcommon-x11`, which
-  desktop installs already have.
-- **macOS** (11 Big Sur or later, Apple silicon and Intel): `filescape-macos-universal.zip` contains
+- **Windows**: `Filescape-windows.zip` contains `Filescape.exe`. No install needed.
+- **Linux** (glibc 2.35 or later: Ubuntu 22.04, Debian 12, Fedora 36 and newer):
+  `Filescape-linux.AppImage` runs on any distribution, `Filescape-linux.deb` installs on Ubuntu and
+  Debian, `Filescape-linux.rpm` on Fedora and openSUSE, and `Filescape-linux.tar.gz` has the bare
+  `filescape` binary with a `filescape.desktop` launcher. Needs X11 or Wayland plus `libxkbcommon`,
+  which desktop installs already have. `packaging/linux/package.sh` makes all four from a release build.
+- **macOS** (11 Big Sur or later, Apple silicon and Intel): `Filescape-macos.dmg` contains
   `Filescape.app`. It isn't notarized, so the first time, right-click it and choose **Open**, or run
   `xattr -dr com.apple.quarantine Filescape.app`. To scan your whole disk including other apps' data,
   give it **Full Disk Access** in System Settings > Privacy & Security; without it those folders are

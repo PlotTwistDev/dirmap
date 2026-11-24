@@ -136,14 +136,37 @@ In the dashboard, **Workers & Pages > filescape-site > Custom domains**: add `fi
 ## 9. Downloads (R2)
 
 1. **R2 > Create bucket** `filescape-downloads`. **Settings > Custom domains**: `downloads.filescape.app`.
-2. Upload each release under the names the website's download buttons use (`latest/windows`,
-   `latest/macos`, `latest/linux`). `--cd` gives the downloaded file a proper name:
+2. Get the files from CI: a tag push (or **Actions > build > Run workflow** with a version) puts
+   them on a GitHub release; any run also keeps them as artifacts named `Filescape-windows`,
+   `Filescape-macos` and `Filescape-linux`. Linux has four files:
+
+   | File | For | R2 object |
+   |---|---|---|
+   | `Filescape-windows.zip` | Windows 10 and 11 | `latest/windows` |
+   | `Filescape-macos.dmg` | macOS 11 and later | `latest/macos` |
+   | `Filescape-linux.AppImage` | any Linux, no install (the main Linux button) | `latest/linux-appimage` |
+   | `Filescape-linux.deb` | Ubuntu, Debian, Mint, Pop!_OS | `latest/linux-deb` |
+   | `Filescape-linux.rpm` | Fedora, RHEL, openSUSE | `latest/linux-rpm` |
+   | `Filescape-linux.tar.gz` | any Linux, unpack and run | `latest/linux` |
+
+   All Linux builds need glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36 and newer).
+3. Upload each one under its object name, from the folder the files are in. `--cd` gives the
+   downloaded file its proper name:
    ```
    npx wrangler@4 r2 object put filescape-downloads/latest/windows --file Filescape-windows.zip --ct application/zip --cd "attachment; filename=Filescape-windows.zip" --remote
    npx wrangler@4 r2 object put filescape-downloads/latest/macos --file Filescape-macos.dmg --ct application/x-apple-diskimage --cd "attachment; filename=Filescape-macos.dmg" --remote
+   npx wrangler@4 r2 object put filescape-downloads/latest/linux-appimage --file Filescape-linux.AppImage --ct application/vnd.appimage --cd "attachment; filename=Filescape-linux.AppImage" --remote
+   npx wrangler@4 r2 object put filescape-downloads/latest/linux-deb --file Filescape-linux.deb --ct application/vnd.debian.binary-package --cd "attachment; filename=filescape_amd64.deb" --remote
+   npx wrangler@4 r2 object put filescape-downloads/latest/linux-rpm --file Filescape-linux.rpm --ct application/x-rpm --cd "attachment; filename=filescape.x86_64.rpm" --remote
    npx wrangler@4 r2 object put filescape-downloads/latest/linux --file Filescape-linux.tar.gz --ct application/gzip --cd "attachment; filename=Filescape-linux.tar.gz" --remote
    ```
-   Uploading again replaces the file. Attach the same files to a GitHub release as a mirror.
+   Uploading again replaces the file. The GitHub release keeps the same files as a mirror.
+4. Check each link downloads with the right name: `curl -sI https://downloads.filescape.app/latest/linux-deb`
+   shows the `content-disposition` line.
+
+To build the Linux packages yourself on Ubuntu (22.04 for the widest reach):
+`sudo apt install rpm`, `cargo build --release`, then
+`packaging/linux/package.sh target/release/filescape dist`.
 
 ## 10. App builds for sale
 

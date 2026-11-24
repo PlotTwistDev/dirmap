@@ -69,10 +69,14 @@ jobs:
           cargo build --release
           # The build for sale must never contain the test-serial mode.
           if grep -q FILESCAPE_LICENCE_DEV target/release/filescape; then echo "test mode in release build" >&2; exit 1; fi
-          mkdir -p dist/filescape
-          cp target/release/filescape README.md packaging/filescape.desktop packaging/filescape.png dist/filescape/
-          tar -C dist -czf dist/Filescape-${{ matrix.name }}.tar.gz filescape
-          rm -rf dist/filescape
+          # AppImage, .deb, .rpm and the plain .tar.gz. Built on 22.04 so they run on glibc 2.35+.
+          sudo apt-get update -qq && sudo apt-get install -y -qq rpm desktop-file-utils
+          packaging/linux/package.sh target/release/filescape dist
+          # The packages must install and start their program.
+          sudo apt-get install -y -qq ./dist/Filescape-linux.deb
+          filescape --help
+          rpm -qpl dist/Filescape-linux.rpm | grep -qx /usr/bin/filescape
+          ./dist/Filescape-linux.AppImage --appimage-extract-and-run --help
 
       - name: Build (macOS app bundle, Apple silicon + Intel)
         if: runner.os == 'macOS'
