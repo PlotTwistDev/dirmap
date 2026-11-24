@@ -69,8 +69,20 @@ the app, so it opens straight away:
 xattr -dr com.apple.quarantine /Applications/Filescape.app
 ```
 
-To scan your whole disk including other apps' data, give Filescape **Full Disk Access** in
-**System Settings > Privacy & Security**. Without it, those folders are counted as unreadable.
+### Folder access
+
+When Filescape first scans your Desktop, Documents, Downloads or an external drive, macOS asks
+whether it may read that folder. Click **Allow**. Other apps' data stays closed even then, so for a
+complete scan (and no more of these questions), give Filescape **Full Disk Access**:
+
+1. Open **System Settings > Privacy & Security > Full Disk Access**.
+2. If Filescape is in the list, turn it on. If it isn't, click **+**, choose **Filescape** in your
+   Applications folder and click **Open**, then make sure it's turned on.
+3. Enter your password or use Touch ID if asked.
+4. Quit Filescape and open it again (macOS may offer **Quit & Reopen**), then scan again.
+
+Without it, protected folders are counted as unreadable. See
+[Folder access on macOS](../disk-usage/hidden-and-unreadable.md#folder-access-on-macos).
 
 The same steps are at <https://filescape.app/mac>.
 

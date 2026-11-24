@@ -41,6 +41,45 @@ pub fn is_elevated() -> bool {
     false
 }
 
+/// macOS only: true when Filescape clearly lacks Full Disk Access. macOS hides other apps' data
+/// (Mail, Safari, Messages, Time Machine settings…) from apps without it, so those folders are
+/// counted as unreadable. Probes folders that only Full Disk Access opens; any that open means it
+/// has access, and if none exist we can't tell, so say nothing. Always false elsewhere.
+#[cfg(target_os = "macos")]
+pub fn missing_full_disk_access() -> bool {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let probes = [
+        PathBuf::from("/Library/Application Support/com.apple.TCC"),
+        home.join("Library/Safari"),
+        home.join("Library/Mail"),
+        home.join("Library/Messages"),
+    ];
+    let mut denied = false;
+    for p in &probes {
+        match std::fs::read_dir(p) {
+            Ok(_) => return false,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => denied = true,
+            Err(_) => {}
+        }
+    }
+    denied
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn missing_full_disk_access() -> bool {
+    false
+}
+
+/// macOS: open System Settings at Privacy & Security > Full Disk Access.
+pub fn open_full_disk_access_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+            .spawn();
+    }
+}
+
 fn pref_file() -> Option<PathBuf> {
     eframe::storage_dir(crate::APP_ID).map(|d| d.join("admin-mode"))
 }

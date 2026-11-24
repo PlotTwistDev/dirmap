@@ -42,8 +42,9 @@ again in the new window.
 There's no restart button on Linux and macOS:
 
 - **Linux:** start Filescape with `sudo` from a terminal to read every user's files.
-- **macOS:** give Filescape **Full Disk Access** in **System Settings > Privacy & Security** instead.
-  That's what macOS uses to protect other apps' data; running with `sudo` doesn't get around it.
+- **macOS:** give Filescape **Full Disk Access** instead. **⚙ Settings > Advanced > Open Full Disk
+  Access settings…** takes you there. That's what macOS uses to protect other apps' data; running
+  with `sudo` doesn't get around it. See [Folder access on macOS](../disk-usage/hidden-and-unreadable.md#folder-access-on-macos).
 
 ## Related topics
 

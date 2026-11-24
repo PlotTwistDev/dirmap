@@ -15,5 +15,11 @@
 </ol></div>
 <div class="card"><h2>Advanced: use Terminal instead</h2><p>If you're comfortable with Terminal, this removes the download flag macOS puts on the app, so it opens straight away. It's also the fix if macOS says Filescape <b>is damaged and can't be opened</b>.</p>
 <pre class="code"><code>xattr -dr com.apple.quarantine /Applications/Filescape.app</code></pre></div>
-<h2>Scanning your whole disk</h2><p>To include other apps' data and your protected folders in a scan, give Filescape <b>Full Disk Access</b> in <b>System Settings &gt; Privacy &amp; Security &gt; Full Disk Access</b>, then restart it. Without it, those folders show as unreadable.</p>
+<h2>Letting Filescape see all your files</h2><p>Once it's open, macOS asks before Filescape reads your Desktop, Documents, Downloads or an external drive, with a message like <b>"Filescape" would like to access files in your Documents folder</b>. Click <b>Allow</b>. Other apps' data, such as Mail, Messages and parts of your Library folder, stays closed even then, so a scan can come up short.</p>
+<div class="card"><h2>Give Filescape Full Disk Access</h2><p>For a complete scan, and no more questions folder by folder:</p><ol>
+<li>Open <b>System Settings &gt; Privacy &amp; Security &gt; Full Disk Access</b>.</li>
+<li>If Filescape is in the list, turn it on. If not, click <b>+</b>, choose <b>Filescape</b> in Applications and click <b>Open</b>.</li>
+<li>Enter your password or use Touch ID if asked.</li>
+<li>Quit Filescape and open it again, then scan again.</li>
+</ol><p class="note">Filescape shows an <b>Allow Full Disk Access…</b> button in its status bar when a scan couldn't read everything, which opens this page of System Settings for you. Clicked <b>Don't Allow</b> earlier? Turn the folder back on under <b>Privacy &amp; Security &gt; Files &amp; Folders &gt; Filescape</b>.</p></div>
 <p>Still stuck? <a href="/contact">Contact us</a> and we'll help.</p></article></div></main><footer><div class="wrap"><span>© 2026 Filescape</span><a href="https://account.filescape.app/">Your licence</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/refunds">Refunds</a><a href="/contact">Contact</a></div></footer></body></html>
