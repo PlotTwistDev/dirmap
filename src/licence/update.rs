@@ -26,6 +26,24 @@ pub struct UpdateCheck {
     pub found: Option<ReleaseManifest>,
     /// The notice was closed for this session (it comes back at the next launch).
     pub closed: bool,
+    /// "Check now" was pressed in Settings: check even if checking at launch is off.
+    manual: bool,
+    /// When the server last answered with a release we could verify (Unix seconds); saved
+    /// between runs for Settings > General > Updates.
+    pub checked_at: Option<i64>,
+    /// The last check couldn't fetch or verify an answer.
+    pub failed: bool,
+}
+
+/// What Settings > General > Updates shows.
+pub struct UpdateStatus {
+    pub found: Option<ReleaseManifest>,
+    pub checking: bool,
+    pub failed: bool,
+    pub checked_at: Option<i64>,
+    /// The sentence about the licence for `found`, and whether it needs a new one.
+    pub coverage_text: String,
+    pub renew: bool,
 }
 
 /// "windows", "macos" or "linux": the names of the downloads.
@@ -56,8 +74,9 @@ impl Licensing {
     /// Call once a frame. Starts the check on the first call when `enabled`, and collects the
     /// answer when it arrives.
     pub fn update_tick(&mut self, ctx: &egui::Context, enabled: bool) {
-        if !self.update.started && enabled {
+        if !self.update.started && (enabled || self.update.manual) {
             self.update.started = true;
+            self.update.manual = false;
             let base = match &self.server {
                 super::Server::Online(base) => base.clone(),
                 #[cfg(feature = "licence-dev")]
@@ -76,11 +95,43 @@ impl Licensing {
             match rx.try_recv() {
                 Ok(env) => {
                     self.update.rx = None;
-                    self.update.found = env.and_then(|e| self.newer_release(&e));
+                    match env {
+                        // A genuine answer: the check worked, whether or not there's something newer.
+                        Some(e) if self.verifier.verify::<ReleaseManifest>(&e, Purpose::Release).is_ok() => {
+                            self.update.failed = false;
+                            self.update.checked_at = Some(chrono::Utc::now().timestamp());
+                            self.update.found = self.newer_release(&e);
+                        }
+                        _ => self.update.failed = true,
+                    }
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(mpsc::TryRecvError::Disconnected) => self.update.rx = None,
             }
+        }
+    }
+
+    /// Check again now (Settings > General > Check now), whatever the launch setting says.
+    pub fn check_updates_now(&mut self) {
+        if self.update.rx.is_none() {
+            self.update.started = false;
+            self.update.manual = true;
+            self.update.closed = false;
+        }
+    }
+
+    pub fn update_status(&self) -> UpdateStatus {
+        let (coverage_text, renew) = match &self.update.found {
+            Some(m) => notice_text(&self.release_coverage(m)),
+            None => (String::new(), false),
+        };
+        UpdateStatus {
+            found: self.update.found.clone(),
+            checking: self.update.rx.is_some() || (self.update.manual && !self.update.started),
+            failed: self.update.failed,
+            checked_at: self.update.checked_at,
+            coverage_text,
+            renew,
         }
     }
 

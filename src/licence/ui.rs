@@ -5,6 +5,7 @@ use filescape_licence as core;
 use core::export::date_time;
 use core::model::LicenceKind;
 use core::standing::{Reason, Standing};
+use crate::kit::{self, Icon, Kind, Tone};
 use eframe::egui::{self, RichText};
 
 #[derive(Default)]
@@ -64,12 +65,6 @@ pub fn feature_name(f: Feature) -> &'static str {
         Feature::SavedSearches => "Saved searches",
         Feature::Snapshots => "Snapshots",
     }
-}
-
-fn row(ui: &mut egui::Ui, k: &str, v: impl Into<String>) {
-    ui.label(RichText::new(k).weak());
-    ui.label(v.into());
-    ui.end_row();
 }
 
 impl Licensing {
@@ -139,133 +134,184 @@ impl Licensing {
         }
     }
 
-    /// Settings > Licensing.
-    pub fn panel(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().max_height(390.0).auto_shrink([false, true]).show(ui, |ui| {
-            self.status(ui);
-            ui.add_space(8.0);
-            self.details(ui);
-            ui.add_space(8.0);
-            self.entry(ui);
-            #[cfg(feature = "licence-dev")]
-            self.test_tools(ui);
-        });
+    /// Settings > Licensing. `focus` says which section a settings search points at.
+    pub fn panel(&mut self, ui: &mut egui::Ui, focus: &dyn Fn(&str) -> kit::Focus) {
+        self.status(ui, focus("status"));
+        self.details(ui, focus("details"));
+        self.entry(ui, focus("activate"));
+        #[cfg(feature = "licence-dev")]
+        self.test_tools(ui);
     }
 
-    fn status(&mut self, ui: &mut egui::Ui) {
+    /// The badge for the licence's state.
+    fn status_badge(&self) -> (String, Tone) {
+        let tone = match &self.standing {
+            Standing::Temporary { .. } | Standing::Perpetual(_) => Tone::Success,
+            Standing::Evaluation { .. } => Tone::Accent,
+            Standing::Restricted(Reason::Revoked) => Tone::Danger,
+            Standing::Restricted(_) => Tone::Warn,
+        };
+        let label = match &self.standing {
+            Standing::Evaluation { .. } => "Evaluation".to_string(),
+            Standing::Restricted(Reason::EvaluationOver) => "Free edition".to_string(),
+            _ => self.status_label(),
+        };
+        (label, tone)
+    }
+
+    fn status(&mut self, ui: &mut egui::Ui, focus: kit::Focus) {
         let now = self.now();
         let cert = self.shown_cert();
-        match self.standing.clone() {
-            Standing::Temporary { cert, days_left } => {
-                ui.heading("Filescape Professional — Temporary Licence");
-                ui.label("Your temporary licence is active, with full access to all Filescape features.");
-                egui::Grid::new("lic-temp").num_columns(2).show(ui, |ui| {
-                    row(ui, "Expires", cert.expires_at.map(date_time).unwrap_or_default());
-                    row(ui, "Days remaining", days_left.to_string());
-                    row(ui, "Activations used", format!("{} of {}", cert.activations_used, cert.max_activations));
-                    row(ui, "Licence type", "Temporary (Non-renewable)");
-                });
+        let (badge, tone) = self.status_badge();
+        kit::section_with(ui, Icon::Key, "Licence", Some((&badge, tone)), focus, |ui| {
+            let t = kit::tokens(ui);
+            ui.add_space(12.0);
+            let (edition, line): (&str, String) = match &self.standing {
+                Standing::Temporary { .. } => ("Filescape Professional", "Temporary licence, with every Filescape feature unlocked until it ends.".into()),
+                Standing::Perpetual(_) => ("Filescape Professional", "Your licence is active and never expires.".into()),
+                Standing::Evaluation { ends_at, days_left } => ("Filescape Professional evaluation", format!("Every feature is unlocked until {} ({} left).", date_time(*ends_at), days(*days_left))),
+                Standing::Restricted(Reason::TemporaryExpired(_)) => ("Filescape Free", "Your temporary licence has expired. Your files, settings and saved data are intact. Enter another licence, or buy a perpetual one, for the full feature set.".into()),
+                Standing::Restricted(r) => (
+                    "Filescape Free",
+                    match r {
+                        Reason::ClockRollback => "This computer's clock is behind a time Filescape has already seen, so time-limited licences are paused. Set the clock right, or go online so Filescape can check the time.",
+                        Reason::UpdatesLapsed(_) => "Your licence covers versions released while its updates last. This version is newer, so it runs with the free features; use an earlier version, or buy a new licence.",
+                        Reason::Revoked => "Your licence has been revoked. If you think this is a mistake, write to us at filescape.app/contact (Help > Contact Filescape).",
+                        _ => "The evaluation has ended. The file browser, the disk map and basic filters stay free.",
+                    }
+                    .into(),
+                ),
+            };
+            ui.label(RichText::new(edition).size(kit::HEADING + 3.0).strong().color(t.strong));
+            ui.add_space(2.0);
+            kit::note(ui, line);
+            ui.add_space(10.0);
+            match self.standing.clone() {
+                Standing::Evaluation { ends_at, days_left } => {
+                    let total = i64::from(core::EVALUATION_DAYS);
+                    kit::progress(ui, days_left as f32 / total as f32, Tone::Accent);
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{} of {} left", days(days_left), days(total))).size(kit::DESC).color(t.text));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(RichText::new(format!("Ends {}", date_time(ends_at).split(',').next().unwrap_or_default())).size(kit::DESC).color(t.weak));
+                        });
+                    });
+                    ui.add_space(8.0);
+                    kit::callout(ui, Tone::Neutral, "Free after the evaluation: the file browser, the disk map and basic filters. Your files, settings and saved data are never affected.");
+                    ui.add_space(8.0);
+                }
+                Standing::Temporary { cert, days_left } => {
+                    egui::Grid::new("lic-temp").num_columns(2).spacing([24.0, 8.0]).show(ui, |ui| {
+                        kit::kv(ui, "Licence type", "Temporary (non-renewable)");
+                        kit::kv(ui, "Expires", cert.expires_at.map(date_time).unwrap_or_default());
+                        kit::kv(ui, "Days remaining", days_left.to_string());
+                        kit::kv(ui, "Activations used", format!("{} of {}", cert.activations_used, cert.max_activations));
+                    });
+                    ui.add_space(8.0);
+                }
+                Standing::Perpetual(cert) => {
+                    egui::Grid::new("lic-perp").num_columns(2).spacing([24.0, 8.0]).show(ui, |ui| {
+                        kit::kv(ui, "Ownership", "Perpetual: yours to keep");
+                        kit::kv(ui, "Updates included until", cert.updates_until.map(date_time).unwrap_or_else(|| "Every future version".into()));
+                        kit::kv(ui, "Computers active", format!("{} of {}", cert.activations_used, cert.max_activations));
+                    });
+                    ui.add_space(6.0);
+                    if cert.updates_until.is_some() {
+                        kit::note(ui, "Your licence never expires. The updates date only decides which new versions it unlocks: versions released before it are covered for good, and this one keeps working after it.");
+                        ui.add_space(8.0);
+                    }
+                }
+                _ => {}
             }
-            Standing::Perpetual(cert) => {
-                ui.heading("Filescape Professional");
-                ui.label("Your licence is active and doesn't expire.");
-                egui::Grid::new("lic-perp").num_columns(2).show(ui, |ui| {
-                    row(ui, "Updates until", cert.updates_until.map(date_time).unwrap_or_else(|| "always".into()));
-                    row(ui, "Computers active", format!("{} of {}", cert.activations_used, cert.max_activations));
-                    row(ui, "Licence type", "Perpetual");
-                });
-            }
-            Standing::Evaluation { ends_at, days_left } => {
-                ui.heading("Filescape evaluation");
-                ui.label(format!("Every feature is unlocked until {} ({} left).", date_time(ends_at), days(days_left)));
-                ui.label("Afterwards the file browser, the disk map and basic filters stay free.");
-            }
-            Standing::Restricted(Reason::TemporaryExpired(_)) => {
-                ui.heading("Your temporary Filescape licence has expired");
-                ui.label("Your temporary access period has ended. Your files, settings and saved data remain intact.");
-                ui.label("To continue using Filescape's full functionality, enter another valid licence or purchase a perpetual licence.");
-            }
-            Standing::Restricted(r) => {
-                ui.heading("Filescape is not licensed");
-                ui.label(match r {
-                    Reason::ClockRollback => "This computer's clock is behind a time Filescape has already seen, so time-limited licences are paused. Set the clock right, or go online so Filescape can check the time.",
-                    Reason::UpdatesLapsed(_) => "Your licence covers versions released while its updates last. This version is newer; use an earlier one, or buy a new licence.",
-                    Reason::Revoked => "Your licence has been revoked. If you think this is a mistake, write to us at filescape.app/contact (Help > Contact Filescape).",
-                    _ => "The evaluation has ended. The file browser, the disk map and basic filters stay free.",
-                });
-            }
-        }
-        ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            if let Some(c) = &cert {
-                if let Some(serial) = self.serial_of(&c.licence_id)
-                    && ui.button("Copy Serial").clicked()
+            kit::divider(ui);
+            ui.add_space(10.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                // No Renew button for temporary licences: more time means a new serial.
+                if !matches!(self.standing, Standing::Perpetual(_))
+                    && kit::button(ui, Kind::Primary, Some(Icon::External), "Buy Filescape Professional").on_hover_text("Opens filescape.app in your browser").clicked()
                 {
-                    ui.ctx().copy_text(serial);
-                    self.ui.say("Serial number copied.".into(), false);
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(PURCHASE_URL));
                 }
-                ui.menu_button("Export Licence ⏷", |ui| {
-                    if ui.button("Licence Certificate (signed)…").clicked() {
-                        self.export_certificate(&c.licence_id);
-                        ui.close();
+                if let Some(c) = &cert {
+                    if let Some(serial) = self.serial_of(&c.licence_id)
+                        && kit::button(ui, Kind::Secondary, Some(Icon::Copy), "Copy Serial").clicked()
+                    {
+                        ui.ctx().copy_text(serial);
+                        self.ui.say("Serial number copied.".into(), false);
                     }
-                    if ui.button("Licence Details (text)…").clicked() {
-                        self.export_details(&c.licence_id, now);
-                        ui.close();
+                    let r = kit::button(ui, Kind::Secondary, Some(Icon::File), "Export Licence ⏷");
+                    egui::Popup::menu(&r).show(|ui| {
+                        if ui.button("Licence Certificate (signed)…").clicked() {
+                            self.export_certificate(&c.licence_id);
+                            ui.close();
+                        }
+                        if ui.button("Licence Details (text)…").clicked() {
+                            self.export_details(&c.licence_id, now);
+                            ui.close();
+                        }
+                    });
+                    let hint = if c.kind == LicenceKind::Perpetual { "Ends the activation here and frees this computer's place for another one." } else { "Ends the activation here. The activation it used isn't given back." };
+                    if self.standing.is_licensed()
+                        && !matches!(self.standing, Standing::Evaluation { .. })
+                        && kit::button(ui, Kind::Danger, None, "Deactivate This Computer…").on_hover_text(hint).clicked()
+                    {
+                        self.ui.confirm_deactivate = true;
                     }
-                });
-                let hint = if c.kind == LicenceKind::Perpetual { "Ends the activation here and frees this computer's place for another one." } else { "Ends the activation here. The activation it used isn't given back." };
-                if self.standing.is_licensed() && !matches!(self.standing, Standing::Evaluation { .. }) && ui.button("Deactivate This Computer…").on_hover_text(hint).clicked() {
-                    self.ui.confirm_deactivate = true;
                 }
-            }
-            // No Renew button for temporary licences: more time means a new serial.
-            if !matches!(self.standing, Standing::Perpetual(_)) && ui.button("Purchase Perpetual Licence").clicked() {
-                ui.ctx().open_url(egui::OpenUrl::new_tab(PURCHASE_URL));
-            }
-        });
-        if self.ui.confirm_deactivate {
-            let perpetual = matches!(self.standing, Standing::Perpetual(_));
-            ui.group(|ui| {
-                ui.label(if perpetual {
-                    "Deactivate Filescape on this computer? Professional features stop here, and its place is freed for another computer. (Release more than one computer in a week and the later ones keep their place for 7 days.)"
-                } else {
-                    "Deactivate Filescape on this computer? Professional features stop here, and the activation it used isn't given back."
-                });
+            });
+            ui.add_space(10.0);
+            if self.ui.confirm_deactivate {
+                let perpetual = matches!(self.standing, Standing::Perpetual(_));
+                kit::callout(
+                    ui,
+                    Tone::Warn,
+                    if perpetual {
+                        "Deactivate Filescape on this computer? Professional features stop here, and its place is freed for another computer. (Release more than one computer in a week and the later ones keep their place for 7 days.)"
+                    } else {
+                        "Deactivate Filescape on this computer? Professional features stop here, and the activation it used isn't given back."
+                    },
+                );
+                ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Deactivate").clicked() {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if kit::button(ui, Kind::Danger, None, "Deactivate").clicked() {
                         self.ui.confirm_deactivate = false;
                         self.deactivate();
                     }
-                    if ui.button("Cancel").clicked() {
+                    if kit::button(ui, Kind::Secondary, None, "Cancel").clicked() {
                         self.ui.confirm_deactivate = false;
                     }
                 });
-            });
-        }
+                ui.add_space(10.0);
+            }
+        });
     }
 
-    fn details(&mut self, ui: &mut egui::Ui) {
+    fn details(&mut self, ui: &mut egui::Ui, focus: kit::Focus) {
         let Some(c) = self.shown_cert() else { return };
         let issued = self.issuance_of(&c.licence_id).map(|(_, i)| i);
-        egui::CollapsingHeader::new("Licence Details").default_open(true).show(ui, |ui| {
-            egui::Grid::new("lic-details").num_columns(2).show(ui, |ui| {
-                row(ui, "Registered owner", c.owner.clone().unwrap_or_else(|| "(not assigned)".into()));
-                row(ui, "Licence type", if c.kind == LicenceKind::Temporary { "Temporary (Non-renewable)" } else { "Perpetual" });
-                row(ui, "Licence ID", c.licence_id.clone());
-                row(ui, "Serial number", format!("ends in {}", c.serial_hint.trim_start_matches('…')));
-                row(ui, "Date issued", date_time(c.issued_at));
-                row(ui, "Date activated", date_time(c.first_activated_at));
-                row(ui, "Expiration date", c.expires_at.map(date_time).unwrap_or_else(|| "never".into()));
+        kit::section(ui, Icon::File, "Licence details", focus, |ui| {
+            ui.add_space(10.0);
+            egui::Grid::new("lic-details").num_columns(2).spacing([24.0, 8.0]).show(ui, |ui| {
+                kit::kv(ui, "Registered owner", c.owner.clone().unwrap_or_else(|| "(not assigned)".into()));
+                kit::kv(ui, "Licence type", if c.kind == LicenceKind::Temporary { "Temporary (Non-renewable)" } else { "Perpetual" });
+                kit::kv(ui, "Licence ID", RichText::new(c.licence_id.clone()).monospace());
+                kit::kv(ui, "Serial number", format!("ends in {}", c.serial_hint.trim_start_matches('…')));
+                kit::kv(ui, "Date issued", date_time(c.issued_at));
+                kit::kv(ui, "Date activated", date_time(c.first_activated_at));
+                kit::kv(ui, "Expiration date", c.expires_at.map(date_time).unwrap_or_else(|| "never".into()));
                 if c.kind == LicenceKind::Perpetual {
                     // Whichever the server signed most recently: computers come and go.
                     let n = issued.as_ref().filter(|i| i.as_of >= c.signed_at).map_or(c.activations_used, |i| i.activations_used);
-                    row(ui, "Computers active", format!("{n} of {}", c.max_activations));
+                    kit::kv(ui, "Computers active", format!("{n} of {}", c.max_activations));
                 } else {
-                    row(ui, "Activations used", format!("{} of {}", issued.as_ref().map_or(c.activations_used, |i| i.activations_used.max(c.activations_used)), c.max_activations));
+                    kit::kv(ui, "Activations used", format!("{} of {}", issued.as_ref().map_or(c.activations_used, |i| i.activations_used.max(c.activations_used)), c.max_activations));
                 }
-                row(ui, "Status", self.status_label());
+                kit::kv(ui, "Status", self.status_label());
             });
+            ui.add_space(10.0);
         });
     }
 
@@ -280,66 +326,86 @@ impl Licensing {
         }
     }
 
-    fn entry(&mut self, ui: &mut egui::Ui) {
-        let label = if self.shown_cert().is_some() { "Enter New Licence" } else { "Enter Licence Key" };
-        ui.label(RichText::new(label).strong());
-        ui.horizontal(|ui| {
-            let r = ui.add(egui::TextEdit::singleline(&mut self.ui.entry).hint_text("FST-XXXXX-XXXXX-XXXXX-XXXXX").desired_width(280.0));
-            let go = ui.add_enabled(!self.busy() && !self.ui.entry.trim().is_empty(), egui::Button::new("Activate")).clicked() || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
-            if go && !self.busy() {
-                let s = self.ui.entry.clone();
-                self.activate(&s);
+    fn entry(&mut self, ui: &mut egui::Ui, focus: kit::Focus) {
+        let title = if self.shown_cert().is_some() { "Enter a new licence" } else { "Activate a licence" };
+        kit::section(ui, Icon::Key, title, focus, |ui| {
+            let t = kit::tokens(ui);
+            kit::stacked(ui, "Licence key", Some("The serial from your purchase email, starting FSP- (perpetual) or FST- (temporary)."), |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let r = kit::field(ui, &mut self.ui.entry, "FSP-XXXXX-XXXXX-XXXXX-XXXXX", (ui.available_width() - 200.0).clamp(200.0, 340.0));
+                    if kit::button(ui, Kind::Secondary, Some(Icon::Clipboard), "Paste").on_hover_text("Paste the licence key from the clipboard").clicked() {
+                        match arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
+                            Ok(text) => self.ui.entry = text.trim().to_string(),
+                            Err(_) => self.ui.say("The clipboard has no text in it.".into(), true),
+                        }
+                    }
+                    let go = ui.add_enabled_ui(!self.busy() && !self.ui.entry.trim().is_empty(), |ui| kit::button(ui, Kind::Primary, None, if self.busy() { "Activating…" } else { "Activate" })).inner.clicked()
+                        || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                    if go && !self.busy() {
+                        let s = self.ui.entry.clone();
+                        self.activate(&s);
+                    }
+                });
+            });
+            if let Some((m, err)) = self.ui.message.clone() {
+                kit::callout(ui, crate::settings::tone_of(err), m);
+                ui.add_space(8.0);
             }
-        });
-        if let Some((m, err)) = &self.ui.message {
-            let c = if *err { ui.visuals().error_fg_color } else { ui.visuals().text_color() };
-            ui.label(RichText::new(m).color(c));
-        }
-        egui::CollapsingHeader::new("Offline activation").show(ui, |ui| {
-            ui.label("For a computer without internet access: save a request file, upload it at account.filescape.app/activate from any computer that's online, and bring the response file back here. It counts towards the same activation limit.");
-            ui.horizontal(|ui| {
-                if ui.add_enabled(!self.ui.entry.trim().is_empty(), egui::Button::new("Save Request…")).clicked() {
-                    let s = self.ui.entry.clone();
-                    match self.offline_request(&s) {
-                        Ok(text) => {
-                            if let Some(f) = rfd::FileDialog::new().set_file_name("filescape-activation-request.json").save_file() {
-                                match std::fs::write(&f, text) {
-                                    Ok(()) => self.ui.say(format!("Saved {}.", f.display()), false),
-                                    Err(e) => self.ui.say(format!("Couldn't save it: {e}"), true),
+            kit::divider(ui);
+            ui.add_space(4.0);
+            egui::CollapsingHeader::new(RichText::new("Offline activation").size(kit::LABEL).color(t.strong)).id_salt("lic-offline").show(ui, |ui| {
+                kit::note(ui, "For a computer without internet access: save a request file, upload it at account.filescape.app/activate from any computer that's online, and bring the response file back here. It counts towards the same activation limit.");
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if ui.add_enabled_ui(!self.ui.entry.trim().is_empty(), |ui| kit::button(ui, Kind::Secondary, Some(Icon::File), "Save Request…")).inner.on_disabled_hover_text("Enter the licence key above first").clicked() {
+                        let s = self.ui.entry.clone();
+                        match self.offline_request(&s) {
+                            Ok(text) => {
+                                if let Some(f) = rfd::FileDialog::new().set_file_name("filescape-activation-request.json").save_file() {
+                                    match std::fs::write(&f, text) {
+                                        Ok(()) => self.ui.say(format!("Saved {}.", f.display()), false),
+                                        Err(e) => self.ui.say(format!("Couldn't save it: {e}"), true),
+                                    }
                                 }
                             }
+                            Err(e) => self.ui.say(e, true),
                         }
-                        Err(e) => self.ui.say(e, true),
                     }
-                }
-                if ui.button("Import Response…").clicked()
-                    && let Some(f) = rfd::FileDialog::new().add_filter("Activation response", &["json"]).pick_file()
-                {
-                    match std::fs::read_to_string(&f) {
-                        Ok(t) => {
-                            if self.ui.serial_for_keychain.is_none()
-                                && let Ok((_, s)) = core::serial::normalize(&self.ui.entry)
-                            {
-                                self.ui.serial_for_keychain = Some(s);
+                    if kit::button(ui, Kind::Secondary, Some(Icon::Folder), "Import Response…").clicked()
+                        && let Some(f) = rfd::FileDialog::new().add_filter("Activation response", &["json"]).pick_file()
+                    {
+                        match std::fs::read_to_string(&f) {
+                            Ok(t) => {
+                                if self.ui.serial_for_keychain.is_none()
+                                    && let Ok((_, s)) = core::serial::normalize(&self.ui.entry)
+                                {
+                                    self.ui.serial_for_keychain = Some(s);
+                                }
+                                self.offline_response(&t)
                             }
-                            self.offline_response(&t)
+                            Err(e) => self.ui.say(format!("Couldn't read it: {e}"), true),
                         }
-                        Err(e) => self.ui.say(format!("Couldn't read it: {e}"), true),
+                    }
+                });
+                ui.add_space(6.0);
+            });
+            egui::CollapsingHeader::new(RichText::new("Verify a licence certificate").size(kit::LABEL).color(t.strong)).id_salt("lic-verify").show(ui, |ui| {
+                kit::note(ui, "Checks a .filescape-licence file's signature, for proof of purchase.");
+                ui.add_space(6.0);
+                if kit::button(ui, Kind::Secondary, Some(Icon::Shield), "Verify Certificate…").clicked()
+                    && let Some(f) = rfd::FileDialog::new().add_filter("Filescape licence certificate", &[core::export::CERTIFICATE_EXTENSION]).pick_file()
+                {
+                    let text = std::fs::read_to_string(&f).unwrap_or_default();
+                    match core::export::verify_certificate_file(&text, self.verifier()) {
+                        Ok(c) => self.ui.say(format!("Genuine: licence {} ({}), issued {}.", c.licence_id, c.owner.unwrap_or_else(|| "no owner".into()), date_time(c.issued_at)), false),
+                        Err(e) => self.ui.say(format!("Not a valid certificate: {e}."), true),
                     }
                 }
+                ui.add_space(6.0);
             });
-        });
-        egui::CollapsingHeader::new("Verify a licence certificate").show(ui, |ui| {
-            ui.label("Checks a .filescape-licence file's signature, for proof of purchase.");
-            if ui.button("Verify Certificate…").clicked()
-                && let Some(f) = rfd::FileDialog::new().add_filter("Filescape licence certificate", &[core::export::CERTIFICATE_EXTENSION]).pick_file()
-            {
-                let text = std::fs::read_to_string(&f).unwrap_or_default();
-                match core::export::verify_certificate_file(&text, self.verifier()) {
-                    Ok(c) => self.ui.say(format!("Genuine: licence {} ({}), issued {}.", c.licence_id, c.owner.unwrap_or_else(|| "no owner".into()), date_time(c.issued_at)), false),
-                    Err(e) => self.ui.say(format!("Not a valid certificate: {e}."), true),
-                }
-            }
+            ui.add_space(4.0);
         });
     }
 

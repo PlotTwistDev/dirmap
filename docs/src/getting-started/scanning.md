@@ -24,7 +24,7 @@ drives aren't listed, but you can still type their path.
 - The line under it shows files, folders, total size, files per second, elapsed time and, if
   any, how many items couldn't be read.
 - The folder being read right now is shown in grey.
-- With **Show folders and files as they are found** turned on (the default, in
+- With **Live scan results** turned on (the default, in
   **⚙ Settings > General**), a tree of what's been found so far fills in live: click a folder to open it while the
   scan carries on. A spinner marks folders still being read. Each open folder lists its 200
   largest files so far; the rest are summarised as "… and N smaller files".

@@ -13,14 +13,18 @@ doesn't need a rescan.
 
 | Setting | Effect |
 |---|---|
-| **Folders to skip** | One full path per line. The folder and everything under it is skipped. Matching ignores case on Windows, and `\` and `/` are treated the same. Example: `C:\Windows\WinSxS`. |
-| **File names to skip** | One pattern per line, matched against file names. `*` matches any characters and `?` one character, ignoring case. Example: `*.tmp` or `~$*`. |
-| **Only count file names matching** | One pattern per line. If anything is entered here, **only** matching files are counted. Leave it empty to count all files. |
-| **Skip files smaller than** | In KB. 0 turns it off. |
-| **Skip files not changed for** | In days. Files last modified longer ago than this are skipped. 0 turns it off. |
+| **Folders to skip** | Full paths, added one at a time with **Add** or **Browse…**. The folder and everything under it is skipped. Matching ignores case on Windows, and `\` and `/` are treated the same. Example: `C:\Windows\WinSxS`. |
+| **Skip files named** | Patterns matched against file names. `*` matches any characters and `?` one character, ignoring case. Example: `*.tmp` or `~$*`. |
+| **Only count files named** | Patterns. If there are any, **only** matching files are counted. Leave it empty to count all files. |
+| **Skip small files** | Turn it on and give a size in bytes, KB, MB, GB or TB. |
+| **Skip old files** | Turn it on and give a time in days, weeks, months or years. Files last modified longer ago than this are skipped. |
+
+Each rule can be edited (**✎**) or removed (**🗑**), and one that can't work (a folder that isn't a
+full path, or a name pattern containing a path) gets a warning sign. **Try a file name** checks
+what the rules do with a name you type.
 
 Folders can also be added straight from the file manager: right-click a folder and choose **Add to
-Exclusion Filter**. On a file, that adds its name to **File names to skip**; in the File types list
+Exclusion Filter**. On a file, that adds its name to **Skip files named**; in the File types list
 it adds `*.ext`. A message in the status bar confirms it, and the change applies to the next scan.
 
 ## Pattern syntax here is simpler

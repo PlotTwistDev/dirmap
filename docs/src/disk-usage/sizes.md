@@ -54,7 +54,7 @@ changed today. Times are shown in your computer's time zone.
 By default sizes use **binary units**, like Windows Explorer: 1 KB = 1,024 bytes,
 1 MB = 1,024 KB, 1 GB = 1,024 MB, labelled KB/MB/GB. Drive makers and macOS use **decimal
 units** (1 kB = 1,000 bytes), which make the same number of bytes look about 7% bigger at GB
-scale. Choose under **⚙ Settings > General > Sizes**. A 1 TB drive is about 931 GB in binary units.
+scale. Choose under **⚙ Settings > General > Size units**. A 1 TB drive is about 931 GB in binary units.
 
 Typed sizes follow the same setting: `500 MB` in a size box is 500 × 1,024 × 1,024 bytes in
 binary mode.

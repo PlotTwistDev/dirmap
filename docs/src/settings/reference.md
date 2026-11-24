@@ -1,90 +1,136 @@
 # Settings reference
 
-Open **⚙ Settings** at the right of the toolbar. The window has five tabs. Changes preview in the
-main window while the window is open; **OK** keeps them and closes the window, **Apply** keeps
-them and leaves it open, and **Cancel** (or closing the window) throws them away. **Reset all**
-puts every setting, on every tab (including the administrator choice), back to its default; press
-**OK** or **Apply** to keep that.
+Open **⚙ Settings** at the right of the toolbar. The window has a sidebar of pages (**General**,
+**Filtering**, **Folder list**, **Treemap**, **Advanced** and **Licensing**) and opens on the page
+you used last. Each page groups its settings into sections, with a line under every setting
+saying what it does. You can resize the window; long pages scroll.
+
+**Find a setting…** at the top of the sidebar (or **Ctrl+F** while the window is open) searches
+settings by name, by what they do and by everyday words: "zoom", "threads", "hidden files" or
+"licence" all work. Pick a result to go to its page; its section is outlined for a moment.
+
+Changes preview in the main window while the window is open (the theme, the interface size, size
+units and the whole treemap look among them). At the bottom:
+
+- **OK** keeps the changes and closes the window.
+- **Apply** keeps them and leaves it open. It's greyed out until something has changed.
+- **Cancel**, the **✕** at the top, or **Esc** throws away everything not yet applied, including
+  the live preview.
+- **Restore page defaults** puts just the settings on the page you're on back to their defaults.
+- **Restore all…** asks first, then puts every setting on every page (including the
+  administrator choice) back to its default. Your licence isn't affected. Like any change, it
+  only sticks once you press **OK** or **Apply**.
+- **Help** (or **F1**) opens the part of this page about the page you're on.
 
 Settings are saved when Filescape closes and are used the next time it starts. Settings marked
 **needs a rescan** change what a scan finds; after changing one the status bar shows **Scan
-settings changed. Rescan**.
+settings changed. Rescan**, and the Filtering page says **Rescan needed**.
 
-![The Treemap tab of the Settings window](../images/settings-treemap.png)
+![The Treemap page of the Settings window](../images/settings-treemap.png)
 
 ## General
 
+![The General page of the Settings window](../images/settings-general.png)
+
 | Setting | Default | Effect |
 |---|---|---|
-| **Theme** <!-- setting:theme --> | Follow system | **Follow system**, **Dark** or **Light**. The help window follows it too. |
-| **Sizes** <!-- setting:units --> | Binary | **Binary** (1 KB = 1,024 bytes, like Explorer) or **Decimal** (1 kB = 1,000 bytes, like drive makers and macOS). Also changes how typed sizes are read. See [Units](../disk-usage/sizes.md#units-binary-and-decimal). |
-| **Striped rows in lists** <!-- setting:stripes --> | On | Shades every other row in the file manager and the side panel lists. |
-| **Show folders and files as they are found** <!-- setting:live_tree --> | On | Shows a tree of folders filling in during a scan. Off shows only the progress bar. |
-| **Check for a new version when Filescape starts** <!-- setting:check_updates --> | On | At each launch, asks filescape.app for the newest version number and shows a notice when there's a newer one, saying whether your licence covers it. Nothing about you or the computer is sent. See [Updates](licensing.md#updates). |
+| **Theme** <!-- setting:theme --> | System | **System** (follow your computer's light or dark mode), **Dark** or **Light**, each shown as a small picture. The help window follows it too. |
+| **Interface size** <!-- setting:ui_scale --> | 100% | Makes all text and controls bigger or smaller: 80% to 150%. **Ctrl +** and **Ctrl −** (**⌘** on macOS) do the same anywhere in Filescape, and **Ctrl 0** goes back to 100%; the size you end up with is remembered. |
+| **Striped rows** <!-- setting:stripes --> | On | Shades every other row in the file manager and the side panel lists. Also on the Folder list page. |
+| **Size units** <!-- setting:units --> | Binary | **Binary** (1 KB = 1,024 bytes, like Explorer) or **Decimal** (1 kB = 1,000 bytes, like drive makers and macOS). An example underneath shows how a file's size would read. Also changes how typed sizes are read. See [Units](../disk-usage/sizes.md#units-binary-and-decimal). |
+| **Live scan results** <!-- setting:live_tree --> | On | Shows a tree of folders filling in during a scan. Off shows only the progress bar. |
+| **Check automatically** <!-- setting:check_updates --> | On | At each launch, asks filescape.app for the newest version number and shows a notice when there's a newer one, saying whether your licence covers it. Nothing about you or the computer is sent. See [Updates](licensing.md#updates). |
+
+The **Updates** section also shows the version you have, when the last check succeeded, and
+whether you're up to date. **Check now** asks straight away (even with automatic checks off), and
+when a newer version is out it says whether your licence covers it, with **Download**. **What's
+new in this version** opens [What's new](../about/whats-new.md); with a newer version found,
+**What's new online** opens its release notes.
 
 ## Filtering
 
 These are scan exclusions: they **need a rescan** and change the totals. See
-[Scan exclusions](../filtering/scan-filters.md).
+[Scan exclusions](../filtering/scan-filters.md). **Active rules** at the top sums up what's
+skipped, and says **Rescan needed** when the scan on screen was made with different rules.
 
 | Setting | Default | Effect |
 |---|---|---|
-| **Folders to skip** <!-- setting:exclude_folders --> | Empty | Full folder paths, one per line. Each folder and everything under it is skipped. |
-| **File names to skip** <!-- setting:exclude_files --> | Empty | File name patterns with `*` and `?`, one per line, for example `*.tmp`. |
-| **Only count file names matching** <!-- setting:include_files --> | Empty (all files) | If filled in, only files matching one of these patterns are counted. |
-| **Skip files smaller than** <!-- setting:min_file_size --> | 0 KB (off) | Leaves out files below this size. |
-| **Skip files not changed for** <!-- setting:max_age_days --> | 0 days (off) | Leaves out files last modified more than this many days ago. |
+| **Folders to skip** <!-- setting:exclude_folders --> | None | Full folder paths. Each folder and everything under it is skipped. Type a path and press **Add** (or **Enter**), or use **Browse…**. |
+| **Skip files named** <!-- setting:exclude_files --> | None | File name patterns with `*` and `?`, for example `*.tmp`. The **Common** buttons add the usual suspects. |
+| **Only count files named** <!-- setting:include_files --> | None (all files) | If you add any patterns, only files matching one of them are counted. |
+| **Skip small files** <!-- setting:min_file_size --> | Off | Leaves out files below a size, in bytes, KB, MB, GB or TB (in the units chosen on the General page). |
+| **Skip old files** <!-- setting:max_age_days --> | Off | Counts only files changed within a number of days, weeks, months (30 days) or years (365 days). |
+
+Each rule has **✎** to edit it and **🗑** to remove it. A warning sign marks a rule that can't
+work: a folder that isn't a full path, a name pattern with a `/` or `\` in it (patterns match
+names, not paths), or a rule listed twice. **Try a file name** shows whether a name you type
+would be counted or skipped, and by which pattern.
 
 ## Folder list
 
-Name and Size are always shown.
+A preview at the top shows a few rows of the folder list with the columns, stripes and size units
+you've chosen. **Name** and **Size** are always shown.
 
 | Setting | Default | Effect |
 |---|---|---|
-| **Percentage of parent (with bar)** <!-- setting:col_percent --> | On | Shows the **% of parent** column. |
+| **% of parent** <!-- setting:col_percent --> | On | Shows the **% of parent** column, with a bar. |
 | **Files** <!-- setting:col_files --> | On | Shows the **Files** column. |
 | **Last change** <!-- setting:col_modified --> | On | Shows the **Last change** column. |
 
 ## Treemap
 
-These change only how the treemap looks and moves; they never need a rescan. See
-[Lighting and visual effects](../views/visual-effects.md).
+These change only how the treemap looks and moves; they never need a rescan. A **Preview** at the
+top draws a sample folder with the current settings, and the map in the main window previews them
+too. See [Lighting and visual effects](../views/visual-effects.md).
 
 | Setting | Default | Effect |
 |---|---|---|
-| **Tile style** <!-- setting:tile_style --> | Modern | **Modern**: soft pastel tiles with names on them and dark name tags on the folders, the same look as the map on filescape.app. **Classic cushion**: shaded cushion tiles in strong colours, tuned by the settings below (which apply to Classic only). |
-| **Brightness** <!-- setting:brightness --> | 88 | Overall brightness of the tiles (0–100). |
-| **Cushion shading** <!-- setting:cushion --> | 87 | Strength of the shading that shows folder boundaries (0 = flat). |
-| **Height** <!-- setting:height --> | 38 | How rounded each folder's cushion is. |
-| **Scale factor** <!-- setting:scale --> | 91 | How much of the cushion shape carries down to deeper folders. |
-| **Light from x** <!-- setting:light_x --> | −1 | Horizontal direction of the light (−2 to 2; negative is from the left). |
-| **Light from y** <!-- setting:light_y --> | −1 | Vertical direction of the light (−2 to 2; negative is from the top). |
-| **Grid: Show** <!-- setting:show_grid --> | Off | Draws a line around every tile. |
-| **Grid colour** <!-- setting:grid_color --> | Black | Colour of those lines. |
-| **Labels** <!-- setting:show_labels --> | On | Writes names (and sizes) on tiles with room for them, on the treemap and the sunburst. The same as **File names on tiles** in the filter bar. |
+| **Tile style** <!-- setting:tile_style --> | Modern | **Modern**: soft pastel tiles with names on them and dark name tags on the folders, the same look as the map on filescape.app. **Classic cushion**: shaded cushion tiles in strong colours, tuned by the **Classic cushion shading** section (which is only shown with Classic chosen). |
+| **File labels** <!-- setting:show_labels --> | On | Writes names (and sizes) on tiles with room for them, on the treemap and the sunburst. The same as **File names on tiles** in the filter bar. |
 | **Selection border** <!-- setting:selection_color --> | White | Colour of the outline around the selected item. |
-| **Presets** | | **Classic** restores the look settings above to their defaults, **Soft** gives gentler shading, and **Flat** turns shading off and the grid on. |
-| **Smooth zoom** <!-- setting:smooth_zoom --> | On | Animates zooming, panning, opening folders and Back/Forward. Off makes every change happen at once (and turns off coasting after a drag). |
-| **Zoom sensitivity** <!-- setting:zoom_sensitivity --> | Middle (1×) | How far each wheel step or trackpad movement zooms, from a quarter to three times the default. |
-| **Animation speed** <!-- setting:anim_speed --> | Middle (1×) | How fast animations play, from half to two and a half times the default. Only with Smooth zoom on. |
+| **Presets** | | Classic cushion only, shown as pictures: **Classic** restores the shading settings below to their defaults, **Soft** gives gentler shading, and **Flat** turns shading off and the grid on. |
+| **Brightness** <!-- setting:brightness --> | 88 | Classic cushion only. Overall brightness of the tiles (0–100). |
+| **Cushion shading** <!-- setting:cushion --> | 87 | Classic cushion only. Strength of the shading that shows folder boundaries (0 = flat). |
+| **Height** <!-- setting:height --> | 38 | Classic cushion only. How rounded each folder's cushion is. |
+| **Scale factor** <!-- setting:scale --> | 91 | Classic cushion only. How much of the cushion shape carries down to deeper folders. |
+| **Light direction: x** <!-- setting:light_x --> | −1 | Classic cushion only. Horizontal direction of the light (−2 to 2; negative is from the left). Drag the dot on the pad, or type a value. |
+| **Light direction: y** <!-- setting:light_y --> | −1 | Classic cushion only. Vertical direction of the light (−2 to 2; negative is from the top). |
+| **Grid** <!-- setting:show_grid --> | Off | Classic cushion only. Draws a line around every tile. |
+| **Grid colour** <!-- setting:grid_color --> | Black | The swatch beside **Grid**: colour of those lines. |
+| **Block depth** <!-- setting:depth_effect --> | On | Classic cushion only. A slight bevel on tile edges so neighbouring tiles stand apart. |
 | **Interactive lighting** <!-- setting:lighting --> | On | A soft light follows the pointer and the tile under it lifts slightly. |
-| **Intensity** <!-- setting:light_level --> | Normal | **Subtle**, **Normal** or **Strong** pointer light. |
-| **Block depth effect** <!-- setting:depth_effect --> | On | A slight bevel on tile edges so neighbouring tiles stand apart. |
+| **Intensity** <!-- setting:light_level --> | Normal | **Subtle**, **Normal** or **Strong** pointer light. Only with Interactive lighting on. |
+| **Smooth zoom** <!-- setting:smooth_zoom --> | On | Animates zooming, panning, opening folders and Back/Forward. Off makes every change happen at once (and turns off coasting after a drag), for less motion. |
+| **Zoom sensitivity** <!-- setting:zoom_sensitivity --> | 1.00× | How far each wheel step or trackpad movement zooms, from 0.25× to 3×. |
+| **Animation speed** <!-- setting:anim_speed --> | 1.00× | How fast animations play, from 0.5× to 2.5×. Only with Smooth zoom on. |
+
+Every slider shows its value, which you can drag or click to type, and a **↺** button that puts
+that one setting back to its default appears once it's changed.
 
 ## Advanced
 
 | Setting | Default | Effect |
 |---|---|---|
+| **Skip hidden files and folders** <!-- setting:skip_hidden --> | Off | **Needs a rescan.** Leaves out hidden (and on Windows, system) files and folders. A warning reminds you that totals then leave their space out. |
 | **Stay on the scanned drive** <!-- setting:one_file_system --> | On | **Needs a rescan.** Linux and macOS: don't scan other drives mounted inside the scanned folder. The `--all-fs` command-line option turns it off for one run. Windows never follows drives mounted in folders either way. See [Links, junctions and mounted drives](../disk-usage/links-and-mounts.md). |
-| **Skip hidden files and folders** <!-- setting:skip_hidden --> | Off | **Needs a rescan.** Leaves out hidden (and on Windows, system) files and folders. |
-| **Scanner threads** <!-- setting:threads --> | 0 (automatic) | How many folders are read at once. 0 uses one per processor core (the number on this computer is shown). Network drives often scan faster with more, such as 32. Applies from the next scan. |
-| **When Filescape starts** <!-- setting:admin --> | Ask if it isn't | Windows only: **Always run as administrator**, **Ask if it isn't**, or **Never (don't ask)**. **🛡 Restart as administrator now** restarts straight away. See [Running as administrator](administrator.md). |
+| **Scanner threads** <!-- setting:threads --> | Automatic | How many folders are read at once, as a profile: **Automatic** (one per CPU thread), **Low** (a quarter of them, to keep the computer responsive), **Balanced** (half), **High** (twice as many, for fast SSDs and RAID), **Network** (32, as each read on a network share waits for the server) or **Custom** (1–256). The number of CPU threads on this computer is shown. Applies from the next scan. |
+| **Run as administrator at start** <!-- setting:admin --> | Ask | Windows only: **Always**, **Ask** (when Filescape isn't running as administrator) or **Never**. **Restart now** restarts as administrator straight away. See [Running as administrator](administrator.md). |
+
+The **Permissions** section says how Filescape is running (as a standard user, as administrator
+or as root) and what to do on your system to read protected folders: the administrator choice on
+Windows, **Open System Settings…** for Full Disk Access on macOS, and `sudo` for a one-off scan on
+Linux. **Diagnostics** shows the settings folder (**Open** it, or copy its path) and a line of
+system details with **Copy**, for a problem report.
 
 ## Licensing
 
-Shows the licence in use, the evaluation or what's needed, with **Activate**, **Copy Serial**,
-**Export Licence**, **Deactivate This Computer** and offline activation. It has no settings of its
-own. See [Licensing](licensing.md).
+Shows your edition (Professional, the evaluation or Free) with its state as a badge, the details
+that matter for it (days left in the evaluation with a bar, the expiry of a temporary licence, or
+for a perpetual licence the date its updates run to, which never makes the licence itself
+expire), **Buy Filescape Professional**, **Copy Serial**, **Export Licence** and **Deactivate This
+Computer**. **Activate a licence** takes the licence key (type it, or press **Paste**), with
+offline activation and certificate checking below. It has no settings of its own. See
+[Licensing](licensing.md).
 
 ## Remembered outside the Settings window
 
@@ -98,6 +144,7 @@ These are changed where you use them and also saved between runs:
 | Match any term (OR) / Match all terms (AND) <!-- pref:match_all --> | Custom filter **⏷** menu | Match any |
 | Highlight / Show matches only <!-- pref:mode --> | Filter bar, when a filter is on | Highlight |
 | Window size and position, panel sizes | The window itself | |
+| The Settings page you were on, and when updates were last checked | The Settings window | General |
 
 ## Where settings are stored
 
@@ -110,7 +157,7 @@ These are changed where you use them and also saved between runs:
 The folder holds `app.ron` (all of the above) and `admin-mode` (the administrator choice, kept
 separately because it's needed before the window opens). `licence.json` holds the signed licence
 record; deleting it doesn't remove a licence (enter the serial again) or restart the evaluation. To start afresh, close Filescape and delete
-the folder, or use **Reset all**.
+the folder, or use **Restore all…**.
 
 ## Related topics
 

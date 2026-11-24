@@ -27,12 +27,14 @@ keeps running normally.
 
 ## Changing it later
 
-**⚙ Settings > Advanced > Administrator** shows whether Filescape is running as administrator, and
+**⚙ Settings > Advanced > Permissions** shows whether Filescape is running as administrator, and
 has:
 
-- **When Filescape starts:** **Always run as administrator**, **Ask if it isn't**, or **Never (don't
-  ask)**.
-- **🛡 Restart as administrator now**, shown when it isn't.
+- **Run as administrator at start:** **Always**, **Ask** (if it isn't), or **Never** (don't ask).
+- **Restart as administrator > Restart now**, shown when it isn't.
+
+Filescape doesn't need administrator rights for your own files, so there's no need to run it that
+way all the time: use it to measure protected system folders, then restart normally.
 
 A restart keeps the command line it was started with, so a scan given on the command line starts
 again in the new window.
@@ -42,8 +44,8 @@ again in the new window.
 There's no restart button on Linux and macOS:
 
 - **Linux:** start Filescape with `sudo` from a terminal to read every user's files.
-- **macOS:** give Filescape **Full Disk Access** instead. **⚙ Settings > Advanced > Open Full Disk
-  Access settings…** takes you there. That's what macOS uses to protect other apps' data; running
+- **macOS:** give Filescape **Full Disk Access** instead. **⚙ Settings > Advanced > Permissions > Open System
+  Settings…** takes you there. That's what macOS uses to protect other apps' data; running
   with `sudo` doesn't get around it. See [Folder access on macOS](../disk-usage/hidden-and-unreadable.md#folder-access-on-macos).
 
 ## Related topics

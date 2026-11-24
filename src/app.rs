@@ -199,6 +199,8 @@ pub struct App {
     /// `--all-fs` on the command line overrides the "stay on drive" setting for this run.
     force_all_fs: bool,
     applied_theme: Option<settings::Theme>,
+    /// The interface size last given to egui (see `Settings::ui_scale`).
+    applied_scale: Option<f32>,
 
     path_input: String,
     scanned_path: PathBuf,
@@ -320,6 +322,8 @@ impl App {
         if path.is_some() || compare.is_some() || std::env::var("DIRMAP_SYNTHETIC").is_ok() {
             files_prefs.workspace = Workspace::Analysis;
         }
+        let settings_page: settings::Tab = cc.storage.and_then(|s| eframe::get_value(s, "settings_page")).unwrap_or_default();
+        let last_update_check: Option<i64> = cc.storage.and_then(|s| eframe::get_value(s, "last_update_check")).unwrap_or_default();
         let mut app = Self {
             settings,
             licence: crate::licence::Licensing::load(),
@@ -327,6 +331,7 @@ impl App {
             icons: Icons::default(),
             force_all_fs,
             applied_theme: None,
+            applied_scale: None,
             path_input: path
                 .clone()
                 .or_else(|| std::env::current_dir().ok())
@@ -425,6 +430,15 @@ impl App {
         // DIRMAP_FILTER=pattern starts with the Custom filter set, e.g. for screenshots.
         if let Ok(f) = std::env::var("DIRMAP_FILTER") {
             app.set_custom(&f);
+        }
+        app.dialog.tab = settings_page;
+        app.licence.update.checked_at = last_update_check;
+        // DIRMAP_SETTINGS=treemap opens Settings on that page (for screenshots of the manual).
+        if let Ok(page) = std::env::var("DIRMAP_SETTINGS") {
+            if let Some(t) = settings::Tab::ALL.into_iter().find(|t| t.name().replace(' ', "").eq_ignore_ascii_case(&page.replace(' ', ""))) {
+                app.dialog.tab = t;
+            }
+            app.dialog.open(&app.settings);
         }
         if std::env::var("DIRMAP_FILTER_ONLY").is_ok() {
             app.custom.prefs.mode = custom::FilterMode::Only;
@@ -2488,11 +2502,11 @@ impl App {
 
 /// Per-pixel cushion shading (van Wijk & van de Wetering), with WinDirStat's knobs.
 pub(crate) struct Shading {
-    ambient: f32,
-    diffuse: f32,
-    gain: f32,
-    light: [f32; 3],
-    grid: Option<Color32>,
+    pub(crate) ambient: f32,
+    pub(crate) diffuse: f32,
+    pub(crate) gain: f32,
+    pub(crate) light: [f32; 3],
+    pub(crate) grid: Option<Color32>,
 }
 
 impl Shading {
@@ -2546,6 +2560,8 @@ impl Shading {
 impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "settings", &self.settings);
+        eframe::set_value(storage, "settings_page", &self.dialog.tab);
+        eframe::set_value(storage, "last_update_check", &self.licence.update.checked_at);
         eframe::set_value(storage, "custom_filter", &self.custom.prefs);
         eframe::set_value(storage, "files", &self.files.to_save());
     }
@@ -2556,6 +2572,16 @@ impl eframe::App for App {
         if self.applied_theme != Some(view_theme) {
             self.view().apply_theme(&ctx);
             self.applied_theme = Some(view_theme);
+        }
+        // Interface size: the setting drives egui's zoom, and Ctrl +/− (which egui handles)
+        // updates the setting, so either way it's kept between runs.
+        let scale = self.view().ui_scale.clamp(0.5, 3.0);
+        if self.applied_scale.is_none_or(|a| (a - scale).abs() > 1e-3) {
+            ctx.set_zoom_factor(scale);
+            self.applied_scale = Some(scale);
+        } else if !self.dialog.open && (ctx.zoom_factor() - scale).abs() > 1e-3 {
+            self.settings.ui_scale = (ctx.zoom_factor() * 100.0).round() / 100.0;
+            self.applied_scale = Some(self.settings.ui_scale);
         }
         scan::set_decimal_units(self.view().units == settings::SizeUnits::Decimal);
 
@@ -2572,7 +2598,8 @@ impl eframe::App for App {
         if std::mem::take(&mut self.licence.ui.open_settings) {
             self.dialog.open_licensing(&self.settings);
         }
-        if let settings::Outcome::Apply = self.dialog.show(&ctx, &mut self.licence) {
+        let env = settings::Env { current: &self.settings, scanned: self.scanned_with.as_ref(), renderer: self.renderer };
+        if let settings::Outcome::Apply = self.dialog.show(&ctx, &mut self.licence, &env) {
             if self.dialog.draft.admin != self.settings.admin {
                 elevate::save_mode(self.dialog.draft.admin);
                 self.admin_prompt = false;
@@ -3127,7 +3154,7 @@ pub(crate) const PASTELS: [u32; 16] = [
 ];
 
 /// The biggest extensions get bright, well-separated hues; the long tail gets muted ones.
-fn ext_color(ext: &str, rank: usize, style: TileStyle) -> Color32 {
+pub(crate) fn ext_color(ext: &str, rank: usize, style: TileStyle) -> Color32 {
     if style == TileStyle::Modern {
         if let Some(&c) = PASTELS.get(rank) {
             return Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
