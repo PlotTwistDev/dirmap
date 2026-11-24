@@ -87,11 +87,20 @@ impl App {
         let filtering = self.filter.active() && !sum.pending;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            let size = if filtering {
+            let mut size = if filtering {
                 format!("{} of {}", scan::human(sum.bytes), scan::human(sum.all_bytes))
             } else {
                 scan::human(sum.bytes)
             };
+            // Which size this is, and the other one when they differ (cloud files, compression).
+            if let Some(t) = self.tree.as_ref().filter(|t| t.flags & scan::store::NO_ALLOC == 0) {
+                let other = if self.metric == scan::Metric::Disk { scan::Metric::Logical } else { scan::Metric::Disk };
+                let (a, b) = (scan::human(t.size), scan::human(t.size_by(other)));
+                size.push_str(if self.metric == scan::Metric::Disk { " on disk" } else { " logical" });
+                if !filtering && a != b {
+                    size.push_str(&format!(" ({b} {})", if other == scan::Metric::Disk { "on disk" } else { "logical" }));
+                }
+            }
             let files = if filtering {
                 format!("{} of {} files", group(sum.files), group(sum.all_files))
             } else {

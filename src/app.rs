@@ -9,7 +9,7 @@ use crate::help::{self, topics};
 use crate::camera::{self, Feel};
 use crate::icons::Icons;
 use crate::mapview::{self, Look, MapView, Paint};
-use crate::scan::{self, ExtStat, LiveDir, Node, Options, Progress};
+use crate::scan::{self, ExtStat, LiveDir, Metric, Node, Options, Progress};
 use crate::settings::{self, Settings, TileStyle};
 use crate::snapshot::{self, Change, DiffNode, Snapshot};
 use crate::sunburst;
@@ -50,6 +50,7 @@ mod seqplayer;
 mod thumbs;
 mod views;
 mod summary;
+mod cloud;
 pub(crate) mod style;
 use files::Workspace;
 
@@ -69,6 +70,8 @@ struct Job {
     started: Instant,
     /// Used space on the drive when scanning a whole drive, to estimate percent complete.
     expected: Option<u64>,
+    /// The size the scan sorts its result by (the metric chosen when it started).
+    metric: Metric,
     /// Refreshing a folder inside the current analysis: swap the result into the tree instead
     /// of replacing it.
     merge: bool,
@@ -291,6 +294,8 @@ pub struct App {
     dupes_only: bool,
     /// A duplicate search has finished for the current scan.
     dup_done: bool,
+    /// Files the duplicate search left out because they're only in the cloud: (files, bytes).
+    dup_skipped: (u64, u64),
     /// Show the "run as administrator?" question (first start without admin rights).
     admin_prompt: bool,
     /// Set when a restart as administrator didn't happen, to say so.
@@ -309,6 +314,14 @@ pub struct App {
     needs_full_disk_access: bool,
     /// The renderer in use, for About.
     renderer: &'static str,
+    /// The size every view shows: on disk or logical. `tree` (and `shown`) are always sorted
+    /// and totalled by it; see `set_metric`.
+    metric: Metric,
+    /// The size the Changes comparison was made by: `metric`, or Logical for an old snapshot
+    /// that has no sizes on disk.
+    diff_metric: Metric,
+    /// "This would download files from the cloud": asked before doing it.
+    cloud_ask: Option<cloud::CloudAsk>,
 }
 
 impl App {
@@ -323,6 +336,7 @@ impl App {
         if path.is_some() || compare.is_some() || std::env::var("DIRMAP_SYNTHETIC").is_ok() {
             files_prefs.workspace = Workspace::Analysis;
         }
+        let metric = settings.size_metric;
         let settings_page: settings::Tab = cc.storage.and_then(|s| eframe::get_value(s, "settings_page")).unwrap_or_default();
         let last_update_check: Option<i64> = cc.storage.and_then(|s| eframe::get_value(s, "last_update_check")).unwrap_or_default();
         let mut app = Self {
@@ -399,6 +413,7 @@ impl App {
             dup_set: Arc::new(HashSet::new()),
             dupes_only: false,
             dup_done: false,
+            dup_skipped: (0, 0),
             admin_prompt,
             admin_declined: false,
             ops: Default::default(),
@@ -406,6 +421,9 @@ impl App {
             help: Default::default(),
             help_regions: Vec::new(),
             scan_errors: 0,
+            metric,
+            diff_metric: metric,
+            cloud_ask: None,
             needs_full_disk_access: false,
             renderer: if let Some(rs) = &cc.wgpu_render_state {
                 match rs.adapter.get_info().backend {
@@ -425,7 +443,8 @@ impl App {
         if let Some(n) = std::env::var("DIRMAP_SYNTHETIC").ok().and_then(|s| s.parse::<usize>().ok()) {
             let tree = treemap::synthetic(n, 5);
             let exts = scan::ext_stats(&tree);
-            app.finish_scan(PathBuf::from("synthetic"), tree, exts, 0.0);
+            let m = app.metric;
+            app.finish_scan(PathBuf::from("synthetic"), tree, exts, 0.0, m);
             return app;
         }
         // DIRMAP_FILTER=pattern starts with the Custom filter set, e.g. for screenshots.
@@ -475,6 +494,7 @@ impl App {
             min_file_size: s.min_file_size,
             min_modified: if s.max_age_days > 0 { now - s.max_age_days as i64 * 86_400 } else { 0 },
             threads: s.threads,
+            metric: self.metric,
         }
     }
 
@@ -507,17 +527,24 @@ impl App {
         self.live_open.clear();
         self.live_order.clear();
         self.live_open.insert(Arc::as_ptr(&live) as usize);
-        self.job = Some(Job { root: path, progress, live, rx, started: Instant::now(), expected: None, merge });
+        self.job = Some(Job { root: path, progress, live, rx, started: Instant::now(), expected: None, merge, metric: self.metric });
     }
 
-    fn finish_scan(&mut self, root: PathBuf, tree: Node, exts: Vec<ExtStat>, secs: f32) {
+    fn finish_scan(&mut self, root: PathBuf, tree: Node, exts: Vec<ExtStat>, secs: f32, metric: Metric) {
         let with = Some(self.settings.clone());
-        self.adopt_analysis(root, Arc::new(tree), exts, secs, dock::unix_now(), with);
+        self.adopt_analysis(root, Arc::new(tree), exts, secs, dock::unix_now(), with, metric);
     }
 
     /// Make `tree` the analysis on screen. The one it replaces is kept for a while (see
     /// `dock::Past`), so going back to a folder it covers doesn't need a rescan.
-    fn adopt_analysis(&mut self, root: PathBuf, tree: Arc<Node>, exts: Vec<ExtStat>, secs: f32, at: i64, with: Option<Settings>) {
+    #[allow(clippy::too_many_arguments)]
+    fn adopt_analysis(&mut self, root: PathBuf, mut tree: Arc<Node>, mut exts: Vec<ExtStat>, secs: f32, at: i64, with: Option<Settings>, metric: Metric) {
+        // Sorted by another size (the switch moved while it was scanning or put away): re-sort.
+        if metric != self.metric {
+            let t = Arc::make_mut(&mut tree);
+            scan::set_metric(t, self.metric);
+            exts = scan::ext_stats(t);
+        }
         if let Some(old) = self.tree.take() {
             let past = dock::Past {
                 root: std::mem::take(&mut self.scanned_path),
@@ -526,6 +553,7 @@ impl App {
                 secs: self.scan_secs,
                 at: self.scanned_at,
                 with: self.scanned_with.take(),
+                metric: self.metric,
             };
             self.dock.remember(past, &root);
         }
@@ -635,9 +663,45 @@ impl App {
     }
 
     /// Compare the current scan with the loaded snapshot.
+    /// Show sizes on disk or logical sizes everywhere. Both were collected by the scan, so this
+    /// only re-sorts the tree (well under a second for millions of files) and keeps your place.
+    pub(crate) fn set_metric(&mut self, m: Metric) {
+        if m == self.metric {
+            return;
+        }
+        self.metric = m;
+        self.settings.size_metric = m;
+        self.dialog.draft.size_metric = m;
+        scan::set_shown_metric(m);
+        self.rework_tree(true, |t| scan::set_metric(t, m));
+        self.dock.invalidate();
+    }
+
+    /// The Size on disk / Logical size switch.
+    pub(crate) fn metric_switch(&mut self, ui: &mut egui::Ui) {
+        let no_alloc = self.tree.as_ref().is_some_and(|t| t.flags & scan::store::NO_ALLOC != 0 && t.alloc == t.logical);
+        let mut m = self.metric;
+        ui.selectable_value(&mut m, Metric::Disk, "On disk").on_hover_text(if no_alloc {
+            "Space used on this computer's drive.\n\nNot known for this analysis (a server, or a snapshot from an older version), so logical sizes are shown in its place."
+        } else {
+            "Space used on this computer's drive, as `du` and Explorer's \"Size on disk\" count it. Cloud files that are only online take none, so this is what deleting or freeing up would recover."
+        });
+        ui.selectable_value(&mut m, Metric::Logical, "Logical").on_hover_text(
+            "Each file's full size, wherever its data is: what Explorer calls \"Size\". Cloud files that are only online count in full.",
+        );
+        if m != self.metric {
+            self.set_metric(m);
+        }
+    }
+
     fn compare(&mut self) {
+        // A snapshot from an earlier version has no sizes on disk: compare logical sizes instead.
+        self.diff_metric = match &self.snapshot {
+            Some(s) if !snapshot::has_alloc(&s.tree) => Metric::Logical,
+            _ => self.metric,
+        };
         self.diff = match (&self.tree, &self.snapshot) {
-            (Some(t), Some(s)) => Some(Arc::new(snapshot::diff(t, &s.tree))),
+            (Some(t), Some(s)) => Some(Arc::new(snapshot::diff(t, &s.tree, self.diff_metric))),
             _ => None,
         };
         self.paint_gen += 1;
@@ -649,7 +713,7 @@ impl App {
             ColorMode::Type => self.color_of(n),
             ColorMode::Age => age_color(n.modified),
             ColorMode::Change => match self.diff.as_deref().and_then(|(d, _)| d.at(abs)) {
-                Some(d) => change_color(d.old, n.size),
+                Some(d) => change_color(d.old, n.size_by(self.diff_metric)),
                 None => Color32::from_gray(95),
             },
         }
@@ -665,12 +729,13 @@ impl App {
             (true, f) => format!("{} files", group(f)),
             (false, _) => fmt_time(n.modified),
         };
-        let mut s = format!("{}  ·  {}  ·  {}", full.display(), scan::human(n.size), what);
+        let mut s = format!("{}  ·  {}  ·  {}", full.display(), sizes_text(n, self.metric), what);
         if let Some(d) = self.diff.as_deref().and_then(|(d, _)| d.at(&self.full_of(abs))) {
+            let now = n.size_by(self.diff_metric);
             if d.old == snapshot::NEW {
                 s.push_str("  ·  new since the snapshot");
-            } else if d.old != n.size {
-                s.push_str(&format!("  ·  was {} ({})", scan::human(d.old), signed(n.size as i64 - d.old as i64)));
+            } else if d.old != now {
+                s.push_str(&format!("  ·  was {} ({})", scan::human(d.old), signed(now as i64 - d.old as i64)));
             }
         }
         s
@@ -953,7 +1018,8 @@ impl App {
             let resp = ui.interact(cell, ui.id().with(("hdr", i)), if sortable { Sense::click() } else { Sense::hover() });
             let tip = match *title {
                 "Name" => "File or folder name",
-                "Size" => "Total size of everything inside (the files' own sizes, not space on disk)",
+                "Size" if self.metric == Metric::Disk => "Space everything inside takes on this computer's drive (cloud files that are only online take none)",
+                "Size" => "Total logical size of everything inside: the files' own sizes, wherever their data is",
                 "% of parent" => "Share of the folder this item is in",
                 "Files" => "How many files are inside, counting subfolders",
                 _ => "The most recent change to anything inside",
@@ -964,7 +1030,8 @@ impl App {
             } else {
                 ""
             };
-            let text = format!("{title}{arrow}");
+            let shown = if *title == "Size" && self.metric == Metric::Disk { "On disk" } else { title };
+            let text = format!("{shown}{arrow}");
             let color = if resp.hovered() && sortable { ui.visuals().strong_text_color() } else { ui.visuals().text_color() };
             let (pos, align) = if i == 0 {
                 (pos2(cell.left() + 6.0, cell.center().y), Align2::LEFT_CENTER)
@@ -1198,7 +1265,7 @@ impl App {
 
     fn live_rows(&mut self, root: &Arc<LiveDir>, hold: bool) -> Vec<LiveRow> {
         let mut rows = Vec::new();
-        let size = root.size.load(Ordering::Relaxed);
+        let size = root.size_by(self.metric);
         self.live_into(root, 0, size, hold, &mut rows);
         rows
     }
@@ -1210,16 +1277,18 @@ impl App {
         }
         // Show the largest files of each open folder; listing 100k files every frame isn't useful.
         const MAX_FILES: usize = 200;
-        let size = d.size.load(Ordering::Relaxed);
+        let m = self.metric;
+        let size = d.size_by(m);
         let (mut dirs, mut files, total_files) = {
             let k = d.kids.lock().unwrap();
             let mut idx: Vec<usize> = (0..k.files.len()).collect();
             if idx.len() > MAX_FILES {
-                idx.select_nth_unstable_by(MAX_FILES, |&a, &b| k.files[b].size.cmp(&k.files[a].size));
+                let of = |f: &scan::LiveFile| m.pick(f.size, f.alloc);
+                idx.select_nth_unstable_by(MAX_FILES, |&a, &b| of(&k.files[b]).cmp(&of(&k.files[a])));
                 idx.truncate(MAX_FILES);
             }
             let files: Vec<(Box<str>, u64, i64)> =
-                idx.iter().map(|&i| (k.files[i].name.clone(), k.files[i].size, k.files[i].modified)).collect();
+                idx.iter().map(|&i| (k.files[i].name.clone(), m.pick(k.files[i].size, k.files[i].alloc), k.files[i].modified)).collect();
             (k.dirs.clone(), files, k.files.len())
         };
         let key = Arc::as_ptr(d) as usize;
@@ -1231,7 +1300,7 @@ impl App {
                 ordered.extend(dirs.into_iter().filter(|c| !known.contains(&(Arc::as_ptr(c) as usize))));
                 dirs = ordered;
             }
-            None => dirs.sort_by_cached_key(|c| std::cmp::Reverse(c.size.load(Ordering::Relaxed))),
+            None => dirs.sort_by_cached_key(|c| std::cmp::Reverse(c.size_by(m))),
         }
         self.live_order.insert(key, dirs.clone());
         files.sort_by(|a, b| b.1.cmp(&a.1));
@@ -1264,7 +1333,7 @@ impl App {
                             is_dir: true,
                             open: self.live_open.contains(&key),
                             name: &dir.name,
-                            size: dir.size.load(Ordering::Relaxed),
+                            size: dir.size_by(self.metric),
                             parent_size: *parent_size,
                             files: dir.files.load(Ordering::Relaxed),
                             modified: dir.modified.load(Ordering::Relaxed),
@@ -1579,8 +1648,15 @@ impl App {
         if !same_path(&snap.root, &self.scanned_path) {
             ui.colored_label(ui.visuals().warn_fg_color, "That snapshot is of a different folder.");
         }
-        let delta = tree.size as i64 - snap.tree.size as i64;
-        ui.strong(format!("Then {}  ·  now {}  ·  {}", scan::human(snap.tree.size), scan::human(tree.size), signed(delta)));
+        let m = self.diff_metric;
+        let (then, now) = (snap.tree.size_by(m), tree.size_by(m));
+        let delta = now as i64 - then as i64;
+        ui.strong(format!("Then {}  ·  now {}  ·  {}", scan::human(then), scan::human(now), signed(delta)));
+        if m != self.metric {
+            ui.weak("Compared by logical size: this snapshot was saved by an older version, which didn't record sizes on disk.");
+        } else {
+            ui.weak(format!("Compared by {}.", m.label().to_lowercase()));
+        }
         let Some(diff) = self.diff.clone() else { return };
         let changes = &diff.1;
         let count = |f: &dyn Fn(&Change) -> bool| changes.iter().filter(|c| f(c)).count() as u64;
@@ -1645,21 +1721,28 @@ impl App {
             return;
         }
         let Some(tree) = &self.tree else { return };
-        fn walk(n: &Node, min: u64, path: &mut Vec<u32>, disk: &mut PathBuf, out: &mut Vec<dupes::Candidate>) {
+        // Matched by logical size, whatever the map shows. Files only in the cloud are left out:
+        // reading them to compare would download them.
+        fn walk(n: &Node, min: u64, path: &mut Vec<u32>, disk: &mut PathBuf, out: &mut Vec<dupes::Candidate>, skipped: &mut (u64, u64)) {
             for (i, c) in n.children.iter().enumerate() {
                 path.push(i as u32);
                 disk.push(&*c.name);
                 if c.is_dir {
-                    walk(c, min, path, disk, out);
-                } else if c.size >= min {
-                    out.push(dupes::Candidate { tree_path: path.clone(), path: disk.clone(), size: c.size });
+                    walk(c, min, path, disk, out, skipped);
+                } else if c.logical >= min && c.flags & scan::store::NOT_LOCAL != 0 {
+                    skipped.0 += 1;
+                    skipped.1 += c.logical;
+                } else if c.logical >= min {
+                    out.push(dupes::Candidate { tree_path: path.clone(), path: disk.clone(), size: c.logical });
                 }
                 disk.pop();
                 path.pop();
             }
         }
         let mut cands = Vec::new();
-        walk(tree, self.dup_min.max(1), &mut Vec::new(), &mut self.scanned_path.clone(), &mut cands);
+        let mut skipped = (0, 0);
+        walk(tree, self.dup_min.max(1), &mut Vec::new(), &mut self.scanned_path.clone(), &mut cands, &mut skipped);
+        self.dup_skipped = skipped;
         let progress = Arc::new(dupes::Progress::default());
         let (tx, rx) = mpsc::channel();
         let p = progress.clone();
@@ -1670,6 +1753,16 @@ impl App {
         self.dup_groups.clear();
         self.dup_rows.clear();
         self.dup_done = false;
+    }
+
+    /// "12 files only in the cloud weren't compared".
+    fn dup_skipped_note(&self, ui: &mut egui::Ui) {
+        let (files, bytes) = self.dup_skipped;
+        if files > 0 {
+            let n = if files == 1 { "1 file".to_string() } else { format!("{} files", group(files)) };
+            ui.weak(format!("☁ {n} only in the cloud ({}) weren't compared, so as not to download them.", scan::human(bytes)))
+                .on_hover_text("Download them with your cloud app (for example \"Make available offline\") and search again to include them.");
+        }
     }
 
     fn dupes_panel(&mut self, ui: &mut egui::Ui) {
@@ -1698,6 +1791,9 @@ impl App {
             } else {
                 "Finds files with exactly the same contents. Files are first matched by size, so only possible duplicates are read."
             });
+            if self.dup_done {
+                self.dup_skipped_note(ui);
+            }
             if ui.link("How duplicates are found").clicked() {
                 self.help.show_topic(topics::DUPLICATES_HOW);
             }
@@ -1705,6 +1801,7 @@ impl App {
         }
         let wasted: u64 = self.dup_groups.iter().map(|g| g.wasted()).sum();
         ui.strong(format!("{} sets of duplicates · {} could be freed", group(self.dup_groups.len() as u64), scan::human(wasted)));
+        self.dup_skipped_note(ui);
         if ui.checkbox(&mut self.dupes_only, "Show only duplicates on the map").changed() {
             self.paint_gen += 1;
         }
@@ -2394,13 +2491,21 @@ impl App {
                 self.zoom.truncate(k);
             }
             ui.add_space(12.0);
-            ui.weak("Wheel to zoom, drag to pan, right-click to zoom out.");
+            // The hint goes first when the window is too narrow for it and the switches.
+            if ui.available_width() > 960.0 {
+                ui.weak("Wheel to zoom, drag to pan, right-click to zoom out.");
+            }
             if help::link_button(ui, "Moving around the map") {
                 self.help.show_topic(match self.map_kind {
                     MapKind::Treemap => topics::TREEMAP_NAV,
                     MapKind::Sunburst => topics::SUNBURST,
                 });
             }
+            ui.separator();
+            if ui.add(egui::Label::new("Size:").sense(Sense::click())).on_hover_text("Which size the map, lists and totals use. Switching doesn't rescan. Click for more.").clicked() {
+                self.help.show_topic(topics::SIZE_METRIC);
+            }
+            self.metric_switch(ui);
             ui.separator();
             ui.label("View:");
             ui.selectable_value(&mut self.map_kind, MapKind::Treemap, "Treemap")
@@ -2585,6 +2690,7 @@ impl eframe::App for App {
             self.applied_scale = Some(self.settings.ui_scale);
         }
         scan::set_decimal_units(self.view().units == settings::SizeUnits::Decimal);
+        scan::set_shown_metric(self.metric);
 
         self.help_keys(&ctx);
         let about = help::AboutInfo { renderer: self.renderer, elevated: elevate::is_elevated() };
@@ -2595,6 +2701,7 @@ impl eframe::App for App {
 
         self.licence.tick(&ctx);
         self.licence.update_tick(&ctx, self.settings.check_updates);
+        self.cloud_ask_ui(&ctx);
         self.licence.prompt(&ctx);
         if std::mem::take(&mut self.licence.ui.open_settings) {
             self.dialog.open_licensing(&self.settings);
@@ -2647,10 +2754,14 @@ impl eframe::App for App {
                 if !job.progress.cancel.load(Ordering::Relaxed) {
                     self.scan_errors = job.progress.errors.load(Ordering::Relaxed);
                     self.needs_full_disk_access = self.scan_errors > 0 && crate::elevate::missing_full_disk_access();
+                    let mut tree = tree;
                     if job.merge && self.tree.is_some() && job.root.starts_with(&self.scanned_path) {
+                        if job.metric != self.metric {
+                            scan::set_metric(&mut tree, self.metric);
+                        }
                         self.merge_scan(job.root, tree);
                     } else {
-                        self.finish_scan(job.root, tree, exts, job.started.elapsed().as_secs_f32());
+                        self.finish_scan(job.root, tree, exts, job.started.elapsed().as_secs_f32(), job.metric);
                     }
                 } else {
                     std::thread::spawn(move || drop(tree));
@@ -2781,7 +2892,7 @@ impl eframe::App for App {
                     ui.label(format!(
                         "{}: {} in {} files, scanned in {:.1}s. {how}",
                         self.scanned_path.display(),
-                        scan::human(t.size),
+                        sizes_text(t, self.metric),
                         group(t.files),
                         self.scan_secs
                     ));
@@ -2905,6 +3016,7 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
     let files = p.files.load(Ordering::Relaxed);
     let dirs = p.dirs.load(Ordering::Relaxed);
     let bytes = p.bytes.load(Ordering::Relaxed);
+    let alloc = p.alloc.load(Ordering::Relaxed);
     let errors = p.errors.load(Ordering::Relaxed);
     let secs = job.started.elapsed().as_secs_f32();
     let cancelling = p.cancel.load(Ordering::Relaxed);
@@ -2914,21 +3026,23 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
         egui::ProgressBar::new(1.0).text("Sorting and building the map…").animate(true)
     } else {
         match job.expected {
-            // Logical file sizes don't exactly match used disk space, so cap below 100%.
+            // Used space on the drive is compared with space on disk found so far; the two
+            // never match exactly (folders, the system's own files), so cap below 100%.
             Some(total) => {
-                let frac = (bytes as f32 / total as f32).min(0.99);
-                let text = format!("about {:.0}%  ({} of {})", frac * 100.0, scan::human(bytes), scan::human(total));
+                let frac = (alloc as f32 / total as f32).min(0.99);
+                let text = format!("about {:.0}%  ({} of {})", frac * 100.0, scan::human(alloc), scan::human(total));
                 egui::ProgressBar::new(frac).text(text)
             }
-            None => egui::ProgressBar::new(0.0).animate(true).text(scan::human(bytes)),
+            None => egui::ProgressBar::new(0.0).animate(true).text(scan::human(job.metric.pick(bytes, alloc))),
         }
     };
     let rate = if secs > 0.5 { files as f32 / secs } else { 0.0 };
     let unreadable = if errors > 0 { format!(" · {} unreadable", group(errors)) } else { String::new() };
     let stats = format!(
-        "{} files · {} folders · {} · {:.0} files/s · {}:{:02}{unreadable}",
+        "{} files · {} folders · {} on disk ({} logical) · {:.0} files/s · {}:{:02}{unreadable}",
         group(files),
         group(dirs),
+        scan::human(alloc),
         scan::human(bytes),
         rate,
         secs as u64 / 60,
@@ -3119,6 +3233,40 @@ fn size_edit(ui: &mut egui::Ui, v: &mut u64) -> bool {
 }
 
 /// "+1.2 GB" / "-300 MB"
+/// Both sizes of an item, the chosen one first, and where its data is when that matters:
+/// "1.2 MB on disk (33.2 GB logical) · online only".
+pub(crate) fn sizes_text(n: &Node, m: Metric) -> String {
+    use scan::store;
+    let (shown, other) = (n.size_by(m), n.size_by(if m == Metric::Disk { Metric::Logical } else { Metric::Disk }));
+    let mut s = scan::human(shown);
+    if n.flags & store::NO_ALLOC != 0 {
+        if m == Metric::Disk {
+            s.push_str(" (size on disk unknown)");
+        }
+    } else if scan::human(shown) != scan::human(other) {
+        s = match m {
+            Metric::Disk => format!("{s} on disk ({} logical)", scan::human(other)),
+            Metric::Logical => format!("{s} ({} on disk)", scan::human(other)),
+        };
+    } else if m == Metric::Disk {
+        s.push_str(" on disk");
+    }
+    let state = match (n.is_dir, n.flags) {
+        (false, f) if f & store::ONLINE_ONLY != 0 => Some("online only: opening it downloads it"),
+        (false, f) if f & store::PARTIAL != 0 => Some("partly downloaded"),
+        (true, f) if f & store::NOT_LOCAL != 0 => Some("some files only in the cloud"),
+        _ => None,
+    };
+    if let Some(t) = state {
+        s.push_str("  ·  ");
+        s.push_str(t);
+    }
+    if n.flags & store::ESTIMATED != 0 {
+        s.push_str("  ·  size on disk partly estimated");
+    }
+    s
+}
+
 fn signed(delta: i64) -> String {
     let sign = if delta < 0 { "−" } else { "+" };
     format!("{sign}{}", scan::human(delta.unsigned_abs()))

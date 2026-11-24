@@ -27,9 +27,8 @@ Likely causes, most common first:
 
 | Cause | How to check |
 |---|---|
-| Hard links, especially `C:\Windows\WinSxS` | Very large WinSxS or backup folders. See [Windows system storage](../advanced/windows-storage.md). |
-| Compressed or sparse files | Explorer's Properties shows a smaller **Size on disk**. |
-| Cloud "online-only" files (OneDrive, iCloud, Dropbox) | They show their full size but use almost no space. |
+| You're looking at **Logical** sizes | Set the **Size** switch above the map to **On disk**. Logical sizes count cloud files that are only online, and compressed and sparse files, in full. See [Size on disk and logical size](../disk-usage/sizes.md#size-on-disk-and-logical-size). |
+| Hard links on Windows, especially `C:\Windows\WinSxS` | Very large WinSxS or backup folders. See [Windows system storage](../advanced/windows-storage.md). (On macOS and Linux, sizes on disk count each hard-linked file once.) |
 | Drives mounted inside the folder (Linux, macOS) | Only if **Stay on the scanned drive** is off. |
 
 ## 4. Find what's using the space

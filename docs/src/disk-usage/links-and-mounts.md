@@ -17,7 +17,9 @@ Examples:
 ## Hard links
 
 A **hard link** is a second name for the same file, not a signpost. Nothing on disk tells the
-two names apart, so Filescape counts the file under **each** name. This mainly matters for
+two names apart. On macOS and Linux, **sizes on disk** count the file once (at the first name the
+scan finds, as `du` does); **logical** sizes, and both sizes on Windows, count it under **each**
+name. On Windows this mainly matters for
 `C:\Windows\WinSxS`, which shares most of its files with `C:\Windows\System32` through hard links,
 and for some backup tools (such as Time Machine snapshots and `rsync --link-dest` backups). The
 total for those folders can be much larger than the space they really use. See

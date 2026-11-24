@@ -56,13 +56,13 @@ mod tests {
     use super::*;
 
     fn file(size: u64) -> Node {
-        Node { name: "f".into(), size, files: 1, modified: 0, is_dir: false, children: vec![] }
+        Node { name: "f".into(), size, logical: size, alloc: size, flags: 0, files: 1, modified: 0, is_dir: false, children: vec![] }
     }
 
     #[test]
     fn angles_follow_sizes() {
-        let sub = Node { name: "d".into(), size: 50, files: 2, modified: 0, is_dir: true, children: vec![file(30), file(20)] };
-        let root = Node { name: "r".into(), size: 100, files: 3, modified: 0, is_dir: true, children: vec![sub, file(50)] };
+        let sub = Node { name: "d".into(), size: 50, logical: 50, alloc: 50, flags: 0, files: 2, modified: 0, is_dir: true, children: vec![file(30), file(20)] };
+        let root = Node { name: "r".into(), size: 100, logical: 100, alloc: 100, flags: 0, files: 3, modified: 0, is_dir: true, children: vec![sub, file(50)] };
         let segs = layout(&root, 5, 0.0);
         assert_eq!(segs.len(), 4);
         assert!((segs[0].a1 - TAU / 2.0).abs() < 1e-4);

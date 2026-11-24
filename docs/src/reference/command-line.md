@@ -5,7 +5,7 @@ Windows, run `filescape.exe`; elsewhere `filescape` (or the full path to it).
 
 ```text
 Filescape [PATH]                                  open Filescape and scan PATH
-filescape --cli [--top N] [--save-snapshot FILE] [--all-fs] PATH
+filescape --cli [--top N] [--logical] [--save-snapshot FILE] [--all-fs] PATH
                                                print a text report instead of opening a window
 filescape --compare FILE [PATH]                   open Filescape comparing with a saved snapshot
 filescape --help                                  show the usage line
@@ -18,6 +18,7 @@ filescape --help                                  show the usage line
 | `PATH` | The drive or folder to scan. In the window, scanning starts straight away. Without it, Filescape opens on the drive list. For `--cli` the default is the current folder. |
 | `--cli` | Don't open a window: scan, print a report and exit. |
 | `--top N` | With `--cli`: how many rows to print in each part of the report (default 15). |
+| `--logical` | With `--cli`: rank and total by logical size instead of size on disk. See [Size on disk and logical size](../disk-usage/sizes.md#size-on-disk-and-logical-size). |
 | `--save-snapshot FILE` | With `--cli`: also save the scan as a snapshot file for comparing later. |
 | `--compare FILE` | Open the window with this snapshot loaded, so the scan is compared with it. See [Comparing with a snapshot](../analysis/snapshots.md). |
 | `--all-fs` | Include other drives mounted inside the scanned folder (Linux and macOS), for this run only. Overrides **Stay on the scanned drive**. |
@@ -27,7 +28,8 @@ filescape --help                                  show the usage line
 
 ```text
 $ filescape --cli --top 5 ~/Projects
-/home/me/Projects: 182.4 GB in 1204311 files, 98770 folders (14.21s, 0 unreadable)
+/home/me/Projects: 182.4 GB on disk, 184.0 GB logical, in 1204311 files, 98770 folders (14.21s, 0 unreadable)
+Sizes below: size on disk (bytes are 182.4 GB)
 
 Largest entries:
       82.1 GB   45.0%  renders/
@@ -39,8 +41,10 @@ By extension:
       ...
 ```
 
-The first line gives the total size, number of files and folders, how long the scan took and how
-many items couldn't be read. **Largest entries** lists what is directly inside the scanned folder,
+The first line gives the total size on disk and logical size, number of files and folders, how
+long the scan took and how many items couldn't be read. When the folder holds cloud files that
+are only online, a `Cloud:` line says how many and how much isn't downloaded. The rest of the
+report uses sizes on disk, or logical sizes with `--logical`. **Largest entries** lists what is directly inside the scanned folder,
 largest first, with folders marked `/`. **By extension** lists the extensions using the most
 space. The scan exclusions from the Settings window are not applied on the command line.
 

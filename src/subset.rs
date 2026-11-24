@@ -61,7 +61,7 @@ where
 }
 
 fn empty_like(dir: &Node) -> Node {
-    Node { name: dir.name.clone(), size: 0, files: 0, modified: 0, is_dir: true, children: Vec::new() }
+    Node { name: dir.name.clone(), size: 0, logical: 0, alloc: 0, flags: 0, files: 0, modified: 0, is_dir: true, children: Vec::new() }
 }
 
 /// The filtered folder and its map, or None inside if nothing in it matched. None if cancelled.
@@ -92,10 +92,9 @@ where
         }
         children.push(node);
     }
-    let size = children.iter().map(|c| c.size).sum();
-    let files = children.iter().map(|c| c.files).sum();
-    let modified = children.iter().map(|c| c.modified).max().unwrap_or(0);
-    Some(Some((Node { name: dir.name.clone(), size, files, modified, is_dir: true, children }, back)))
+    let mut n = Node { children, ..empty_like(dir) };
+    n.resum();
+    Some(Some((n, back)))
 }
 
 /// One child: Some(None) = dropped, Some(Some(..)) = kept, None = cancelled.
@@ -106,7 +105,7 @@ where
     if c.is_dir {
         Some(walk(c, keep, cancel)?.map(|(n, b)| (i as u32, n, Some(b))))
     } else if keep(c) {
-        let n = Node { name: c.name.clone(), size: c.size, files: 1, modified: c.modified, is_dir: false, children: Vec::new() };
+        let n = c.clone();
         Some(Some((i as u32, n, None)))
     } else {
         Some(None)
@@ -239,18 +238,13 @@ mod tests {
     use crate::pattern::{Filter, Options};
 
     fn file(name: &str, size: u64) -> Node {
-        Node { name: name.into(), size, files: 1, modified: size as i64, is_dir: false, children: Vec::new() }
+        Node { name: name.into(), size, logical: size, alloc: size, flags: 0, files: 1, modified: size as i64, is_dir: false, children: Vec::new() }
     }
     fn dir(name: &str, mut children: Vec<Node>) -> Node {
         children.sort_unstable_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
-        Node {
-            name: name.into(),
-            size: children.iter().map(|c| c.size).sum(),
-            files: children.iter().map(|c| c.files).sum(),
-            modified: children.iter().map(|c| c.modified).max().unwrap_or(0),
-            is_dir: true,
-            children,
-        }
+        let mut n = Node { name: name.into(), size: 0, logical: 0, alloc: 0, flags: 0, files: 0, modified: 0, is_dir: true, children };
+        n.resum();
+        n
     }
 
     fn sample() -> Node {

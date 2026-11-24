@@ -239,6 +239,8 @@ pub fn list(archive: &Path, inner: &str) -> Result<Vec<Entry>, String> {
                 is_link: false,
                 hidden: rest.starts_with('.'),
                 size: it.size,
+                alloc: it.size,
+                flags: crate::scan::store::NO_ALLOC,
                 modified: it.modified,
             })
         })

@@ -64,6 +64,8 @@ pub(super) struct Past {
     pub secs: f32,
     pub at: i64,
     pub with: Option<Settings>,
+    /// The size the tree is sorted by.
+    pub metric: scan::Metric,
 }
 
 /// Keep at most this many earlier analyses, and only ones up to this size (each costs memory).
@@ -203,7 +205,7 @@ impl App {
             && let Some(i) = self.dock.past_for(dir)
         {
             let p = self.dock.past.remove(i);
-            self.adopt_analysis(p.root, p.tree, p.exts, p.secs, p.at, p.with);
+            self.adopt_analysis(p.root, p.tree, p.exts, p.secs, p.at, p.with, p.metric);
             cover = self.cover_of(target.as_deref());
             // A new tree: work the key out again next frame against it.
             self.dock.key = None;
@@ -815,7 +817,8 @@ pub(super) fn changed_since(entries: &[Entry], n: &Node, at: i64) -> bool {
     for c in &n.children {
         match listed.get(&*c.name) {
             None => return true,
-            Some(e) if !c.is_dir && !e.is_dir && e.size != c.size => return true,
+            // Logical sizes: a cloud file being downloaded changes only its size on disk.
+            Some(e) if !c.is_dir && !e.is_dir && e.size != c.logical => return true,
             _ => {}
         }
     }
@@ -828,17 +831,17 @@ mod tests {
     use super::*;
 
     fn file(name: &str, size: u64) -> Node {
-        Node { name: name.into(), size, files: 1, modified: 100, is_dir: false, children: vec![] }
+        Node { name: name.into(), size, logical: size, alloc: size, flags: 0, files: 1, modified: 100, is_dir: false, children: vec![] }
     }
 
     fn dir(name: &str, children: Vec<Node>) -> Node {
         let size = children.iter().map(|c| c.size).sum();
         let files = children.iter().map(|c| c.files).sum();
-        Node { name: name.into(), size, files, modified: 100, is_dir: true, children }
+        Node { name: name.into(), size, logical: size, alloc: size, flags: 0, files, modified: 100, is_dir: true, children }
     }
 
     fn entry(name: &str, size: u64, is_dir: bool, modified: i64) -> Entry {
-        Entry { name: name.into(), is_dir, is_link: false, hidden: false, size, modified }
+        Entry { name: name.into(), is_dir, is_link: false, hidden: false, size, alloc: size, flags: 0, modified }
     }
 
     #[test]
@@ -874,7 +877,7 @@ mod tests {
     #[test]
     fn earlier_analyses_are_kept_and_found() {
         let mut d = Dock::default();
-        let past = |root: &str, files: u64| Past { root: root.into(), tree: Arc::new(Node { files, ..dir("r", vec![]) }), exts: vec![], secs: 0.0, at: 0, with: None };
+        let past = |root: &str, files: u64| Past { root: root.into(), tree: Arc::new(Node { files, ..dir("r", vec![]) }), exts: vec![], secs: 0.0, at: 0, with: None, metric: scan::Metric::Disk };
         d.remember(past("/a", 10), Path::new("/b"));
         d.remember(past("/c", 10), Path::new("/d"));
         d.remember(past("/e", 10), Path::new("/f"));

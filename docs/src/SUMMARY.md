@@ -17,6 +17,7 @@
 # Understanding Disk Usage
 
 - [How sizes are calculated](disk-usage/sizes.md)
+- [Cloud files](disk-usage/cloud-files.md)
 - [File types and extensions](disk-usage/file-types.md)
 - [Hidden, system and unreadable files](disk-usage/hidden-and-unreadable.md)
 - [Links, junctions and mounted drives](disk-usage/links-and-mounts.md)

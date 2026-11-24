@@ -2,6 +2,7 @@
 //!
 //!   dirmap [PATH]                      open the GUI (and scan PATH if given)
 //!   dirmap --cli PATH [--top N]        print a text report instead
+//!   --logical                          (with --cli) rank by logical size instead of size on disk
 //!   --all-fs                           descend into other mounted filesystems
 //!   --save-snapshot FILE               (with --cli) also save the scan for later comparison
 //!   --compare FILE                     open the GUI comparing against a saved snapshot
@@ -60,13 +61,14 @@ fn main() -> eframe::Result {
         match a.as_str() {
             "--cli" => cli = true,
             "--all-fs" => opts.one_file_system = false,
+            "--logical" => opts.metric = scan::Metric::Logical,
             "--top" => top = args.next().and_then(|s| s.parse().ok()).unwrap_or(top),
             "--save-snapshot" => save_snapshot = args.next().map(PathBuf::from),
             "--compare" => compare = args.next().map(PathBuf::from),
             // Added when Filescape restarts itself as administrator; stops it trying twice.
             elevate::ELEVATED_FLAG => restarted = true,
             "-h" | "--help" => {
-                println!("usage: filescape [--cli [--top N] [--save-snapshot FILE]] [--compare FILE] [--all-fs] [PATH]");
+                println!("usage: filescape [--cli [--top N] [--logical] [--save-snapshot FILE]] [--compare FILE] [--all-fs] [PATH]");
                 return Ok(());
             }
             _ => path = Some(PathBuf::from(a)),
@@ -145,14 +147,25 @@ fn report(root: &std::path::Path, opts: scan::Options, top: usize, save_snapshot
     let t = std::time::Instant::now();
     let tree = scan::scan(root, &opts, &progress, &scan::new_live(root));
     println!(
-        "{}: {} in {} files, {} folders ({:.2}s, {} unreadable)",
+        "{}: {} on disk, {} logical, in {} files, {} folders ({:.2}s, {} unreadable)",
         root.display(),
-        scan::human(tree.size),
+        scan::human(tree.alloc),
+        scan::human(tree.logical),
         tree.files,
         progress.dirs.load(Ordering::Relaxed),
         t.elapsed().as_secs_f64(),
         progress.errors.load(Ordering::Relaxed)
     );
+    let cloud = scan::cloud_tally(&tree);
+    if cloud.online_only > 0 || cloud.partial > 0 {
+        println!(
+            "Cloud: {} online-only files ({} in the cloud), {} partly downloaded",
+            cloud.online_only,
+            scan::human(cloud.online_bytes),
+            cloud.partial
+        );
+    }
+    println!("Sizes below: {} (bytes are {})", opts.metric.label().to_lowercase(), scan::human(tree.size));
     let pct = |b: u64| if tree.size > 0 { b as f64 * 100.0 / tree.size as f64 } else { 0.0 };
 
     println!("\nLargest entries:");

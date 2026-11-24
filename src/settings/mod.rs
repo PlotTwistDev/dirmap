@@ -62,6 +62,9 @@ pub struct Settings {
     pub units: SizeUnits,
     pub stripes: bool,
     pub live_tree: bool,
+    /// The size Storage Analysis opens with: on disk (default) or logical. The switch above the
+    /// map changes it.
+    pub size_metric: crate::scan::Metric,
     /// Ask filescape.app for the newest version at launch and show a notice when there's a newer
     /// one. Nothing about the user or the computer is sent.
     pub check_updates: bool,
@@ -133,6 +136,7 @@ impl Default for Settings {
             units: SizeUnits::Binary,
             stripes: true,
             live_tree: true,
+            size_metric: crate::scan::Metric::Disk,
             check_updates: true,
             ui_scale: 1.0,
             exclude_folders: String::new(),

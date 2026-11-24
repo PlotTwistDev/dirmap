@@ -77,7 +77,7 @@ fn group_of(e: &Entry, g: FGroup, today: chrono::NaiveDate) -> (i64, String) {
             const KB: u64 = 1 << 10;
             const MB: u64 = 1 << 20;
             const GB: u64 = 1 << 30;
-            let (rank, label) = match e.size {
+            let (rank, label) = match e.shown_size() {
                 0 => (7, "Empty"),
                 s if s < 16 * KB => (6, "Tiny (under 16 KB)"),
                 s if s < MB => (5, "Small (16 KB to 1 MB)"),
@@ -547,7 +547,7 @@ impl App {
                 let size = 64.0;
                 let pic = Rect::from_center_size(pos2(cell.center().x, cell.top() + 6.0 + size / 2.0), vec2(size, size));
                 let path = dir.join(&*e.name);
-                let thumb = if !e.is_dir && thumbs::wants_thumb(&e.name) { thumb_cache.get(&path, thumbs::stamp(e.size, e.modified), e.size).map(|t| (t.id(), t.size_vec2())) } else { None };
+                let thumb = if !e.is_dir && !e.not_local() && thumbs::wants_thumb(&e.name) { thumb_cache.get(&path, thumbs::stamp(e.size, e.modified), e.size).map(|t| (t.id(), t.size_vec2())) } else { None };
                 if let Some((id, tsize)) = thumb {
                     let scale = (size / tsize.x).min(size / tsize.y);
                     let r = Rect::from_center_size(pic.center(), tsize * scale);
@@ -604,7 +604,7 @@ mod tests {
     use super::*;
 
     fn entry(name: &str, is_dir: bool, size: u64, modified: i64) -> Entry {
-        Entry { name: name.into(), is_dir, is_link: false, hidden: false, size, modified }
+        Entry { name: name.into(), is_dir, is_link: false, hidden: false, size, alloc: size, flags: 0, modified }
     }
 
     #[test]

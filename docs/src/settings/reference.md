@@ -38,6 +38,7 @@ settings changed. Rescan**, and the Filtering page says **Rescan needed**.
 | **Interface size** <!-- setting:ui_scale --> | 100% | Makes all text and controls bigger or smaller: 80% to 150%. **Ctrl +** and **Ctrl −** (**⌘** on macOS) do the same anywhere in Filescape, and **Ctrl 0** goes back to 100%; the size you end up with is remembered. |
 | **Striped rows** <!-- setting:stripes --> | On | Shades every other row in the file manager and the side panel lists. Also on the Folder list page. |
 | **Size units** <!-- setting:units --> | Binary | **Binary** (1 KB = 1,024 bytes, like Explorer) or **Decimal** (1 kB = 1,000 bytes, like drive makers and macOS). An example underneath shows how a file's size would read. Also changes how typed sizes are read. See [Units](../disk-usage/sizes.md#units-binary-and-decimal). |
+| **Size shown** <!-- setting:size_metric --> | On disk | **On disk** or **Logical**. Set with the **Size** switch above the map, not in this window; Filescape remembers your last choice. See [Size on disk and logical size](../disk-usage/sizes.md#size-on-disk-and-logical-size). |
 | **Live scan results** <!-- setting:live_tree --> | On | Shows a tree of folders filling in during a scan. Off shows only the progress bar. |
 | **Check automatically** <!-- setting:check_updates --> | On | At each launch, asks filescape.app for the newest version number and shows a notice when there's a newer one, saying whether your licence covers it. Nothing about you or the computer is sent. See [Updates](licensing.md#updates). |
 
