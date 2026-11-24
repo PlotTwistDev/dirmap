@@ -27,7 +27,7 @@ migrations_dir = "migrations"
 # "live" (the Filescape product is on the live account); "sandbox" for a Paddle sandbox account.
 PADDLE_ENV = "live"
 # Comma-separated Paddle price IDs that issue a Filescape licence (pri_...).
-PADDLE_PRICE_IDS = "pri_01m84qwgg1a8858drzqk2rvzpz"
+PADDLE_PRICE_IDS = "pri_01m86kecyaqrsp7d702v4hc679,pri_01m86kf4h9r8tj5p6rtgez78v6,pri_01m84qwgg1a8858drzqk2rvzpz"
 MAIL_FROM = "Filescape <licences@filescape.app>"
 MAIL_REPLY_TO = "support@filescape.app"
 # Cloudflare Access: your team domain (e.g. filescape.cloudflareaccess.com) and the admin

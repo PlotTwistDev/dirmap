@@ -98,9 +98,13 @@ key ID keygen printed.
 
 ## 7. Paddle
 
-The Filescape product and price are already on your live Paddle account
-(`pri_01m84qwgg1a8858drzqk2rvzpz`, set in `wrangler.toml` as `PADDLE_PRICE_IDS`). Paddle sends
-notifications for your other product too; the server ignores anything without this price.
+The Filescape product and its prices are already on your live Paddle account: standard $9.99
+(`pri_01m86kecyaqrsp7d702v4hc679`), launch $4.99 (`pri_01m86kf4h9r8tj5p6rtgez78v6`, the one the
+website sells now) and the old $5.00 (`pri_01m84qwgg1a8858drzqk2rvzpz`, to be archived). All three
+are in `wrangler.toml` as `PADDLE_PRICE_IDS`, so any of them issues a licence. Paddle sends
+notifications for your other product too; the server ignores anything without these prices.
+To end the launch price, change `licensing/site/config.js` (priceId, priceLabel, listPriceLabel)
+and redeploy the website (step 8).
 
 1. **Developer tools > Notifications > New destination**: URL `https://api.filescape.app/v1/paddle`,
    events `transaction.completed`, `adjustment.created`, `adjustment.updated`. Save, open it, copy

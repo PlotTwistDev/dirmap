@@ -30,7 +30,7 @@
         <a class="btn btn-ghost" data-os="mac" href="https://downloads.filescape.app/latest/macos"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for macOS</a>
         <a class="btn btn-ghost" data-os="linux" href="https://downloads.filescape.app/latest/linux"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for Linux</a>
       </div>
-      <div class="dl-meta"><span>Free to use</span><span>Pro is $5, once</span><span>v2.3</span></div>
+      <div class="dl-meta"><span>Free to use</span><span>Pro is <s class="js-list">$9.99</s> <span class="js-price">$4.99</span>, once</span><span>v2.3</span></div>
 
       <div class="window" role="group" aria-label="Interactive example of the Filescape disk map">
         <div class="win-bar">
@@ -58,7 +58,7 @@
       <div class="fact"><b>47 s</b><span>to map 1.3 million files on our test drive</span></div>
       <div class="fact"><b>25 MB</b><span>download, no installer or runtime on Windows</span></div>
       <div class="fact"><b>3</b><span>platforms: Windows, macOS and Linux</span></div>
-      <div class="fact"><b>$5</b><span>once for Pro, on 3 computers at once</span></div>
+      <div class="fact"><b><s class="js-list">$9.99</s> <span class="js-price">$4.99</span></b><span>once for Pro, on 3 computers at once</span></div>
     </div>
   </div>
 
@@ -156,7 +156,7 @@
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Pricing</span>
-        <h2>Free to look. $5 to do everything.</h2>
+        <h2>Free to look. <span class="js-price">$4.99</span> to do everything.</h2>
         <p class="lede">No subscription. Buy Pro once and use it on up to 3 of your computers at once.</p>
       </div>
       <div class="plans">
@@ -173,7 +173,7 @@
         </div>
         <div class="plan pro">
           <div><h3>Filescape Pro</h3><p class="small">One payment, yours to keep</p></div>
-          <div class="price"><b>$5</b><span>once</span></div>
+          <div class="price"><s class="js-list">$9.99</s><b class="js-price">$4.99</b><span>once<span class="js-launch">, launch price</span></span></div>
           <ul>
             <li>Everything in Free</li>
             <li>Two-pane file management, batch rename, Compare Folders</li>
@@ -183,7 +183,7 @@
             <li>Active on 3 of your computers at once</li>
             <li>Every update for a year, then keep the version you have</li>
           </ul>
-          <button class="btn btn-key" id="buy" type="button">Buy Filescape Pro for $5</button>
+          <button class="btn btn-key" id="buy" type="button"><span>Buy Filescape Pro for <span class="js-price">$4.99</span></span></button>
           <p class="checkout-note" id="checkout-note" hidden>The checkout couldn't open. Please try again, or email <a href="mailto:support@filescape.app">support@filescape.app</a>.</p>
           <p class="small">Checkout and tax are handled by Paddle, our reseller. Your licence key arrives by email.</p>
         </div>
@@ -218,7 +218,7 @@
 
       <div class="faq">
         <details><summary>Do my files leave my computer?</summary><p>No. Scanning, the map and previews all run locally. Filescape only goes online to activate a Pro licence, or when you connect to a server yourself.</p></details>
-        <details><summary>Is this a subscription?</summary><p>No. Pro is a single $5 payment. There's nothing to renew.</p></details>
+        <details><summary>Is this a subscription?</summary><p>No. Pro is a single <span class="js-price">$4.99</span> payment. There's nothing to renew.</p></details>
         <details><summary>I replaced my computer. Can I move my licence?</summary><p>Yes. Deactivate Filescape on the old computer, or release it from your account at account.filescape.app, and activate on the new one. A licence can be active on 3 computers at once.</p></details>
         <details><summary>How is size calculated?</summary><p>Filescape adds up file sizes. Hard links count once per name, and compressed, sparse or cloud-only files show their full size, so totals can differ from what your system reports as used.</p></details>
       </div>
@@ -257,6 +257,10 @@
   /* ---------- Paddle checkout ---------- */
   // Token, price and success page come from /config.js, shared with /buy.
   const PADDLE = window.FILESCAPE || {};
+  // Prices shown come from /config.js too, so ending the launch price is one edit there.
+  if (PADDLE.priceLabel) document.querySelectorAll(".js-price").forEach(e => { e.textContent = PADDLE.priceLabel; });
+  if (PADDLE.priceLabel && !PADDLE.listPriceLabel) document.querySelectorAll(".js-list, .js-launch").forEach(e => e.remove());
+  else if (PADDLE.listPriceLabel) document.querySelectorAll(".js-list").forEach(e => { e.textContent = PADDLE.listPriceLabel; });
   let paddleReady = false;
   try {
     if (window.Paddle && PADDLE.paddleClientToken) {
