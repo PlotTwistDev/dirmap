@@ -42,9 +42,9 @@ the kinds of files using the most space. Click a row to light up just those file
 
 ## Why the total may differ from Windows
 
-Filescape adds up the sizes of files it can read. Windows' "used space" also includes the
-Recycle Bin, restore points, system files Filescape can't read, file-system overhead, and the
-difference between a file's size and the space it occupies on disk. See
+Filescape adds up the files it can read, by default by the space they take on disk (the **Size**
+switch above the map). Windows' "used space" also includes the Recycle Bin, restore points,
+system files Filescape can't read and file-system overhead. See
 [Why is free space lower than expected?](../tutorials/missing-space.md) and
 [How sizes are calculated](../disk-usage/sizes.md).
 

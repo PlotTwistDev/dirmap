@@ -59,6 +59,8 @@ pub(super) struct Look {
     view_of: Option<PathBuf>,
     /// A sound playing (or paused) in the preview.
     pub player: Option<crate::media::Player>,
+    /// Cloud files the user agreed to download to preview (others aren't read: see `preview_body`).
+    pub download_ok: std::collections::HashSet<PathBuf>,
 }
 
 /// The kind of preview a file gets, from its extension.
@@ -554,6 +556,24 @@ impl App {
             self.files.look.pan = Vec2::ZERO;
         }
         let (zoom, pan) = (self.files.look.zoom, self.files.look.pan);
+        // Reading a file that's only in the cloud downloads it: only when asked to.
+        if e.not_local() && !self.files.look.download_ok.contains(path) {
+            let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r.shrink(12.0)).layout(egui::Layout::top_down(egui::Align::Center)));
+            child.add_space((r.height() / 2.0 - 60.0).max(0.0));
+            child.label(egui::RichText::new("☁").size(40.0).color(pal.weak));
+            let what = if e.flags & crate::scan::store::ONLINE_ONLY != 0 { "This file is only in the cloud." } else { "This file is only partly downloaded." };
+            child.label(egui::RichText::new(what).color(pal.text));
+            child.label(egui::RichText::new(format!("Previewing it downloads it ({}).", crate::scan::human(e.size.saturating_sub(e.alloc)))).color(pal.weak).size(12.0));
+            child.add_space(6.0);
+            if child.button("Download and preview").on_hover_text("Fetch this file from the cloud to preview it. It then takes space on this computer until the cloud app frees it again.").clicked() {
+                self.files.look.download_ok.insert(path.to_path_buf());
+            }
+            if child.link("About cloud files").clicked() {
+                self.help.show_topic(topics::CLOUD_FILES);
+            }
+            return;
+        }
         let Some(c) = self.files.look.get(&ctx, path, e) else {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             ui.put(Rect::from_center_size(r.center(), vec2(24.0, 24.0)), egui::Spinner::new());
@@ -695,6 +715,11 @@ pub(super) fn facts_line(e: &Entry) -> String {
     let mut s = browser::kind_for(&e.name, e.is_dir);
     if !e.is_dir {
         s = format!("{} · {s}", crate::scan::human(e.size));
+        if e.flags & crate::scan::store::ONLINE_ONLY != 0 {
+            s.push_str(" · online only");
+        } else if e.flags & crate::scan::store::PARTIAL != 0 {
+            s.push_str(" · partly downloaded");
+        }
     }
     if e.modified > 0 {
         s.push_str(&format!(" · {}", fmt_time(e.modified)));

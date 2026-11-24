@@ -1007,7 +1007,7 @@ pub(super) fn order_entries(
             (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, &e.name, e.is_dir)
         })
         .collect();
-    let size_of = |e: &Entry| if e.is_dir { sizes.and_then(|s| s.get(&e.name)).map(|s| s.0).unwrap_or(0) } else { e.size };
+    let size_of = |e: &Entry| if e.is_dir { sizes.and_then(|s| s.get(&e.name)).map(|s| s.0).unwrap_or(0) } else { e.shown_size() };
     let kinds: Vec<String> = if key == FSort::Type { entries.iter().map(|e| browser::kind_for(&e.name, e.is_dir)).collect() } else { Vec::new() };
     o.sort_by(|&x, &y| {
         let (a, b) = (&entries[x as usize], &entries[y as usize]);
@@ -1684,7 +1684,8 @@ impl App {
 
     /// Keep one pane's visible tab listed and sorted.
     fn poll_pane(&mut self, ctx: &egui::Context, pane: usize) {
-        let tree_id = self.tree.as_ref().map(|t| Arc::as_ptr(t) as usize).unwrap_or(0);
+        // Changes with the tree and with the size shown (pointers are aligned, so the low bit is free).
+        let tree_id = self.tree.as_ref().map(|t| Arc::as_ptr(t) as usize).unwrap_or(0) | self.metric as usize;
         let need_sizes = {
             let t = self.files.panes[pane].tab();
             t.sizes.as_ref().map(|s| s.0) != Some(tree_id)
@@ -2408,7 +2409,8 @@ impl App {
                     FSort::Size => (pos2(cell.right() - 10.0, cell.center().y), Align2::RIGHT_CENTER),
                     _ => (pos2(cell.left() + if col == FSort::Name { 10.0 } else { 8.0 }, cell.center().y), Align2::LEFT_CENTER),
                 };
-                let g = ui2.painter().layout_no_wrap(col.title().to_string(), font, color);
+                let title = if col == FSort::Size && scan::metric() == scan::Metric::Disk { "On disk" } else { col.title() };
+                let g = ui2.painter().layout_no_wrap(title.to_string(), font, color);
                 let tr = align.anchor_size(at, g.size());
                 ui2.painter().galley(tr.min, g, color);
                 if on {
@@ -2621,7 +2623,7 @@ impl App {
                             }
                             Some(FSort::Size) => {
                                 if !e.is_dir {
-                                    p.text(right, Align2::RIGHT_CENTER, scan::human(e.size), font.clone(), tc);
+                                    p.text(right, Align2::RIGHT_CENTER, scan::human(e.shown_size()), font.clone(), tc);
                                 } else if let Some(&(bytes, _)) = sizes.and_then(|s| s.get(&e.name)) {
                                     // From the scan: shown in italics so it doesn't read as live.
                                     let f = egui::text::LayoutJob::simple_singleline(
@@ -2821,7 +2823,7 @@ impl App {
                     // The picture: a thumbnail for images once it's ready, else the type's icon.
                     let pic = Rect::from_center_size(pos2(cell.center().x, cell.top() + 6.0 + size / 2.0), vec2(size, size));
                     let path = dir.join(&*e.name);
-                    let thumb = if !e.is_dir && thumbs::wants_thumb(&e.name) { thumb_cache.get(&path, thumbs::stamp(e.size, e.modified), e.size).map(|t| (t.id(), t.size_vec2())) } else { None };
+                    let thumb = if !e.is_dir && !e.not_local() && thumbs::wants_thumb(&e.name) { thumb_cache.get(&path, thumbs::stamp(e.size, e.modified), e.size).map(|t| (t.id(), t.size_vec2())) } else { None };
                     if let Some((id, tsize)) = thumb {
                         let scale = (size / tsize.x).min(size / tsize.y).min(2.0);
                         let r = Rect::from_center_size(pic.center(), tsize * scale);
@@ -2918,7 +2920,7 @@ impl App {
         let sel_rows: Vec<u32> = t.order.iter().copied().filter(|&i| t.selected.contains(&l.entries[i as usize].name)).collect();
         let sel: Vec<&Entry> = sel_rows.iter().map(|&i| &l.entries[i as usize]).collect();
         if !sel.is_empty() {
-            let bytes: u64 = sel_rows.iter().filter(|&&i| !l.entries[i as usize].is_dir).map(|i| t.seqs.get(i).map_or(l.entries[*i as usize].size, |s| s.seq.bytes)).sum();
+            let bytes: u64 = sel_rows.iter().filter(|&&i| !l.entries[i as usize].is_dir).map(|i| t.seqs.get(i).map_or(l.entries[*i as usize].shown_size(), |s| s.seq.bytes)).sum();
             let dirs = sel.iter().filter(|e| e.is_dir).count();
             text.push_str(&format!("  ·  {} selected", group(sel.len() as u64)));
             if sel.len() > dirs {
@@ -4092,7 +4094,7 @@ mod tests {
     use super::*;
 
     fn e(name: &str, is_dir: bool, size: u64, modified: i64, hidden: bool) -> Entry {
-        Entry { name: name.into(), is_dir, is_link: false, hidden, size, modified }
+        Entry { name: name.into(), is_dir, is_link: false, hidden, size, alloc: size, flags: 0, modified }
     }
 
     fn names(es: &[Entry], o: &[u32]) -> Vec<String> {

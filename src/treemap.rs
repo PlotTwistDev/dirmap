@@ -560,7 +560,7 @@ pub fn synthetic(files: usize, seed: u64) -> Node {
         for k in 0..here {
             let size = (rng.unit() * 18.0).exp() as u64 + 1;
             let name = format!("f{k}.{}", EXTS[(rng.next() % 12) as usize]);
-            children.push(Node { name: name.into(), size, files: 1, modified: 1_700_000_000, is_dir: false, children: Vec::new() });
+            children.push(Node { name: name.into(), size, logical: size, alloc: size, flags: 0, files: 1, modified: 1_700_000_000, is_dir: false, children: Vec::new() });
         }
         left -= here;
         let mut d = 0;
@@ -576,7 +576,7 @@ pub fn synthetic(files: usize, seed: u64) -> Node {
         children.sort_by(|a, b| b.size.cmp(&a.size));
         let size = children.iter().map(|c| c.size).sum();
         let files = children.iter().map(|c| c.files).sum();
-        Node { name: "root".into(), size, files, modified: 1_700_000_000, is_dir: true, children }
+        Node { name: "root".into(), size, logical: size, alloc: size, flags: 0, files, modified: 1_700_000_000, is_dir: true, children }
     }
     make(&mut Rng(seed | 1), files, 0)
 }

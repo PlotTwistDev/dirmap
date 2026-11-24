@@ -22,6 +22,10 @@ pub struct Entry {
     pub hidden: bool,
     /// Bytes for files; 0 for folders.
     pub size: u64,
+    /// Space on disk for files (see `scan::on_disk`); 0 for folders.
+    pub alloc: u64,
+    /// `scan::store` bits: whether a cloud file is downloaded.
+    pub flags: u8,
     /// Seconds since the Unix epoch, 0 when unknown.
     pub modified: i64,
 }
@@ -29,6 +33,16 @@ pub struct Entry {
 impl Entry {
     pub fn ext(&self) -> &str {
         if self.is_dir { "" } else { crate::scan::ext_of(&self.name) }
+    }
+
+    /// The file's size by the metric chosen in the app (see `scan::metric`).
+    pub fn shown_size(&self) -> u64 {
+        crate::scan::metric().pick(self.size, self.alloc)
+    }
+
+    /// Reading this file would download it from the cloud.
+    pub fn not_local(&self) -> bool {
+        self.flags & crate::scan::store::NOT_LOCAL != 0
     }
 }
 
@@ -355,14 +369,39 @@ pub fn entry(e: &fs::DirEntry) -> Option<Entry> {
     let name: Box<str> = e.file_name().to_string_lossy().into();
     let is_link = md.file_type().is_symlink() || is_reparse(&md);
     let is_dir = if md.file_type().is_symlink() { fs::metadata(e.path()).is_ok_and(|t| t.is_dir()) } else { md.is_dir() };
+    // Metadata only, as the scan does: listing a cloud folder never downloads its files.
+    let (alloc, flags) = if md.is_file() { crate::scan::on_disk(&md, || e.path(), cluster_for(e)) } else { (0, 0) };
     Some(Entry {
         hidden: crate::scan::is_hidden(&name, &md),
         size: if md.is_file() { md.len() } else { 0 },
+        alloc,
+        flags,
         modified: secs(md.modified()),
         is_dir,
         is_link,
         name,
     })
+}
+
+/// The drive's allocation unit for an entry, worked out once per folder (Windows only).
+#[cfg(windows)]
+fn cluster_for(e: &fs::DirEntry) -> u64 {
+    use std::cell::RefCell;
+    thread_local!(static LAST: RefCell<(PathBuf, u64)> = RefCell::new((PathBuf::new(), 0)));
+    let path = e.path();
+    let dir = path.parent().unwrap_or(&path).to_path_buf();
+    LAST.with_borrow_mut(|(d, c)| {
+        if *d != dir || *c == 0 {
+            *c = crate::scan::cluster_of(&dir);
+            *d = dir;
+        }
+        *c
+    })
+}
+
+#[cfg(not(windows))]
+fn cluster_for(_e: &fs::DirEntry) -> u64 {
+    512
 }
 
 fn secs(t: std::io::Result<std::time::SystemTime>) -> i64 {

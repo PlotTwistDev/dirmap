@@ -244,9 +244,9 @@ mod tests {
     fn dir(name: &str, files: &[&str]) -> Node {
         let children = files
             .iter()
-            .map(|f| Node { name: (*f).into(), size: 10, files: 1, modified: 0, is_dir: false, children: Vec::new() })
+            .map(|f| Node { name: (*f).into(), size: 10, logical: 10, alloc: 10, flags: 0, files: 1, modified: 0, is_dir: false, children: Vec::new() })
             .collect::<Vec<_>>();
-        Node { name: name.into(), size: 10 * files.len() as u64, files: files.len() as u64, modified: 0, is_dir: true, children }
+        Node { name: name.into(), size: 10 * files.len() as u64, logical: 10 * files.len() as u64, alloc: 10 * files.len() as u64, flags: 0, files: files.len() as u64, modified: 0, is_dir: true, children }
     }
 
     fn detect_in(files: &[&str]) -> Vec<Sequence> {
@@ -305,6 +305,9 @@ mod tests {
         let root = Node {
             name: "r".into(),
             size: 60,
+            logical: 60,
+            alloc: 60,
+            flags: 0,
             files: 6,
             modified: 0,
             is_dir: true,

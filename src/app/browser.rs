@@ -77,6 +77,7 @@ impl Col {
     fn title(self) -> &'static str {
         match self {
             Col::Name => "Name",
+            Col::Size if scan::metric() == scan::Metric::Disk => "On disk",
             Col::Size => "Size",
             Col::Share => "% of folder",
             Col::Kind => "Kind",
@@ -200,6 +201,21 @@ pub(super) fn kind_of(n: &Node) -> String {
 }
 
 /// What an item is, from its name: "Folder", "PNG image", "File".
+/// Where an item's data is, in words, when it's in the cloud ("Online only", "3 of 40 files only
+/// in the cloud"); None for ordinary local items.
+pub(super) fn storage_state(n: &Node) -> Option<String> {
+    use scan::store;
+    if n.flags & store::NOT_LOCAL == 0 {
+        return None;
+    }
+    if !n.is_dir {
+        return Some(if n.flags & store::ONLINE_ONLY != 0 { "Online only (opening it downloads it)".into() } else { "Partly downloaded".into() });
+    }
+    let t = scan::cloud_tally(n);
+    let away = t.online_only + t.partial;
+    Some(format!("{} of {} files only in the cloud ({} not downloaded)", group(away), group(n.files), scan::human(t.online_bytes)))
+}
+
 pub(super) fn kind_for(name: &str, is_dir: bool) -> String {
     if is_dir {
         return "Folder".into();
@@ -1807,8 +1823,19 @@ impl App {
         cui.add_space(8.0);
         egui::Grid::new("bpreview").num_columns(2).spacing([10.0, 4.0]).show(&mut cui, |ui| {
             ui.weak("Size");
-            ui.label(format!("{} ({} bytes)", scan::human(n.size), group(n.size)));
+            ui.label(format!("{} ({} bytes)", scan::human(n.logical), group(n.logical)));
             ui.end_row();
+            if n.flags & scan::store::NO_ALLOC == 0 {
+                ui.weak("On disk");
+                let est = if n.flags & scan::store::ESTIMATED != 0 { " (partly estimated)" } else { "" };
+                ui.label(format!("{} ({} bytes){est}", scan::human(n.alloc), group(n.alloc)));
+                ui.end_row();
+            }
+            if let Some(state) = storage_state(n) {
+                ui.weak("Stored");
+                ui.label(state);
+                ui.end_row();
+            }
             if n.modified > 0 {
                 ui.weak("Last change");
                 ui.label(fmt_time(n.modified));
@@ -1864,13 +1891,13 @@ mod tests {
     use super::*;
 
     fn file(name: &str, size: u64, modified: i64) -> Node {
-        Node { name: name.into(), size, files: 1, modified, is_dir: false, children: Vec::new() }
+        Node { name: name.into(), size, logical: size, alloc: size, flags: 0, files: 1, modified, is_dir: false, children: Vec::new() }
     }
 
     fn dir(name: &str, children: Vec<Node>) -> Node {
         let size = children.iter().map(|c| c.size).sum();
         let files = children.iter().map(|c| c.files).sum();
-        Node { name: name.into(), size, files, modified: 0, is_dir: true, children }
+        Node { name: name.into(), size, logical: size, alloc: size, flags: 0, files, modified: 0, is_dir: true, children }
     }
 
     fn names(n: &Node, key: SortKey, reversed: bool) -> Vec<&str> {

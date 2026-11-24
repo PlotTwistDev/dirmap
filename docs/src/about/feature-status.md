@@ -47,7 +47,7 @@ version.
 
 These aren't in Filescape yet. Some may come later; none should be relied on.
 
-- A **size on disk** (allocated space) mode, and counting hard-linked files once.
+- Counting hard-linked files once on **Windows** (macOS and Linux do, in sizes on disk).
 - **Compressing**, **sparsifying** or **compacting virtual disks** from Filescape.
 - **Selecting several items** at once, and bulk operations.
 - **Exporting** results (CSV, report files) from the window. The command-line report is text only.

@@ -2,6 +2,26 @@
 
 ## Next version
 
+### Size on disk, and cloud files that stay in the cloud
+
+- Filescape now reads two sizes for every file: its **size on disk** (what it really takes on
+  this computer, as `du` and Explorer's "Size on disk" count it) and its **logical size**. The new
+  **Size** switch above the map changes between them at once, without rescanning; everything
+  follows it: the map, sunburst, folder list, File types, size histogram, summary, filters and
+  the file manager's Size column. **On disk** is the default.
+- Cloud folders (Google Drive, OneDrive, iCloud Drive, Dropbox, Box…) now show what they use
+  on this computer: files that are only online take almost no space, instead of their full size.
+  Hover an item to see both sizes and whether it's online only. See
+  [Cloud files](../disk-usage/cloud-files.md).
+- Filescape no longer downloads online-only files behind your back: no thumbnails for them,
+  the preview asks first, **Find duplicates** skips them, **Compare contents** compares them by
+  size and date, and the sequence player asks before playing frames that aren't downloaded.
+- On macOS and Linux, files with several names (hard links) count once in sizes on disk.
+- Snapshots now record both sizes. Snapshots saved by earlier versions still open; they're
+  compared by logical size.
+- The command-line report (`--cli`) prints both totals and counts online-only files; add
+  `--logical` to rank by logical size.
+
 ### Update notices
 
 - Filescape checks for a newer version each time it starts and, when there is one, says so at

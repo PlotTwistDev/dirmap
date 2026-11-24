@@ -67,6 +67,8 @@ pub(super) struct Info {
     pub is_dir: bool,
     pub size: u64,
     pub modified: i64,
+    /// Only (partly) in the cloud: its contents aren't read, as that would download it.
+    pub cloud: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -140,6 +142,7 @@ fn list(dir: &Path) -> Result<Listed, String> {
                         is_dir: e.is_dir,
                         size: e.size,
                         modified: e.modified,
+                        cloud: false,
                     },
                 )
             })
@@ -157,6 +160,7 @@ fn list(dir: &Path) -> Result<Listed, String> {
                     is_dir: e.is_dir,
                     size: e.size,
                     modified: e.modified,
+                    cloud: e.not_local(),
                 },
             )
         })
@@ -224,7 +228,10 @@ pub(super) fn compare(
                 (Some(a), Some(b)) => {
                     let close = (a.modified - b.modified).abs() <= SLACK;
                     if a.size == b.size && (close || ignore_times) {
+                        // Files only in the cloud are judged by size and date alone.
                         let differ = contents
+                            && !a.cloud
+                            && !b.cloud
                             && same_contents(&join(left, &path), &join(right, &path), stop)
                                 == Some(false);
                         if differ { Kind::Conflict } else { Kind::Same }
@@ -410,7 +417,7 @@ impl App {
             ui.horizontal(|ui| {
                 let mut again = ui.checkbox(&mut c.deep, "Include subfolders").changed();
                 again |= ui.checkbox(&mut c.ignore_times, "Ignore times").on_hover_text("Files of the same size count as the same. For servers that can't set a file's time, where every copy looks newer").changed();
-                again |= ui.checkbox(&mut c.contents, "Compare contents").on_hover_text("Also read files with the same size and date, to be sure they match. Slower; local folders only").changed();
+                again |= ui.checkbox(&mut c.contents, "Compare contents").on_hover_text("Also read files with the same size and date, to be sure they match. Slower; local folders only. Files that are only in the cloud aren't read (that would download them)").changed();
                 if ui.button("Compare Again").clicked() || again {
                     c.start();
                 }

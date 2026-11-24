@@ -284,6 +284,12 @@ impl App {
         if clips.is_empty() || !self.premium(crate::licence::Feature::SequencePlayer) {
             return;
         }
+        // Frames only in the cloud would be downloaded as they play: ask first.
+        let (files, bytes) = self.cloud_in_listing(clips.iter().flat_map(|c| c.slots.iter().flatten().map(|p| p.as_path())));
+        self.after_cloud_ok("Playing the sequence", files, bytes, move |app| app.open_player(clips));
+    }
+
+    fn open_player(&mut self, clips: Vec<Clip>) {
         let mut pl = Player::new(clips, &self.files.prefs.player);
         if let Some(p) = self.files.prefs.player.lut.clone() {
             pl.load_cube(p);

@@ -1612,12 +1612,12 @@ mod tests {
         // A folder drawn large, holding big files that don't match and one tiny file that does:
         // the tiny file can't be drawn, and its folder's patch is covered by the big files, so
         // the marker must sit where the tiny file is (not only when the folder itself is small).
-        let file = |name: &str, size: u64| Node { name: name.into(), size, files: 1, modified: 0, is_dir: false, children: Vec::new() };
+        let file = |name: &str, size: u64| Node { name: name.into(), size, logical: size, alloc: size, flags: 0, files: 1, modified: 0, is_dir: false, children: Vec::new() };
         let mut kids: Vec<Node> = (0..6).map(|i| file(&format!("big{i}.bin"), 1 << 30)).collect();
         kids.push(file("tiny.onnx", 10));
         let size = kids.iter().map(|k| k.size).sum();
-        let dir = Node { name: "d".into(), size, files: kids.len() as u64, modified: 0, is_dir: true, children: kids };
-        let tree = Arc::new(Node { name: "root".into(), size, files: dir.files, modified: 0, is_dir: true, children: vec![dir] });
+        let dir = Node { name: "d".into(), size, logical: size, alloc: size, flags: 0, files: kids.len() as u64, modified: 0, is_dir: true, children: kids };
+        let tree = Arc::new(Node { name: "root".into(), size, logical: size, alloc: size, flags: 0, files: dir.files, modified: 0, is_dir: true, children: vec![dir] });
         let world = DRect { x0: 0.0, y0: 0.0, x1: 400.0, y1: 300.0 };
         let mark = Color32::from_rgb(250, 10, 10);
         let mut r = req(&tree, world, world, 1.0);
@@ -1639,10 +1639,10 @@ mod tests {
     fn small_match_is_marked_until_it_is_big_enough_to_see() {
         // A match only a pixel or two across would be a speck that looks like it vanished, so
         // it's shown as a marker until its tile is MIN_TILE_PT across.
-        let file = |name: &str, size: u64| Node { name: name.into(), size, files: 1, modified: 0, is_dir: false, children: Vec::new() };
+        let file = |name: &str, size: u64| Node { name: name.into(), size, logical: size, alloc: size, flags: 0, files: 1, modified: 0, is_dir: false, children: Vec::new() };
         let kids = vec![file("big.bin", 120_000 * 1000 - 4000), file("small.onnx", 4000)];
         let size = kids.iter().map(|k| k.size).sum();
-        let tree = Arc::new(Node { name: "root".into(), size, files: 2, modified: 0, is_dir: true, children: kids });
+        let tree = Arc::new(Node { name: "root".into(), size, logical: size, alloc: size, flags: 0, files: 2, modified: 0, is_dir: true, children: kids });
         let world = DRect { x0: 0.0, y0: 0.0, x1: 400.0, y1: 300.0 };
         let mark = Color32::from_rgb(250, 10, 10);
         let tile = Color32::from_rgb(10, 250, 10);

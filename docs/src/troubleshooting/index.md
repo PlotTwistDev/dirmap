@@ -60,9 +60,10 @@ Filescape's total and Windows' (or the drive's) used space measure different thi
 
 ## Differences between file sizes and Windows' disk usage
 
-Filescape shows each file's **size**, like the **Size** in Explorer's Properties, not **Size on disk**.
-They differ for compressed files, sparse files, cloud placeholders and hard links, and by up to
-one cluster (usually 4 KB) per file. Folder totals in Filescape also include hidden and system files
+By default Filescape shows **size on disk**, like **Size on disk** in Explorer's Properties; the
+**Size** switch above the map changes to **Logical** sizes, like **Size**. The two differ for
+compressed files, sparse files, cloud files that are only online and hard links, and by up to one
+cluster (usually 4 KB) per file. Folder totals in Filescape also include hidden and system files
 by default, which Explorer may hide. See [How sizes are calculated](../disk-usage/sizes.md).
 
 ## Zooming or rendering is slow

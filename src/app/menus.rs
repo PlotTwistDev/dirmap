@@ -1116,6 +1116,35 @@ impl App {
         if updates.is_empty() || self.tree.is_none() {
             return;
         }
+        let root = self.scanned_path.clone();
+        self.rework_tree(false, |tree| {
+            for (disk, new) in updates {
+                let Ok(rel) = disk.strip_prefix(&root) else { continue };
+                let names: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+                match new {
+                    _ if !names.is_empty() => {
+                        replace_at(tree, &names, new);
+                    }
+                    Some(mut n) => {
+                        n.name = tree.name.clone();
+                        *tree = n;
+                    }
+                    None => {
+                        tree.children.clear();
+                        resum(tree);
+                    }
+                }
+            }
+        });
+    }
+
+    /// Change the tree with `f`, keeping the user's place: zoom, selection and open folders are
+    /// remembered by their paths on disk across it. With `same_items` (only sizes and order
+    /// changed, as when switching the size shown), duplicate results are kept too.
+    pub(super) fn rework_tree(&mut self, same_items: bool, f: impl FnOnce(&mut Node)) {
+        if self.tree.is_none() {
+            return;
+        }
         // Work in whole-scan positions; "Show matches only" is rebuilt from the new tree.
         self.drop_filtered_view();
         // Tree positions change when sizes do, so remember things by their paths on disk.
@@ -1126,23 +1155,7 @@ impl App {
         self.map.clear();
         let old = self.tree.take().unwrap();
         let mut tree = Arc::try_unwrap(old).unwrap_or_else(|shared| (*shared).clone());
-        for (disk, new) in updates {
-            let Ok(rel) = disk.strip_prefix(&self.scanned_path) else { continue };
-            let names: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
-            match new {
-                _ if !names.is_empty() => {
-                    replace_at(&mut tree, &names, new);
-                }
-                Some(mut n) => {
-                    n.name = tree.name.clone();
-                    tree = n;
-                }
-                None => {
-                    tree.children.clear();
-                    resum(&mut tree);
-                }
-            }
-        }
+        f(&mut tree);
         self.tree = Some(Arc::new(tree));
 
         // Back to tree positions; anything gone falls back to its nearest surviving folder.
@@ -1168,15 +1181,29 @@ impl App {
         self.hits = None;
         self.hist = None;
         self.sun = None;
-        // Duplicate results point at old tree positions.
-        if let Some(j) = self.dup_job.take() {
-            j.progress.cancel.store(true, Ordering::Relaxed);
+        if same_items && self.dup_job.is_none() {
+            // Same files, new positions: follow each duplicate to where it is now.
+            let mut groups = std::mem::take(&mut self.dup_groups);
+            for g in &mut groups {
+                for c in &mut g.files {
+                    if let Some(p) = self.tree_path_of(&c.path) {
+                        c.tree_path = p;
+                    }
+                }
+            }
+            self.dup_set = Arc::new(groups.iter().flat_map(|g| g.files.iter().map(|f| f.tree_path.clone())).collect());
+            self.dup_groups = groups;
+        } else {
+            // Duplicate results point at old tree positions.
+            if let Some(j) = self.dup_job.take() {
+                j.progress.cancel.store(true, Ordering::Relaxed);
+            }
+            self.dup_groups.clear();
+            self.dup_rows.clear();
+            self.dup_set = Arc::new(HashSet::new());
+            self.dupes_only = false;
+            self.dup_done = false;
         }
-        self.dup_groups.clear();
-        self.dup_rows.clear();
-        self.dup_set = Arc::new(HashSet::new());
-        self.dupes_only = false;
-        self.dup_done = false;
         self.compare();
         self.paint_gen += 1;
     }
@@ -1204,7 +1231,7 @@ fn reread(path: &Path, opts: &Options) -> Option<Node> {
         return Some(if m.is_dir && !m.is_link {
             scan::scan_remote(path, &Progress::default())
         } else {
-            Node { name: scan::root_name(path), size: m.len, files: 1, modified: m.modified, is_dir: false, children: Vec::new() }
+            Node::plain(scan::root_name(path), m.len, m.modified)
         });
     }
     let md = std::fs::symlink_metadata(path).ok()?;
@@ -1212,7 +1239,8 @@ fn reread(path: &Path, opts: &Options) -> Option<Node> {
         Some(scan::scan(path, opts, &Progress::default(), &scan::new_live(path)))
     } else if md.is_file() {
         let modified = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0);
-        Some(Node { name: scan::root_name(path), size: md.len(), files: 1, modified, is_dir: false, children: Vec::new() })
+        let (alloc, flags) = scan::on_disk(&md, || path.to_path_buf(), scan::cluster_of(path));
+        Some(Node::file(scan::root_name(path), md.len(), alloc, flags, modified, opts.metric))
     } else {
         None
     }
@@ -1246,10 +1274,8 @@ fn replace_at(n: &mut Node, names: &[String], new: Option<Node>) {
 
 /// Recompute a folder's totals from its children and sort them as the scan does.
 fn resum(n: &mut Node) {
-    n.children.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
-    n.size = n.children.iter().map(|c| c.size).sum();
-    n.files = n.children.iter().map(|c| c.files).sum();
-    n.modified = n.children.iter().map(|c| c.modified).max().unwrap_or(0);
+    scan::sort_children(&mut n.children);
+    n.resum();
 }
 
 #[cfg(test)]
@@ -1257,11 +1283,11 @@ mod tests {
     use super::*;
 
     fn file(name: &str, size: u64) -> Node {
-        Node { name: name.into(), size, files: 1, modified: size as i64, is_dir: false, children: Vec::new() }
+        Node { name: name.into(), size, logical: size, alloc: size, flags: 0, files: 1, modified: size as i64, is_dir: false, children: Vec::new() }
     }
 
     fn dir(name: &str, mut children: Vec<Node>) -> Node {
-        let mut n = Node { name: name.into(), size: 0, files: 0, modified: 0, is_dir: true, children: Vec::new() };
+        let mut n = Node { name: name.into(), size: 0, logical: 0, alloc: 0, flags: 0, files: 0, modified: 0, is_dir: true, children: Vec::new() };
         n.children.append(&mut children);
         resum(&mut n);
         n

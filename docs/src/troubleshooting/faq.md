@@ -27,7 +27,14 @@ can't see. See [Why is free space lower than expected?](../tutorials/missing-spa
 
 ## Can I see the size on disk instead of the file size?
 
-Not yet. See [Feature status](../about/feature-status.md) and [How sizes are calculated](../disk-usage/sizes.md).
+Yes, it's the default. The **Size** switch above the map changes between **On disk** and
+**Logical**. See [How sizes are calculated](../disk-usage/sizes.md).
+
+## Why is my Google Drive (or OneDrive, iCloud, Dropbox) folder so small?
+
+Its files are online only: they show their full size in Finder or Explorer but are stored in
+the cloud, so they take almost no space on this computer. Switch the **Size** switch to
+**Logical** to see their full size. See [Cloud files](../disk-usage/cloud-files.md).
 
 ## Is it safe to delete what Filescape shows?
 
