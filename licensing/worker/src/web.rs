@@ -117,9 +117,9 @@ pub fn parse_day(s: &str) -> Option<Ts> {
 const CSS: &str = r#"
 :root{--bg:#fff;--fg:#1d1f23;--mute:#5d6470;--line:#e3e6ea;--card:#f6f7f9;--acc:#2f6fdb;--warn:#b54708;--bad:#b42318;--good:#067647}
 @media (prefers-color-scheme:dark){:root{--bg:#16181c;--fg:#e8eaed;--mute:#9aa1ab;--line:#2c3036;--card:#1e2126;--acc:#6ea0ff;--warn:#f79009;--bad:#f97066;--good:#47cd89}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+*{box-sizing:border-box}:root{--logo:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' width='20' height='20'%3E%3Crect x='1' y='1' width='10' height='11' rx='2' fill='%23ff6363'/%3E%3Crect x='12' y='1' width='7' height='6' rx='1.5' fill='%23e6e6e6'/%3E%3Crect x='12' y='8' width='7' height='4' rx='1.2' fill='%2363a1ff'/%3E%3Crect x='1' y='13' width='6' height='6' rx='1.5' fill='%23e6e6e6'/%3E%3Crect x='8' y='13' width='5' height='6' rx='1.2' fill='%236a6b6c'/%3E%3Crect x='14' y='13' width='5' height='6' rx='1.2' fill='%23ff6363' opacity='.55'/%3E%3C/svg%3E")}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 header{border-bottom:1px solid var(--line);padding:12px 20px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
-header b{font-size:16px}header a{color:var(--mute);text-decoration:none}header a:hover{color:var(--fg)}
+header b{font-size:16px;display:inline-flex;align-items:center;gap:8px}header b::before{content:"";width:18px;height:18px;background:var(--logo) center/contain no-repeat}header a{color:var(--mute);text-decoration:none}header a:hover{color:var(--fg)}
 main{max-width:1100px;margin:0 auto;padding:20px}
 h1{font-size:22px;margin:4px 0 16px}h2{font-size:17px;margin:26px 0 10px}
 a{color:var(--acc)}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -141,7 +141,7 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 pub fn page(title: &str, nav: &str, body: &str) -> String {
     format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <meta name=\"robots\" content=\"noindex\"><title>{}</title><style>{CSS}</style></head><body><header>{nav}</header><main>{body}</main></body></html>",
+         <meta name=\"robots\" content=\"noindex\"><link rel=\"icon\" href=\"https://filescape.app/favicon.svg\" type=\"image/svg+xml\"><title>{}</title><style>{CSS}</style></head><body><header>{nav}</header><main>{body}</main></body></html>",
         esc(title)
     )
 }
