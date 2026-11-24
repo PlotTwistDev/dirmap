@@ -91,10 +91,22 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .chip:hover { color: var(--text); }
 .chip[aria-pressed="true"] { color: var(--text); border-color: rgba(255,99,99,.5); background: var(--ember); }
 .map-wrap { position: relative; aspect-ratio: 16 / 8; max-width: 100%; background: #000; }
-.map-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: zoom-in; touch-action: manipulation; }
+.map-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: zoom-in; touch-action: pan-y; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+/* Hold a finger on a tile: its name, size and type in a label above the finger */
+.map-tip { position: absolute; z-index: 1; pointer-events: none; max-width: min(78%, 360px); padding: 7px 10px; border-radius: 8px; background: rgba(8,9,11,.94); border: 1px solid var(--line-strong); box-shadow: 0 8px 24px rgba(0,0,0,.6); font-family: var(--mono); font-size: 11px; line-height: 1.45; color: var(--text-2); }
+.map-tip b { display: block; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .win-foot { display: flex; gap: 16px; align-items: center; padding: 9px 12px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--text-3); min-width: 0; }
 .readout { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); flex: 1; }
 .hint { flex: none; }
+.hint-touch { display: none; }
+/* Phones and tablets: the finger hint, bigger buttons, and a readout that wraps instead of cutting off the size */
+@media (hover: none) and (pointer: coarse) {
+  .hint-mouse { display: none; }
+  .hint-touch { display: block; flex-basis: 100%; }
+  .win-foot { flex-wrap: wrap; row-gap: 4px; }
+  .readout { white-space: normal; overflow-wrap: anywhere; flex-basis: 100%; }
+  .chip { padding: 7px 10px; }
+}
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 12px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--text-3); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { width: 8px; height: 8px; border-radius: 2px; }
@@ -193,7 +205,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   .hero .eyebrow { font-size: 10px; letter-spacing: .05em; }
   .dl-row { flex-direction: column; align-items: stretch; max-width: 320px; margin-inline: auto; }
   .map-wrap { aspect-ratio: 4 / 5; }
-  .hint { display: none; }
+  .hint-mouse { display: none; }
   .keys, .plans { grid-template-columns: minmax(0, 1fr); }
   .fact b { font-size: 22px; }
   section { padding-block: 80px 0; }
