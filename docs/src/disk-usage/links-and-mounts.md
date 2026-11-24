@@ -3,8 +3,8 @@
 ## Symbolic links and junctions are never followed
 
 A **symbolic link** (or a Windows **junction**) is a signpost to another folder or file. If
-dirmap followed them, the same files could be counted twice, or a link pointing to a folder
-above it could make a scan go round in circles. So dirmap **never follows links**: the link
+Filescape followed them, the same files could be counted twice, or a link pointing to a folder
+above it could make a scan go round in circles. So Filescape **never follows links**: the link
 itself is skipped, and the files it points to are counted only where they really are (if
 that place is inside what you scanned).
 
@@ -17,7 +17,7 @@ Examples:
 ## Hard links
 
 A **hard link** is a second name for the same file, not a signpost. Nothing on disk tells the
-two names apart, so dirmap counts the file under **each** name. This mainly matters for
+two names apart, so Filescape counts the file under **each** name. This mainly matters for
 `C:\Windows\WinSxS`, which shares most of its files with `C:\Windows\System32` through hard links,
 and for some backup tools (such as Time Machine snapshots and `rsync --link-dest` backups). The
 total for those folders can be much larger than the space they really use. See
@@ -26,9 +26,9 @@ total for those folders can be much larger than the space they really use. See
 ## Other drives mounted inside a folder
 
 On **Linux and macOS**, other drives often appear inside the folder tree, for example a USB
-disk at `/media/you/USB` or a network share at `/mnt/nas`. By default dirmap **stays on the
+disk at `/media/you/USB` or a network share at `/mnt/nas`. By default Filescape **stays on the
 drive you scan** and skips them, so scanning `/` doesn't scan every connected disk. To include
-them, turn off **⚙ Settings > Advanced > Stay on the scanned drive** and rescan, or start dirmap
+them, turn off **⚙ Settings > Advanced > Stay on the scanned drive** and rescan, or start Filescape
 with `--all-fs`. System folders such as `/proc` and `/sys` are separate file systems and are
 skipped for the same reason.
 

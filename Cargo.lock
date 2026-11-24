@@ -1255,48 +1255,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dirmap"
-version = "0.2.0"
-dependencies = [
- "bytemuck",
- "bzip2",
- "chrono",
- "data-encoding",
- "eframe",
- "filescape-licence",
- "flate2",
- "half",
- "image",
- "keyring",
- "libc",
- "lzma-rust2",
- "notify",
- "pulldown-cmark",
- "raw-window-handle",
- "rayon",
- "regex",
- "rfd",
- "ring",
- "ron",
- "roxmltree",
- "russh",
- "russh-sftp",
- "rustls",
- "rustls-platform-verifier",
- "serde",
- "serde_json",
- "sevenz-rust2",
- "sha2 0.11.1",
- "suppaftp",
- "tar",
- "tokio",
- "ureq",
- "windows",
- "windows-sys 0.61.2",
- "zip",
-]
-
-[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1752,6 +1710,48 @@ name = "fiat-crypto"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
+
+[[package]]
+name = "filescape"
+version = "0.2.0"
+dependencies = [
+ "bytemuck",
+ "bzip2",
+ "chrono",
+ "data-encoding",
+ "eframe",
+ "filescape-licence",
+ "flate2",
+ "half",
+ "image",
+ "keyring",
+ "libc",
+ "lzma-rust2",
+ "notify",
+ "pulldown-cmark",
+ "raw-window-handle",
+ "rayon",
+ "regex",
+ "rfd",
+ "ring",
+ "ron",
+ "roxmltree",
+ "russh",
+ "russh-sftp",
+ "rustls",
+ "rustls-platform-verifier",
+ "serde",
+ "serde_json",
+ "sevenz-rust2",
+ "sha2 0.11.1",
+ "suppaftp",
+ "tar",
+ "tokio",
+ "ureq",
+ "windows",
+ "windows-sys 0.61.2",
+ "zip",
+]
 
 [[package]]
 name = "filescape-licence"

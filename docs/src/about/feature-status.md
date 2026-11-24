@@ -1,6 +1,6 @@
 # Feature status
 
-This page says plainly what dirmap does today, what works only partly, and what isn't available
+This page says plainly what Filescape does today, what works only partly, and what isn't available
 yet, so you don't go looking for something that isn't there. It's kept up to date with each
 version.
 
@@ -33,31 +33,31 @@ version.
 
 | Feature | What's missing |
 |---|---|
-| Files workspace | Grouping is in the Details view only. Video and PDF pictures and sound need the system's own thumbnailers and players (on Linux: ffmpeg, pdftoppm, ffplay or similar); videos don't play inside dirmap, and seeking in sound is Windows-only. Archives are read-only (no adding to them), and RAR and password-protected archives aren't supported. Changes on network shares are noticed only if the server reports them. Undo can't restore items deleted permanently, or ones the bin no longer has. Colours, tags and notes are kept by dirmap, not in the files, so they're lost when another program renames or moves the items. Compare contents works on local folders only, and a subfolder search isn't updated when files change (press F5). The sequence player has no OpenColorIO configs (`.cube` LUTs only), no audio, no pixel aspect ratio, and ignores alpha; DPX is read from the first image element only, uncompressed. Sequences are grouped one folder at a time. On servers (SFTP, FTP, WebDAV): delete is always permanent, Undo can't restore what was deleted there, changes made by other programs aren't noticed (press F5), files opened in apps are copies whose changes aren't sent back, archives open as files, and certificates must be trusted by the system (no per-server exceptions). No SCP-only or S3 servers. Network & Remote on macOS and Linux needs the share to be mountable without a dirmap password prompt (the system asks). The analysis dock draws the treemap when a scan finishes, not while it runs (it shows the scan's progress meanwhile). |
+| Files workspace | Grouping is in the Details view only. Video and PDF pictures and sound need the system's own thumbnailers and players (on Linux: ffmpeg, pdftoppm, ffplay or similar); videos don't play inside Filescape, and seeking in sound is Windows-only. Archives are read-only (no adding to them), and RAR and password-protected archives aren't supported. Changes on network shares are noticed only if the server reports them. Undo can't restore items deleted permanently, or ones the bin no longer has. Colours, tags and notes are kept by Filescape, not in the files, so they're lost when another program renames or moves the items. Compare contents works on local folders only, and a subfolder search isn't updated when files change (press F5). The sequence player has no OpenColorIO configs (`.cube` LUTs only), no audio, no pixel aspect ratio, and ignores alpha; DPX is read from the first image element only, uncompressed. Sequences are grouped one folder at a time. On servers (SFTP, FTP, WebDAV): delete is always permanent, Undo can't restore what was deleted there, changes made by other programs aren't noticed (press F5), files opened in apps are copies whose changes aren't sent back, archives open as files, and certificates must be trusted by the system (no per-server exceptions). No SCP-only or S3 servers. Network & Remote on macOS and Linux needs the share to be mountable without a Filescape password prompt (the system asks). The analysis dock draws the treemap when a scan finishes, not while it runs (it shows the scan's progress meanwhile). |
 | Right-click menus | Only in the file manager and the File types list. The treemap and sunburst have none (right-click zooms out there). WinDirStat's **Compress**, **Sparsify**, **Optimize VHD**, **Custom Cleanup**, the full **Windows Explorer** context submenu and **Group Unregistered Types** aren't available. |
 | Keyboard use | The file manager can be used entirely from the keyboard, and there are shortcuts for file commands, the Custom filter, help and the treemap, but there's no keyboard way to move between the sidebar and the list (Tab moves between the two panes), and the Tree layout can't be moved through with the arrow keys. |
 | Duplicate verification | Matches use a 64-bit hash of the whole contents, not a byte-by-byte comparison. There's no "delete all but one" action; copies are deleted one at a time. |
 | Sunburst navigation | No Back/Forward history (the treemap and the file manager have it). |
-| File manager | Copy and Cut work only inside dirmap (the paths go to the clipboard as text), and files can't be dragged to or from other apps. Changes made by other apps show after a Refresh. Real Finder icons on macOS aren't used yet (drawn icons instead). |
+| File manager | Copy and Cut work only inside Filescape (the paths go to the clipboard as text), and files can't be dragged to or from other apps. Changes made by other apps show after a Refresh. Real Finder icons on macOS aren't used yet (drawn icons instead). |
 | Size accuracy | File sizes only. Hard links are counted once per name; compressed, sparse and cloud-only files show their full size. See [How sizes are calculated](../disk-usage/sizes.md). |
-| Licensing | Filescape's licence server and shop aren't open yet, so serials can't be bought or activated online. Test mode (`FILESCAPE_LICENCE_DEV=1`) issues serials for trying it out. The app is still called dirmap. |
+| Licensing | Filescape's licence server and shop aren't open yet, so serials can't be bought or activated online. Test mode (`FILESCAPE_LICENCE_DEV=1`) issues serials for trying it out. The app is still called Filescape. |
 | Administrator mode | A restart button on Windows only; on Linux use `sudo`, on macOS Full Disk Access. |
 
 ## Not available
 
-These aren't in dirmap yet. Some may come later; none should be relied on.
+These aren't in Filescape yet. Some may come later; none should be relied on.
 
 - A **size on disk** (allocated space) mode, and counting hard-linked files once.
-- **Compressing**, **sparsifying** or **compacting virtual disks** from dirmap.
+- **Compressing**, **sparsifying** or **compacting virtual disks** from Filescape.
 - **Selecting several items** at once, and bulk operations.
 - **Exporting** results (CSV, report files) from the window. The command-line report is text only.
 - **Automatic rescans** or watching drives for changes.
 - **Fast NTFS scanning** by reading the master file table directly.
 - **Comparing two different folders** side by side (snapshots compare the same folder over time).
 - **Scanning several drives into one map.**
-- A **translated** interface; dirmap is in English only.
+- A **translated** interface; Filescape is in English only.
 
 ## Related topics
 
 - [What's new](whats-new.md)
-- [How dirmap works](../advanced/architecture.md)
+- [How Filescape works](../advanced/architecture.md)

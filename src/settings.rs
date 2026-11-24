@@ -485,13 +485,13 @@ fn advanced(ui: &mut egui::Ui, d: &mut Settings, restart: &mut bool) {
     ui.heading("Administrator");
     let elevated = elevate::is_elevated();
     ui.label(if elevated {
-        "dirmap is running as administrator."
+        "Filescape is running as administrator."
     } else {
-        "dirmap is not running as administrator, so folders that need it are counted as unreadable."
+        "Filescape is not running as administrator, so folders that need it are counted as unreadable."
     });
     if elevate::can_elevate() {
         ui.horizontal(|ui| {
-            ui.label("When dirmap starts:");
+            ui.label("When Filescape starts:");
             egui::ComboBox::from_id_salt("admin")
                 .selected_text(admin_label(d.admin))
                 .show_ui(ui, |ui| {

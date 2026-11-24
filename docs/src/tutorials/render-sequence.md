@@ -23,7 +23,7 @@
 2. Every sequence in the scan is listed once, largest first, with its frame count, frame range,
    average frame size and how many frames are missing.
 3. Hover over a sequence to see its folder and exactly which frames are missing.
-4. Click it: dirmap fills in the Custom filter for that sequence and selects its folder.
+4. Click it: Filescape fills in the Custom filter for that sequence and selects its folder.
 
 ## Checking for missing frames
 

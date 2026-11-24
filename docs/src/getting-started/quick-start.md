@@ -1,10 +1,10 @@
 # Quick Start
 
-This page gets you from opening dirmap to knowing what fills your drive in a couple of minutes.
+This page gets you from opening Filescape to knowing what fills your drive in a couple of minutes.
 
 ## 1. Pick what to scan
 
-dirmap opens in the **Files** workspace, where you can browse your drives and folders like in
+Filescape opens in the **Files** workspace, where you can browse your drives and folders like in
 Explorer or Finder (see [The Files workspace](../views/file-manager.md)). To find out what fills
 a drive or folder, either:
 
@@ -13,13 +13,13 @@ a drive or folder, either:
 
 Without a scan, Storage Analysis lists your drives with their total, free and used space.
 
-![The drive list shown when dirmap starts](../images/drive-picker.png)
+![The drive list shown when Filescape starts](../images/drive-picker.png)
 
 - Click a drive's name or its **Scan** button to scan the whole drive.
 - Or type a folder into the box at the top (for example `D:\Projects` or `~/Videos`) and press
   **Enter** or **⟳ Scan**. **Browse…** picks a folder with the system's folder picker.
 
-On Windows, dirmap may first ask whether to run as administrator. Say **Yes** if you want to
+On Windows, Filescape may first ask whether to run as administrator. Say **Yes** if you want to
 include folders that belong to Windows or to other users; see
 [Running as administrator](../settings/administrator.md).
 

@@ -1,6 +1,6 @@
-# What is dirmap?
+# What is Filescape?
 
-dirmap is a disk usage analyser for Windows, Linux and macOS, in the style of WinDirStat. It
+Filescape is a disk usage analyser for Windows, Linux and macOS, in the style of WinDirStat. It
 answers one question quickly: **where has my space gone?**
 
 It scans a drive or folder, adds up the size of every file and folder, and shows the result in
@@ -29,9 +29,9 @@ Clicking in one view selects the same item in the others.
 - Save a snapshot of a scan and later see what is new, deleted, grew or shrank.
 - Open, reveal, hash, move or delete files straight from the file manager.
 
-## What dirmap doesn't do
+## What Filescape doesn't do
 
-dirmap reads your drives; it never changes anything unless you use a right-click command such
+Filescape reads your drives; it never changes anything unless you use a right-click command such
 as **Delete** or **Move to**, and those always say exactly what they will do. It doesn't run in
 the background or watch your drives for changes: a scan is a picture of the moment it was taken.
 See [Feature status](../about/feature-status.md) for features that are planned but not yet

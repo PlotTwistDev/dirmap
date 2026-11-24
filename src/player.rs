@@ -423,7 +423,7 @@ impl Cube {
                         .filter(|&n| {
                             (2..=256).contains(&n) || (!three_d && (2..=65536).contains(&n))
                         })
-                        .ok_or("The LUT size isn't one dirmap can use.")?;
+                        .ok_or("The LUT size isn't one Filescape can use.")?;
                 }
                 "DOMAIN_MIN" => min = nums(w)?,
                 "DOMAIN_MAX" => max = nums(w)?,

@@ -1,10 +1,10 @@
-# dirmap Help Centre
+# Filescape Help Centre
 
-dirmap shows you what is using the space on your drives. It reads a drive or folder, then draws
+Filescape shows you what is using the space on your drives. It reads a drive or folder, then draws
 every file as a rectangle sized by how much space it takes, so the biggest files and folders stand
 out at a glance.
 
-Press **F1** anywhere in dirmap to open the help for the part of the window you are using, or
+Press **F1** anywhere in Filescape to open the help for the part of the window you are using, or
 choose a topic below. Use the search box at the top of this window to find any word in the help.
 
 ## Start here
@@ -34,11 +34,11 @@ choose a topic below. Use the search box at the top of this window to find any w
 
 - [Troubleshooting](troubleshooting/index.md)
 - [Frequently asked questions](troubleshooting/faq.md)
-- [Feature status](about/feature-status.md): what dirmap does and doesn't do yet.
+- [Feature status](about/feature-status.md): what Filescape does and doesn't do yet.
 
 ## About this help
 
-This help is built into dirmap, so it works without an internet connection. The same pages
-are kept with dirmap's source code in the `docs` folder and are checked automatically whenever
-dirmap changes, so they describe the version you are running. See [What's new](about/whats-new.md)
+This help is built into Filescape, so it works without an internet connection. The same pages
+are kept with Filescape's source code in the `docs` folder and are checked automatically whenever
+Filescape changes, so they describe the version you are running. See [What's new](about/whats-new.md)
 for recent changes.

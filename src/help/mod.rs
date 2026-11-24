@@ -111,7 +111,7 @@ impl Help {
         self.docs();
         let mut open = true;
         let mut action = None;
-        let resp = egui::Window::new("dirmap Help")
+        let resp = egui::Window::new("Filescape Help")
             .id(egui::Id::new("help-window"))
             .open(&mut open)
             .default_size([1000.0, 720.0])
@@ -266,7 +266,7 @@ impl Help {
         }
         let mut open = true;
         let mut more = false;
-        egui::Window::new("About dirmap")
+        egui::Window::new("About Filescape")
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -274,7 +274,7 @@ impl Help {
             .default_pos(ctx.content_rect().center())
             .show(ctx, |ui| {
                 ui.set_max_width(420.0);
-                ui.heading(format!("dirmap {}", env!("CARGO_PKG_VERSION")));
+                ui.heading(format!("Filescape {}", env!("CARGO_PKG_VERSION")));
                 ui.label("A disk usage visualiser for Windows, Linux and macOS.");
                 ui.add_space(8.0);
                 egui::Grid::new("about").num_columns(2).spacing([14.0, 4.0]).show(ui, |ui| {
@@ -291,7 +291,7 @@ impl Help {
                     ui.label(if about.elevated { "Yes" } else { "No" });
                     ui.end_row();
                     ui.label("Settings folder");
-                    let dir = eframe::storage_dir("dirmap").map(|d| d.display().to_string()).unwrap_or_else(|| "(none)".into());
+                    let dir = eframe::storage_dir(crate::APP_ID).map(|d| d.display().to_string()).unwrap_or_else(|| "(none)".into());
                     ui.add(egui::Label::new(RichText::new(dir).monospace().size(11.5)).wrap());
                     ui.end_row();
                 });
@@ -299,7 +299,7 @@ impl Help {
                 ui.horizontal(|ui| {
                     if ui.button("Copy details").on_hover_text("For a problem report").clicked() {
                         let text = format!(
-                            "dirmap {} · {} {} · drawing: {} · administrator: {}",
+                            "Filescape {} · {} {} · drawing: {} · administrator: {}",
                             env!("CARGO_PKG_VERSION"),
                             std::env::consts::OS,
                             std::env::consts::ARCH,
@@ -308,7 +308,7 @@ impl Help {
                         );
                         ui.ctx().copy_text(text);
                     }
-                    if ui.button("More about dirmap…").clicked() {
+                    if ui.button("More about Filescape…").clicked() {
                         more = true;
                     }
                 });

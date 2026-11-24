@@ -179,7 +179,7 @@ impl App {
                 ui.weak("These tags replace the ones the items share. Notes are kept.");
             }
             ui.add_space(4.0);
-            ui.weak("Kept by dirmap, not in the files: renaming or moving them in another program loses them.");
+            ui.weak("Kept by Filescape, not in the files: renaming or moving them in another program loses them.");
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 save = ui.button("Save").clicked();

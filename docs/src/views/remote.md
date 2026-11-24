@@ -10,7 +10,7 @@ preview, drag and drop and file operations. Only the layout and the sidebar are 
 ## Its own panes
 
 Remote keeps its own panes, tabs and layout, separate from Files. Switching between Files and
-Remote takes you back to where you were in each, and both are remembered when dirmap closes.
+Remote takes you back to where you were in each, and both are remembered when Filescape closes.
 The first time, Remote opens with two panes: your Files folder on the left and the site you used
 last on the right. Favourites, saved sites, tags and notes are shared by both workspaces.
 
@@ -65,16 +65,16 @@ A file is written under a temporary name (`.name.dirmap-part`, beside where it's
 takes its real name once all of it has arrived and its size matches. So a file with its real name
 is always complete, and a cut-off transfer never replaces a good file.
 
-If the connection drops, dirmap connects again and carries on from where it got to, up to three
+If the connection drops, Filescape connects again and carries on from where it got to, up to three
 times (after 1, 2 and 4 seconds). If it still can't, the transfer is marked failed and the part
 file stays. **Retry** runs it again: files that already arrived (same size and time) are skipped,
 folders are merged, and the part file is continued rather than started again. Asking for the same
-copy later, even after closing dirmap, continues it the same way.
+copy later, even after closing Filescape, continues it the same way.
 
 Continuing part-way works for downloads from SFTP, FTP and WebDAV servers that allow it, and for
 uploads to SFTP and FTP. Elsewhere the file starts again from the beginning.
 
-Every file's size is checked once it has arrived. dirmap doesn't compare checksums yet.
+Every file's size is checked once it has arrived. Filescape doesn't compare checksums yet.
 
 ## Comparing and synchronising
 
@@ -96,19 +96,19 @@ second compare shows them as the same. Some FTP servers can't set times at all; 
 
 ## Editing files on a server
 
-Double-click a file on a server (or use **Open With**) and dirmap fetches it to a folder of its
-own and opens it in its app. Each time you save it there, dirmap sends it back to the server,
+Double-click a file on a server (or use **Open With**) and Filescape fetches it to a folder of its
+own and opens it in its app. Each time you save it there, Filescape sends it back to the server,
 the same safe way as a transfer, and the status bar says so ("Saved notes.txt to render01").
 The pane re-reads the folder, so the new size and time show.
 
-If someone changed the server's copy since you opened it, dirmap asks before replacing it:
+If someone changed the server's copy since you opened it, Filescape asks before replacing it:
 **Replace It** or **Don't Send** (your copy stays, and saving again asks again). If sending
 fails, saving again tries again.
 
 Files being edited are listed at the top of the [Transfers panel](#transfers), with how many
 times each was sent; **Stop Sending** stops sending a file's saves. Opening the same file again
 while it's being edited opens your copy, with your changes, rather than fetching it again.
-Editing stops when dirmap closes.
+Editing stops when Filescape closes.
 
 ## SSH terminal
 
@@ -125,7 +125,7 @@ password, `ssh` asks for it in the terminal.
   others that's installed.
 
 `ssh` keeps its own list of known servers (`~/.ssh/known_hosts`), so the first time it may ask you
-to accept the server's key, even if dirmap already knows it.
+to accept the server's key, even if Filescape already knows it.
 
 ## Properties and permissions
 
@@ -156,9 +156,9 @@ The server opens in the pane that's already on a server, otherwise in the right-
 this computer stays beside it. A quick connection isn't saved: use **Save as Site…** in the
 connection menu (below) to keep it.
 
-If you type a password in the address (`sftp://rich:password@render01`), dirmap signs in with it
+If you type a password in the address (`sftp://rich:password@render01`), Filescape signs in with it
 and takes it straight out of the address: it isn't shown in the box, the address bar, the
-connection log, Recent Servers or anything saved, and it's forgotten when dirmap closes.
+connection log, Recent Servers or anything saved, and it's forgotten when Filescape closes.
 
 ## The connection in the toolbar
 
@@ -166,7 +166,7 @@ Beside quick connect, the toolbar shows the focused pane's server: a closed padl
 encrypted protocol, an open one (in orange) for one that isn't, the server's name and the round
 trip time of its last small requests. Click it for:
 
-- **Connection Log…**: what dirmap asked the server and how long it took, and any errors.
+- **Connection Log…**: what Filescape asked the server and how long it took, and any errors.
   Passwords, passphrases and keys are never written to it.
 - **Disconnect**.
 - **Save as Site…**, for a server you connected to with quick connect.
@@ -190,14 +190,14 @@ right-click to **Remove from Recent**.
 
 ## Listings and Refresh
 
-dirmap remembers each server folder's list for a minute, so Back, Forward and going back into a
-folder you just left are instant and don't ask the server again. Anything dirmap changes on the
+Filescape remembers each server folder's list for a minute, so Back, Forward and going back into a
+folder you just left are instant and don't ask the server again. Anything Filescape changes on the
 server (a copy, move, rename, delete, new folder or upload) drops the remembered list of that
 folder, so you always see your own changes. Changes made by someone else, or by another program,
 show when you press **Refresh** (the button beside the address bar, or **Ctrl+R**; in Remote, F5
 copies to the other pane), or after the minute is up. Compare Folders and transfers always read the server afresh.
 
-Big folders list quickly on SFTP: dirmap asks for many batches of names at once instead of one
+Big folders list quickly on SFTP: Filescape asks for many batches of names at once instead of one
 after another, so a folder of 100,000 items over a slow link takes seconds rather than minutes.
 
 ## The Site Manager
@@ -227,7 +227,7 @@ The buttons:
 - **New Site**, **Duplicate** and **Delete** under the list. Deleting a site also removes any
   password kept for it in the keychain. Right-click a group's name to rename it.
 
-Passwords are never saved in dirmap's own settings. When you tick **Remember** in the sign-in box
+Passwords are never saved in Filescape's own settings. When you tick **Remember** in the sign-in box
 they go to Windows Credential Manager, your macOS Keychain or your desktop's keyring.
 
 ### Importing from WinSCP and FileZilla
@@ -244,16 +244,16 @@ they go to Windows Credential Manager, your macOS Keychain or your desktop's key
   and Cyberduck can import. FileZilla has no WebDAV, so WebDAV sites are left out (and named).
 
 The address, port, user name, remote and local folders, key file and notes come across.
-Passwords never do, in either direction: dirmap asks on the first connection, and **Remember**
-keeps them in the keychain. Sites already in the list are skipped, and kinds of server dirmap
+Passwords never do, in either direction: Filescape asks on the first connection, and **Remember**
+keeps them in the keychain. Sites already in the list are skipped, and kinds of server Filescape
 doesn't connect to (S3, for example) are named as left out.
 
 ## Unencrypted protocols
 
 FTP and WebDAV over http send your password and files as plain text that anyone on the network
-can read or change. Before the first connection to such a server, dirmap asks: **Connect
+can read or change. Before the first connection to such a server, Filescape asks: **Connect
 Anyway** or **Cancel**. A saved site remembers the answer; a quick connection asks again the next
-time dirmap starts. Use SFTP, FTPS or https when the server offers them.
+time Filescape starts. Use SFTP, FTPS or https when the server offers them.
 
 ## Safety
 
@@ -262,7 +262,7 @@ time dirmap starts. Use SFTP, FTPS or https when the server offers them.
 - A name a server lists is always used as one name. Names such as `..`, or ones containing a
   slash, are left out of the list (the connection log says so), and a download never writes
   outside the folder you chose.
-- Delete on a server is permanent and dirmap asks first.
+- Delete on a server is permanent and Filescape asks first.
 - When you upload a folder, a link inside it is sent (as the file it points to) only when it
   points to a file inside that folder. A link to something elsewhere, such as your SSH key, is
   skipped and the connection log says so. A link you chose on its own is sent as usual.

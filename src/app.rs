@@ -556,7 +556,7 @@ impl App {
                 .resizable(false)
                 .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
                 .show(ctx, |ui| {
-                    ui.label("Windows didn't start dirmap as administrator, so it's carrying on as it is.");
+                    ui.label("Windows didn't start Filescape as administrator, so it's carrying on as it is.");
                     if ui.button("OK").clicked() {
                         self.admin_declined = false;
                     }
@@ -577,7 +577,7 @@ impl App {
             .show(ctx, |ui| {
                 ui.set_max_width(440.0);
                 ui.label(
-                    "dirmap isn't running as administrator. Windows keeps some folders (other users' files, parts of \
+                    "Filescape isn't running as administrator. Windows keeps some folders (other users' files, parts of \
                      Windows itself) closed to ordinary programs, so they would be counted as unreadable and \
                      left out of the totals.",
                 );
@@ -841,7 +841,7 @@ impl App {
                 self.dialog.open_licensing(&self.settings);
                 ui.close();
             }
-            if ui.add(egui::Button::new(style::mi("About dirmap"))).clicked() {
+            if ui.add(egui::Button::new(style::mi("About Filescape"))).clicked() {
                 self.help.about_open = true;
                 ui.close();
             }
@@ -1474,8 +1474,8 @@ impl App {
         }
         let Some(tree) = &self.tree else { return };
         let label: String = tree.name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
-        let name = format!("dirmap {} {}.dmsnap", label.trim_matches('_'), chrono::Local::now().format("%Y-%m-%d %H%M"));
-        let dialog = rfd::FileDialog::new().add_filter("dirmap snapshot", &["dmsnap"]).set_file_name(name);
+        let name = format!("Filescape {} {}.dmsnap", label.trim_matches('_'), chrono::Local::now().format("%Y-%m-%d %H%M"));
+        let dialog = rfd::FileDialog::new().add_filter("Filescape snapshot", &["dmsnap"]).set_file_name(name);
         if let Some(f) = dialog.save_file() {
             self.snap_msg = Some(match snapshot::save(&f, &self.scanned_path, tree) {
                 Ok(()) => format!("Saved {}", f.display()),
@@ -1485,7 +1485,7 @@ impl App {
     }
 
     fn load_snapshot(&mut self) {
-        if let Some(f) = rfd::FileDialog::new().add_filter("dirmap snapshot", &["dmsnap"]).pick_file() {
+        if let Some(f) = rfd::FileDialog::new().add_filter("Filescape snapshot", &["dmsnap"]).pick_file() {
             self.load_snapshot_from(f);
         }
     }
@@ -2613,7 +2613,7 @@ impl eframe::App for App {
                             format!("{} items couldn't be read.", group(self.scan_errors))
                         };
                         ui.colored_label(ui.visuals().warn_fg_color, text).on_hover_text(
-                            "Folders or files dirmap wasn't allowed to open (or that vanished during the scan). \
+                            "Folders or files Filescape wasn't allowed to open (or that vanished during the scan). \
                              Their space isn't counted. Press F1 for why and what to do.",
                         );
                     }
@@ -2653,7 +2653,7 @@ impl eframe::App for App {
                 ui.horizontal(|ui| {
                     ui.heading("Pick a drive to scan, or type a folder above");
                     ui.add_space(16.0);
-                    if ui.link("New to dirmap? Read the Quick Start").clicked() {
+                    if ui.link("New to Filescape? Read the Quick Start").clicked() {
                         self.help.show_topic(topics::QUICK_START);
                     }
                 });

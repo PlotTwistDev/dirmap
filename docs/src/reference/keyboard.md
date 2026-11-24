@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Every keyboard shortcut dirmap has. This list is generated from the program itself and checked
+Every keyboard shortcut Filescape has. This list is generated from the program itself and checked
 against the code by the tests, so it only lists shortcuts that really work in this version.
 
 On macOS, **⌘** (Command) takes the place of **Ctrl**. Shortcuts that act on the map or on the
@@ -186,7 +186,7 @@ While the pointer is over the help window.
 
 ## Not available yet
 
-Some shortcuts you might expect from other disk-usage tools aren't in dirmap yet: arrow keys to
+Some shortcuts you might expect from other disk-usage tools aren't in Filescape yet: arrow keys to
 move through the folder list, **Backspace** to go up a level, **Escape** to close the help window,
 and Back and Forward in the sunburst. See [Feature status](../about/feature-status.md).
 

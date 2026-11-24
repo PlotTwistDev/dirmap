@@ -70,7 +70,7 @@ fn check_key(site: &Site, key: &keys::PublicKey, refused: &Mutex<Option<String>>
                 let known_hosts = format!("{}, line {line}", file.display());
                 ask(Ask::ChangedHostKey { site: site.url(), algorithm, fingerprint: fingerprint.clone(), known_hosts: known_hosts.clone() });
                 *refused.lock().unwrap() = Some(format!(
-                    "{}'s key has changed since you last connected ({known_hosts}). This can mean someone is intercepting the connection, so dirmap didn't connect. If the server was reinstalled, remove the old key from that file and try again.",
+                    "{}'s key has changed since you last connected ({known_hosts}). This can mean someone is intercepting the connection, so Filescape didn't connect. If the server was reinstalled, remove the old key from that file and try again.",
                     site.host
                 ));
                 return false;

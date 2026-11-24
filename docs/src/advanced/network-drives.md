@@ -20,16 +20,16 @@ depends mostly on the network's delay:
 - **Scan only what you need**, such as one project folder rather than the whole share.
 - **Exclude snapshot folders** such as `.snapshot` or `~snapshot` on NAS devices, which can
   multiply the apparent size. Add them under **Folders to skip**.
-- **Scan on the server** if you can: running dirmap (or `dirmap --cli`) on the storage server
+- **Scan on the server** if you can: running Filescape (or `filescape --cli`) on the storage server
   itself is far faster than over the network.
 - A share that disconnects mid-scan shows its remaining folders as unreadable. Scan again.
 
-dirmap looks up the drive list in the background, so a slow or disconnected share doesn't freeze
+Filescape looks up the drive list in the background, so a slow or disconnected share doesn't freeze
 the window.
 
 ## Sizes on network storage
 
-Network storage often compresses, deduplicates or snapshots data. dirmap shows file sizes as the
+Network storage often compresses, deduplicates or snapshots data. Filescape shows file sizes as the
 share reports them, which can be very different from the space used on the server's disks. Use
 the storage system's own tools for its physical usage.
 

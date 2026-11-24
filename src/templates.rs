@@ -46,16 +46,59 @@ pub struct UserTemplate {
     pub is_dir: bool,
 }
 
-/// dirmap's own templates folder (made on first use by "Open Templates Folder").
-pub fn own_folder() -> Option<PathBuf> {
-    let base = if cfg!(windows) {
+/// Where per-user app folders live: %APPDATA%, ~/Library/Application Support or ~/.local/share.
+fn data_base() -> Option<PathBuf> {
+    if cfg!(windows) {
         std::env::var_os("APPDATA").map(PathBuf::from)
     } else if cfg!(target_os = "macos") {
         crate::fsys::places::home().map(|h| h.join("Library/Application Support"))
     } else {
         std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| crate::fsys::places::home().map(|h| h.join(".local/share")))
-    }?;
-    Some(base.join("dirmap").join("Templates"))
+    }
+}
+
+/// The app's own folder (settings, licence, Templates). It matches what eframe uses for
+/// `crate::APP_ID`: lower case on Linux, as typed elsewhere (eframe adds `data` on Windows).
+pub fn app_folder() -> Option<PathBuf> {
+    let name = if cfg!(any(windows, target_os = "macos")) { crate::APP_ID.to_string() } else { crate::APP_ID.to_lowercase() };
+    data_base().map(|b| b.join(name))
+}
+
+/// Before the rename to Filescape the folder was called "dirmap". On the first run after the
+/// rename, copy it to the new name so settings, saved servers and the licence carry over. The
+/// old folder is left alone, so an older build still finds its settings.
+pub fn migrate_old_folder() {
+    let (Some(base), Some(new)) = (data_base(), app_folder()) else { return };
+    let old = base.join("dirmap");
+    if new.exists() || !old.is_dir() {
+        return;
+    }
+    fn copy(from: &Path, to: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(to)?;
+        for e in std::fs::read_dir(from)? {
+            let e = e?;
+            let t = to.join(e.file_name());
+            if e.file_type()?.is_dir() {
+                copy(&e.path(), &t)?;
+            } else {
+                std::fs::copy(e.path(), t)?;
+            }
+        }
+        Ok(())
+    }
+    // Copy into a temporary name first, so a half-finished copy is never taken for the real one.
+    let tmp = base.join(format!(".{}-migrating", crate::APP_ID));
+    let _ = std::fs::remove_dir_all(&tmp);
+    if copy(&old, &tmp).is_ok() {
+        let _ = std::fs::rename(&tmp, &new);
+    } else {
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+/// The app's own templates folder (made on first use by "Open Templates Folder").
+pub fn own_folder() -> Option<PathBuf> {
+    Some(app_folder()?.join("Templates"))
 }
 
 /// Folders to look in: dirmap's own, and on Linux the desktop's Templates folder (which GNOME

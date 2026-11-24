@@ -155,7 +155,7 @@ impl ConnectBox {
         let user = self.user.trim();
         let user = if user.is_empty() { String::new() } else { format!("{user}@") };
         let folder = self.folder.trim().trim_start_matches('/');
-        remote::parse(&format!("{}://{user}{host}:{port}/{folder}", kind.prefix())).ok_or_else(|| "That isn't a server address dirmap can read.".into())
+        remote::parse(&format!("{}://{user}{host}:{port}/{folder}", kind.prefix())).ok_or_else(|| "That isn't a server address Filescape can read.".into())
     }
 }
 
@@ -444,9 +444,9 @@ impl App {
                     ui.checkbox(&mut c.save, "Add to Network & Remote");
                     ui.add_space(4.0);
                     ui.weak(if cfg!(windows) {
-                        "Windows asks for a user name and password if the share needs one, and can remember it in Credential Manager. dirmap never sees it."
+                        "Windows asks for a user name and password if the share needs one, and can remember it in Credential Manager. Filescape never sees it."
                     } else if cfg!(target_os = "macos") {
-                        "macOS asks for a password if the share needs one, and can keep it in your Keychain. dirmap never sees it."
+                        "macOS asks for a password if the share needs one, and can keep it in your Keychain. Filescape never sees it."
                     } else {
                         "Mounted through GVFS. If the share needs a password, connect once from your desktop's file manager so it's saved in your keyring."
                     });
@@ -497,12 +497,12 @@ impl App {
                         ui.colored_label(ui.visuals().warn_fg_color, "Not encrypted: the password and the files can be read by anyone on the network between here and the server. Use it only on a network you trust.");
                     }
                     ui.weak(match kind {
-                        Scheme::Sftp => "dirmap checks the server's identity, then signs in with your SSH agent or key files, or asks for a password.",
+                        Scheme::Sftp => "Filescape checks the server's identity, then signs in with your SSH agent or key files, or asks for a password.",
                         Scheme::Ftps => "The server's certificate must be one your system trusts.",
                         Scheme::Davs => "The server's certificate must be one your system trusts.",
                         _ => "",
                     });
-                    ui.weak(format!("If a password is needed dirmap asks for it, and can keep it in {}. It is never saved in dirmap's own files.", keychain_name()));
+                    ui.weak(format!("If a password is needed Filescape asks for it, and can keep it in {}. It is never saved in Filescape's own files.", keychain_name()));
                 }
             }
             if let Some(e) = &c.error {
@@ -595,7 +595,7 @@ impl App {
                 Ask::NewHostKey { site, algorithm, fingerprint } => {
                     ui.heading("Connect to a new server?");
                     ui.add_space(6.0);
-                    ui.label(format!("dirmap hasn't connected to {site} before. Before signing in, check that this is the server's key fingerprint (your server's administrator can tell you, or run ssh-keygen -lf on the server's key):"));
+                    ui.label(format!("Filescape hasn't connected to {site} before. Before signing in, check that this is the server's key fingerprint (your server's administrator can tell you, or run ssh-keygen -lf on the server's key):"));
                     ui.add_space(6.0);
                     ui.label(mono(fingerprint));
                     ui.weak(algorithm.as_str());
@@ -615,7 +615,7 @@ impl App {
                 Ask::ChangedHostKey { site, algorithm, fingerprint, known_hosts } => {
                     ui.heading("The server's identity has changed");
                     ui.add_space(6.0);
-                    ui.colored_label(ui.visuals().warn_fg_color, format!("{site} showed a different key from the one recorded in {known_hosts}. Someone could be intercepting the connection, so dirmap won't connect."));
+                    ui.colored_label(ui.visuals().warn_fg_color, format!("{site} showed a different key from the one recorded in {known_hosts}. Someone could be intercepting the connection, so Filescape won't connect."));
                     ui.add_space(4.0);
                     ui.label("The key it showed now:");
                     ui.label(mono(fingerprint));
@@ -638,7 +638,7 @@ impl App {
                     ui.label("Use it only on a network you trust. If the server offers SFTP, FTPS or https, use that instead.");
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Connect Anyway").on_hover_text("Don't ask again for this server while dirmap is open (saved servers remember it)").clicked() {
+                        if ui.button("Connect Anyway").on_hover_text("Don't ask again for this server while Filescape is open (saved servers remember it)").clicked() {
                             answer = Some(Answer::Trust { always: true });
                         }
                         if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {

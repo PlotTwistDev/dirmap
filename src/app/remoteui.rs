@@ -769,7 +769,7 @@ impl App {
                 self.files.rws.target = Some(target);
                 self.open_server(p);
             }
-            None => self.ops.notice = Some((format!("\"{text}\" isn't an address dirmap can connect to. Try sftp://user@host/folder, ftp://host, https://host/dav or \\\\server\\share."), true)),
+            None => self.ops.notice = Some((format!("\"{text}\" isn't an address Filescape can connect to. Try sftp://user@host/folder, ftp://host, https://host/dav or \\\\server\\share."), true)),
         }
     }
 
@@ -796,7 +796,7 @@ impl App {
                 .desired_width(if narrow { 140.0 } else { 220.0 }),
         );
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        r.on_hover_text("Type a server's address and press Enter. A bare name (render01) is SFTP. FTP and http WebDAV aren't encrypted and dirmap asks before using them.");
+        r.on_hover_text("Type a server's address and press Enter. A bare name (render01) is SFTP. FTP and http WebDAV aren't encrypted and Filescape asks before using them.");
         if enter || ui.add_enabled(!self.files.rws.quick.trim().is_empty(), egui::Button::new("Connect")).clicked() {
             self.quick_connect();
         }
@@ -1165,7 +1165,7 @@ impl App {
                             ui.separator();
                             if ui.button("Export for FileZilla…").on_hover_text("All sites, without passwords, as a sitemanager.xml that FileZilla, WinSCP and Cyberduck can import").clicked() {
                                 let (xml, left_out) = si::to_filezilla(&sites);
-                                if let Some(f) = rfd::FileDialog::new().set_file_name("dirmap-sites.xml").add_filter("FileZilla site file", &["xml"]).save_file() {
+                                if let Some(f) = rfd::FileDialog::new().set_file_name("filescape-sites.xml").add_filter("FileZilla site file", &["xml"]).save_file() {
                                     match std::fs::write(&f, xml) {
                                         Ok(()) => {
                                             let extra = if left_out.is_empty() { String::new() } else { format!(" Left out (FileZilla has no WebDAV): {}.", left_out.join(", ")) };
@@ -1279,9 +1279,9 @@ impl App {
                     });
                     ui.add_space(4.0);
                     if kind_is_insecure(f) {
-                        ui.colored_label(ui.visuals().warn_fg_color, "Not encrypted: the password and files can be read on the network. dirmap asks before connecting.");
+                        ui.colored_label(ui.visuals().warn_fg_color, "Not encrypted: the password and files can be read on the network. Filescape asks before connecting.");
                     }
-                    ui.weak(format!("Passwords are never saved in dirmap's files; when you tick Remember they go to {}.", super::netui::keychain_name()));
+                    ui.weak(format!("Passwords are never saved in Filescape's files; when you tick Remember they go to {}.", super::netui::keychain_name()));
                     if let Some(r) = &m.tested {
                         match r {
                             Ok(t) => ui.colored_label(pal.accent, format!("✔ {t}")),

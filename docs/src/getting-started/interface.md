@@ -1,9 +1,9 @@
 # Understanding the interface
 
-dirmap has two workspaces, switched with the buttons at the left of the toolbar:
+Filescape has two workspaces, switched with the buttons at the left of the toolbar:
 
 - **🗀 Files** (**Ctrl+1**) is a file manager for browsing your drives and folders without a
-  scan. It's where dirmap starts. See [The Files workspace](../views/file-manager.md).
+  scan. It's where Filescape starts. See [The Files workspace](../views/file-manager.md).
 - **▦ Storage Analysis** (**Ctrl+3**) is the scan with its treemap, described on the rest of this
   page.
 

@@ -1,6 +1,6 @@
 # The Files workspace
 
-dirmap opens in the **Files** workspace: a file manager like Windows Explorer, Finder or Dolphin.
+Filescape opens in the **Files** workspace: a file manager like Windows Explorer, Finder or Dolphin.
 You can browse your computer straight away, with no scan. When you want to know where the space
 goes, open the [analysis dock](#the-analysis-dock) under the list: it shows the treemap of the
 folder you're in, and follows you as you browse.
@@ -9,7 +9,7 @@ folder you're in, and follows you as you browse.
 
 ## Workspaces
 
-The buttons at the left of the toolbar switch between the three workspaces. dirmap reopens in the
+The buttons at the left of the toolbar switch between the three workspaces. Filescape reopens in the
 one you used last.
 
 | Workspace | What it's for |
@@ -25,7 +25,7 @@ Switching keeps your place:
 - **Storage Analysis to Files.** Files shows the folder Storage Analysis is showing, with the same
   item selected.
 
-Starting dirmap with a folder (`dirmap D:\Projects`) or a snapshot to compare (`--compare`) opens
+Starting Filescape with a folder (`filescape D:\Projects`) or a snapshot to compare (`--compare`) opens
 Storage Analysis and scans it, as before.
 
 A scan keeps running while you browse in Files. The right of the status bar shows it, and any
@@ -70,7 +70,7 @@ right-click menu does the same.
 - A favourite whose folder has gone (a drive that isn't plugged in, a renamed folder) stays in
   the list; opening it says the folder can't be found.
 
-Folders pinned in earlier versions of dirmap appear in the first group.
+Folders pinned in earlier versions of Filescape appear in the first group.
 
 ## Moving around
 
@@ -155,7 +155,7 @@ Each tab has its own folder and history. **Ctrl+T** opens a tab, **Ctrl+W** clos
 **Ctrl+Shift+T** reopens the last one you closed, and **Ctrl+Tab** moves between them.
 Middle-click a folder to open it in a new tab. Drag a tab to move it along the strip, and
 right-click one for **Close Other Tabs**. When there are more tabs than fit, they get narrower,
-then the strip scrolls. Your tabs are there again the next time you start dirmap.
+then the strip scrolls. Your tabs are there again the next time you start Filescape.
 
 ## Two panes
 
@@ -172,7 +172,7 @@ two folders at once. **One Above the Other** stacks them instead.
   The right-click menu has **Copy to Other Pane** and **Move to Other Pane** too.
 - **Ctrl+U** swaps the panes. Drag the line between them to share the room, and double-click it
   to make them even.
-- Press **Ctrl+\\** again to go back to one pane. dirmap keeps the other pane's tabs for next
+- Press **Ctrl+\\** again to go back to one pane. Filescape keeps the other pane's tabs for next
   time, and remembers the split when you quit.
 
 ## The list
@@ -186,7 +186,7 @@ two folders at once. **One Above the Other** stacks them instead.
 
 Click a heading to sort by it, and again to reverse. Folders always come first, and names
 sort in natural order, so `shot2` comes before `shot10`. Drag the divider at a column's left edge
-to resize it, and double-click the divider to put the column back to its usual width. dirmap
+to resize it, and double-click the divider to put the column back to its usual width. Filescape
 remembers the widths.
 
 To choose items:
@@ -250,7 +250,7 @@ The four buttons at the bottom right of the list (and **View > Layout**) switch 
 
 ### Each folder remembers its view
 
-When you change the view, the sort or the grouping, dirmap remembers it for that folder, and
+When you change the view, the sort or the grouping, Filescape remembers it for that folder, and
 shows the folder that way when you come back, as Finder and Explorer do. Folders you haven't
 changed use the default.
 
@@ -297,7 +297,7 @@ a render or a photo at a glance.
 
 Pictures are made for the same image types as the [preview](#quick-look-and-the-preview-pane),
 including OpenEXR and HDR, and for videos and PDFs where the system can make one. This happens in the background and only for the icons on screen. Scrolling quickly
-through thousands of images never freezes the window, and dirmap keeps the pictures within a
+through thousands of images never freezes the window, and Filescape keeps the pictures within a
 fixed amount of memory, dropping the ones you haven't seen for a while. A file that can't be
 read shows its type's icon instead.
 
@@ -319,7 +319,7 @@ read shows its type's icon instead.
 | **Open in Terminal…** (Command Prompt or PowerShell on Windows) | Opens a terminal in the folder. |
 | **Properties** (**Alt+Enter**) | Size, number of files and dates. |
 | **Analyse This Folder** | Scans the folder and shows it in the [analysis dock](#the-analysis-dock). You stay in Files. |
-| **Show More Options** (**Shift+F10**; Windows) | Opens Windows' own menu for the items, the one Explorer shows: everything other apps add to it (7-Zip, Notepad++, PowerToys, your antivirus…), **Send to**, **Give access to** and the rest. **Rename** there renames in dirmap's list. |
+| **Show More Options** (**Shift+F10**; Windows) | Opens Windows' own menu for the items, the one Explorer shows: everything other apps add to it (7-Zip, Notepad++, PowerToys, your antivirus…), **Send to**, **Give access to** and the rest. **Rename** there renames in Filescape's list. |
 
 On Windows, **Shift+right-click** an item to go straight to Windows' menu, with the extra commands
 Explorer shows when Shift is held (such as **Copy as path** and more **Send to** places).
@@ -343,7 +343,7 @@ box shows each old name beside its new one as you type, and nothing changes unti
 
 A name that can't be used is shown in red, and **Rename** waits until it's fixed: two items would
 get the same name, the name is taken by something else in the folder, or it's empty or has a
-character the system doesn't allow. Names can swap (`a` to `b` and `b` to `a`), as dirmap renames
+character the system doesn't allow. Names can swap (`a` to `b` and `b` to `a`), as Filescape renames
 through temporary names. If one rename fails, the ones already done are put back. **Ctrl+Z** undoes
 the whole rename.
 
@@ -363,8 +363,8 @@ The sidebar's **Tags** lists every tag. Click one to see everything that has it,
 and the ones below: the filter becomes `#client` and [searches subfolders](#searching-subfolders).
 You can type `#client` in the filter yourself, too.
 
-Colours, tags and notes are kept by dirmap in its own file, not in the files themselves. They
-follow items you rename or move in dirmap (and through Undo), but renaming or moving the items in
+Colours, tags and notes are kept by Filescape in its own file, not in the files themselves. They
+follow items you rename or move in Filescape (and through Undo), but renaming or moving the items in
 another program loses them, and other programs don't see them.
 
 ## Comparing and syncing folders
@@ -438,11 +438,11 @@ a file that's already there: the new one is called `New folder 2`, `README 2.md`
 Put any file or folder in the templates folder (a `.blend` scene, a project folder with its
 subfolders, a document with your letterhead) and it appears in the New menu. The folder is:
 
-- Windows: `%APPDATA%\dirmap\Templates`;
-- macOS: `~/Library/Application Support/dirmap/Templates`;
-- Linux: `~/.local/share/dirmap/Templates`, plus your desktop's own Templates folder.
+- Windows: `%APPDATA%\Filescape\Templates`;
+- macOS: `~/Library/Application Support/Filescape/Templates`;
+- Linux: `~/.local/share/filescape/Templates`, plus your desktop's own Templates folder.
 
-dirmap doesn't make Word, Excel, Photoshop or other formats it can't write correctly. Save one
+Filescape doesn't make Word, Excel, Photoshop or other formats it can't write correctly. Save one
 from the app into the templates folder and New copies it.
 
 ## Quick Look and the preview pane
@@ -484,7 +484,7 @@ On an image, scroll to zoom towards the pointer, drag to pan, and double-click t
 fitting the image and showing it at 1:1.
 
 Previews are made in the background, so a big file never freezes the window. To keep memory in
-check, dirmap shrinks large images to 2048 pixels across for display, and doesn't preview images
+check, Filescape shrinks large images to 2048 pixels across for display, and doesn't preview images
 over 256 MB.
 
 ## The analysis dock
@@ -500,7 +500,7 @@ You can see where the space goes while you browse, without switching to Storage 
 - **⛶** opens the same folder in the full Storage Analysis workspace.
 - **✖** closes it.
 
-dirmap remembers whether the dock is open, and its height.
+Filescape remembers whether the dock is open, and its height.
 
 ![The analysis dock under the list](../images/file-manager-dock.png)
 
@@ -524,7 +524,7 @@ folder on it.
 If a folder is already analysed, the button says **⟳ Refresh Analysis**. That scans only this
 folder again and puts the result into the existing analysis, so a whole-drive analysis is kept.
 
-dirmap also keeps the last two analyses you replaced (if each is under 2 million files). Going
+Filescape also keeps the last two analyses you replaced (if each is under 2 million files). Going
 back to a folder one of them covers shows it again at once.
 
 ### What the map shows as you browse
@@ -586,7 +586,7 @@ on the dock's toolbar switches to colouring by age, or by change since a snapsho
   Finder. Hold **Ctrl** or **Alt** while you let go to copy, or **Shift** to move (on a Mac,
   **⌥** copies and **⌘** moves). The label by the pointer always says which will happen, and a
   folder can't be dropped inside itself.
-- **Rename** with **F2**, and **Delete** to send items to the Recycle Bin or Trash. dirmap asks
+- **Rename** with **F2**, and **Delete** to send items to the Recycle Bin or Trash. Filescape asks
   first. **Ctrl+Z** undoes any of these.
 
 Copies and moves run in the background. The status bar shows what's being copied and how far it
@@ -612,7 +612,7 @@ reporting changes; most Windows servers and NAS boxes do.
 
 ### When a name is already taken
 
-If a file or folder you copy or move would land on one with the same name, dirmap stops and
+If a file or folder you copy or move would land on one with the same name, Filescape stops and
 asks, showing both items' sizes and dates and which is newer:
 
 | Choice | What happens |
@@ -629,15 +629,15 @@ separately). Copying an item into the folder it's already in never asks: the cop
 
 ### Undo
 
-**Ctrl+Z** (**⌘Z** on a Mac) undoes the last change dirmap made: a copy, a move, a rename, a new
-folder or file, or **Move to Trash**. Press it again to undo the one before; dirmap remembers the
+**Ctrl+Z** (**⌘Z** on a Mac) undoes the last change Filescape made: a copy, a move, a rename, a new
+folder or file, or **Move to Trash**. Press it again to undo the one before; Filescape remembers the
 last 30. After a change, the status bar also shows an **Undo** button beside its note, and the
 right-click menu of empty space in the list has **Undo**.
 
 - Undoing a copy or a new item sends it to the Recycle Bin or Trash, so nothing is lost.
 - Undoing a move or a rename puts the items back where they were.
 - Undoing **Move to Trash**, or a **Replace**, takes the items back out of the bin. If an item
-  can't be found there (it was emptied, or the drive has no bin, as on a network share), dirmap
+  can't be found there (it was emptied, or the drive has no bin, as on a network share), Filescape
   says so and you can restore it yourself.
 - **Delete Permanently** can't be undone, which is why it asks first.
 
@@ -646,7 +646,7 @@ menu of empty space has **Redo** too. Making another change clears what can be r
 
 ## Archives
 
-dirmap opens zip, 7z, tar, tar.gz (`.tgz`), tar.xz and tar.bz2 archives like folders. Double-click
+Filescape opens zip, 7z, tar, tar.gz (`.tgz`), tar.xz and tar.bz2 archives like folders. Double-click
 an archive (or press **Enter**) to look inside, and go into its folders as usual: every view,
 Quick Look and the preview work there. **Open with Its App** on the right-click menu opens the
 archive in the program the system uses for it instead.
@@ -664,7 +664,7 @@ Extracting shows its progress in the status bar, can be paused and stopped, and 
 what it made. Names in an archive that would put files outside the folder you extract to (such as
 `../`) are refused.
 
-Archives are only read: dirmap doesn't add to them, rename or delete inside them, and says so if
+Archives are only read: Filescape doesn't add to them, rename or delete inside them, and says so if
 you try. Password-protected archives and RAR aren't supported yet.
 
 ## Image sequences
@@ -712,7 +712,7 @@ black frame saying so.
 The mouse wheel zooms around the pointer, dragging moves the picture, and a double-click or **F**
 fits it to the window. **Escape** closes the player.
 
-The player reads every image type dirmap previews: OpenEXR, PNG, JPEG, TIFF, HDR, TGA, BMP and the
+The player reads every image type Filescape previews: OpenEXR, PNG, JPEG, TIFF, HDR, TGA, BMP and the
 rest. It also reads **DPX** at 8, 10, 12 and 16 bits, in either byte order, packed or filled. A
 sequence on a server plays too, as each frame is downloaded. Frames are shown without their alpha
 channel.
@@ -742,7 +742,7 @@ The **Network & Remote** group in the sidebar lists:
 Right-click a network drive for **Disconnect**, and a saved share for **Remove from This List**.
 
 **Connect to Server…** opens a box. Pick the kind of connection at the top: a network share
-(SMB, through your system), or one of dirmap's own server connections (see
+(SMB, through your system), or one of Filescape's own server connections (see
 [Servers](#servers-sftp-ftp-and-webdav)). For a share, type its address:
 
 - **Windows:** type `\\server\share` (or `smb://server/share`), choose a drive letter or leave it
@@ -752,20 +752,20 @@ Right-click a network drive for **Disconnect**, and a saved share for **Remove f
   manager does.
 
 If the share needs a password, the system asks for it and can keep it in Credential Manager, the
-Keychain or your keyring. dirmap never sees or stores passwords. Connecting happens in the
+Keychain or your keyring. Filescape never sees or stores passwords. Connecting happens in the
 background, so a server that doesn't answer shows an error instead of freezing the window.
 
 ## Servers: SFTP, FTP and WebDAV
 
-dirmap connects to servers itself, so you can browse, copy, rename and delete on them as on a
+Filescape connects to servers itself, so you can browse, copy, rename and delete on them as on a
 drive:
 
 | Kind | Use it for | Security |
 |---|---|---|
-| **SFTP (SSH)** | Linux and Mac machines, render nodes, most NAS boxes | Encrypted. dirmap checks the server's identity. |
+| **SFTP (SSH)** | Linux and Mac machines, render nodes, most NAS boxes | Encrypted. Filescape checks the server's identity. |
 | **FTPS** | FTP servers that offer TLS | Encrypted. The certificate must be one your system trusts. |
 | **WebDAV (https)** | Nextcloud, ownCloud, a NAS, SharePoint-style shares | Encrypted. The certificate must be one your system trusts. |
-| **FTP** and **WebDAV (http)** | Old or local servers only | **Not encrypted:** the password and files can be read on the network. dirmap asks before connecting. |
+| **FTP** and **WebDAV (http)** | Old or local servers only | **Not encrypted:** the password and files can be read on the network. Filescape asks before connecting. |
 
 In **Connect to Server…**, choose the kind, then type the **Server** (or paste a whole address
 there and the rest fills in), and the **Port**, **User name** and **Folder** if they aren't the
@@ -775,18 +775,18 @@ Tab**, **Edit…**, **Disconnect**, **Forget Saved Password** and **Remove from 
 
 ![Connect to Server, set up for an FTP server, with the warning that FTP isn't encrypted](../images/file-manager-connect.png)
 
-**Signing in.** For SFTP, dirmap tries your SSH agent first (ssh-agent, Windows' OpenSSH agent or
+**Signing in.** For SFTP, Filescape tries your SSH agent first (ssh-agent, Windows' OpenSSH agent or
 Pageant), then your key files (the one you chose, else `id_ed25519`, `id_ecdsa` and `id_rsa` in
 your `.ssh` folder), then a password. When it needs a password or a key's passphrase it asks, and
 **Remember** keeps it in Windows Credential Manager, your macOS Keychain or your desktop's
-keyring. dirmap never writes a password into its own files. FTP and WebDAV sign in with a password
+keyring. Filescape never writes a password into its own files. FTP and WebDAV sign in with a password
 the same way (an FTP server with no user name is used anonymously).
 
-**The server's identity (SFTP).** The first time you connect, dirmap shows the server's key
+**The server's identity (SFTP).** The first time you connect, Filescape shows the server's key
 fingerprint before sending anything. Check it with whoever runs the server, then choose
 **Connect and Remember** or **Connect Once**. Remembered keys are kept beside your
-`.ssh/known_hosts` (which dirmap reads but never changes), in dirmap's own `known_hosts` file. If a
-server's key ever changes, dirmap refuses to connect and says which file holds the old key.
+`.ssh/known_hosts` (which Filescape reads but never changes), in Filescape's own `known_hosts` file. If a
+server's key ever changes, Filescape refuses to connect and says which file holds the old key.
 
 **What works on a server:**
 
@@ -801,14 +801,14 @@ server's key ever changes, dirmap refuses to connect and says which file holds t
 - **Analyse Folder** reads every folder below and draws the map, as for a drive. On a big tree
   this takes a while, since each folder is a request to the server.
 
-**What's different:** a server has no bin, so **Delete** always deletes permanently (dirmap asks
+**What's different:** a server has no bin, so **Delete** always deletes permanently (Filescape asks
 first), and replacing an item in a name clash deletes the old one. **Undo** can move things back
 and remove copies, but can't bring back something deleted on a server. Changes other programs
 make on a server aren't noticed: press **F5** to read the folder again. Archives on a server
 open as files, not folders. **Open in Terminal**, **Show in Explorer/Finder** and the system's
 Properties don't apply to items on a server.
 
-Connections stay open while dirmap runs and reconnect by themselves if the server drops them.
+Connections stay open while Filescape runs and reconnect by themselves if the server drops them.
 A server that doesn't answer shows an error after 20 seconds instead of freezing the window.
 
 ## Related topics

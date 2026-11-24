@@ -1,15 +1,15 @@
 # Installation and first launch
 
-dirmap is a single program file. There is nothing to install and nothing runs in the background.
+Filescape is a single program file. There is nothing to install and nothing runs in the background.
 
 ## Windows
 
-1. Download `dirmap-windows-x64.zip` and extract `dirmap.exe` anywhere, for example to your
+1. Download `filescape-windows-x64.zip` and extract `filescape.exe` anywhere, for example to your
    Desktop or `C:\Tools`.
-2. Double-click `dirmap.exe`.
+2. Double-click `filescape.exe`.
 3. If Windows SmartScreen warns about an unrecognised app, choose **More info**, then **Run anyway**.
 
-The first time it starts without administrator rights, dirmap asks whether to restart as
+The first time it starts without administrator rights, Filescape asks whether to restart as
 administrator:
 
 ![The administrator question](../images/admin-prompt.png)
@@ -25,18 +25,18 @@ You can change this later under **⚙ Settings > Advanced**. See
 
 ## Linux
 
-1. Download `dirmap-linux-x64.tar.gz` and extract it: `tar xzf dirmap-linux-x64.tar.gz`.
-2. Run `./dirmap/dirmap`.
-3. Optionally copy `dirmap.desktop` to `~/.local/share/applications/` (edit its `Exec=` line to
-   point at the program) so dirmap appears in your application menu.
+1. Download `filescape-linux-x64.tar.gz` and extract it: `tar xzf filescape-linux-x64.tar.gz`.
+2. Run `./filescape/filescape`.
+3. Optionally copy `filescape.desktop` to `~/.local/share/applications/` (edit its `Exec=` line to
+   point at the program) so Filescape appears in your application menu.
 
 ## macOS
 
-1. Download `dirmap-macos-universal.zip` and open it to get `dirmap.app`. Move it to
+1. Download `filescape-macos-universal.zip` and open it to get `Filescape.app`. Move it to
    **Applications** if you like.
-2. dirmap isn't notarised by Apple, so the first time, **right-click** it and choose **Open**,
-   then **Open** again. (Or run `xattr -dr com.apple.quarantine dirmap.app` in Terminal.)
-3. To scan your whole disk including other apps' data, give dirmap **Full Disk Access** in
+2. Filescape isn't notarised by Apple, so the first time, **right-click** it and choose **Open**,
+   then **Open** again. (Or run `xattr -dr com.apple.quarantine Filescape.app` in Terminal.)
+3. To scan your whole disk including other apps' data, give Filescape **Full Disk Access** in
    **System Settings > Privacy & Security**. Without it, those folders are counted as unreadable.
 
 ## Building from source
@@ -45,13 +45,13 @@ With Rust 1.95 or newer installed from <https://rustup.rs>:
 
 ```sh
 git clone https://github.com/PlotTwistDev/dirmap
-cd dirmap
+cd Filescape
 cargo run --release -- /path/to/scan
 ```
 
 ## The first launch
 
-dirmap opens on the drive list. Pick a drive, or type a folder and press **Enter**. Everything
+Filescape opens on the drive list. Pick a drive, or type a folder and press **Enter**. Everything
 you change in **⚙ Settings** is remembered for next time. See [Quick Start](quick-start.md).
 
 ## Related topics

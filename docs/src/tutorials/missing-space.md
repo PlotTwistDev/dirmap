@@ -1,21 +1,21 @@
 # Why is free space lower than expected?
 
-**Goal:** work out why a drive is fuller than the files you know about, or why dirmap's total
+**Goal:** work out why a drive is fuller than the files you know about, or why Filescape's total
 doesn't match the drive's used space.
 
-## 1. Compare dirmap's total with the drive's used space
+## 1. Compare Filescape's total with the drive's used space
 
 Open **🖴 Drives…**: the **Used** column is what the drive reports. Compare it with the total in the
 status bar after scanning the whole drive. Make sure both use the same units (**⚙ Settings >
 General > Sizes**): a "1 TB" drive is 931 GB in binary units.
 
-## 2. If dirmap's total is lower: something wasn't counted
+## 2. If Filescape's total is lower: something wasn't counted
 
 Likely causes, most common first:
 
 | Cause | How to check | What to do |
 |---|---|---|
-| Folders dirmap couldn't read | The status bar says **N items couldn't be read** | Run as administrator (Windows), give Full Disk Access (macOS) or use `sudo` (Linux). See [Running as administrator](../settings/administrator.md). |
+| Folders Filescape couldn't read | The status bar says **N items couldn't be read** | Run as administrator (Windows), give Full Disk Access (macOS) or use `sudo` (Linux). See [Running as administrator](../settings/administrator.md). |
 | System restore points and shadow copies (Windows) | Not visible to programs | **System Properties > System Protection > Configure** shows and limits their space. |
 | Recycle Bin of other users | `$Recycle.Bin` is unreadable without administrator rights | Run as administrator, or empty the Recycle Bin. |
 | Scan exclusions or skipped hidden files | **⚙ Settings > Filtering** and **Advanced** | Clear them and rescan. |
@@ -23,7 +23,7 @@ Likely causes, most common first:
 | Files deleted but still open | A program is still writing to a deleted file (common on Linux servers) | Restart the program. |
 | Other drives' space (macOS) | APFS volumes share one disk's space | Scan `/` to cover system and data volumes. |
 
-## 3. If dirmap's total is higher: something was counted more than once or isn't really on disk
+## 3. If Filescape's total is higher: something was counted more than once or isn't really on disk
 
 | Cause | How to check |
 |---|---|

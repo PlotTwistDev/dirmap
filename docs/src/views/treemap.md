@@ -8,7 +8,7 @@ The treemap shows the folder named in the breadcrumbs above it (at first, everyt
 scanned) as one big rectangle, divided up among its contents:
 
 - **Each rectangle is one file.** Its **area is proportional to the file's size**: a file twice as
-  big gets twice the area. The shape (tall, wide or square) means nothing; dirmap keeps
+  big gets twice the area. The shape (tall, wide or square) means nothing; Filescape keeps
   rectangles as square as it can so they're easy to compare.
 - **Files in the same folder sit together.** A folder is the region made up of all its files,
   and folders inside it are smaller regions within that.
@@ -39,7 +39,7 @@ swatches in the **File types** list. Other colour modes show age or change since
 
 ## Very small files
 
-A drive can have millions of files too small to draw even as a single pixel. dirmap draws
+A drive can have millions of files too small to draw even as a single pixel. Filescape draws
 everything down to about a pixel and fills the space of anything smaller with the average
 colour of what's there, so a folder of many tiny files looks like a fine speckle of its main
 colours rather than a gap. Zoom in and the individual files appear.

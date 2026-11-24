@@ -4,7 +4,7 @@
 
 ### Files workspace
 
-- dirmap now opens as a **file manager**. Browse your drives, folders and network shares straight
+- Filescape now opens as a **file manager**. Browse your drives, folders and network shares straight
   away, with no scan. It has:
   - a sidebar with Home, Desktop, Documents, Downloads and the rest, favourites, drives with
     their space, and recent folders;
@@ -22,7 +22,7 @@
   [Copying, moving and deleting](../views/file-manager.md#copying-moving-and-deleting).
 - **Undo and name clashes.** **Ctrl+Z** undoes copies, moves, renames, new items and Move to
   Trash, putting deleted items back from the bin. When a copy or move meets a name that's taken,
-  dirmap asks: Replace, Keep Both, Skip, or Merge for folders. See
+  Filescape asks: Replace, Keep Both, Skip, or Merge for folders. See
   [Undo](../views/file-manager.md#undo).
 - **Servers: SFTP, FTP and WebDAV.** Browse, copy to and from, rename and delete on servers as if
   they were drives, and analyse their folders. **Connect to Server…** saves them in the sidebar.
@@ -85,7 +85,7 @@
   scripts), plus your own templates: put any file or folder in the templates folder and New
   copies it. See [New folders and files](../views/file-manager.md#new-folders-and-files).
 - **Network & Remote.** Mapped drives (including offline ones), network mounts, saved servers and
-  **Connect to Server…** for SMB shares. The system asks for passwords; dirmap never sees them.
+  **Connect to Server…** for SMB shares. The system asks for passwords; Filescape never sees them.
   See [Network & Remote](../views/file-manager.md#network--remote).
 - **The analysis dock** (**Ctrl+J**) shows the treemap or sunburst of the folder you're in, under
   the list. Once a folder or drive is analysed, every folder inside it shows its treemap
@@ -101,7 +101,7 @@
     highlights a file type when you click it.
 
   See [The analysis dock](../views/file-manager.md#the-analysis-dock).
-- **Storage Analysis** is still the dirmap you know, with everything in it. **Ctrl+1** and
+- **Storage Analysis** is still the Filescape you know, with everything in it. **Ctrl+1** and
   **Ctrl+3** switch between the two workspaces, and each keeps your place.
 - **A new look.** It has:
   - calmer panel colours in both themes, and one accent colour;
@@ -133,7 +133,7 @@
   [Showing only some kinds of file](../views/file-manager.md#showing-only-some-kinds-of-file).
 - **The preview pane counts a selection** of several items by kind, with sizes. Click a kind to
   preview one of them.
-- **Crashes are saved** to `crash.log` in dirmap's settings folder, and on Windows a message says
+- **Crashes are saved** to `crash.log` in Filescape's settings folder, and on Windows a message says
   what happened, so a crash can be reported.
 
 ### Fixes
@@ -148,7 +148,7 @@
 - **The File Manager toolbar no longer overlaps itself on a narrow window.** Back, Forward, Up,
   the path and the filter now sit on the pane's own bar above the tabs, and on a narrow window
   the toolbar's buttons show only their symbols.
-- **Resizing the window on Windows** no longer makes the panels shake. dirmap now draws with
+- **Resizing the window on Windows** no longer makes the panels shake. Filescape now draws with
   OpenGL there. `DIRMAP_RENDERER=wgpu` brings back DirectX 12.
 - **Rename** no longer replaces a different file whose name differs only in capital letters
   (`readme` → `README`) on Linux and on case-sensitive Mac disks.
@@ -171,7 +171,7 @@
 
 ### Help and documentation
 
-- **Help Centre** built into dirmap: the complete manual, tutorials, keyboard and mouse
+- **Help Centre** built into Filescape: the complete manual, tutorials, keyboard and mouse
   references, filter syntax and troubleshooting, searchable and available offline. Open it from
   **❓ Help** in the toolbar.
 - **F1** opens help for the part of the window under the pointer.
@@ -222,4 +222,4 @@
 ## Related topics
 
 - [Feature status](feature-status.md)
-- [About dirmap](about.md)
+- [About Filescape](about.md)

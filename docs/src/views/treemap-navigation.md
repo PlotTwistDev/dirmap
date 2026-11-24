@@ -44,7 +44,7 @@ it.
 ## Zooming to the selection
 
 **Zoom to selection** in the toolbar brings the selected file or folder into view, as large as
-fits. If it's in a different folder from the one on screen, dirmap moves there first. Use it after
+fits. If it's in a different folder from the one on screen, Filescape moves there first. Use it after
 selecting something in the file manager, the Duplicates or Sequences tab, or a **Find all** list.
 
 ## Returning to the parent folder
@@ -59,7 +59,7 @@ selecting something in the file manager, the Duplicates or Sequences tab, or a *
 
 ## Back and Forward
 
-dirmap remembers the places you've looked at (the folder and the part of it on screen) once
+Filescape remembers the places you've looked at (the folder and the part of it on screen) once
 you've stopped there for a moment, up to 200 of them.
 
 | Action | Mouse | Keyboard | Toolbar |

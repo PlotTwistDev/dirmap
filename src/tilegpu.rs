@@ -361,11 +361,11 @@ struct WgpuState {
 impl WgpuState {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("dirmap tiles"),
+            label: Some("Filescape tiles"),
             source: wgpu::ShaderSource::Wgsl(WGSL.into()),
         });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("dirmap tiles"),
+            label: Some("Filescape tiles"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
@@ -378,12 +378,12 @@ impl WgpuState {
             }],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("dirmap tiles"),
+            label: Some("Filescape tiles"),
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("dirmap tiles"),
+            label: Some("Filescape tiles"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &module,
@@ -452,13 +452,13 @@ impl egui_wgpu::CallbackTrait for WgpuDraw {
         let Some(st) = res.get_mut::<WgpuState>() else { return Vec::new() };
         while st.slots.len() <= self.slot {
             let buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("dirmap tile uniforms"),
+                label: Some("Filescape tile uniforms"),
                 size: std::mem::size_of::<Uniforms>() as u64,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
             let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("dirmap tile uniforms"),
+                label: Some("Filescape tile uniforms"),
                 layout: &st.layout,
                 entries: &[wgpu::BindGroupEntry { binding: 0, resource: buf.as_entire_binding() }],
             });
@@ -475,7 +475,7 @@ impl egui_wgpu::CallbackTrait for WgpuDraw {
         } else if !self.draw.instances.is_empty() {
             let bytes: &[u8] = bytemuck::cast_slice(&self.draw.instances);
             let buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("dirmap tiles"),
+                label: Some("Filescape tiles"),
                 size: bytes.len() as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,

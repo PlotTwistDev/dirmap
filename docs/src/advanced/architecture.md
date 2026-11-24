@@ -1,7 +1,7 @@
-# How dirmap works
+# How Filescape works
 
-This page is for the curious and for anyone judging whether dirmap fits a large or unusual storage
-system. You don't need it to use dirmap.
+This page is for the curious and for anyone judging whether Filescape fits a large or unusual storage
+system. You don't need it to use Filescape.
 
 ## Scanning
 
@@ -52,7 +52,7 @@ and versioned with it. A build script bundles every page and image into the prog
 Help Centre works offline and always describes the version you're running. The same files build
 the online version with mdBook (`mdbook build docs`).
 
-When dirmap changes, the help is updated in the same change:
+When Filescape changes, the help is updated in the same change:
 
 | To add | Do this |
 |---|---|
@@ -72,7 +72,7 @@ When dirmap changes, the help is updated in the same change:
 - the File categories table disagrees with the program;
 - a help link used by the app points at a page or heading that doesn't exist.
 
-Screenshots are real captures of the program. To retake one, run dirmap on a sample folder,
+Screenshots are real captures of the program. To retake one, run Filescape on a sample folder,
 capture the window and replace the PNG with the same name; the tests check every image is a
 readable PNG that a page uses.
 

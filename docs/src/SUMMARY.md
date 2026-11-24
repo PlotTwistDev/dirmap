@@ -4,7 +4,7 @@
 
 # Getting Started
 
-- [What is dirmap?](getting-started/what-is-dirmap.md)
+- [What is Filescape?](getting-started/what-is-dirmap.md)
 - [Quick Start](getting-started/quick-start.md)
 - [System requirements](getting-started/system-requirements.md)
 - [Installation and first launch](getting-started/installation.md)
@@ -87,10 +87,10 @@
 - [External and network drives](advanced/network-drives.md)
 - [Render farms and VFX projects](advanced/vfx.md)
 - [Windows system storage](advanced/windows-storage.md)
-- [How dirmap works](advanced/architecture.md)
+- [How Filescape works](advanced/architecture.md)
 
 # About
 
 - [What's new](about/whats-new.md)
 - [Feature status](about/feature-status.md)
-- [About dirmap](about/about.md)
+- [About Filescape](about/about.md)

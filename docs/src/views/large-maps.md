@@ -1,6 +1,6 @@
 # Working with very large maps
 
-dirmap is designed for drives with millions of files. A scan of 3.5 million files draws and zooms
+Filescape is designed for drives with millions of files. A scan of 3.5 million files draws and zooms
 as smoothly as a scan of a thousand, because:
 
 - Only the tiles you can see are worked out, down to about a pixel, and only when the view has
@@ -30,4 +30,4 @@ See [Zooming or rendering is slow](../troubleshooting/index.md#zooming-or-render
 
 - [Navigate a dense treemap](../tutorials/dense-treemap.md)
 - [Scanning millions of files](../advanced/millions-of-files.md)
-- [How dirmap works](../advanced/architecture.md)
+- [How Filescape works](../advanced/architecture.md)

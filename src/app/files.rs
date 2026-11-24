@@ -2463,7 +2463,7 @@ impl App {
                     ui.spinner();
                     if slow {
                         ui.label(format!("Still waiting for {}…", dir.display()));
-                        ui.weak("Network drives and sleeping disks can take a while. You can keep using dirmap meanwhile.");
+                        ui.weak("Network drives and sleeping disks can take a while. You can keep using Filescape meanwhile.");
                         if ui.button("Cancel").clicked() {
                             picks.clear = true;
                         }
@@ -3714,7 +3714,7 @@ pub(super) struct RowMenu {
 }
 
 /// Said when something would change an archive.
-pub(super) const READ_ONLY_NOTE: &str = "That's inside an archive, which dirmap only reads. Copy or extract the items to a folder to change them.";
+pub(super) const READ_ONLY_NOTE: &str = "That's inside an archive, which Filescape only reads. Copy or extract the items to a folder to change them.";
 
 /// A file in an archive, taken out to a temporary folder (to open it in its app or preview it).
 pub(super) fn archive_temp(p: &Path) -> std::io::Result<PathBuf> {

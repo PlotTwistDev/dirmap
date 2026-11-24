@@ -187,7 +187,7 @@ pub(super) fn resolve(s: &str) -> Result<Location, String> {
         return Ok(Location::Dir(p));
     }
     if lower.contains("://") && !lower.starts_with("smb://") && !lower.starts_with("file://") {
-        return Err("dirmap opens sftp://, ftp://, ftps://, dav:// and davs:// (or https://) addresses, smb:// shares and file:// paths.".into());
+        return Err("Filescape opens sftp://, ftp://, ftps://, dav:// and davs:// (or https://) addresses, smb:// shares and file:// paths.".into());
     }
     if lower.starts_with("smb://") {
         let Some((server, share, rest)) = crate::netdrives::parse_smb(t) else { return Err("Type smb://server/share.".into()) };

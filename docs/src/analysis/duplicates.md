@@ -15,11 +15,11 @@ scan and whatever they're called, and shows how much space the extra copies use.
 
 ## How detection works
 
-dirmap compares files in three rounds, so it only reads what it has to:
+Filescape compares files in three rounds, so it only reads what it has to:
 
 1. **Size.** Only files that have exactly the same size as at least one other file can be
    duplicates. This needs no reading at all and rules out most files.
-2. **The first 64 KB.** For files of the same size, dirmap reads the first 64 KB and computes a
+2. **The first 64 KB.** For files of the same size, Filescape reads the first 64 KB and computes a
    fingerprint (a 64-bit hash). Files whose beginnings differ are ruled out.
 3. **The whole file.** Files that are still alike and bigger than 64 KB are read completely and
    fingerprinted again. Files that match here are reported as duplicates.
@@ -28,7 +28,7 @@ Reading happens on several threads at once. Files that can't be opened are left 
 
 ### How certain is the match?
 
-dirmap matches files by **size plus a 64-bit fingerprint of their entire contents**. Two different
+Filescape matches files by **size plus a 64-bit fingerprint of their entire contents**. Two different
 files of the same size having the same fingerprint is astronomically unlikely in practice, but it
 isn't a byte-by-byte comparison, and the fingerprint isn't cryptographic. If you need certainty,
 right-click each copy in the file manager and choose **Compute Hash (SHA-256)**: identical
@@ -50,13 +50,13 @@ where the copies are.
 
 ## Managing duplicates safely
 
-dirmap never deletes duplicates by itself. To remove a copy, click it in the list, then use the
+Filescape never deletes duplicates by itself. To remove a copy, click it in the list, then use the
 right-click menu in the file manager (or press **Delete** to send it to the Recycle Bin or Trash).
 
 Before deleting:
 
 - **Hard links aren't copies.** Two names for the same file on disk look like duplicates to
-  dirmap but deleting one frees nothing. This is common in `C:\Windows\WinSxS` and in some
+  Filescape but deleting one frees nothing. This is common in `C:\Windows\WinSxS` and in some
   backup folders. Don't delete system files.
 - **Programs expect their own files.** Two apps shipping the same library file both need their
   copy. Duplicates inside `Program Files`, game folders, `node_modules` or virtual environments

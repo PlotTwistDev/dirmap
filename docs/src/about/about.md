@@ -1,18 +1,18 @@
-# About dirmap
+# About Filescape
 
-dirmap is a disk usage visualiser for Windows, Linux and macOS, inspired by WinDirStat. It's
+Filescape is a disk usage visualiser for Windows, Linux and macOS, inspired by WinDirStat. It's
 written in Rust, using egui and eframe for the interface, rayon for parallel scanning and wgpu or
 OpenGL for drawing.
 
-**❓ Help > About dirmap** shows the version you're running, how the map is being drawn (GPU or
-OpenGL), whether dirmap is running as administrator and where its settings are kept. Include
+**❓ Help > About Filescape** shows the version you're running, how the map is being drawn (GPU or
+OpenGL), whether Filescape is running as administrator and where its settings are kept. Include
 these when reporting a problem.
 
 ## Source code
 
-dirmap's source code, including this help, is at
+Filescape's source code, including this help, is at
 <https://github.com/PlotTwistDev/dirmap>. The help pages are in the `docs` folder; every change to
-dirmap is checked against them automatically, so the help describes the version it ships with.
+Filescape is checked against them automatically, so the help describes the version it ships with.
 
 ## Credits
 

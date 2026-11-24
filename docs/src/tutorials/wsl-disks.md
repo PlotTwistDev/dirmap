@@ -22,7 +22,7 @@ when you delete files inside Linux, so they are a common cause of disappearing s
 
 ## What to do about a large ext4.vhdx
 
-dirmap shows the size of the virtual disk file on your Windows drive. To see what's using space
+Filescape shows the size of the virtual disk file on your Windows drive. To see what's using space
 *inside* it, run a disk usage tool inside Linux (for example `du -sh /*`), or scan the
 distribution's files from Windows through the `\\wsl$\<distribution>` path (this works as a
 network path and is slower).
@@ -40,7 +40,7 @@ Optimize-VHD -Path "<path to ext4.vhdx>" -Mode Full
 automatically when sparse mode is turned on (`wsl --manage <distribution> --set-sparse true`).
 Rescan afterwards (select the file and press **F5**) to see the new size.
 
-dirmap doesn't compact virtual disks itself; see [Feature status](../about/feature-status.md).
+Filescape doesn't compact virtual disks itself; see [Feature status](../about/feature-status.md).
 
 ## Related topics
 

@@ -98,7 +98,7 @@ pub(super) fn from_filezilla(xml: &str) -> Result<Found, String> {
                         _ => None,
                     };
                     let Some(scheme) = scheme else {
-                        found.skipped.push(format!("{shown}: a kind of server dirmap doesn't connect to"));
+                        found.skipped.push(format!("{shown}: a kind of server Filescape doesn't connect to"));
                         continue;
                     };
                     if host.is_empty() {
@@ -177,7 +177,7 @@ pub(super) fn to_filezilla(sites: &[SavedSite]) -> (String, Vec<String>) {
         groups.entry(s.group.clone()).or_default().push(x);
     }
     // Nested folders: write each group's path as nested <Folder>s.
-    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<FileZilla3 version=\"3.66.0\" platform=\"dirmap\">\n<Servers>\n");
+    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<FileZilla3 version=\"3.66.0\" platform=\"Filescape\">\n<Servers>\n");
     fn emit(out: &mut String, prefix: &str, groups: &BTreeMap<String, Vec<String>>, depth: usize) {
         if let Some(servers) = groups.get(prefix) {
             for x in servers {
@@ -256,7 +256,7 @@ fn winscp_site(key: &str, v: &std::collections::HashMap<String, String>) -> Resu
         "5" => Scheme::Ftp,
         "6" if secure => Scheme::Davs,
         "6" => Scheme::Dav,
-        _ => return Err(format!("{name}: a kind of server dirmap doesn't connect to (S3)")),
+        _ => return Err(format!("{name}: a kind of server Filescape doesn't connect to (S3)")),
     };
     let port = get("PortNumber").parse().unwrap_or(0);
     let port = if scheme == Scheme::Ftps && ftps == "1" && port == 0 { 990 } else { port };

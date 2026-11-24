@@ -1,4 +1,4 @@
-# dirmap
+# Filescape
 
 A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
 
@@ -83,7 +83,7 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
 - **Size histogram** (Sizes tab): how many files and how much space fall in each size range. Click a bar to
   show only that range on the map.
 - **Compare with a snapshot** (Changes tab): save a scan, scan again later, and see what is new, deleted, grew
-  or shrank. `dirmap --cli PATH --save-snapshot FILE` saves one from a script; `dirmap --compare FILE PATH`
+  or shrank. `filescape --cli PATH --save-snapshot FILE` saves one from a script; `filescape --compare FILE PATH`
   opens the GUI comparing against it.
 - **Duplicate finder** (Duplicates tab): files with identical contents, matched by size, then the first 64 KB,
   then the whole file, with how much space removing the extra copies would free.
@@ -95,7 +95,7 @@ A WinDirStat-style disk usage visualizer written in Rust (egui/eframe).
 
 ## Help and documentation
 
-The full manual is built into dirmap: press **F1** for help on whatever is under the pointer, or
+The full manual is built into Filescape: press **F1** for help on whatever is under the pointer, or
 use the **❓ Help** menu for the Help Centre, Getting Started, keyboard shortcuts, mouse controls,
 filter examples and troubleshooting. It works offline and always matches the version you have.
 
@@ -111,13 +111,13 @@ Every push to `main` builds Windows, Linux and macOS versions on GitHub Actions 
 workflow; open a run and download from *Artifacts*). Pushing a tag such as `v0.2.0` also attaches them
 to a GitHub release.
 
-- **Windows**: `dirmap-windows-x64.zip` contains `dirmap.exe`. No install needed.
-- **Linux**: `dirmap-linux-x64.tar.gz` contains the `dirmap` binary and a `dirmap.desktop` launcher
+- **Windows**: `filescape-windows-x64.zip` contains `filescape.exe`. No install needed.
+- **Linux**: `filescape-linux-x64.tar.gz` contains the `filescape` binary and a `filescape.desktop` launcher
   (copy it to `~/.local/share/applications/`). Needs X11 or Wayland plus `libxkbcommon-x11`, which
   desktop installs already have.
-- **macOS** (11 Big Sur or later, Apple silicon and Intel): `dirmap-macos-universal.zip` contains
-  `dirmap.app`. It isn't notarized, so the first time, right-click it and choose **Open**, or run
-  `xattr -dr com.apple.quarantine dirmap.app`. To scan your whole disk including other apps' data,
+- **macOS** (11 Big Sur or later, Apple silicon and Intel): `filescape-macos-universal.zip` contains
+  `Filescape.app`. It isn't notarized, so the first time, right-click it and choose **Open**, or run
+  `xattr -dr com.apple.quarantine Filescape.app`. To scan your whole disk including other apps' data,
   give it **Full Disk Access** in System Settings > Privacy & Security; without it those folders are
   counted as unreadable.
 
@@ -127,7 +127,7 @@ Install Rust from https://rustup.rs (1.95 or newer), then:
 
 ```sh
 git clone https://github.com/PlotTwistDev/dirmap
-cd dirmap
+cd Filescape
 cargo run --release -- /path/to/scan        # GUI
 cargo run --release -- --cli --top 20 ~/    # text report, no window
 ```

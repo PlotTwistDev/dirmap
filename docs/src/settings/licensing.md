@@ -1,6 +1,6 @@
 # Licensing
 
-dirmap is being released as **Filescape**. The file browser, the disk map and basic filtering are
+Filescape is being released as **Filescape**. The file browser, the disk map and basic filtering are
 free for good. The rest is **Filescape Professional**, unlocked by a licence. Open
 **⚙ Settings > Licensing**, or **Help > Licence**, to see your licence or enter one.
 
