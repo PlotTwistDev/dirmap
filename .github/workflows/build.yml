@@ -62,7 +62,7 @@ jobs:
         run: |
           cargo build --release
           mkdir -p dist/filescape
-          cp target/release/filescape README.md packaging/filescape.desktop dist/filescape/
+          cp target/release/filescape README.md packaging/filescape.desktop packaging/filescape.png dist/filescape/
           tar -C dist -czf dist/filescape-${{ matrix.name }}.tar.gz filescape
 
       - name: Build (macOS app bundle, Apple silicon + Intel)
@@ -71,7 +71,8 @@ jobs:
           cargo build --release --target aarch64-apple-darwin
           cargo build --release --target x86_64-apple-darwin
           app=dist/Filescape.app/Contents
-          mkdir -p "$app/MacOS"
+          mkdir -p "$app/MacOS" "$app/Resources"
+          cp packaging/filescape.icns "$app/Resources/"
           lipo -create -output "$app/MacOS/filescape" \
             target/aarch64-apple-darwin/release/filescape target/x86_64-apple-darwin/release/filescape
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)

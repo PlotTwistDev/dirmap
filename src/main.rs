@@ -99,7 +99,8 @@ fn main() -> eframe::Result {
             viewport: eframe::egui::ViewportBuilder::default()
                 .with_title(APP_ID)
                 .with_inner_size([1280.0, 820.0])
-                .with_min_inner_size([640.0, 420.0]),
+                .with_min_inner_size([640.0, 420.0])
+                .with_icon(app_icon()),
             renderer,
             wgpu_options: wgpu_options(),
             ..Default::default()
@@ -212,4 +213,18 @@ fn crash_log() {
         }
         let _ = saved;
     }));
+}
+
+/// The window and taskbar icon: the tile-grid logo from filescape.app (packaging/filescape.svg).
+fn app_icon() -> std::sync::Arc<eframe::egui::IconData> {
+    let png = include_bytes!("../packaging/filescape-window.png");
+    let icon = match image::load_from_memory_with_format(png, image::ImageFormat::Png) {
+        Ok(img) => {
+            let img = img.to_rgba8();
+            let (width, height) = img.dimensions();
+            eframe::egui::IconData { rgba: img.into_raw(), width, height }
+        }
+        Err(_) => eframe::egui::IconData::default(),
+    };
+    std::sync::Arc::new(icon)
 }

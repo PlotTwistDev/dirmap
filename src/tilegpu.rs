@@ -27,6 +27,9 @@ pub struct Instance {
 
 /// Painted flat, without cushion, light or bevel (filtered-out tiles, the background).
 pub const FLAT: u32 = 1;
+/// A folder's files too small to draw, shown as one patch of their blended colour. The Modern
+/// style paints it plainly rather than as one big glowing tile.
+pub const PATCH: u32 = 2;
 
 /// Per-draw settings. All vec4s so the layout is the same in WGSL and GLSL std140.
 #[repr(C)]
@@ -34,7 +37,8 @@ pub const FLAT: u32 = 1;
 pub struct Uniforms {
     /// ndc = local * xy + zw
     pub xform: [f32; 4],
-    /// Physical pixels per local unit (x, y), layer alpha, flags (bit 0 bevel, bit 1 grid, bit 2 sRGB target).
+    /// Physical pixels per local unit (x, y), layer alpha, flags (bit 0 bevel, bit 1 grid, bit 2
+    /// sRGB target, bit 3 Modern style).
     pub px: [f32; 4],
     /// Pointer light: position (local units), intensity 0.., radius in pixels.
     pub light: [f32; 4],
@@ -42,7 +46,8 @@ pub struct Uniforms {
     pub light2: [f32; 4],
     /// Cushion shading: ambient, diffuse, gain, unused.
     pub shade: [f32; 4],
-    /// Fixed cushion light direction (normalised), unused.
+    /// Classic: fixed cushion light direction (normalised), unused. Modern: where the glow's
+    /// light is, as fractions of the map (x, y), unused, unused.
     pub sun: [f32; 4],
     /// Hovered tile (local rect) fading in, and the previously hovered one fading out.
     pub hover_a: [f32; 4],
@@ -56,6 +61,8 @@ pub struct Uniforms {
 pub const BEVEL: u32 = 1;
 pub const GRID: u32 = 2;
 const SRGB_TARGET: u32 = 4;
+/// The Modern style: soft glowing tiles (see `soft_shade`), as on filescape.app.
+pub const SOFT: u32 = 8;
 
 /// A tile set to draw this frame.
 #[derive(Clone)]
@@ -181,6 +188,27 @@ fn shoulder(c: vec3<f32>) -> vec3<f32> {
     return c * (t / m);
 }
 
+// The Modern style, the same look as the map on filescape.app: each tile a soft radial glow
+// from a lighter spot (offset towards where the light is) through the tile's own colour to a
+// darker rim, with a hairline gap between tiles. `pos` and `size` are in pixels. Matches the
+// canvas radial gradient the website draws (inner circle at the lit spot with radius 0, outer
+// circle at the tile centre with radius 0.78 of the longer side; stops 0, 0.55, 1).
+fn soft_shade(base: vec3<f32>, pos: vec2<f32>, size: vec2<f32>, lpos: vec2<f32>) -> vec3<f32> {
+    if (min(size.x, size.y) < 3.0) { return base * 0.75; }
+    let c1 = size * 0.5;
+    let c0 = size * (vec2<f32>(0.5) + (lpos - vec2<f32>(0.5)) * 0.5);
+    let rr = max(size.x, size.y) * 0.78;
+    let d = c1 - c0;
+    let q = pos - c0;
+    let a = dot(d, d) - rr * rr;
+    let b = dot(q, d);
+    let t = clamp((b - sqrt(max(b * b - a * dot(q, q), 0.0))) / a, 0.0, 1.0);
+    let lite = mix(base, vec3<f32>(1.0), 0.38);
+    var col = mix(base, base * 0.42, (t - 0.55) / 0.45);
+    if (t < 0.55) { col = mix(lite, base, t / 0.55); }
+    return col;
+}
+
 fn shade(in: VOut) -> vec4<f32> {
     let k = u.px.xy;
     let alpha = u.px.z;
@@ -194,6 +222,22 @@ fn shade(in: VOut) -> vec4<f32> {
     }
     let size = (r.zw - r.xy) * k;
     let m = min(size.x, size.y);
+    if ((opts & 8u) != 0u) {
+        var col = base * 0.8;
+        if ((in.flags & 2u) == 0u) { col = soft_shade(base, d0, size, u.sun.xy); }
+        var hov = 0.0;
+        if (same_rect(r, u.hover_a)) { hov = u.hover_w.x; }
+        if (same_rect(r, u.hover_b)) { hov = max(hov, u.hover_w.y); }
+        let e = min(min(d0.x, d0.y), min(d1.x, d1.y));
+        if (hov > 0.0) {
+            col = col * (1.0 + 0.06 * hov);
+            col = mix(col, vec3<f32>(1.0), 0.92 * hov * (1.0 - smoothstep(1.0, 2.0, e)) * smoothstep(4.0, 10.0, m));
+        }
+        if (size.x > 6.0 && size.y > 6.0) { col = col * clamp(e, 0.0, 1.0); }
+        col = clamp(col, vec3<f32>(0.0), vec3<f32>(1.0));
+        if ((opts & 4u) != 0u) { col = pow(col, vec3<f32>(2.2)); }
+        return vec4<f32>(col * alpha, alpha);
+    }
     let g = vec2<f32>(in.grad.x * in.p.x + in.grad.y, in.grad.z * in.p.y + in.grad.w);
     let n = normalize(vec3<f32>(-g.x, -g.y, 1.0));
     // The original cushion shading (van Wijk & van de Wetering, WinDirStat's knobs).
@@ -297,6 +341,19 @@ vec3 shoulder(vec3 c) {
     return c * (t / m);
 }
 bool same_rect(vec4 a, vec4 b) { vec4 d = abs(a - b); return max(max(d.x, d.y), max(d.z, d.w)) < 0.01; }
+vec3 soft_shade(vec3 base, vec2 pos, vec2 size, vec2 lpos) {
+    if (min(size.x, size.y) < 3.0) return base * 0.75;
+    vec2 c1 = size * 0.5;
+    vec2 c0 = size * (vec2(0.5) + (lpos - vec2(0.5)) * 0.5);
+    float rr = max(size.x, size.y) * 0.78;
+    vec2 d = c1 - c0;
+    vec2 q = pos - c0;
+    float a = dot(d, d) - rr * rr;
+    float b = dot(q, d);
+    float t = clamp((b - sqrt(max(b * b - a * dot(q, q), 0.0))) / a, 0.0, 1.0);
+    vec3 lite = mix(base, vec3(1.0), 0.38);
+    return t < 0.55 ? mix(lite, base, t / 0.55) : mix(base, base * 0.42, (t - 0.55) / 0.45);
+}
 void main() {
     vec2 k = px.xy;
     float alpha = px.z;
@@ -308,6 +365,20 @@ void main() {
     if ((v_flags & 1u) != 0u) { frag = vec4(base * alpha, alpha); return; }
     vec2 size = (r.zw - r.xy) * k;
     float m = min(size.x, size.y);
+    if ((opts & 8) != 0) {
+        vec3 col = (v_flags & 2u) == 0u ? soft_shade(base, d0, size, sun.xy) : base * 0.8;
+        float hov = 0.0;
+        if (same_rect(r, hover_a)) hov = hover_w.x;
+        if (same_rect(r, hover_b)) hov = max(hov, hover_w.y);
+        float e = min(min(d0.x, d0.y), min(d1.x, d1.y));
+        if (hov > 0.0) {
+            col = col * (1.0 + 0.06 * hov);
+            col = mix(col, vec3(1.0), 0.92 * hov * (1.0 - smoothstep(1.0, 2.0, e)) * smoothstep(4.0, 10.0, m));
+        }
+        if (size.x > 6.0 && size.y > 6.0) col = col * clamp(e, 0.0, 1.0);
+        frag = vec4(clamp(col, vec3(0.0), vec3(1.0)) * alpha, alpha);
+        return;
+    }
     vec2 g = vec2(v_grad.x * v_p.x + v_grad.y, v_grad.z * v_p.y + v_grad.w);
     vec3 n = normalize(vec3(-g.x, -g.y, 1.0));
     float cosa = clamp(dot(n, sun.xyz), 0.0, 1.0);

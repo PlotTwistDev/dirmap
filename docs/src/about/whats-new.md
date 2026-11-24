@@ -2,6 +2,15 @@
 
 ## Next version
 
+### A new look for the treemap
+
+- The treemap has a new **Modern** tile style, the same look as the map on filescape.app: soft
+  pastel tiles, names and sizes written on the tiles, and the folders on screen outlined with dark
+  name tags. The cushion look is still there as **Classic cushion** under
+  **Settings > Treemap > Tile style**.
+- Filescape has its own icon, the tile-grid logo from the website, in the window, the taskbar and
+  the Dock.
+
 ### Files workspace
 
 - Filescape now opens as a **file manager**. Browse your drives, folders and network shares straight

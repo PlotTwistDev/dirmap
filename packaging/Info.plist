@@ -10,6 +10,8 @@
     <string>app.filescape.Filescape</string>
     <key>CFBundleExecutable</key>
     <string>filescape</string>
+    <key>CFBundleIconFile</key>
+    <string>filescape</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>

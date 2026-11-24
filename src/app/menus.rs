@@ -1156,8 +1156,9 @@ impl App {
 
         let tree = self.tree.clone().unwrap();
         self.exts = scan::ext_stats(&tree);
+        let style = self.colors_style;
         for (i, e) in self.exts.iter().enumerate() {
-            self.colors.entry(e.ext.clone()).or_insert_with(|| ext_color(&e.ext, i));
+            self.colors.entry(e.ext.clone()).or_insert_with(|| ext_color(&e.ext, i, style));
         }
         self.rows = None;
         self.filter_stats = None;

@@ -4,6 +4,6 @@ Name=Filescape
 GenericName=Disk Usage Analyzer
 Comment=See what is taking up space on your drives
 Exec=filescape %f
-Icon=drive-harddisk
+Icon=filescape
 Terminal=false
 Categories=Utility;System;Filesystem;

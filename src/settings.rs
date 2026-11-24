@@ -19,6 +19,17 @@ pub enum SizeUnits {
     Decimal,
 }
 
+/// How treemap tiles are drawn.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
+pub enum TileStyle {
+    /// Soft pastel tiles with a gentle glow, dark folder name tags and plain labels: the same
+    /// look as the map on filescape.app.
+    #[default]
+    Modern,
+    /// The cushion treemap: shaded, bevelled tiles in strong colours, tuned with the sliders.
+    Classic,
+}
+
 /// How strongly the treemap lights up under the pointer.
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum LightLevel {
@@ -64,6 +75,8 @@ pub struct Settings {
     pub col_modified: bool,
 
     // Treemap
+    /// Modern (soft, as on the website) or Classic (cushion shading).
+    pub tile_style: TileStyle,
     pub brightness: f32,
     pub cushion: f32,
     pub height: f32,
@@ -117,6 +130,7 @@ impl Default for Settings {
             col_percent: true,
             col_files: true,
             col_modified: true,
+            tile_style: TileStyle::Modern,
             brightness: 0.88,
             cushion: 0.87,
             height: 0.38,
@@ -166,7 +180,7 @@ impl Settings {
             self.light_y.to_bits(),
             self.show_grid as u32,
             u32::from_ne_bytes(self.grid_color.to_array()),
-            0,
+            self.tile_style as u32,
         ]
     }
 
@@ -384,10 +398,22 @@ fn folder_list(ui: &mut egui::Ui, d: &mut Settings) {
 
 fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
     ui.label("Changes preview live in the main window.");
+    ui.horizontal(|ui| {
+        ui.label("Tile style");
+        ui.selectable_value(&mut d.tile_style, TileStyle::Modern, "Modern")
+            .on_hover_text("Soft pastel tiles with folder name tags, as on filescape.app");
+        ui.selectable_value(&mut d.tile_style, TileStyle::Classic, "Classic cushion")
+            .on_hover_text("Shaded cushion tiles in strong colours, tuned with the sliders below");
+    });
+    ui.add_space(4.0);
+    let classic = d.tile_style == TileStyle::Classic;
+    if !classic {
+        ui.weak("The shading sliders and presets apply to the Classic cushion style.");
+    }
     egui::Grid::new("tm").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
         let pct = |ui: &mut egui::Ui, label: &str, v: &mut f32| {
             ui.label(label);
-            ui.add(egui::Slider::new(v, 0.0..=1.0).custom_formatter(|x, _| format!("{:.0}", x * 100.0)));
+            ui.add_enabled(classic, egui::Slider::new(v, 0.0..=1.0).custom_formatter(|x, _| format!("{:.0}", x * 100.0)));
             ui.end_row();
         };
         // The four shading sliders together set the cushion look; see the Treemap settings help.
@@ -397,14 +423,14 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
         pct(ui, "Scale factor", &mut d.scale);
         ui.label("Light from");
         ui.horizontal(|ui| {
-            ui.add(egui::Slider::new(&mut d.light_x, -2.0..=2.0).text("x"));
-            ui.add(egui::Slider::new(&mut d.light_y, -2.0..=2.0).text("y"));
+            ui.add_enabled(classic, egui::Slider::new(&mut d.light_x, -2.0..=2.0).text("x"));
+            ui.add_enabled(classic, egui::Slider::new(&mut d.light_y, -2.0..=2.0).text("y"));
         });
         ui.end_row();
         ui.label("Grid");
         ui.horizontal(|ui| {
-            ui.checkbox(&mut d.show_grid, "Show");
-            ui.color_edit_button_srgba(&mut d.grid_color);
+            ui.add_enabled(classic, egui::Checkbox::new(&mut d.show_grid, "Show"));
+            ui.add_enabled_ui(classic, |ui| ui.color_edit_button_srgba(&mut d.grid_color));
         });
         ui.end_row();
         ui.label("Labels");
@@ -416,7 +442,7 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
         ui.end_row();
     });
     ui.add_space(6.0);
-    ui.horizontal(|ui| {
+    ui.add_enabled_ui(classic, |ui| ui.horizontal(|ui| {
         ui.label("Presets:");
         if ui.button("Classic").clicked() {
             let def = Settings::default();
@@ -429,7 +455,7 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
         if ui.button("Flat").clicked() {
             (d.brightness, d.cushion, d.height, d.scale, d.show_grid) = (0.75, 0.0, 0.0, 0.0, true);
         }
-    });
+    }));
     ui.add_space(6.0);
     ui.columns(2, |cols| {
         let ui = &mut cols[0];
@@ -461,7 +487,8 @@ fn treemap(ui: &mut egui::Ui, d: &mut Settings) {
                 ui.selectable_value(&mut d.light_level, LightLevel::Strong, "Strong");
             });
         });
-        ui.checkbox(&mut d.depth_effect, "Block depth effect").on_hover_text("A very slight bevel so neighbouring tiles stand apart");
+        ui.add_enabled(classic, egui::Checkbox::new(&mut d.depth_effect, "Block depth effect"))
+            .on_hover_text("A very slight bevel so neighbouring tiles stand apart (Classic cushion style)");
     });
 }
 

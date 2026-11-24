@@ -28,7 +28,8 @@ You can change this later under **⚙ Settings > Advanced**. See
 1. Download `filescape-linux-x64.tar.gz` and extract it: `tar xzf filescape-linux-x64.tar.gz`.
 2. Run `./filescape/filescape`.
 3. Optionally copy `filescape.desktop` to `~/.local/share/applications/` (edit its `Exec=` line to
-   point at the program) so Filescape appears in your application menu.
+   point at the program) and `filescape.png` to `~/.local/share/icons/` so Filescape appears in
+   your application menu with its icon.
 
 ## macOS
 

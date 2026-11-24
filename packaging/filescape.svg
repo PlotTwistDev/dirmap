@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Filescape app icon: the website's tile-grid logo on a dark rounded square (macOS icon grid:
+       an 824 px square with 185 px corners inside the 1024 px canvas). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b1d21"/>
+      <stop offset="1" stop-color="#08090b"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#ffffff" stroke-opacity=".10" stroke-width="3"/>
+  <g transform="translate(222 222) scale(29)">
+    <rect x="1" y="1" width="10" height="11" rx="2" fill="#ff6363"/>
+    <rect x="12" y="1" width="7" height="6" rx="1.5" fill="#e6e6e6"/>
+    <rect x="12" y="8" width="7" height="4" rx="1.2" fill="#63a1ff"/>
+    <rect x="1" y="13" width="6" height="6" rx="1.5" fill="#e6e6e6"/>
+    <rect x="8" y="13" width="5" height="6" rx="1.2" fill="#6a6b6c"/>
+    <rect x="14" y="13" width="5" height="6" rx="1.2" fill="#ff6363" opacity=".55"/>
+  </g>
+</svg>

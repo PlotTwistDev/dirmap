@@ -51,6 +51,7 @@ These change only how the treemap looks and moves; they never need a rescan. See
 
 | Setting | Default | Effect |
 |---|---|---|
+| **Tile style** <!-- setting:tile_style --> | Modern | **Modern**: soft pastel tiles with names on them and dark name tags on the folders, the same look as the map on filescape.app. **Classic cushion**: shaded cushion tiles in strong colours, tuned by the settings below (which apply to Classic only). |
 | **Brightness** <!-- setting:brightness --> | 88 | Overall brightness of the tiles (0–100). |
 | **Cushion shading** <!-- setting:cushion --> | 87 | Strength of the shading that shows folder boundaries (0 = flat). |
 | **Height** <!-- setting:height --> | 38 | How rounded each folder's cushion is. |

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Filescape</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="Filescape maps every file on your drive as a tile you can zoom through, with a full file manager, remote servers and VFX sequence tools built in. Windows, macOS and Linux.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -254,7 +255,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
         </div>
         <div class="win-foot">
           <span class="readout" id="readout">~/Projects · 61.9 GB · 2,262 files</span>
-          <span class="hint">Click to zoom in · right-click to zoom out</span>
+          <span class="hint">Wheel to zoom · drag to pan · click a folder to open it · right-click to zoom out</span>
         </div>
         <div class="legend" id="legend"></div>
       </div>
@@ -279,8 +280,8 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 
       <div class="showcase">
         <div class="copy">
-          <h3>A cushion treemap you can fly through</h3>
-          <p>Every file is a shaded tile sized by how much space it takes. The map is drawn on your graphics card, so zooming and panning stay smooth even with millions of files.</p>
+          <h3>A treemap you can fly through</h3>
+          <p>Every file is a tile sized by how much space it takes, in soft colours by type (or the classic cushion shading, if you prefer). The map is drawn on your graphics card, so zooming and panning stay smooth even with millions of files.</p>
           <ul class="ticks">
             <li>Zoom toward the pointer, pan with inertia, step Back and Forward</li>
             <li>Colour by file type, by age, or by what changed since a snapshot</li>
@@ -547,7 +548,19 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 
   // Age colouring: a stable pseudo-age per file, newer in Film and Code
   const ageOf = n => { let a = n; while (a.parent && a.parent !== root) a = a.parent; const base = { Film: .15, Code: .1, Models: .45, Photos: .55, Downloads: .3, Music: .75 }[a.name] ?? .5; return Math.min(1, Math.max(0, base + (rnd() - .5) * .4)); };
-  leaves.forEach(l => { l.age = ageOf(l); l.rgb = hexRgb((TYPE[l.ext] || OTHER)[0]); });
+  // Colours as in the app's Modern style: the biggest file types (by total size) take the
+  // palette in order, the rest a muted colour from their name. Keep PASTELS in step with the app.
+  const PASTELS = ["#e27ae6", "#b8d36a", "#61c9b8", "#6fe0e0", "#f0b45f", "#7aa7f5", "#f08585", "#c7a3f5", "#e8c27a", "#ef7fb4", "#d8d06a", "#9db0c8", "#7fd9a0", "#a68af0", "#f28d72", "#8fc7f0"];
+  const extTotals = new Map();
+  leaves.forEach(l => extTotals.set(l.ext, (extTotals.get(l.ext) || 0) + l.size));
+  const extRgb = new Map([...extTotals.entries()].sort((a, b) => b[1] - a[1]).map(([e], i) => [e, i < PASTELS.length ? hexRgb(PASTELS[i]) : tailRgb(e)]));
+  function tailRgb(e) { // HSV(hash, 0.28, 0.78), the same hash as the app
+    let h = 5381; for (const b of new TextEncoder().encode(e)) h = (Math.imul(h, 33) ^ b) >>> 0;
+    const hue = (h % 360) / 60, s = .28, v = .78, c = v * s, x = c * (1 - Math.abs(hue % 2 - 1)), m = v - c;
+    const [r, g, b] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(hue) % 6];
+    return [r, g, b].map(t => Math.round((t + m) * 255));
+  }
+  leaves.forEach(l => { l.age = ageOf(l); l.rgb = extRgb.get(l.ext); });
   function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
   const ageRgb = t => { // new = coral, old = deep blue
     const a = [255, 110, 100], b = [60, 90, 190];
@@ -592,34 +605,67 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   }
 
   /* ---------- Drawing ---------- */
-  // The focused folder is always laid out to fill the canvas. Zooming morphs every tile from
-  // where it is on screen now to where it lands in the new layout.
+  // The same look and the same folder zoom as the Filescape app ("Modern" tile style): soft
+  // glowing tiles, names written on the tiles, the folders on screen outlined with dark name
+  // tags. Zooming into a folder flies the camera into it while its own layout grows out of its
+  // place and fades in over it; zooming out is the reverse (the app's drill animation).
   const canvas = document.getElementById("map"), wrap = document.getElementById("map-wrap");
   const ctx = canvas.getContext("2d");
   let W = 0, H = 0, dpr = 1, mono = "monospace";
-  let focus = root, anim = 0, frames = null;
+  let focus = root, cur = null, anim = 0, trans = null, labelFade = 1;
+  // The camera, as in the app: the part of the folder's layout on screen, [x0, y0, x1, y1].
+  let view = null, zoomGap = 0, anchor = [0, 0], fly = null, glide = [0, 0], camAnim = 0;
   let hover = null, light = { x: .35, y: .3 }, colorMode = "type";
 
+  // Lay a folder out to fill the map; returns every node's rectangle [x0, y0, x1, y1].
+  function snapshot(n) {
+    layout(n, 0, 0, W, H);
+    const m = new Map();
+    (function rec(a) { const [x, y, w, h] = a.r; m.set(a, [x, y, x + w, y + h]); if (a.children) a.children.forEach(rec); })(n);
+    return m;
+  }
   function resize() {
     const r = wrap.getBoundingClientRect();
     dpr = Math.min(2, window.devicePixelRatio || 1);
     W = Math.max(1, r.width); H = Math.max(1, r.height);
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
     mono = getComputedStyle(document.body).getPropertyValue("--mono") || "monospace";
-    layout(focus, 0, 0, W, H);
+    finish();
+    cur = snapshot(focus);
+    view = FULL(); zoomGap = 0; fly = null; glide = [0, 0];
     draw();
   }
   const shade = (c, k) => c.map(v => Math.max(0, Math.min(255, Math.round(v * k))));
   const mix = (c, t) => c.map(v => Math.round(v + (255 - v) * t));
   const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
-  const inside = (n, a) => { for (let p = n; p; p = p.parent) if (p === a) return true; return false; };
+  const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const colorOf = l => colorMode === "age" ? ageRgb(l.age) : l.rgb;
+  const ink = c => (.2126 * c[0] + .7152 * c[1] + .0722 * c[2]) / 255 > .42 ? "10,10,12" : "255,255,255";
+  // From view a to view b (both [x0, y0, x1, y1]): each axis zooms about the point that stays
+  // put between them, scale changing geometrically, so it reads as one steady zoom.
+  function interpolate(a, b, t) {
+    const axis = (a0, a1, b0, b1) => {
+      const wa = a1 - a0, wb = b1 - b0, ratio = Math.log(wb / wa);
+      if (Math.abs(ratio) < 1e-3) { const s = a0 + (b0 - a0) * t, w = wa + (wb - wa) * t; return [s, s + w]; }
+      const w = wa * Math.exp(ratio * t), u = (b0 - a0) / (wa - wb), s = a0 + u * wa - u * w;
+      return [s, s + w];
+    };
+    const [x0, x1] = axis(a[0], a[2], b[0], b[2]), [y0, y1] = axis(a[1], a[3], b[1], b[3]);
+    return [x0, y0, x1, y1];
+  }
+  // Where layout rectangle r lands on screen when view v fills screen rectangle d.
+  const place = (r, v, d) => {
+    const kx = (d[2] - d[0]) / (v[2] - v[0]), ky = (d[3] - d[1]) / (v[3] - v[1]);
+    return [d[0] + (r[0] - v[0]) * kx, d[1] + (r[1] - v[1]) * ky, d[0] + (r[2] - v[0]) * kx, d[1] + (r[3] - v[1]) * ky];
+  };
 
-  function paint(l, r, alpha) {
-    if (!r.every(Number.isFinite)) return;
-    const [sx, sy, sw, sh] = r;
-    if (sw * sh < .25 || alpha <= 0) return;
-    const base = colorMode === "age" ? ageRgb(l.age) : l.rgb;
-    ctx.globalAlpha = alpha;
+  // One tile: a soft radial glow from a lit spot (offset towards the light) through the tile's
+  // colour to a darker rim, with a hairline gap. The app's shader draws exactly this.
+  function paint(l, r) {
+    const sx = r[0], sy = r[1], sw = r[2] - r[0], sh = r[3] - r[1];
+    if (!(sw * sh >= .25)) return;
+    const base = colorOf(l);
     if (sw < 3 || sh < 3) { ctx.fillStyle = css(shade(base, .75)); ctx.fillRect(sx, sy, sw, sh); return; }
     const cx = sx + sw * (.5 + (light.x - .5) * .5), cy = sy + sh * (.5 + (light.y - .5) * .5);
     const g = ctx.createRadialGradient(cx, cy, 0, sx + sw / 2, sy + sh / 2, Math.max(sw, sh) * .78);
@@ -630,103 +676,249 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
     const gap = sw > 6 && sh > 6 ? .5 : 0;
     ctx.fillRect(sx + gap, sy + gap, sw - gap * 2, sh - gap * 2);
   }
+  // A folder's layout with view v filling screen rectangle d, faded by alpha.
+  function drawLayout(L, n, v, d, alpha) {
+    if (alpha <= 0) return;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(d[0], d[1], d[2] - d[0], d[3] - d[1]); ctx.clip();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "#000"; ctx.fillRect(d[0], d[1], d[2] - d[0], d[3] - d[1]);
+    const cl = [Math.max(0, d[0]), Math.max(0, d[1]), Math.min(W, d[2]), Math.min(H, d[3])];
+    for (const l of leaves) {
+      const r = L.get(l);
+      if (!r) continue;
+      const s = place(r, v, d);
+      if (s[2] < cl[0] || s[0] > cl[2] || s[3] < cl[1] || s[1] > cl[3]) continue;
+      paint(l, s);
+    }
+    ctx.restore();
+  }
 
-  function draw(t) {
+  const FULL = () => [0, 0, W, H];
+  function draw() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
-    if (frames) {
-      for (const f of frames) {
-        if (f.a && f.b) continue;
-        paint(f.l, f.a || f.b, f.a ? 1 - t : t);
+    if (trans) {
+      const t = trans.t, e = ease(t);
+      if (trans.drillIn) {
+        // The camera flies into the folder; its own layout grows out of its place and fades in.
+        const vs = interpolate(trans.from, trans.rf, e);
+        drawLayout(trans.old, trans.oldFocus, vs, FULL(), 1);
+        drawLayout(cur, focus, FULL(), place(trans.rf, vs, FULL()), smooth(0, .55, t));
+      } else {
+        // Out: the parent's camera pulls back while the folder shrinks into its place, fading.
+        const vs = interpolate(trans.rf, FULL(), e);
+        drawLayout(cur, focus, vs, FULL(), 1);
+        drawLayout(trans.old, trans.oldFocus, FULL(), place(trans.rf, vs, FULL()), 1 - smooth(.1, .6, t));
       }
-      for (const f of frames) {
-        if (!(f.a && f.b)) continue;
-        paint(f.l, f.a.map((v, i) => v + (f.b[i] - v) * t), 1);
-      }
-      ctx.globalAlpha = 1;
       return;
     }
+    for (const l of leaves) l.s = null;
+    const F = FULL();
     for (const l of leaves) {
-      if (!inside(l, focus)) { l.s = null; continue; }
-      l.s = l.r; paint(l, l.r, 1);
+      const r = cur.get(l);
+      if (!r) continue;
+      const s = place(r, view, F);
+      if (s[2] < 0 || s[0] > W || s[3] < 0 || s[1] > H) continue;
+      l.s = s; paint(l, s);
     }
-    ctx.globalAlpha = 1;
-    // File labels
+    // File names and sizes on tiles with room for them, fading in after a zoom.
     ctx.textBaseline = "top";
     for (const l of leaves) {
       if (!l.s) continue;
-      const [sx, sy, sw, sh] = l.s;
-      if (sw < 96 || sh < 36) continue;
-      ctx.save(); ctx.beginPath(); ctx.rect(sx, sy, sw, sh); ctx.clip();
+      const [x0, y0, x1, y1] = l.s, sw = x1 - x0, sh = y1 - y0;
+      if (sw < 80 || sh < 22) continue;
+      const k = ink(colorOf(l));
+      ctx.save(); ctx.beginPath(); ctx.rect(x0 + 2, y0 + 2, sw - 4, sh - 4); ctx.clip();
       ctx.font = "500 12px " + mono;
-      ctx.fillStyle = "rgba(10,10,12,.82)";
-      ctx.fillText(l.name, sx + 6, sy + 6);
-      ctx.font = "400 11px " + mono;
-      ctx.fillStyle = "rgba(10,10,12,.62)";
-      ctx.fillText(fmt(l.size), sx + 6, sy + 21);
+      ctx.fillStyle = `rgba(${k},${.86 * labelFade})`;
+      ctx.fillText(l.name, x0 + 6, y0 + 6);
+      if (sh >= 36) {
+        ctx.font = "400 11px " + mono;
+        ctx.fillStyle = `rgba(${k},${.64 * labelFade})`;
+        ctx.fillText(fmt(l.size), x0 + 6, y0 + 21);
+      }
       ctx.restore();
     }
-    // Outlines and name chips for the folders inside the focus
-    const hg = hoverGroup();
-    if (focus.children) for (const c of focus.children) {
+    // Outlines and name tags for the folders that make up the view
+    const tf = tagFolder(), hg = hoverGroup();
+    if (tf.children) for (const c of tf.children) {
       if (!c.children) continue;
-      const [sx, sy, sw, sh] = c.r;
+      const [x0, y0, x1, y1] = place(cur.get(c), view, F), sw = x1 - x0, sh = y1 - y0;
+      if (x1 < 0 || x0 > W || y1 < 0 || y0 > H) continue;
       ctx.strokeStyle = c === hg ? "rgba(255,255,255,.9)" : "rgba(0,0,0,.55)";
       ctx.lineWidth = c === hg ? 1.5 : 1;
-      ctx.strokeRect(sx + .5, sy + .5, sw - 1, sh - 1);
-      if (sw < 90 || sh < 28) continue;
+      ctx.strokeRect(x0 + .5, y0 + .5, sw - 1, sh - 1);
+      // The tag sits at the bottom left of the part of the folder that's on screen.
+      const vx0 = Math.max(0, x0), vy0 = Math.max(0, y0), vx1 = Math.min(W, x1), vy1 = Math.min(H, y1);
+      if (vx1 - vx0 < 90 || vy1 - vy0 < 28) continue;
       const label = `${c.name}/  ${fmt(c.size)}`;
       ctx.font = "500 11px " + mono;
-      const tw = Math.min(ctx.measureText(label).width + 14, sw - 12);
+      const tw = Math.min(ctx.measureText(label).width + 14, vx1 - vx0 - 12);
+      ctx.globalAlpha = labelFade;
       ctx.fillStyle = "rgba(4,5,6,.78)";
-      roundRect(sx + 6, sy + sh - 28, tw, 20, 5); ctx.fill();
-      ctx.save(); ctx.beginPath(); ctx.rect(sx + 6, sy + sh - 28, tw, 20); ctx.clip();
+      roundRect(vx0 + 6, vy1 - 28, tw, 20, 5); ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.rect(vx0 + 6, vy1 - 28, tw, 20); ctx.clip();
       ctx.fillStyle = "#fff"; ctx.textBaseline = "middle";
-      ctx.fillText(label, sx + 13, sy + sh - 18);
+      ctx.fillText(label, vx0 + 13, vy1 - 18);
       ctx.restore(); ctx.textBaseline = "top";
+      ctx.globalAlpha = 1;
     }
     if (hover && hover.s) {
-      const [sx, sy, sw, sh] = hover.s;
+      const [x0, y0, x1, y1] = hover.s;
       ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
-      ctx.strokeRect(sx + .75, sy + .75, Math.max(0, sw - 1.5), Math.max(0, sh - 1.5));
+      ctx.strokeRect(x0 + .75, y0 + .75, Math.max(0, x1 - x0 - 1.5), Math.max(0, y1 - y0 - 1.5));
     }
   }
   function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-  function hoverGroup() { if (!hover) return null; let a = hover; while (a.parent && a.parent !== focus) a = a.parent; return a.parent === focus ? a : null; }
+  // The deepest folder holding the whole view; its subfolders get the outlines and name tags.
+  function tagFolder() {
+    let f = focus;
+    for (;;) {
+      const c = f.children && f.children.find(c => { const r = cur.get(c); return c.children && r && r[0] <= view[0] + .5 && r[1] <= view[1] + .5 && r[2] >= view[2] - .5 && r[3] >= view[3] - .5; });
+      if (!c) return f;
+      f = c;
+    }
+  }
+  function groupOf(l) { const tf = tagFolder(); let a = l; while (a.parent && a.parent !== tf) a = a.parent; return a.parent === tf ? a : null; }
+  function hoverGroup() { return hover ? groupOf(hover) : null; }
 
   let queued = false;
-  const redraw = () => { if (queued || frames) return; queued = true; requestAnimationFrame(() => { queued = false; draw(); }); };
+  const redraw = () => { if (queued || trans || camAnim) return; queued = true; requestAnimationFrame(() => { queued = false; draw(); }); };
 
   /* ---------- Zoom ---------- */
+  function finish() { cancelAnimationFrame(anim); trans = null; labelFade = 1; stopCamera(); }
   function zoomTo(n) {
     if (!n || n === focus || !n.children) return;
-    const old = new Map();
-    for (const l of leaves) if (inside(l, focus)) old.set(l, l.r.slice());
+    const from = view.slice();
+    finish();
+    const old = cur, oldFocus = focus;
     focus = n;
-    layout(n, 0, 0, W, H);
+    cur = snapshot(n);
     hover = null;
     renderCrumbs(); updateReadout();
-    if (reduce) { frames = null; draw(); return; }
-    frames = [];
-    for (const l of leaves) {
-      const a = old.get(l) || null, b = inside(l, n) ? l.r.slice() : null;
-      if (a || b) frames.push({ l, a, b });
-    }
-    const t0 = performance.now(), dur = 560;
-    cancelAnimationFrame(anim);
+    // Into a folder inside the one on screen, or out to one around it: animate as the app does.
+    const drillIn = inside(n, oldFocus), rf = drillIn ? old.get(n) : cur.get(oldFocus);
+    if (reduce || !rf || (!drillIn && !inside(oldFocus, n))) { view = FULL(); draw(); return; }
+    const secs = Math.min(.8, .36 + .05 * Math.abs(Math.log((rf[2] - rf[0]) / W)));
+    view = FULL();
+    trans = { old, oldFocus, drillIn, rf, from, t: 0 };
+    let last = performance.now();
     const step = now => {
-      let t = Math.min(1, (now - t0) / dur);
-      t = t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      if (t < 1) { draw(t); anim = requestAnimationFrame(step); }
-      else { frames = null; draw(); }
+      const dt = Math.min(.1, (now - last) / 1000); last = now;
+      if (trans) {
+        trans.t = Math.min(1, trans.t + dt / secs);
+        if (trans.t >= 1) { trans = null; labelFade = 0; }
+        draw(); anim = requestAnimationFrame(step); return;
+      }
+      labelFade = Math.min(1, labelFade + dt / .25);
+      draw();
+      if (labelFade < 1) anim = requestAnimationFrame(step);
     };
     anim = requestAnimationFrame(step);
   }
-  const zoomOut = () => { if (focus.parent) zoomTo(focus.parent); };
+  const inside = (n, a) => { for (let p = n; p; p = p.parent) if (p === a) return true; return false; };
+  // Right-click: back out of a wheel zoom first (to the folder around the view), then up a folder.
+  const zoomOut = () => {
+    if (trans) return;
+    if (zoom() > 1.02) {
+      // To the nearest folder around the view that is less zoomed in than now (as the app does).
+      for (let f = tagFolder(); f; f = f.parent) {
+        const target = f === focus ? FULL() : frameRect(cur.get(f));
+        if (f === focus || W / (target[2] - target[0]) < zoom() * .92) { flyTo(target); return; }
+      }
+    } else if (focus.parent) zoomTo(focus.parent);
+  };
+
+  /* ---------- Camera: wheel zoom toward the pointer, drag to pan (as in the app) ---------- */
+  const NOTCH = .27, MAX_ZOOM = 400;
+  const zoom = () => W / (view[2] - view[0]);
+  // A rectangle with the map's shape around r, a little padded, kept inside the map.
+  function frameRect(r) {
+    const pad = 1.04, cx = (r[0] + r[2]) / 2, cy = (r[1] + r[3]) / 2;
+    let w = Math.max(r[2] - r[0], (r[3] - r[1]) * W / H) * pad;
+    w = Math.min(W, w); const h = w * H / W;
+    return clampView([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2]);
+  }
+  function clampView(v) {
+    let w = Math.min(W, v[2] - v[0]), h = Math.min(H, v[3] - v[1]);
+    let x0 = Math.min(Math.max(0, v[0]), W - w), y0 = Math.min(Math.max(0, v[1]), H - h);
+    return [x0, y0, x0 + w, y0 + h];
+  }
+  function scaleAbout(k, ax, ay) { // k > 1 zooms in, about screen point (ax, ay)
+    const z = zoom();
+    k = Math.max(1 / z, Math.min(MAX_ZOOM / z, k));
+    const wx = view[0] + ax / W * (view[2] - view[0]), wy = view[1] + ay / H * (view[3] - view[1]);
+    const w = (view[2] - view[0]) / k, h = (view[3] - view[1]) / k;
+    view = clampView([wx - ax / W * w, wy - ay / H * h, wx - ax / W * w + w, wy - ay / H * h + h]);
+  }
+  function stopCamera() { cancelAnimationFrame(camAnim); camAnim = 0; zoomGap = 0; fly = null; glide = [0, 0]; }
+  function kick() {
+    if (camAnim) return;
+    let last = performance.now();
+    const step = now => {
+      const dt = Math.min(.05, (now - last) / 1000); last = now;
+      let moving = false;
+      if (Math.abs(zoomGap) > 1e-4) {
+        // Close the gap smoothly; each step zooms about the pointer, so the point under it stays put.
+        const d = zoomGap * (1 - Math.exp(-dt / .07));
+        zoomGap -= d; scaleAbout(Math.exp(d), anchor[0], anchor[1]); moving = true;
+      } else zoomGap = 0;
+      if (fly) {
+        fly.t = Math.min(1, fly.t + dt / fly.secs);
+        view = interpolate(fly.from, fly.to, ease(fly.t));
+        if (fly.t >= 1) fly = null; else moving = true;
+      }
+      if (Math.hypot(glide[0], glide[1]) > 5) {
+        const kx = (view[2] - view[0]) / W;
+        view = clampView([view[0] - glide[0] * dt * kx, view[1] - glide[1] * dt * kx, view[2] - glide[0] * dt * kx, view[3] - glide[1] * dt * kx]);
+        const f = Math.exp(-dt / .18); glide = [glide[0] * f, glide[1] * f]; moving = true;
+      } else glide = [0, 0];
+      hover = null; draw();
+      camAnim = moving ? requestAnimationFrame(step) : 0;
+    };
+    camAnim = requestAnimationFrame(step);
+  }
+  function flyTo(to) {
+    if (reduce) { view = to; draw(); return; }
+    zoomGap = 0; glide = [0, 0];
+    const secs = Math.min(.85, .28 + .045 * Math.abs(Math.log((to[2] - to[0]) / (view[2] - view[0]))));
+    fly = { from: view.slice(), to, t: 0, secs }; kick();
+  }
+  canvas.addEventListener("wheel", e => {
+    if (trans) return;
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const notches = e.deltaMode === 1 ? -e.deltaY / 3 : e.deltaMode === 2 ? -e.deltaY * 4 : -e.deltaY / 100;
+    if (e.ctrlKey) zoomGap += -e.deltaY / 100; else zoomGap += notches * NOTCH;
+    anchor = [e.clientX - r.left, e.clientY - r.top]; fly = null; glide = [0, 0];
+    if (reduce) { scaleAbout(Math.exp(zoomGap), anchor[0], anchor[1]); zoomGap = 0; draw(); return; }
+    kick();
+  }, { passive: false });
+  let drag = null, dragged = false;
+  canvas.addEventListener("pointerdown", e => {
+    if (e.button !== 0 && e.button !== 1) return;
+    drag = { x: e.clientX, y: e.clientY, t: performance.now(), vx: 0, vy: 0 }; dragged = false;
+  });
+  window.addEventListener("pointermove", e => {
+    if (!drag || trans) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!dragged && Math.hypot(dx, dy) < 4) return;
+    if (!dragged) { dragged = true; canvas.setPointerCapture?.(e.pointerId); stopCamera(); canvas.style.cursor = "grabbing"; }
+    const now = performance.now(), dt = Math.max(1, now - drag.t) / 1000;
+    const kx = (view[2] - view[0]) / W;
+    view = clampView([view[0] - dx * kx, view[1] - dy * kx, view[2] - dx * kx, view[3] - dy * kx]);
+    drag = { x: e.clientX, y: e.clientY, t: now, vx: dx / dt, vy: dy / dt };
+    draw();
+  });
+  window.addEventListener("pointerup", () => {
+    if (drag && dragged) { canvas.style.cursor = ""; if (performance.now() - drag.t < 80) { glide = [drag.vx, drag.vy]; kick(); } }
+    drag = null;
+  });
 
   function leafAt(x, y) {
-    for (const l of leaves) { const s = l.s; if (s && x >= s[0] && y >= s[1] && x < s[0] + s[2] && y < s[1] + s[3]) return l; }
+    for (const l of leaves) { const s = l.s; if (s && x >= s[0] && y >= s[1] && x < s[2] && y < s[3]) return l; }
     return null;
   }
   const readout = document.getElementById("readout");
@@ -747,9 +939,9 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   canvas.addEventListener("click", e => {
     const r = canvas.getBoundingClientRect();
     const l = leafAt(e.clientX - r.left, e.clientY - r.top);
-    if (!l || frames) return;
-    let a = l; while (a.parent && a.parent !== focus) a = a.parent;
-    if (a.children) zoomTo(a);
+    if (!l || trans || dragged) return;
+    const a = groupOf(l);
+    if (a && a.children) zoomTo(a);
   });
   canvas.addEventListener("contextmenu", e => { e.preventDefault(); zoomOut(); });
   document.getElementById("zoom-out").addEventListener("click", zoomOut);
@@ -783,8 +975,8 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
       return;
     }
     const by = new Map();
-    for (const l of leaves) { const [c, t] = TYPE[l.ext] || OTHER; const e = by.get(t) || { c, s: 0 }; e.s += l.size; by.set(t, e); }
-    [...by.entries()].sort((a, b) => b[1].s - a[1].s).slice(0, 9).forEach(([t, e]) => add(`${t} ${fmt(e.s)}`, e.c));
+    for (const l of leaves) { const t = (TYPE[l.ext] || OTHER)[1]; const e = by.get(t) || { c: l.rgb, top: 0, s: 0 }; e.s += l.size; if (l.size > e.top) { e.top = l.size; e.c = l.rgb; } by.set(t, e); }
+    [...by.entries()].sort((a, b) => b[1].s - a[1].s).slice(0, 9).forEach(([t, e]) => add(`${t} ${fmt(e.s)}`, css(e.c)));
     function add(t, c) { const s = document.createElement("span"); const i = document.createElement("i"); i.style.background = c; s.append(i, t); legend.append(s); }
   }
   renderCrumbs(); renderLegend(); updateReadout();

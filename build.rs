@@ -27,7 +27,24 @@ fn main() {
 
     let dest = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("help_bundle.rs");
     std::fs::write(dest, out).unwrap();
+
+    windows_icon();
 }
+
+/// The app icon for Explorer, the taskbar and Alt+Tab, built into filescape.exe. Needs the
+/// Windows SDK's resource compiler; without it the program still builds, just without the icon.
+#[cfg(windows)]
+fn windows_icon() {
+    println!("cargo:rerun-if-changed=packaging/filescape.ico");
+    let mut res = winresource::WindowsResource::new();
+    res.set_icon("packaging/filescape.ico");
+    if let Err(e) = res.compile() {
+        println!("cargo:warning=no icon in filescape.exe: {e}");
+    }
+}
+
+#[cfg(not(windows))]
+fn windows_icon() {}
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };

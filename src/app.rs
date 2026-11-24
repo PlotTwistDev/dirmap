@@ -10,7 +10,7 @@ use crate::camera::{self, Feel};
 use crate::icons::Icons;
 use crate::mapview::{self, Look, MapView, Paint};
 use crate::scan::{self, ExtStat, LiveDir, Node, Options, Progress};
-use crate::settings::{self, Settings};
+use crate::settings::{self, Settings, TileStyle};
 use crate::snapshot::{self, Change, DiffNode, Snapshot};
 use crate::sunburst;
 use crate::tilegpu::Backend;
@@ -213,6 +213,8 @@ pub struct App {
     scan_secs: f32,
     exts: Vec<ExtStat>,
     colors: HashMap<String, Color32>,
+    /// The tile style `colors` were picked for (each style has its own palette).
+    colors_style: TileStyle,
     selected: Option<Vec<u32>>,
     reveal: bool,
     zoom: Vec<u32>,
@@ -334,6 +336,7 @@ impl App {
             scan_secs: 0.0,
             exts: Vec::new(),
             colors: HashMap::new(),
+            colors_style: TileStyle::default(),
             selected: None,
             reveal: false,
             zoom: Vec::new(),
@@ -508,7 +511,7 @@ impl App {
         self.scanned_with = with;
         self.scanned_at = at;
         self.exts = exts;
-        self.colors = self.exts.iter().enumerate().map(|(i, e)| (e.ext.clone(), ext_color(&e.ext, i))).collect();
+        self.pick_colors();
         self.tree = Some(tree);
         self.scan_secs = secs;
         self.selected = None;
@@ -649,6 +652,13 @@ impl App {
             }
         }
         s
+    }
+
+    /// A colour for each file type, biggest types first, from the tile style's palette.
+    fn pick_colors(&mut self) {
+        let style = self.view().tile_style;
+        self.colors_style = style;
+        self.colors = self.exts.iter().enumerate().map(|(i, e)| (e.ext.clone(), ext_color(&e.ext, i, style))).collect();
     }
 
     fn color_for_ext(&self, ext: &str) -> Color32 {
@@ -1252,7 +1262,7 @@ impl App {
                             files: 1,
                             modified: *modified,
                             busy: false,
-                            color: ext_color(&scan::ext_of(name).to_lowercase(), usize::MAX),
+                            color: ext_color(&scan::ext_of(name).to_lowercase(), usize::MAX, self.view().tile_style),
                             dim: false,
                         };
                         self.paint_line(ui, rect, &line, false, resp.hovered(), stripe);
@@ -1922,12 +1932,17 @@ impl App {
             lighting: v.lighting,
             light_level: v.light_level.factor(),
             bevel: v.depth_effect,
+            soft: v.tile_style == TileStyle::Modern,
         }
     }
 
     /// Give the map new colouring inputs when anything that changes tile colours has changed.
     fn update_map_paint(&mut self) {
         use std::hash::{Hash, Hasher};
+        if self.colors_style != self.view().tile_style {
+            self.pick_colors();
+            self.paint_gen += 1;
+        }
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key()).hash(&mut h);
         self.shown.as_ref().map(|s| Arc::as_ptr(&s.tree) as usize).hash(&mut h);
@@ -1998,11 +2013,68 @@ impl App {
             });
             f
         });
-        let background = if filtering || dupes_only { Color32::from_gray(24) } else { Color32::from_gray(45) };
+        let background = if filtering || dupes_only {
+            Color32::from_gray(24)
+        } else if self.view().tile_style == TileStyle::Modern {
+            Color32::BLACK
+        } else {
+            Color32::from_gray(45)
+        };
         let v = self.view();
         let cushion = Cushion { height: v.height as f64, scale: v.scale as f64 };
         let look = self.look();
         self.map.set_paint(Paint { key, colorize, hidden, cushion, background, look });
+    }
+
+    /// Modern style: outline the folders that make up what's on screen (the subfolders of the
+    /// deepest folder that holds the whole view) and tag each big enough with its name and size,
+    /// as the website's map does. Returns the on-screen rectangle of the one under the pointer.
+    fn folder_tags(&mut self, painter: &egui::Painter, tree: &Node, root: &[u32], bounds: Rect, hover: Option<&[u32]>) -> Option<Rect> {
+        let zroot = tree.at(root)?;
+        // The deepest folder holding the whole view: follow the path under the view's centre.
+        let (rel, _) = self.map.hit(tree, bounds, bounds.center())?;
+        let mut depth = 0;
+        for k in (0..rel.len()).rev() {
+            if !zroot.at(&rel[..k]).is_some_and(|n| n.is_dir) {
+                continue;
+            }
+            let covers = k == 0 || self.map.locate(tree, &rel[..k]).map(|r| self.map.to_screen(bounds, &r)).is_some_and(|r| r.expand(1.0).contains_rect(bounds));
+            if covers {
+                depth = k;
+                break;
+            }
+        }
+        let folder = zroot.at(&rel[..depth])?;
+        let hover = hover.filter(|h| h.len() > depth && h[..depth] == rel[..depth]).map(|h| h[depth]);
+        let p = painter.with_clip_rect(bounds.intersect(painter.clip_rect()));
+        let font = FontId::monospace(11.0);
+        let mut path = rel[..depth].to_vec();
+        let mut hovered = None;
+        for (i, c) in folder.children.iter().enumerate().take(400) {
+            if !c.is_dir {
+                continue;
+            }
+            path.push(i as u32);
+            let r = self.map.locate(tree, &path).map(|r| self.map.to_screen(bounds, &r));
+            path.pop();
+            let Some(r) = r.filter(|r| r.intersects(bounds) && r.width() >= 2.0 && r.height() >= 2.0) else { continue };
+            if hover == Some(i as u32) {
+                hovered = Some(r);
+            } else {
+                p.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_black_alpha(140)), egui::StrokeKind::Inside);
+            }
+            let vis = r.intersect(bounds);
+            if vis.width() < 90.0 || vis.height() < 28.0 {
+                continue;
+            }
+            let label = format!("{}/  {}", c.name, scan::human(c.size));
+            let g = p.layout_no_wrap(label, font.clone(), Color32::WHITE);
+            let w = (g.size().x + 14.0).min(vis.width() - 12.0);
+            let tag = Rect::from_min_size(pos2(vis.left() + 6.0, vis.bottom() - 28.0), vec2(w, 20.0));
+            p.rect_filled(tag, 5.0, Color32::from_rgba_unmultiplied(4, 5, 6, 200));
+            p.with_clip_rect(tag.intersect(p.clip_rect())).galley(pos2(tag.left() + 7.0, tag.center().y - g.size().y / 2.0), g, Color32::WHITE);
+        }
+        hovered
     }
 
     fn treemap_panel(&mut self, ui: &mut egui::Ui) -> Option<egui::Response> {
@@ -2136,8 +2208,40 @@ impl App {
         let root = self.map.root().unwrap_or(&[]).to_vec();
         let zroot = tree.at(&root).unwrap_or(&tree);
 
+        let modern = self.view().tile_style == TileStyle::Modern;
+        // Modern: name and size written straight on the tile, as on the website.
+        if self.view().show_labels && modern {
+            let labels: Vec<(Rect, Vec<u32>, f32)> = self
+                .map
+                .labels(bounds)
+                .into_iter()
+                .filter(|(r, _, _)| r.width() >= 80.0 && r.height() >= 22.0)
+                .take(2500)
+                .map(|(r, l, a)| (r, l.path.clone(), a))
+                .collect();
+            let name_font = FontId::monospace(12.0);
+            let size_font = FontId::monospace(11.0);
+            for (r, path, a) in labels {
+                let Some(n) = zroot.at(&path) else { continue };
+                let mut abs = root.clone();
+                abs.extend_from_slice(&path);
+                // Dark text on light tiles, light text on dark ones (Age and Change colours).
+                let c = self.node_color(n, &abs);
+                let lum = (0.2126 * c.r() as f32 + 0.7152 * c.g() as f32 + 0.0722 * c.b() as f32) / 255.0;
+                let ink = if lum > 0.42 { Color32::from_rgb(10, 10, 12) } else { Color32::WHITE };
+                let p = painter.with_clip_rect(r.shrink(2.0).intersect(painter.clip_rect()));
+                let at = r.min + vec2(6.0, 6.0);
+                p.text(at, Align2::LEFT_TOP, &*n.name, name_font.clone(), ink.gamma_multiply(0.86 * a));
+                if r.height() >= 36.0 {
+                    p.text(at + vec2(0.0, 15.0), Align2::LEFT_TOP, scan::human(n.size), size_font.clone(), ink.gamma_multiply(0.64 * a));
+                }
+            }
+        }
+        // Modern: the folders that make up the view outlined, each with a dark name tag.
+        let hover_group = if modern && !self.map.in_transition() { self.folder_tags(&painter, &tree, &root, bounds, frame.hover.as_ref().map(|h| &h.0[..])) } else { None };
+
         // File names on tiles with room for them, fading in with size.
-        if self.view().show_labels {
+        if self.view().show_labels && !modern {
             let labels = self.map.labels(bounds);
             for (r, l, a) in labels.into_iter().take(2500) {
                 let Some(n) = zroot.at(&l.path) else { continue };
@@ -2184,8 +2288,10 @@ impl App {
             abs
         });
         if let Some((rel, _)) = &frame.hover {
-            // The folder around the hovered tile, faintly.
-            if let Some((_, parent)) = rel.split_last() {
+            // The folder around the hovered tile: faintly, or in Modern the tagged folder it's in.
+            if let Some(r) = hover_group {
+                painter.with_clip_rect(bounds).rect_stroke(r, 0.0, Stroke::new(1.5, Color32::from_white_alpha(230)), egui::StrokeKind::Inside);
+            } else if let Some((_, parent)) = rel.split_last() {
                 if let Some(pr) = self.map.locate(&tree, parent).filter(|_| !parent.is_empty()) {
                     let stroke = Stroke::new(1.0, Color32::from_white_alpha(110));
                     painter.with_clip_rect(bounds).rect_stroke(self.map.to_screen(bounds, &pr), 0.0, stroke, egui::StrokeKind::Inside);
@@ -2957,8 +3063,22 @@ fn fmt_time(secs: i64) -> String {
         .unwrap_or_default()
 }
 
+/// The Modern style's palette, for the 16 biggest file types in order: the same soft colours as
+/// the map on filescape.app (which picks them the same way, so keep the two lists in step).
+pub(crate) const PASTELS: [u32; 16] = [
+    0xe27ae6, 0xb8d36a, 0x61c9b8, 0x6fe0e0, 0xf0b45f, 0x7aa7f5, 0xf08585, 0xc7a3f5, 0xe8c27a, 0xef7fb4, 0xd8d06a, 0x9db0c8,
+    0x7fd9a0, 0xa68af0, 0xf28d72, 0x8fc7f0,
+];
+
 /// The biggest extensions get bright, well-separated hues; the long tail gets muted ones.
-fn ext_color(ext: &str, rank: usize) -> Color32 {
+fn ext_color(ext: &str, rank: usize, style: TileStyle) -> Color32 {
+    if style == TileStyle::Modern {
+        if let Some(&c) = PASTELS.get(rank) {
+            return Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
+        }
+        let h = ext.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
+        return Hsva::new((h % 360) as f32 / 360.0, 0.28, 0.78, 1.0).into();
+    }
     if rank < 16 {
         let hue = (rank as f32 * 0.618_034).fract();
         Hsva::new(hue, 0.75, 0.95, 1.0).into()
