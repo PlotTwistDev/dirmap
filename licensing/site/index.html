@@ -80,6 +80,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .dl-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 32px; }
 .dl-meta { margin-top: 14px; font-family: var(--mono); font-size: 12px; color: var(--text-3); display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .dl-meta span + span::before { content: "|"; margin-right: 10px; opacity: .5; }
+.dl-meta a { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; }
+.dl-meta a:hover { color: var(--text); }
 
 /* The app window around the live map */
 .window { margin-top: 56px; border-radius: 14px; background: var(--ink); border: 1px solid var(--line-strong); box-shadow: 0 40px 120px -20px rgba(0,0,0,.9), 0 0 0 1px #000, inset 0 1px 0 rgba(255,255,255,.05); overflow: hidden; text-align: left; }
@@ -244,7 +246,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
         <a class="btn btn-ghost" data-os="mac" href="https://downloads.filescape.app/latest/macos"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for macOS</a>
         <a class="btn btn-ghost" data-os="linux" href="https://downloads.filescape.app/latest/linux-appimage"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for Linux</a>
       </div>
-      <div class="dl-meta"><span>Free to use</span><span>Pro is <s class="js-list">$9.99</s> <span class="js-price">$4.99</span>, once</span><span>v2.3</span></div>
+      <div class="dl-meta"><span>Free to use</span><span>Pro is <s class="js-list">$9.99</s> <span class="js-price">$4.99</span>, once</span><span>v2.3</span><span class="mac-help"><a href="/mac">Opening it on a Mac</a></span></div>
 
       <div class="window" role="group" aria-label="Interactive example of the Filescape disk map">
         <div class="win-bar">
@@ -421,6 +423,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <h3>macOS</h3>
           <p>macOS 11 Big Sur or later, on Apple silicon or Intel.</p>
           <a class="btn btn-ghost btn-sm" data-os="mac" href="https://downloads.filescape.app/latest/macos"><svg aria-hidden="true"><use href="#i-dl"/></svg>macOS universal</a>
+          <p class="req-alt">Not notarised by Apple yet, so the first launch needs one extra step. <a href="/mac">How to open it on a Mac</a>.</p>
         </div>
         <div class="req">
           <h3>Linux</h3>
@@ -433,6 +436,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 
       <div class="faq">
         <details><summary>Do my files leave my computer?</summary><p>No. Scanning, the map and previews all run locally. Filescape only goes online to activate a Pro licence, or when you connect to a server yourself.</p></details>
+        <details><summary>My Mac says Filescape can't be opened. Is it safe?</summary><p>Yes. Filescape isn't notarised by Apple yet, so macOS asks you to allow it once. Try to open it, click <b>Done</b>, then go to <b>System Settings &gt; Privacy &amp; Security</b> and click <b>Open Anyway</b>. <a href="/mac">Step-by-step instructions</a>.</p></details>
         <details><summary>Is this a subscription?</summary><p>No. Pro is a single <span class="js-price">$4.99</span> payment. There's nothing to renew.</p></details>
         <details><summary>I replaced my computer. Can I move my licence?</summary><p>Yes. Deactivate Filescape on the old computer, or release it from your account at account.filescape.app, and activate on the new one. A licence can be active on 3 computers at once.</p></details>
         <details><summary>How is size calculated?</summary><p>Filescape adds up file sizes. Hard links count once per name, and compressed, sparse or cloud-only files show their full size, so totals can differ from what your system reports as used.</p></details>

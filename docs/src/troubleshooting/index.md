@@ -134,8 +134,18 @@ changes since it started may be lost. Check that the settings folder is writable
 
 ## macOS says Filescape can't be opened
 
-Filescape isn't notarised by Apple. Right-click it and choose **Open**, or run
-`xattr -dr com.apple.quarantine Filescape.app`. See [Installation and first launch](../getting-started/installation.md).
+Filescape isn't notarised by Apple yet, so macOS blocks it the first time with **"Filescape" Not
+Opened**. Click **Done**, then open **System Settings > Privacy & Security**, scroll to
+**Security** and click **Open Anyway**. On macOS 14 Sonoma and earlier, Control-click Filescape and
+choose **Open** instead. See [Installation and first launch](../getting-started/installation.md#macos)
+for the full steps.
+
+If macOS says Filescape **is damaged and can't be opened**, or **Open Anyway** doesn't appear, run
+this in Terminal and open it again:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Filescape.app
+```
 
 ## Still stuck? Contact us
 

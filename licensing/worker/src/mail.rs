@@ -60,6 +60,8 @@ fn what(row: &LicenceRow) -> String {
 
 const HOW: &str = "To activate: open Filescape, choose Help > Licence, paste the serial number and press Activate. A computer without internet access can use Offline activation on the same screen, with the page https://account.filescape.app/activate.";
 
+const MAC: &str = "On a Mac? Filescape isn't notarised by Apple yet, so the first time you open it macOS blocks it. Click Done, then go to System Settings > Privacy & Security and click Open Anyway. Step-by-step help: https://filescape.app/mac";
+
 pub fn licence_message(row: &LicenceRow, serial: &str, to: &str) -> Message {
     let paid = row.lic.kind() == LicenceKind::Perpetual;
     let hello = row.lic.owner.as_deref().map_or("Hello,".to_string(), |o| format!("Hello {o},"));
@@ -68,7 +70,7 @@ pub fn licence_message(row: &LicenceRow, serial: &str, to: &str) -> Message {
         to: to.into(),
         subject: if paid { "Your Filescape licence".into() } else { "Your temporary Filescape licence".into() },
         text: format!(
-            "{hello}\n\n{intro}\n\n{serial}\n\n{}\n\n{HOW}\n\nKeep this email: you can also get your serial again at https://account.filescape.app.\n\nQuestions? Write to us at https://filescape.app/contact (replies to this email aren't read).\n\nFilescape (filescape.app)",
+            "{hello}\n\n{intro}\n\n{serial}\n\n{}\n\n{HOW}\n\n{MAC}\n\nKeep this email: you can also get your serial again at https://account.filescape.app.\n\nQuestions? Write to us at https://filescape.app/contact (replies to this email aren't read).\n\nFilescape (filescape.app)",
             what(row)
         ),
         reply_to: None,
