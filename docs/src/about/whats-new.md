@@ -2,6 +2,34 @@
 
 ## Next version
 
+### A redesigned Settings window
+
+- Settings has a sidebar of pages with icons, and opens on the page you used last. Each page has
+  a title, a line on what it's for, and its settings in grouped sections, each with a sentence on
+  what it does. The window can be resized. See [Settings reference](../settings/reference.md).
+- **Find a setting…** (or **Ctrl+F**) searches every setting by name or by everyday words such as
+  "zoom", "threads", "hidden files" or "licence", and takes you to it.
+- On/off settings are switches, choices are segmented buttons, and sliders show their value (drag
+  or type it) with a reset button once changed.
+- Pictures show what you're choosing: the themes, a folder list preview that follows the columns
+  you pick, and a small treemap drawn with the current treemap settings, with the tile styles and
+  presets as thumbnails. The Classic cushion settings only show when that style is chosen.
+- **General** has a new **Interface size** (80% to 150%, which **Ctrl +** and **Ctrl −** also
+  change and which is now remembered), an example for the size units, and an **Updates** section
+  with your version, the last successful check, **Check now** and release notes.
+- **Filtering** keeps rules as lists you add to, edit and remove from, with **Browse…** for
+  folders, warnings for rules that can't work, common patterns to add with one click, a name
+  tester, sizes in any unit and ages in days, weeks, months or years. A summary at the top says
+  what's skipped and when a rescan is needed.
+- **Advanced** has scanner thread profiles (Automatic, Low, Balanced, High, Network, Custom), a
+  Permissions section that gives the right advice for Windows, macOS and Linux, and Diagnostics
+  with the settings folder and system details to copy.
+- **Licensing** shows your edition and state at a glance, a bar for the evaluation's days left,
+  a **Paste** button for the licence key, and makes clear that a perpetual licence never expires
+  even after its updates end.
+- The footer has **Restore page defaults** and **Restore all…** (which asks first). **Apply** is
+  greyed out until something changes, and **Cancel** or **Esc** undoes everything not applied.
+
 ### Update notices
 
 - Filescape checks for a newer version each time it starts and, when there is one, says so at

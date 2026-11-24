@@ -19,7 +19,7 @@ Find the problem below, or search this help for words from an error message.
 
 Filescape doesn't stop for folders it can't read: it counts them as **unreadable** and carries on.
 The progress line and the status bar say how many there were. To read them, run Filescape as
-administrator on Windows (**⚙ Settings > Advanced > 🛡 Restart as administrator now**), give it
+administrator on Windows (**⚙ Settings > Advanced > Permissions > Restart now**), give it
 Full Disk Access on macOS, or start it with `sudo` on Linux. See
 [Hidden, system and unreadable files](../disk-usage/hidden-and-unreadable.md).
 

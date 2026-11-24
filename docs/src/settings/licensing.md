@@ -59,8 +59,8 @@ locks or delays anything: there's simply no notice.
 
 The check sends no serial number, computer identifier or anything about your files: it's an
 ordinary request for the latest version number, and the answer is signed by the licence server so
-it can't be forged. Turn it off with **⚙ Settings > General > Check for a new version when
-Filescape starts**.
+it can't be forged. Turn it off with **⚙ Settings > General > Updates > Check automatically**. **Check now**
+on the same page checks straight away and shows when the last check succeeded.
 
 ## Entering a licence
 

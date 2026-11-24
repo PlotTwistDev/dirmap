@@ -30,7 +30,7 @@ Each folder that couldn't be opened counts once, however much is inside it.
 
 | System | What to do |
 |---|---|
-| **Windows** | Run Filescape as administrator: **⚙ Settings > Advanced > 🛡 Restart as administrator now**, or answer **Yes** when Filescape asks at start. See [Running as administrator](../settings/administrator.md). |
+| **Windows** | Run Filescape as administrator: **⚙ Settings > Advanced > Permissions > Restart now**, or answer **Yes** when Filescape asks at start. See [Running as administrator](../settings/administrator.md). |
 | **macOS** | Give Filescape **Full Disk Access**, then quit and reopen it. See [Folder access on macOS](#folder-access-on-macos). |
 | **Linux** | Start Filescape from a terminal with `sudo`, for example `sudo Filescape /`. |
 

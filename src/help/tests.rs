@@ -193,7 +193,7 @@ fn markers(page: &str, kind: &str) -> BTreeSet<String> {
 
 #[test]
 fn every_setting_is_documented() {
-    let fields: BTreeSet<String> = struct_fields("src/settings.rs", "pub struct Settings").into_iter().collect();
+    let fields: BTreeSet<String> = struct_fields("src/settings/mod.rs", "pub struct Settings").into_iter().collect();
     assert!(fields.len() > 25, "couldn't read the Settings fields");
     let documented = markers(topics::SETTINGS, "setting");
     let missing: Vec<_> = fields.difference(&documented).collect();
