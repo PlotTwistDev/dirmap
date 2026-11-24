@@ -101,7 +101,7 @@ filter examples and troubleshooting. It works offline and always matches the ver
 
 The same pages are plain Markdown in [`docs/src`](docs/src) (start at
 [the Help Centre](docs/src/index.md)), and every CI run builds them into a website with
-[mdBook](https://rust-lang.github.io/mdBook/) (the **dirmap-manual** artifact). `cargo test`
+[mdBook](https://rust-lang.github.io/mdBook/) (the **filescape-manual** artifact). `cargo test`
 checks that the manual still matches the program: links, screenshots, every setting, every
 shortcut and every filter example. See [How the help is built](docs/src/advanced/architecture.md#the-help-system).
 
