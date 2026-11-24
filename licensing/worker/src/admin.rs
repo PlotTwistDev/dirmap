@@ -4,9 +4,10 @@
 
 use crate::db::LicenceRow;
 use crate::store::{ListFilter, describe};
-use crate::web::{Form, date, encode, esc, opt_date, page, parse_day};
+use crate::web::{Form, date, encode, esc, iso_day, opt_date, page, parse_day};
 use crate::{Ctx, Db, Net, Req, Resp, mail};
 use filescape_licence::model::{LicenceKind, Status, Validity};
+use filescape_licence::release::{self, Downloads, ReleaseManifest};
 use filescape_licence::rules::{IssueError, TemporaryOptions};
 use filescape_licence::{DEFAULT_MAX_ACTIVATIONS, DEFAULT_TEMPORARY_DAYS, SHARING_FLAG_MACHINES, SHARING_WINDOW_DAYS};
 
@@ -19,7 +20,7 @@ impl A<'_> {
     fn nav(&self) -> String {
         let b = self.base;
         format!(
-            "<b>Filescape admin</b><a href=\"{b}/\">Licences</a><a href=\"{b}/issue\">Create temporary licence</a><a href=\"{b}/activations\">Activations</a><a href=\"{b}/settings\">Settings</a><span class=\"mute\" style=\"margin-left:auto\">{}</span>",
+            "<b>Filescape admin</b><a href=\"{b}/\">Licences</a><a href=\"{b}/issue\">Create temporary licence</a><a href=\"{b}/activations\">Activations</a><a href=\"{b}/releases\">Releases</a><a href=\"{b}/settings\">Settings</a><span class=\"mute\" style=\"margin-left:auto\">{}</span>",
             esc(self.actor)
         )
     }
@@ -40,6 +41,22 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
         ("GET", ["issue"]) => Ok(issue_form(&a, None)),
         ("POST", ["issue"]) => issue(cx, &a, &form).await,
         ("GET", ["activations"]) => activations(cx, &a).await,
+        ("GET", ["releases"]) => releases(cx, &a, req.query_param("msg").as_deref()).await,
+        ("POST", ["releases"]) => {
+            let msg = if form.has("withdraw") {
+                cx.set_latest_release(None, actor).await?;
+                "Filescape no longer announces a new release.".to_string()
+            } else {
+                match release_from_form(&form, cx.now) {
+                    Ok(m) => {
+                        cx.set_latest_release(Some(&m), actor).await?;
+                        format!("Filescape {} is now announced. Copies of Filescape see it the next time they start (within about 5 minutes).", m.version)
+                    }
+                    Err(e) => e,
+                }
+            };
+            Ok(Resp::redirect(&format!("{base}/releases?msg={}", encode(&msg))))
+        }
         ("GET", ["settings"]) => settings(cx, &a, req.query_param("msg").as_deref()).await,
         ("POST", ["settings"]) => {
             let max: u32 = form.get("perpetual_limit").parse().unwrap_or(0);
@@ -417,6 +434,86 @@ async fn activations<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>) -> Result<Res
         body.push_str("</table></div>");
     }
     Ok(a.page("Activations", &body))
+}
+
+/// The release from the Releases form, checked.
+fn release_from_form(form: &Form, now: i64) -> Result<ReleaseManifest, String> {
+    let version = form.get("version").trim_start_matches(['v', 'V']).to_string();
+    if release::version_key(&version).is_none() {
+        return Err("The version must look like 0.3.0.".into());
+    }
+    let when = form.get("released_at");
+    let released_at = match when.parse::<i64>() {
+        Ok(t) if t > 1_000_000_000 => t,
+        _ => parse_day(&when).ok_or("The release date must be a date (YYYY-MM-DD) or Unix seconds.")?,
+    };
+    if released_at > now + filescape_licence::DAY {
+        return Err("The release date can't be in the future.".into());
+    }
+    let link = |k: &str| -> Result<Option<String>, String> {
+        let v = form.get(k);
+        if v.is_empty() {
+            Ok(None)
+        } else if release::is_ours(&v) {
+            Ok(Some(v))
+        } else {
+            Err(format!("{v} isn't a https link on filescape.app; the app only opens links there."))
+        }
+    };
+    let summary = form.get("summary");
+    if summary.chars().count() > 300 {
+        return Err("Keep the summary to 300 characters; link to release notes for more.".into());
+    }
+    Ok(ReleaseManifest {
+        version,
+        released_at,
+        signed_at: now,
+        summary: (!summary.is_empty()).then_some(summary),
+        notes_url: link("notes_url")?,
+        downloads: Downloads { windows: link("windows")?, macos: link("macos")?, linux: link("linux")? },
+    })
+}
+
+async fn releases<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, msg: Option<&str>) -> Result<Resp, String> {
+    let m = msg.map(|m| format!("<div class=\"card\">{}</div>", esc(m))).unwrap_or_default();
+    let cur = cx.latest_release().await?;
+    let current = match &cur {
+        Some(r) => format!(
+            "<div class=\"card\"><table><tr><th>Version</th><td><b>{}</b></td></tr><tr><th>Released</th><td>{}</td></tr><tr><th>Summary</th><td>{}</td></tr><tr><th>Release notes</th><td>{}</td></tr>\
+             <tr><th>Windows</th><td class=\"mono\">{}</td></tr><tr><th>macOS</th><td class=\"mono\">{}</td></tr><tr><th>Linux</th><td class=\"mono\">{}</td></tr></table>\
+             <form method=\"post\" action=\"{}/releases\" style=\"margin-top:10px\"><button name=\"withdraw\" value=\"1\">Stop announcing it</button></form></div>",
+            esc(&r.version),
+            date(r.released_at),
+            esc(r.summary.as_deref().unwrap_or("—")),
+            esc(r.notes().unwrap_or("—")),
+            esc(&r.download_for("windows")),
+            esc(&r.download_for("macos")),
+            esc(&r.download_for("linux")),
+            a.base,
+        ),
+        None => "<p class=\"mute\">No release is announced. Filescape shows no update notice.</p>".into(),
+    };
+    let v = |f: fn(&ReleaseManifest) -> Option<&str>| esc(cur.as_ref().and_then(f).unwrap_or(""));
+    let today = iso_day(cx.now);
+    let body = format!(
+        "<h1>Releases</h1>{m}<h2>Announced now</h2>{current}\
+         <h2>Announce a release</h2><p class=\"mute\">Upload the downloads to R2 first (SETUP.md step 9). Every copy of Filescape asks for this at launch and, when the version is newer than its own, shows a notice saying whether the person's licence covers it. The signature is made by this server; nothing else is needed.</p>\
+         <form method=\"post\" action=\"{b}/releases\" class=\"card\" style=\"display:grid;gap:10px;max-width:640px\">\
+         <label>Version<input name=\"version\" required placeholder=\"0.3.0\" value=\"\" size=\"12\"></label>\
+         <label>Release date <span class=\"mute\">(date of the commit it was built from, YYYY-MM-DD; or exact Unix seconds from <span class=\"mono\">git log -1 --format=%ct v0.3.0</span>). Licences with updates until at least this date are told they're covered.</span><input name=\"released_at\" required value=\"{today}\" size=\"16\"></label>\
+         <label>Summary <span class=\"mute\">(optional, one or two lines)</span><input name=\"summary\" maxlength=\"300\" value=\"{}\" style=\"width:100%\"></label>\
+         <label>Release notes link <span class=\"mute\">(optional, https on filescape.app)</span><input name=\"notes_url\" value=\"{}\" style=\"width:100%\"></label>\
+         <details><summary>Download links <span class=\"mute\">(leave empty for downloads.filescape.app/latest/&lt;os&gt;)</span></summary>\
+         <label>Windows<input name=\"windows\" value=\"{}\" style=\"width:100%\"></label><label>macOS<input name=\"macos\" value=\"{}\" style=\"width:100%\"></label><label>Linux<input name=\"linux\" value=\"{}\" style=\"width:100%\"></label></details>\
+         <div><button class=\"primary\">Announce</button></div></form>",
+        v(|r| r.summary.as_deref()),
+        v(|r| r.notes()),
+        v(|r| r.downloads.windows.as_deref()),
+        v(|r| r.downloads.macos.as_deref()),
+        v(|r| r.downloads.linux.as_deref()),
+        b = a.base,
+    );
+    Ok(a.page("Releases", &body))
 }
 
 async fn settings<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, msg: Option<&str>) -> Result<Resp, String> {

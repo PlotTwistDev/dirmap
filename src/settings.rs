@@ -56,6 +56,9 @@ pub struct Settings {
     pub units: SizeUnits,
     pub stripes: bool,
     pub live_tree: bool,
+    /// Ask filescape.app for the newest version at launch and show a notice when there's a newer
+    /// one. Nothing about the user or the computer is sent.
+    pub check_updates: bool,
 
     // Filtering (applied while scanning)
     /// One path per line; these folders and everything under them are skipped.
@@ -122,6 +125,7 @@ impl Default for Settings {
             units: SizeUnits::Binary,
             stripes: true,
             live_tree: true,
+            check_updates: true,
             exclude_folders: String::new(),
             exclude_files: String::new(),
             include_files: String::new(),
@@ -350,6 +354,10 @@ fn general(ui: &mut egui::Ui, d: &mut Settings) {
     ui.heading("Scanning");
     ui.checkbox(&mut d.live_tree, "Show folders and files as they are found")
         .on_hover_text("Fill in the folder list during a scan. Off shows only the progress.");
+    ui.add_space(8.0);
+    ui.heading("Updates");
+    ui.checkbox(&mut d.check_updates, "Check for a new version when Filescape starts")
+        .on_hover_text("Asks filescape.app for the newest version number and shows a notice when there's a newer one, saying whether your licence covers it. Nothing about you or this computer is sent.");
 }
 
 fn filtering(ui: &mut egui::Ui, d: &mut Settings) {

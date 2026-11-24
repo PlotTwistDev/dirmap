@@ -724,3 +724,51 @@ fn customers_sign_in_with_an_emailed_link_and_release_computers() {
     w.now.set(T0 + 2 * DAY + 16 * 60);
     assert!(acc("POST", "/signin", "", &format!("t={t}")).body.contains("expired"));
 }
+
+#[test]
+fn releases_are_announced_signed_and_only_with_filescape_links() {
+    use filescape_licence::release::ReleaseManifest;
+    let w = world();
+    // Nothing announced yet: the app shows no notice.
+    let r = w.call("GET", "api.filescape.app", "/v1/release", &[], "");
+    assert_eq!(r.status, 404);
+    // Bad input is refused with a reason.
+    for (form, why) in [
+        ("version=soon&released_at=2026-11-20", "look%20like"),
+        ("version=0.3.0&released_at=yesterday", "release%20date"),
+        ("version=0.3.0&released_at=2030-01-01", "future"),
+        ("version=0.3.0&released_at=2026-11-20&notes_url=https%3A%2F%2Fevil.example%2F", "filescape.app"),
+    ] {
+        let r = w.admin("/releases", form);
+        assert!(r.header("location").unwrap().contains(why), "{form}: {:?}", r.header("location"));
+    }
+    assert_eq!(w.call("GET", "api.filescape.app", "/v1/release", &[], "").status, 404);
+    // Announce one.
+    let r = w.admin("/releases", "version=v0.3.0&released_at=2026-11-20&summary=Faster+scans&notes_url=https%3A%2F%2Ffilescape.app%2Fwhats-new&linux=https%3A%2F%2Ffilescape.app%2F%23download");
+    assert!(r.header("location").unwrap().contains("now%20announced"));
+    w.now.set(T0 + DAY);
+    let r = w.call("GET", "api.filescape.app", "/v1/release", &[], "");
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.header("cache-control"), Some("public, max-age=300"));
+    let env: filescape_licence::sign::Envelope = serde_json::from_value(serde_json::from_str::<serde_json::Value>(&r.body).unwrap()["release"].clone()).unwrap();
+    let m: ReleaseManifest = w.verifier().verify(&env, Purpose::Release).unwrap();
+    assert_eq!(m.version, "0.3.0");
+    assert_eq!(m.released_at, T0 - 3 * DAY);
+    assert_eq!(m.signed_at, T0 + DAY, "signed fresh for each request");
+    assert_eq!(m.summary.as_deref(), Some("Faster scans"));
+    assert_eq!(m.notes(), Some("https://filescape.app/whats-new"));
+    assert_eq!(m.download_for("linux"), "https://filescape.app/#download");
+    assert_eq!(m.download_for("windows"), "https://downloads.filescape.app/latest/windows");
+    // It can't pass as anything that unlocks features.
+    assert!(w.verifier().verify::<ActivationCert>(&env, Purpose::Activation).is_err());
+    // The admin page shows it, and it can be withdrawn.
+    assert!(w.call("GET", "localhost", "/admin/releases", &[], "").body.contains("0.3.0"));
+    w.admin("/releases", "withdraw=1");
+    assert_eq!(w.call("GET", "api.filescape.app", "/v1/release", &[], "").status, 404);
+    // Exact Unix seconds work too.
+    w.admin("/releases", &format!("version=0.3.1&released_at={}", T0 + 3600));
+    let r = w.call("GET", "api.filescape.app", "/v1/release", &[], "");
+    let env: filescape_licence::sign::Envelope = serde_json::from_value(serde_json::from_str::<serde_json::Value>(&r.body).unwrap()["release"].clone()).unwrap();
+    assert_eq!(w.verifier().verify::<ReleaseManifest>(&env, Purpose::Release).unwrap().released_at, T0 + 3600);
+    assert_eq!(w.call("POST", "api.filescape.app", "/v1/release", &[], "").status, 405);
+}
