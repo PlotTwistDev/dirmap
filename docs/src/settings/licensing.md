@@ -31,7 +31,7 @@ a temporary licence ending never starts the evaluation again.
 
 | Type | What it does |
 |---|---|
-| **Perpetual** | Never expires. It covers every version released while its updates last (12 months from purchase), and can be used on up to 10 computers. |
+| **Perpetual** | Never expires. It covers every version released while its updates last (12 months from purchase), and can be active on up to 3 computers at once. |
 | **Temporary** | Full access for a set time: usually 30 days from the first time it's activated, or until a fixed date. It can't be renewed; when it ends you can enter another licence or buy a perpetual one. |
 
 If you have both, the perpetual licence is used. When a temporary licence expires, Filescape
@@ -45,7 +45,7 @@ perpetual one) into the box and press **Activate**. Spaces, dashes and the case 
 matter, and a mistyped serial is caught at once without using an activation.
 
 The status screen then shows the licence type, the expiry date (or the end of updates for a
-perpetual licence), the days remaining and how many activations have been used. **Licence
+perpetual licence), the days remaining, and how many computers are active (perpetual) or activations used (temporary). **Licence
 Details** lists the registered owner, licence ID, serial number, and the dates issued, activated
 and expiring.
 
@@ -54,29 +54,37 @@ and expiring.
 | **Copy Serial** | Copies the serial number to the clipboard. |
 | **Export Licence ⏷ > Licence Certificate (signed)…** | Saves a `.filescape-licence` file signed by Filescape, as proof of purchase. **Verify a licence certificate** checks one. |
 | **Export Licence ⏷ > Licence Details (text)…** | Saves the details as plain text. |
-| **Deactivate This Computer…** | Ends the licence on this computer. The activation it used isn't given back. |
+| **Deactivate This Computer…** | Ends the licence on this computer. For a perpetual licence this frees the computer's place for another one; a temporary licence's activation isn't given back. |
 | **Purchase Perpetual Licence** | Opens the Filescape website. |
 
 ## Activations
 
-Each new computer a licence is activated on uses one **activation**. A temporary licence has 3, a
-perpetual one 10.
+A **perpetual** licence can be active on 3 computers at once.
 
 - Starting Filescape again, restarting the computer or activating again on the same computer
-  doesn't use another one.
+  doesn't take another place.
+- To move to a new computer, deactivate the old one (**Deactivate This Computer…**), or sign in at
+  `account.filescape.app` with the email you bought with and press **Release** next to it. Its
+  place is free straight away.
+- The first computer you release in a week frees its place at once. Release more in the same week
+  and those keep their place for 7 days, so a licence can't be passed round many computers.
+- If an old computer is lost or broken and you can't sign in, ask Filescape support.
+
+A **temporary** licence has 3 **activations**, ever: each new computer uses one.
+
 - Deactivating a computer doesn't give its activation back. For a temporary licence with 3
   activations: activate on computer A (1 used), deactivate A, activate on B (2 used), then on C (3
   used). A fourth computer is refused, even if A, B and C are all deactivated.
 - A temporary licence's expiry date is set by its first activation and never moves.
 
-If you replace computers and run out, ask Filescape support: they can reset a licence's activations.
+If a temporary licence runs out because a computer was replaced, ask Filescape support: they can reset its activations.
 
 ## Offline activation
 
 For a computer without internet access, open **Offline activation**, enter the serial and choose
 **Save Request…**. Take the request file to any computer that's online, upload it at
 `account.filescape.app/activate`, and bring the response file back with **Import Response…**. It
-counts towards the same limit as activating online, and the response only works on the computer
+counts towards the same limit as activating online (release it at `account.filescape.app` when you're done with that computer), and the response only works on the computer
 that made the request.
 
 ## Checks and the clock

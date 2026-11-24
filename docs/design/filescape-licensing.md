@@ -93,3 +93,27 @@ From the audit in the shared doc "Filescape licensing audit and enterprise propo
   afterwards. An approved full refund or chargeback revokes; pending, partial and chargeback
   warnings only flag; an approved chargeback reversal reinstates what a chargeback revoked.
 - `ACCESS_AUD` is a Worker secret, not a `wrangler.toml` variable; `keep_vars = true`.
+
+## Phase 2 (individual licences, 24 Nov 2026)
+
+Rich's answers in the audit doc: no sales yet, personal Pro = 3 active computers, price $9.99
+standard / $4.99 launch (Paddle price unchanged at $5 until he approves the change).
+
+- Perpetual licences limit computers active now: `rules::seats_in_use` = live activations +
+  max(0, self-releases in the last 7 days − 1) (`RELEASE_COOLDOWN_DAYS`). Deactivating in the app
+  or Release on the account page frees the seat; admin Void frees it at once and doesn't count;
+  Reset clears the cooldown. `activations_used` stays as history. Certificates carry seats in use
+  for perpetual licences, uses ever for temporary ones.
+- Temporary licences keep the original spec's 3-uses-ever rule (spec tests t05, t06, t10 and t16
+  unchanged).
+- `ActivationRequest.os` (optional, serde default): Windows, macOS or Linux, shown on the account
+  page. Migration `0002_seats_and_account.sql`: `activations.os`, `activations.released_via`,
+  `logins`, `sessions`.
+- The Worker's allocation stays one batch: `UPDATE licences … WHERE activations_used = <read>`
+  (a version check) then `INSERT … WHERE changes() = 1`; a lost race decides again. A concurrent
+  release only frees seats, so it can't over-allocate.
+- account.filescape.app sign-in: emailed one-time link (15 minutes, hash stored, used by a POST
+  so mail scanners can't spend it), 30-day HttpOnly Secure SameSite=Lax cookie (hash stored),
+  forms checked for Origin. Signed in: licences for that email, computers, Release.
+- Deferred: update renewals (needs a Paddle price, so Rich's approval), Resend idempotency keys,
+  a D1 export job (D1 Time Travel already keeps 30 days).

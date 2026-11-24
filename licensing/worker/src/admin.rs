@@ -157,7 +157,15 @@ async fn licence<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, id: &str, msg: Op
         ("Issued", date(l.issued_at)),
         ("First activated", opt_date(l.first_activated_at)),
         ("Expires", opt_date(l.expires_at)),
-        ("Activations used", format!("{} of {}", l.activations_used, l.max_activations)),
+        (
+            if l.kind() == LicenceKind::Perpetual { "Computers active" } else { "Activations used" },
+            if l.kind() == LicenceKind::Perpetual {
+                let all: Vec<_> = acts.iter().map(|x| x.a.clone()).collect();
+                format!("{} of {} <span class=\"mute\">({} activations ever)</span>", filescape_licence::rules::seats_in_use(l, &all, cx.now), l.max_activations, l.activations_used)
+            } else {
+                format!("{} of {}", l.activations_used, l.max_activations)
+            },
+        ),
         ("Paddle transaction", esc(l.order_ref.as_deref().unwrap_or("—"))),
         ("Emailed", opt_date(r.emailed_at)),
         ("Revoked", l.revoked_at.map_or("—".into(), |t| format!("{} ({})", date(t), esc(l.revoke_reason.as_deref().unwrap_or(""))))),
@@ -181,11 +189,15 @@ async fn licence<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, id: &str, msg: Op
         "Reset activations",
         "",
     ));
-    body.push_str("<p class=\"mute\" style=\"margin:-4px 0 10px\">Gives every used activation back. Computers already activated keep working; the expiry doesn't change.</p>");
+    body.push_str(if l.kind() == LicenceKind::Perpetual {
+        "<p class=\"mute\" style=\"margin:-4px 0 10px\">Clears the 7-day release cooldown, so recently released computers stop holding seats. Computers still active keep their seats. To free one now, use Void on it below.</p>"
+    } else {
+        "<p class=\"mute\" style=\"margin:-4px 0 10px\">Gives every used activation back. Computers already activated keep working; the expiry doesn't change.</p>"
+    });
     if l.kind() == LicenceKind::Perpetual {
         body.push_str(&act(
             "limit",
-            &format!("<label>Activation limit<input name=\"max\" type=\"number\" min=\"1\" max=\"1000\" value=\"{}\" style=\"width:90px\"></label><label>Reason<input name=\"reason\" required size=\"30\"></label>", l.max_activations),
+            &format!("<label>Computers at once<input name=\"max\" type=\"number\" min=\"1\" max=\"1000\" value=\"{}\" style=\"width:90px\"></label><label>Reason<input name=\"reason\" required size=\"30\"></label>", l.max_activations),
             "Set limit",
             "",
         ));
@@ -413,7 +425,7 @@ async fn settings<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, msg: Option<&str
     let cfg = cx.cfg;
     let yes_no = |b: bool| if b { "<span class=\"good\">set up</span>" } else { "<span class=\"warn\">not set up</span>" };
     let body = format!(
-        "<h1>Settings</h1>{m}<form method=\"post\" action=\"{}/settings\" class=\"card row\"><label>Activations for new perpetual licences<input name=\"perpetual_limit\" type=\"number\" min=\"1\" max=\"1000\" value=\"{limit}\" style=\"width:100px\"></label><button class=\"primary\">Save</button></form>\
+        "<h1>Settings</h1>{m}<form method=\"post\" action=\"{}/settings\" class=\"card row\"><label>Computers at once, new perpetual licences<input name=\"perpetual_limit\" type=\"number\" min=\"1\" max=\"1000\" value=\"{limit}\" style=\"width:100px\"></label><button class=\"primary\">Save</button></form>\
          <p class=\"mute\">Licences already sold keep their limit; change one on its own page. Temporary licences get their limit when they're created.</p>\
          <h2>Server</h2><div class=\"card\"><table><tr><th>Signing key ID</th><td class=\"mono\">{}</td></tr><tr><th>Paddle</th><td>{}{}</td></tr><tr><th>Email (Resend)</th><td>{}</td></tr><tr><th>Cloudflare Access check</th><td>{}</td></tr><tr><th>Server time</th><td>{}</td></tr></table></div>",
         a.base,

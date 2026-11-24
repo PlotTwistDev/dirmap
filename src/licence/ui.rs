@@ -171,7 +171,7 @@ impl Licensing {
                 ui.label("Your licence is active and doesn't expire.");
                 egui::Grid::new("lic-perp").num_columns(2).show(ui, |ui| {
                     row(ui, "Updates until", cert.updates_until.map(date_time).unwrap_or_else(|| "always".into()));
-                    row(ui, "Activations used", format!("{} of {}", cert.activations_used, cert.max_activations));
+                    row(ui, "Computers active", format!("{} of {}", cert.activations_used, cert.max_activations));
                     row(ui, "Licence type", "Perpetual");
                 });
             }
@@ -214,7 +214,8 @@ impl Licensing {
                         ui.close();
                     }
                 });
-                if self.standing.is_licensed() && !matches!(self.standing, Standing::Evaluation { .. }) && ui.button("Deactivate This Computer…").on_hover_text("Ends the activation here. The activation it used isn't given back.").clicked() {
+                let hint = if c.kind == LicenceKind::Perpetual { "Ends the activation here and frees this computer's place for another one." } else { "Ends the activation here. The activation it used isn't given back." };
+                if self.standing.is_licensed() && !matches!(self.standing, Standing::Evaluation { .. }) && ui.button("Deactivate This Computer…").on_hover_text(hint).clicked() {
                     self.ui.confirm_deactivate = true;
                 }
             }
@@ -224,8 +225,13 @@ impl Licensing {
             }
         });
         if self.ui.confirm_deactivate {
+            let perpetual = matches!(self.standing, Standing::Perpetual(_));
             ui.group(|ui| {
-                ui.label("Deactivate Filescape on this computer? Professional features stop here, and the activation it used isn't given back.");
+                ui.label(if perpetual {
+                    "Deactivate Filescape on this computer? Professional features stop here, and its place is freed for another computer. (Release more than one computer in a week and the later ones keep their place for 7 days.)"
+                } else {
+                    "Deactivate Filescape on this computer? Professional features stop here, and the activation it used isn't given back."
+                });
                 ui.horizontal(|ui| {
                     if ui.button("Deactivate").clicked() {
                         self.ui.confirm_deactivate = false;
@@ -251,7 +257,13 @@ impl Licensing {
                 row(ui, "Date issued", date_time(c.issued_at));
                 row(ui, "Date activated", date_time(c.first_activated_at));
                 row(ui, "Expiration date", c.expires_at.map(date_time).unwrap_or_else(|| "never".into()));
-                row(ui, "Activations used", format!("{} of {}", issued.as_ref().map_or(c.activations_used, |i| i.activations_used.max(c.activations_used)), c.max_activations));
+                if c.kind == LicenceKind::Perpetual {
+                    // Whichever the server signed most recently: computers come and go.
+                    let n = issued.as_ref().filter(|i| i.as_of >= c.signed_at).map_or(c.activations_used, |i| i.activations_used);
+                    row(ui, "Computers active", format!("{n} of {}", c.max_activations));
+                } else {
+                    row(ui, "Activations used", format!("{} of {}", issued.as_ref().map_or(c.activations_used, |i| i.activations_used.max(c.activations_used)), c.max_activations));
+                }
                 row(ui, "Status", self.status_label());
             });
         });

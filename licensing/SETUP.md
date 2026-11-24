@@ -169,7 +169,24 @@ to edit at release time. If you ever make a new signing key, add its public half
 
 Cloudflare's free plan includes one rate-limiting rule. **Security > WAF > Rate limiting rules**:
 `http.host eq "api.filescape.app"`, 30 requests per 10 seconds per IP, Block. Serial numbers can't
-be guessed (80 random bits), so this is only against floods.
+be guessed (80 random bits), so this is only against floods. If you'd rather protect the account
+page's sign-in form instead, use `http.host eq "account.filescape.app" and http.request.method eq
+"POST"`, 10 requests per minute per IP; the server already sends at most one sign-in email a minute
+per address.
+
+## Updating a server set up before Phase 2
+
+Phase 2 (24 Nov 2026) adds computer seats and customer sign-in. On a server that's already running:
+
+1. `npx wrangler@4 d1 migrations apply filescape-licences --remote` (applies
+   `0002_seats_and_account.sql`: two activation columns and the sign-in tables).
+2. Deploy the Worker (step 6).
+3. In the admin site, **Settings**: "Computers at once, new perpetual licences" should say 3. If it
+   was saved as 10 earlier, set it to 3. Existing test licences keep their own limit; change one
+   on its page if needed.
+4. Deploy the website (step 8) for the new "3 computers at once" copy, terms and privacy text.
+
+Sign-in links are emailed through Resend (step 5), so the account page needs `RESEND_API_KEY`.
 
 ## Local development
 

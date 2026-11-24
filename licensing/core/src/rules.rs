@@ -6,7 +6,13 @@
 //! concurrent requests. [`MemoryLedger`] does the same under a mutex; it is the reference
 //! implementation the tests run against, and what the app's tests use as a fake server.
 //!
-//! The spec's rules, by number:
+//! Two kinds of limit:
+//! - **Perpetual licences** limit the computers active at once ([`seats_in_use`]). Deactivating a
+//!   computer frees its seat; the first self-service release in [`crate::RELEASE_COOLDOWN_DAYS`]
+//!   frees it at once, later ones in the window only when the window passes. An admin release
+//!   (void) or Reset activations frees seats at once.
+//! - **Temporary licences** keep the original spec's rules, by number:
+//!
 //! 1–4. each new activation consumes one use; a fourth (past the limit) is rejected
 //! 5. deactivating never gives a use back
 //! 6, 10. reinstalling or relaunching on the same machine re-issues, it doesn't consume
@@ -29,6 +35,19 @@ pub enum Decision {
     /// A new activation: consume one use. On the first ever use, `first_activated_at` and
     /// `expires_at` are set; later uses leave them alone.
     NewUse { first_activation: Option<(Ts, Option<Ts>)> },
+}
+
+/// Seats a licence is using at `now`, given all its activations. A temporary licence's "seats"
+/// are its uses ever, so this is also the figure certificates and the account page show.
+pub fn seats_in_use(lic: &Licence, activations: &[Activation], now: Ts) -> u32 {
+    if lic.kind() == LicenceKind::Temporary {
+        return lic.activations_used;
+    }
+    let mine = activations.iter().filter(|a| a.licence_id == lic.id);
+    let live = mine.clone().filter(|a| a.is_live()).count() as u32;
+    let since = now - crate::RELEASE_COOLDOWN_DAYS * DAY;
+    let recent_releases = mine.filter(|a| a.counted && a.voided.is_none() && a.ended_at.is_some_and(|e| e >= since)).count() as u32;
+    live + recent_releases.saturating_sub(1)
 }
 
 /// What should happen for `req` (whose serial has already been matched to `lic`).
@@ -60,7 +79,7 @@ pub fn decide(lic: &Licence, activations: &[Activation], req: &ActivationRequest
     if expired {
         return Err(Rejection::Expired);
     }
-    if lic.activations_used >= lic.max_activations {
+    if seats_in_use(lic, activations, now) >= lic.max_activations {
         return Err(Rejection::ActivationLimitReached);
     }
     let first_activation = match lic.first_activated_at {
@@ -277,8 +296,14 @@ impl MemoryLedger {
         Ok((serial, lic))
     }
 
-    fn certs(&self, lic: &Licence, a: &Activation, now: Ts) -> (crate::sign::Envelope, crate::sign::Envelope) {
-        certificates(&self.signer, lic, a, now)
+    fn certs(&self, lic: &Licence, acts: &[Activation], a: &Activation, now: Ts) -> (crate::sign::Envelope, crate::sign::Envelope) {
+        certificates(&self.signer, lic, a, seats_in_use(lic, acts, now), now)
+    }
+
+    /// Seats the licence is using now (see [`seats_in_use`]).
+    pub fn seats(&self, licence_id: &str, now: Ts) -> Option<u32> {
+        let st = self.state.lock().unwrap();
+        st.licences.get(licence_id).map(|l| seats_in_use(l, &st.activations, now))
     }
 
     /// POST /v1/activate (and the offline upload).
@@ -306,16 +331,18 @@ impl MemoryLedger {
                     device_hash: req.device_hash.clone(),
                     app_version: req.app_version.clone(),
                     created_at: now,
+                    os: req.os.clone(),
                     counted: true,
                     ended_at: None,
                     voided: None,
                 });
-                event(lic, now, "activated", format!("{} ({} of {})", req.activation_id, lic.activations_used, lic.max_activations));
+                let shown = seats_in_use(lic, activations, now);
+                event(lic, now, "activated", format!("{} ({} of {})", req.activation_id, shown, lic.max_activations));
                 (req.activation_id.clone(), true)
             }
         };
         let a = activations.iter().find(|a| a.activation_id == activation_id).unwrap();
-        let (activation, issuance) = self.certs(lic, a, now);
+        let (activation, issuance) = self.certs(lic, activations, a, now);
         Ok(ActivationResponse { activation, issuance, status: lic.status(now), consumed_use: consumed })
     }
 
@@ -335,7 +362,7 @@ impl MemoryLedger {
         let a = activations.iter().find(|a| a.activation_id == activation_id).ok_or(Rejection::NotFound)?;
         let lic = licences.get_mut(&a.licence_id).unwrap();
         check_validate(lic, a, device_hash, now)?;
-        let (activation, issuance) = self.certs(lic, a, now);
+        let (activation, issuance) = self.certs(lic, activations, a, now);
         Ok(ActivationResponse { activation, issuance, status: lic.status(now), consumed_use: false })
     }
 
@@ -348,7 +375,8 @@ impl MemoryLedger {
         status_statement(&self.signer, lic, a, why, now)
     }
 
-    /// POST /v1/deactivate: ends this device's activation. The use is not given back.
+    /// POST /v1/deactivate: ends this device's activation. A perpetual licence's seat is freed
+    /// (subject to the release cooldown); a temporary licence's use is not given back.
     pub fn deactivate(&self, activation_id: &str, device_hash: &str, now: Ts) -> Result<(), Rejection> {
         let mut st = self.state.lock().unwrap();
         let State { licences, activations, .. } = &mut *st;
@@ -405,8 +433,9 @@ impl MemoryLedger {
         Ok(())
     }
 
-    /// Admin: Reset activations. Gives every used activation back; machines already activated
-    /// keep working. Expiry, first activation and history are kept.
+    /// Admin: Reset activations. Temporary licence: gives every used activation back. Perpetual
+    /// licence: clears the release cooldown (computers still active keep their seats). Machines
+    /// already activated keep working. Expiry, first activation and history are kept.
     pub fn reset_activations(&self, licence_id: &str, reason: &str, now: Ts) -> Result<(), Rejection> {
         let mut st = self.state.lock().unwrap();
         let State { licences, activations, .. } = &mut *st;
@@ -457,8 +486,8 @@ impl MemoryLedger {
     }
 }
 
-/// The proof-of-issuance contents for a licence as it stands.
-pub fn issuance(lic: &Licence, now: Ts) -> IssuanceCert {
+/// The proof-of-issuance contents for a licence as it stands, with `used` from [`seats_in_use`].
+pub fn issuance(lic: &Licence, used: u32, now: Ts) -> IssuanceCert {
     IssuanceCert {
         licence_id: lic.id.clone(),
         kind: lic.kind(),
@@ -470,7 +499,7 @@ pub fn issuance(lic: &Licence, now: Ts) -> IssuanceCert {
         updates_until: lic.validity.updates_until(),
         validity: lic.validity,
         max_activations: lic.max_activations,
-        activations_used: lic.activations_used,
+        activations_used: used,
         non_renewable: lic.kind() == LicenceKind::Temporary,
         issuer: ISSUER.into(),
         as_of: now,
@@ -538,8 +567,9 @@ pub fn check_validate(lic: &Licence, a: &Activation, device_hash: &str, now: Ts)
     Ok(())
 }
 
-/// The signed activation certificate (for this device) and proof of issuance, as of `now`.
-pub fn certificates(signer: &Signer, lic: &Licence, a: &Activation, now: Ts) -> (crate::sign::Envelope, crate::sign::Envelope) {
+/// The signed activation certificate (for this device) and proof of issuance, as of `now`. `used`
+/// comes from [`seats_in_use`].
+pub fn certificates(signer: &Signer, lic: &Licence, a: &Activation, used: u32, now: Ts) -> (crate::sign::Envelope, crate::sign::Envelope) {
     let act = ActivationCert {
         licence_id: lic.id.clone(),
         kind: lic.kind(),
@@ -551,11 +581,11 @@ pub fn certificates(signer: &Signer, lic: &Licence, a: &Activation, now: Ts) -> 
         first_activated_at: lic.first_activated_at.unwrap_or(a.created_at),
         expires_at: lic.expires_at,
         updates_until: lic.validity.updates_until(),
-        activations_used: lic.activations_used,
+        activations_used: used,
         max_activations: lic.max_activations,
         signed_at: now,
     };
-    (signer.sign(Purpose::Activation, &act), signer.sign(Purpose::Issuance, &issuance(lic, now)))
+    (signer.sign(Purpose::Activation, &act), signer.sign(Purpose::Issuance, &issuance(lic, used, now)))
 }
 
 /// A signed statement that this activation can no longer be used, for the rejections the app acts

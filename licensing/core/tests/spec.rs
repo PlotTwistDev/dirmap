@@ -35,6 +35,7 @@ fn req(serial: &str, n: u32) -> ActivationRequest {
         activation_id: aid(serial, n),
         device_hash: device_hash(&format!("machine-{n}")),
         app_version: "2.4.0".into(),
+        os: None,
     }
 }
 
@@ -457,7 +458,7 @@ fn t19_perpetual_licences_are_unaffected_and_win() {
     let (pserial, plic) = l.issue_perpetual(Some("Rich".into()), None, Some("txn_01".into()), DEFAULT_UPDATE_MONTHS, ISSUE).unwrap();
     assert_eq!(plic.kind(), LicenceKind::Perpetual);
     assert_eq!(plic.max_activations, DEFAULT_PERPETUAL_ACTIVATIONS);
-    assert_eq!(plic.max_activations, 10);
+    assert_eq!(plic.max_activations, 3);
     // A resent Paddle webhook doesn't make a second licence.
     assert!(l.issue_perpetual(None, None, Some("txn_01".into()), 12, ISSUE).is_err());
     let (tserial, _) = temp(&l, TemporaryOptions::default());
@@ -476,14 +477,20 @@ fn t19_perpetual_licences_are_unaffected_and_win() {
     // Update entitlement: a build released after it lapses isn't covered.
     let late = Context { now: ISSUE + 500 * DAY, device_hash: &dev, build_date: ISSUE + 400 * DAY, verifier: &v };
     assert!(matches!(evaluate(&late, &st), Standing::Restricted(Reason::TemporaryExpired(_)) | Standing::Restricted(Reason::UpdatesLapsed(_))));
-    // Perpetual licences stop at their limit (10 by default, Rich 23 Nov), which the admin can
-    // change, and support can reset them.
-    l.set_activation_limit(&plic.id, 3, "test", FIRST).unwrap();
+    // Perpetual licences stop at their limit of active computers (3 by default, Rich 24 Nov),
+    // which the admin can change.
     l.activate(&req(&pserial, 2), FIRST).unwrap();
     l.activate(&req(&pserial, 3), FIRST).unwrap();
     assert_eq!(l.activate(&req(&pserial, 4), FIRST), Err(Rejection::ActivationLimitReached));
+    l.set_activation_limit(&plic.id, 4, "test", FIRST).unwrap();
+    assert!(l.activate(&req(&pserial, 4), FIRST).unwrap().consumed_use);
+    l.set_activation_limit(&plic.id, 3, "test", FIRST).unwrap();
+    // Support can clear the release cooldown.
+    l.deactivate(&aid(&pserial, 1), &dev, FIRST + DAY).unwrap();
+    l.deactivate(&aid(&pserial, 2), &device_hash("machine-2"), FIRST + DAY).unwrap();
+    assert_eq!(l.activate(&req(&pserial, 5), FIRST + DAY), Err(Rejection::ActivationLimitReached));
     l.reset_activations(&plic.id, "new PC, ticket 42", FIRST + DAY).unwrap();
-    assert!(l.activate(&req(&pserial, 4), FIRST + DAY).unwrap().consumed_use);
+    assert!(l.activate(&req(&pserial, 5), FIRST + DAY).unwrap().consumed_use);
     assert!(l.licence(&plic.id).unwrap().events.iter().any(|e| e.what == "reset" && e.detail.contains("ticket 42")));
 }
 
@@ -524,6 +531,7 @@ fn admin_tools_history_void_and_search() {
 fn perpetual_limits_are_adjustable_and_activations_are_monitored() {
     let (l, _) = ledger();
     let (serial, lic) = l.issue_perpetual(None, None, None, 12, ISSUE).unwrap();
+    l.set_activation_limit(&lic.id, 10, "office", FIRST).unwrap();
     for n in 1..=7 {
         l.activate(&req(&serial, n), FIRST + i64::from(n) * DAY).unwrap();
     }
@@ -550,4 +558,39 @@ fn perpetual_limits_are_adjustable_and_activations_are_monitored() {
     let again = MemoryLedger::from_json(Signer::from_pkcs8(&pkcs8).unwrap(), &json).unwrap();
     assert_eq!(again.licence(&lic.id).unwrap().max_activations, 5);
     assert_eq!(again.default_perpetual_limit(), 20);
+}
+
+#[test]
+fn perpetual_licences_count_active_computers_and_releases_have_a_cooldown() {
+    let (l, v) = ledger();
+    let (serial, lic) = l.issue_perpetual(None, None, None, 12, ISSUE).unwrap();
+    let dev = |n: u32| device_hash(&format!("machine-{n}"));
+    for n in 1..=3 {
+        let r = l.activate(&req(&serial, n), FIRST).unwrap();
+        assert_eq!(cert(&v, &r).activations_used, n);
+    }
+    assert_eq!(l.activate(&req(&serial, 4), FIRST), Err(Rejection::ActivationLimitReached));
+    // A perpetual licence never shows "limit reached": it is simply full.
+    assert_eq!(l.licence(&lic.id).unwrap().status(FIRST), Status::Active);
+    // Deactivating frees the seat at once (the first release in a week).
+    l.deactivate(&aid(&serial, 1), &dev(1), FIRST + DAY).unwrap();
+    assert_eq!(l.seats(&lic.id, FIRST + DAY), Some(2));
+    let r = l.activate(&req(&serial, 4), FIRST + DAY).unwrap();
+    assert_eq!(cert(&v, &r).activations_used, 3);
+    // A second release in the same week keeps its seat until the week passes.
+    l.deactivate(&aid(&serial, 2), &dev(2), FIRST + 2 * DAY).unwrap();
+    assert_eq!(l.seats(&lic.id, FIRST + 2 * DAY), Some(3));
+    assert_eq!(l.activate(&req(&serial, 5), FIRST + 2 * DAY), Err(Rejection::ActivationLimitReached));
+    assert!(l.activate(&req(&serial, 5), FIRST + 8 * DAY + 1).unwrap().consumed_use);
+    // An admin release (void) frees the seat at once and doesn't count as a release.
+    l.void_activation(&lic.id, &aid(&serial, 3), false, "lost laptop", FIRST + 9 * DAY).unwrap();
+    assert_eq!(l.seats(&lic.id, FIRST + 9 * DAY), Some(2));
+    assert!(l.activate(&req(&serial, 6), FIRST + 9 * DAY).unwrap().consumed_use);
+    // The history still counts every activation.
+    assert_eq!(l.licence(&lic.id).unwrap().activations_used, 6);
+    // Re-activating a released computer is a new activation and takes a seat again.
+    l.deactivate(&aid(&serial, 4), &dev(4), FIRST + 20 * DAY).unwrap();
+    let again = ActivationRequest { activation_id: "act-again-4".into(), ..req(&serial, 4) };
+    assert!(l.activate(&again, FIRST + 20 * DAY).unwrap().consumed_use);
+    assert_eq!(l.seats(&lic.id, FIRST + 20 * DAY), Some(3));
 }

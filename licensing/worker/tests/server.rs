@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 const T0: i64 = 1_795_392_000; // 23 Nov 2026
-const SCHEMA: &str = include_str!("../migrations/0001_init.sql");
+const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql")];
 
 /// Gives way once, so two requests run with `join` interleave like concurrent Workers.
 struct YieldOnce(bool);
@@ -128,7 +128,9 @@ const WEBHOOK_SECRET: &str = "pdl_ntfset_test_secret";
 
 fn world() -> World {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    conn.execute_batch(SCHEMA).unwrap();
+    for m in SCHEMA {
+        conn.execute_batch(m).unwrap();
+    }
     let pkcs8 = Signer::generate_pkcs8(&ring::rand::SystemRandom::new());
     World {
         db: Sqlite(conn),
@@ -270,7 +272,7 @@ fn two_computers_racing_for_the_last_use_get_one_between_them() {
     let w = world();
     let serial = w.temp_serial(30, 2);
     ok(&w.activate(&serial, "m1", "act-m1-00001"));
-    let req = |m: &str, id: &str| ActivationRequest { serial: serial.clone(), activation_id: id.into(), device_hash: device_hash(m), app_version: "2.3.0".into() };
+    let req = |m: &str, id: &str| ActivationRequest { serial: serial.clone(), activation_id: id.into(), device_hash: device_hash(m), app_version: "2.3.0".into(), os: Some("macOS".into()) };
     let (r1, r2) = (req("m2", "act-m2-00001"), req("m3", "act-m3-00001"));
     let cx = w.cx();
     let (a, b) = pollster::block_on(futures::future::join(cx.activate(&r1), cx.activate(&r2)));
@@ -361,7 +363,7 @@ fn paddle_purchase_issues_one_emailed_perpetual_licence() {
     let text = m["text"].as_str().unwrap();
     let i = text.find("FSP-").unwrap();
     let serial = &text[i..i + 27];
-    assert!(text.contains("up to 10 computers"));
+    assert!(text.contains("active on up to 3 computers at once"), "{text}");
     // A resent notification (same event, or same transaction in a new event) changes nothing.
     assert_eq!(w.webhook(&purchase("txn_01", 1)).status, 200);
     let mut again = purchase("txn_01", 1);
@@ -370,10 +372,10 @@ fn paddle_purchase_issues_one_emailed_perpetual_licence() {
     assert_eq!(w.net.emails().len(), 1, "not emailed twice");
     let cx = w.cx();
     assert_eq!(pollster::block_on(cx.list("", Default::default(), 100)).unwrap().len(), 1);
-    // The serial works, with 10 activations.
+    // The serial works, on 3 computers at once.
     let a = ok(&w.activate(serial, "m1", "act-m1-00001"));
     let c: ActivationCert = w.verifier().verify(&a.activation, Purpose::Activation).unwrap();
-    assert_eq!((c.kind, c.max_activations, c.owner.as_deref()), (LicenceKind::Perpetual, 10, Some("Ada Buyer")));
+    assert_eq!((c.kind, c.max_activations, c.owner.as_deref()), (LicenceKind::Perpetual, 3, Some("Ada Buyer")));
     assert_eq!(c.expires_at, None);
 }
 
@@ -446,6 +448,8 @@ fn activations_page_flags_possible_sharing() {
     let text = serde_json::from_str::<serde_json::Value>(&w.net.emails()[0]).unwrap()["text"].as_str().unwrap().to_string();
     let i = text.find("FSP-").unwrap();
     let serial = text[i..i + 27].to_string();
+    let id = pollster::block_on(w.cx().licence_by_serial(&filescape_licence::serial::normalize(&serial).unwrap().1)).unwrap().unwrap().lic.id;
+    w.admin(&format!("/licence/{id}/limit"), "max=10&reason=office");
     for n in 0..6 {
         ok(&w.activate(&serial, &format!("pc-{n}"), &format!("act-pc-{n:05}")));
     }
@@ -615,4 +619,108 @@ fn approved_refunds_and_chargebacks_revoke_and_a_reversal_reinstates() {
     // A reversal never undoes a revoke made for another reason.
     adj("e7", "chargeback_reverse", "approved", "txn_r1", "full");
     assert!(revoked("txn_r1"));
+}
+
+#[test]
+fn perpetual_seats_free_up_when_a_computer_is_released() {
+    let w = world();
+    w.webhook(&purchase("txn_10", 1));
+    let text = serde_json::from_str::<serde_json::Value>(&w.net.emails()[0]).unwrap()["text"].as_str().unwrap().to_string();
+    let i = text.find("FSP-").unwrap();
+    let serial = text[i..i + 27].to_string();
+    for n in 1..=3 {
+        let a = ok(&w.activate(&serial, &format!("pc-{n}"), &format!("act-pc-{n:05}")));
+        let c: ActivationCert = w.verifier().verify(&a.activation, Purpose::Activation).unwrap();
+        assert_eq!((c.activations_used, c.max_activations), (n, 3));
+    }
+    assert_eq!(rejection(&w.activate(&serial, "pc-4", "act-pc-00004")), Rejection::ActivationLimitReached);
+    // Deactivating in the app frees the seat.
+    w.now.set(T0 + DAY);
+    let r = w.api("/v1/deactivate", &serde_json::json!({ "activation_id": "act-pc-00001", "device_hash": device_hash("pc-1") }));
+    assert_eq!(r.status, 200, "{}", r.body);
+    ok(&w.activate(&serial, "pc-4", "act-pc-00004"));
+    // A second release the same week keeps the seat for 7 days.
+    let r = w.api("/v1/deactivate", &serde_json::json!({ "activation_id": "act-pc-00002", "device_hash": device_hash("pc-2") }));
+    assert_eq!(r.status, 200);
+    assert_eq!(rejection(&w.activate(&serial, "pc-5", "act-pc-00005")), Rejection::ActivationLimitReached);
+    w.now.set(T0 + 8 * DAY + 1);
+    let a = ok(&w.activate(&serial, "pc-5", "act-pc-00005"));
+    let c: ActivationCert = w.verifier().verify(&a.activation, Purpose::Activation).unwrap();
+    assert_eq!(c.activations_used, 3);
+    // Two racing for the last seat after a release: one wins.
+    let r = w.api("/v1/deactivate", &serde_json::json!({ "activation_id": "act-pc-00003", "device_hash": device_hash("pc-3") }));
+    assert_eq!(r.status, 200);
+    let req = |m: &str, id: &str| ActivationRequest { serial: serial.clone(), activation_id: id.into(), device_hash: device_hash(m), app_version: "2.3.0".into(), os: None };
+    let cx = w.cx();
+    let (a, b) = pollster::block_on(futures::future::join(cx.activate(&req("pc-6", "act-pc-00006")), cx.activate(&req("pc-7", "act-pc-00007"))));
+    assert_eq!([a.is_ok(), b.is_ok()].iter().filter(|x| **x).count(), 1);
+}
+
+fn session_cookie(r: &Resp) -> String {
+    let c = r.header("set-cookie").expect("cookie set");
+    assert!(c.contains("HttpOnly") && c.contains("SameSite=Lax"), "{c}");
+    c.split(';').next().unwrap().to_string()
+}
+
+#[test]
+fn customers_sign_in_with_an_emailed_link_and_release_computers() {
+    let w = world();
+    w.webhook(&purchase("txn_11", 1));
+    let text = serde_json::from_str::<serde_json::Value>(&w.net.emails()[0]).unwrap()["text"].as_str().unwrap().to_string();
+    let i = text.find("FSP-").unwrap();
+    let serial = text[i..i + 27].to_string();
+    let act = |m: &str, id: &str, os: &str| {
+        w.api("/v1/activate", &serde_json::json!({ "serial": serial, "activation_id": id, "device_hash": device_hash(m), "app_version": "2.4.0", "os": os }))
+    };
+    ok(&act("mac", "act-mac-0001", "macOS"));
+    ok(&act("win", "act-win-0001", "Windows"));
+    ok(&act("old", "act-old-0001", "Plan 9"));
+    let acc = |method: &str, path: &str, cookie: &str, body: &str| w.call(method, "account.filescape.app", path, &[("cookie", cookie), ("origin", "https://account.filescape.app")], body);
+    // Unknown addresses get the same answer and no email.
+    let before = w.net.emails().len();
+    assert!(acc("POST", "/login", "", "email=nobody%40example.com").body.contains("sign-in link is on its way"));
+    assert_eq!(w.net.emails().len(), before);
+    // The buyer gets a link.
+    assert!(acc("POST", "/login", "", "email=ada%40example.com").body.contains("sign-in link is on its way"));
+    let mail = w.net.emails().last().unwrap().clone();
+    let m: serde_json::Value = serde_json::from_str(&mail).unwrap();
+    let body = m["text"].as_str().unwrap();
+    let i = body.find("/signin?t=").unwrap() + "/signin?t=".len();
+    let t: String = body[i..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    // Opening the link doesn't spend it; pressing Sign in does, once.
+    let page = acc("GET", &format!("/signin?t={t}"), "", "");
+    assert!(page.body.contains("Sign in"));
+    let r = acc("POST", "/signin", "", &format!("t={t}"));
+    assert_eq!(r.status, 303, "{}", r.body);
+    let cookie = session_cookie(&r);
+    assert!(acc("POST", "/signin", "", &format!("t={t}")).body.contains("expired or was already used"));
+    // Signed in: the licence, its computers, 3 of 3 active. Unknown OS names aren't shown.
+    let home = acc("GET", "/", &cookie, "");
+    assert!(home.body.contains("3 of 3 computers active"), "{}", home.body);
+    assert!(home.body.contains("macOS") && home.body.contains("Windows") && !home.body.contains("Plan 9"));
+    assert!(!home.body.contains(&serial), "the full serial isn't shown");
+    // Another site can't post the form.
+    let evil = w.call("POST", "account.filescape.app", "/release", &[("cookie", &cookie), ("origin", "https://evil.example")], "activation=act-mac-0001");
+    assert_eq!(evil.status, 403);
+    // Release the Mac: the seat frees and the Mac's next check finds it ended.
+    let r = acc("POST", "/release", &cookie, "activation=act-mac-0001");
+    assert_eq!(r.status, 303);
+    assert!(acc("GET", "/", &cookie, "").body.contains("2 of 3 computers active"));
+    assert_eq!(rejection(&w.api("/v1/validate", &serde_json::json!({ "activation_id": "act-mac-0001", "device_hash": device_hash("mac") }))), Rejection::Deactivated);
+    ok(&act("new", "act-new-0001", "Linux"));
+    // Without the cookie (or after signing out) nothing can be released.
+    assert_eq!(acc("POST", "/release", "", "activation=act-win-0001").status, 303);
+    acc("POST", "/signout", &cookie, "");
+    assert!(acc("GET", "/", &cookie, "").body.contains("Email me a sign-in link"));
+    assert_eq!(acc("POST", "/release", &cookie, "activation=act-win-0001").status, 303);
+    ok(&w.api("/v1/validate", &serde_json::json!({ "activation_id": "act-win-0001", "device_hash": device_hash("win") })));
+    // Links expire after 15 minutes.
+    w.now.set(T0 + 2 * DAY);
+    acc("POST", "/login", "", "email=ada%40example.com");
+    let m: serde_json::Value = serde_json::from_str(w.net.emails().last().unwrap()).unwrap();
+    let body = m["text"].as_str().unwrap();
+    let i = body.find("/signin?t=").unwrap() + "/signin?t=".len();
+    let t: String = body[i..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    w.now.set(T0 + 2 * DAY + 16 * 60);
+    assert!(acc("POST", "/signin", "", &format!("t={t}")).body.contains("expired"));
 }

@@ -91,7 +91,7 @@ pub fn req_text(r: &Row, k: &str) -> Result<String, String> {
 }
 
 pub const LICENCE_COLS: &str = "id, serial_hash, serial_hint, serial_enc, kind, validity, owner, email, purpose, issued_at, first_activated_at, expires_at, max_activations, activations_used, revoked_at, revoke_reason, order_ref, refund_flag, emailed_at";
-pub const ACTIVATION_COLS: &str = "activation_id, licence_id, device_hash, app_version, created_at, counted, ended_at, voided_at, void_reason, last_seen_at";
+pub const ACTIVATION_COLS: &str = "activation_id, licence_id, device_hash, app_version, created_at, counted, ended_at, voided_at, void_reason, last_seen_at, os, released_via";
 
 /// A licence row, with what the core's [`Licence`] doesn't hold.
 #[derive(Debug, Clone)]
@@ -129,11 +129,13 @@ pub fn licence(r: &Row) -> Result<LicenceRow, String> {
     })
 }
 
-/// An activation row, with when the app last checked in.
+/// An activation row, with when the app last checked in and how it was released.
 #[derive(Debug, Clone)]
 pub struct ActivationRow {
     pub a: Activation,
     pub last_seen_at: Option<Ts>,
+    /// "app" or "account" when the owner ended it.
+    pub released_via: Option<String>,
 }
 
 pub fn activation(r: &Row) -> Result<ActivationRow, String> {
@@ -145,10 +147,12 @@ pub fn activation(r: &Row) -> Result<ActivationRow, String> {
             device_hash: req_text(r, "device_hash")?,
             app_version: text(r, "app_version").unwrap_or_default(),
             created_at: int(r, "created_at").unwrap_or(0),
+            os: text(r, "os"),
             counted: int(r, "counted").unwrap_or(1) != 0,
             ended_at: int(r, "ended_at"),
             voided,
         },
         last_seen_at: int(r, "last_seen_at"),
+        released_via: text(r, "released_via"),
     })
 }

@@ -308,7 +308,7 @@ impl Licensing {
                 id
             }
         };
-        Ok(ActivationRequest { serial, activation_id: id, device_hash: self.device.clone(), app_version: env!("CARGO_PKG_VERSION").into() })
+        Ok(ActivationRequest { serial, activation_id: id, device_hash: self.device.clone(), app_version: env!("CARGO_PKG_VERSION").into(), os: Some(os_name().into()) })
     }
 
     pub fn busy(&self) -> bool {
@@ -379,9 +379,17 @@ impl Licensing {
                 }
                 self.stored.last_validated = self.now();
                 let used = format!("{} of {}", cert.activations_used, cert.max_activations);
+                let perpetual = cert.kind == core::model::LicenceKind::Perpetual;
                 self.refresh();
                 self.ui.entry.clear();
-                self.ui.say(if r.consumed_use { format!("Activated. Activations used: {used}.") } else { "Activated again on this computer. No activation was used.".into() }, false);
+                self.ui.say(
+                    match (r.consumed_use, perpetual) {
+                        (true, true) => format!("Activated. Computers active: {used}."),
+                        (true, false) => format!("Activated. Activations used: {used}."),
+                        (false, _) => "Activated again on this computer. No activation was used.".into(),
+                    },
+                    false,
+                );
             }
             Answer::Activated(Err(e)) => self.ui.say(e, true),
             Answer::Validated(results) => {
@@ -807,5 +815,16 @@ mod tests {
         l.revalidate();
         assert!(matches!(l.standing, Standing::Perpetual(_)), "{:?}", l.standing);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Shown next to this computer on the customer's account page.
+fn os_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "Windows"
+    } else if cfg!(target_os = "macos") {
+        "macOS"
+    } else {
+        "Linux"
     }
 }

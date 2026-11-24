@@ -56,7 +56,8 @@ pub enum Status {
     Active,
     /// The validity period has ended.
     Expired,
-    /// Every use consumed. Machines already activated keep working.
+    /// A temporary licence with every use consumed. Machines already activated keep working.
+    /// (Perpetual licences count computers active now, so they never reach this.)
     ActivationLimitReached,
     /// Administratively disabled.
     Revoked,
@@ -97,6 +98,8 @@ pub struct Licence {
     pub first_activated_at: Option<Ts>,
     pub expires_at: Option<Ts>,
     pub max_activations: u32,
+    /// Activations ever made (history). A temporary licence's limit counts these; a perpetual
+    /// licence's limit counts computers active now ([`crate::rules::seats_in_use`]).
     pub activations_used: u32,
     pub revoked_at: Option<Ts>,
     pub revoke_reason: Option<String>,
@@ -117,13 +120,15 @@ impl Licence {
             Status::Expired
         } else if self.first_activated_at.is_none() {
             Status::Issued
-        } else if self.activations_used >= self.max_activations {
+        } else if self.kind() == LicenceKind::Temporary && self.activations_used >= self.max_activations {
             Status::ActivationLimitReached
         } else {
             Status::Active
         }
     }
 
+    /// Activations left on a temporary licence (uses, ever). For a perpetual licence see
+    /// [`crate::rules::seats_in_use`].
     pub fn uses_left(&self) -> u32 {
         self.max_activations.saturating_sub(self.activations_used)
     }
@@ -138,6 +143,9 @@ pub struct Activation {
     pub device_hash: String,
     pub app_version: String,
     pub created_at: Ts,
+    /// The operating system the app reported, if any.
+    #[serde(default)]
+    pub os: Option<String>,
     /// Whether this activation still counts against the limit (false after an admin void or reset).
     pub counted: bool,
     /// Deactivated by the user. A deactivated activation never comes back; activating that
@@ -167,6 +175,7 @@ pub struct ActivationCert {
     pub first_activated_at: Ts,
     pub expires_at: Option<Ts>,
     pub updates_until: Option<Ts>,
+    /// Temporary licence: activations used, ever. Perpetual licence: seats in use now.
     pub activations_used: u32,
     pub max_activations: u32,
     /// The server's clock when it signed: a trusted floor for the app's clock checks.
@@ -214,6 +223,10 @@ pub struct ActivationRequest {
     pub activation_id: String,
     pub device_hash: String,
     pub app_version: String,
+    /// "Windows", "macOS" or "Linux", shown next to the computer on the account page so the
+    /// buyer can tell their computers apart. Older apps don't send it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os: Option<String>,
 }
 
 /// The offline request file: an [`ActivationRequest`] carried to any computer with internet
@@ -258,7 +271,7 @@ impl Rejection {
             Rejection::UnknownSerial => "That serial number wasn't issued by Filescape.",
             Rejection::Revoked => "This licence has been revoked.",
             Rejection::Expired => "This licence has expired. Temporary licences can't be renewed or reactivated.",
-            Rejection::ActivationLimitReached => "This serial has already been activated the maximum number of times.",
+            Rejection::ActivationLimitReached => "This licence is already active on as many computers as it allows. Deactivate it on one of them (in Filescape, or at account.filescape.app), then try again.",
             Rejection::ActivationIdConflict => "This activation belongs to another computer.",
             Rejection::Deactivated => "This activation was ended. Activate again to continue.",
             Rejection::NotFound => "No such licence or activation.",

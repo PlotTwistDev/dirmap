@@ -39,7 +39,7 @@ pub async fn send<D: Db, N: Net>(cx: &Ctx<'_, D, N>, m: &Message) -> Result<bool
 fn what(row: &LicenceRow) -> String {
     match row.lic.validity {
         Validity::Perpetual { updates_until } => format!(
-            "This is a perpetual licence: it doesn't expire. It includes updates released until {}, and can be activated on up to {} computers.",
+            "This is a perpetual licence: it doesn't expire. It includes updates released until {}, and can be active on up to {} computers at once. To move it to a new computer, deactivate it on an old one (in Filescape, or at https://account.filescape.app).",
             date(updates_until).split(',').next().unwrap_or_default(),
             row.lic.max_activations
         ),
@@ -81,5 +81,15 @@ pub fn reminder_message(rows: &[(LicenceRow, String)], to: &str) -> Message {
         to: to.into(),
         subject: "Your Filescape serial numbers".into(),
         text: format!("Hello,\n\nYou asked for the Filescape serial numbers registered to this address:\n\n{list}\n\n{HOW}\n\nIf you didn't ask for this, you can ignore this email.\n\nFilescape (filescape.app)"),
+    }
+}
+
+pub fn login_message(link: &str, to: &str) -> Message {
+    Message {
+        to: to.into(),
+        subject: "Sign in to your Filescape account".into(),
+        text: format!(
+            "Hello,\n\nUse this link to sign in at account.filescape.app. It works once, for 15 minutes:\n\n{link}\n\nIf you didn't ask for this, you can ignore this email: nobody can sign in without the link.\n\nFilescape (filescape.app)"
+        ),
     }
 }

@@ -20,6 +20,7 @@ pub mod api;
 pub mod db;
 pub mod mail;
 pub mod paddle;
+pub mod portal;
 pub mod secret;
 pub mod store;
 pub mod web;

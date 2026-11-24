@@ -1,7 +1,7 @@
 # Glossary
 
-**Activation**: One computer using a licence. A temporary licence can be activated 3 times, a perpetual one 10
-times; deactivating doesn't give an activation back. See [Licensing](../settings/licensing.md#activations).
+**Activation**: One computer using a licence. A perpetual licence can be active on 3 computers at once, and
+deactivating one frees its place; a temporary licence can be activated 3 times, ever. See [Licensing](../settings/licensing.md#activations).
 
 **Breadcrumbs**: The row of folder names above the map (🏠 *scan* › *folder* › …) showing which folder the map is
 showing. Click one to go there.

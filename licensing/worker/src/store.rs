@@ -1,9 +1,12 @@
 //! Licences and activations in D1, applying the core's rules.
 //!
-//! Activation is the one place two requests can race for the last use. It is one batch (one
-//! transaction): a conditional `UPDATE … WHERE activations_used < max_activations` and an
-//! `INSERT … WHERE changes() = 1`. If the update changed nothing, someone else took the use (or
-//! the licence changed), so the request is decided again from fresh rows.
+//! Activation is the one place two requests can race for the last seat. The core decides from the
+//! licence and its activations ([`rules::decide`], which counts seats in use); the result is one
+//! batch (one transaction): an `UPDATE licences … WHERE activations_used = <as read>` (every new
+//! activation bumps that history counter, so it works as a version number) and an
+//! `INSERT … WHERE changes() = 1`. If the update changed nothing, another activation got in first
+//! (or the licence changed), so the request is decided again from fresh rows. A deactivation in
+//! between only frees a seat, so deciding on slightly old rows can never over-allocate.
 
 use crate::db::{self, ACTIVATION_COLS, ActivationRow, Db, LICENCE_COLS, LicenceRow, Stmt, V};
 use crate::{Ctx, Net, secret};
@@ -240,7 +243,7 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
         lic.email = email.map(|e| e.trim().to_lowercase());
         lic.order_ref = Some(order_ref.into());
         let ins = self.insert_stmt(&lic, &serial);
-        let ev = event_stmt(&lic.id, self.now, "issued", &format!("perpetual, {limit} activations, order {order_ref}"), actor);
+        let ev = event_stmt(&lic.id, self.now, "issued", &format!("perpetual, {limit} computers at once, order {order_ref}"), actor);
         match self.db.batch(vec![ins, ev]).await {
             Ok(_) => {}
             // Two deliveries of the same order at once: the other one won.
@@ -295,8 +298,8 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
                     self.db
                         .run("UPDATE activations SET last_seen_at = ?1, app_version = ?2 WHERE activation_id = ?3", vec![self.now.into(), (&req.app_version).into(), (&activation_id).into()])
                         .await?;
-                    let a = acts.into_iter().find(|a| a.activation_id == activation_id).ok_or("activation vanished")?;
-                    return Ok(self.respond(&lic, &a, false));
+                    let a = acts.iter().find(|a| a.activation_id == activation_id).ok_or("activation vanished")?;
+                    return Ok(self.respond(&lic, &acts, a, false));
                 }
                 Decision::NewUse { first_activation } => {
                     let first_expiry = first_activation.and_then(|(_, e)| e);
@@ -311,21 +314,22 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
                                 vec![self.now.into(), first_expiry.into(), (&lic.id).into(), lic.activations_used.into(), lic.max_activations.into()],
                             ),
                             (
-                                "INSERT INTO activations (activation_id, licence_id, device_hash, app_version, created_at, counted, last_seen_at) \
-                                 SELECT ?1, ?2, ?3, ?4, ?5, 1, ?5 WHERE changes() = 1",
-                                vec![(&req.activation_id).into(), (&lic.id).into(), (&req.device_hash).into(), (&req.app_version).into(), self.now.into()],
+                                "INSERT INTO activations (activation_id, licence_id, device_hash, app_version, created_at, counted, last_seen_at, os) \
+                                 SELECT ?1, ?2, ?3, ?4, ?5, 1, ?5, ?6 WHERE changes() = 1",
+                                vec![(&req.activation_id).into(), (&lic.id).into(), (&req.device_hash).into(), (&req.app_version).into(), self.now.into(), clean_os(req.os.as_deref()).into()],
                             ),
                             (
                                 "INSERT INTO events (licence_id, at, what, detail, actor) SELECT ?1, ?2, 'activated', ?3, 'app' WHERE changes() = 1",
-                                vec![(&lic.id).into(), self.now.into(), format!("{} ({} of {})", req.activation_id, lic.activations_used + 1, lic.max_activations).into()],
+                                vec![(&lic.id).into(), self.now.into(), format!("{} ({} of {})", req.activation_id, rules::seats_in_use(&lic, &acts, self.now) + 1, lic.max_activations).into()],
                             ),
                         ])
                         .await;
                     match changes {
                         Ok(c) if c.first() == Some(&1) && c.get(1) == Some(&1) => {
                             let row = self.licence(&lic.id).await?.ok_or("licence vanished")?;
-                            let a = self.activation(&req.activation_id).await?.ok_or("activation vanished")?;
-                            return Ok(self.respond(&row.lic, &a.a, true));
+                            let acts = self.acts_of(&lic.id).await?;
+                            let a = acts.iter().find(|a| a.activation_id == req.activation_id).ok_or("activation vanished")?;
+                            return Ok(self.respond(&row.lic, &acts, a, true));
                         }
                         // The licence changed under us (another activation took a use): decide again.
                         Ok(_) => continue,
@@ -339,8 +343,18 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
         Err(Fail::Err("too much contention activating this licence".into()))
     }
 
-    fn respond(&self, lic: &Licence, a: &Activation, consumed: bool) -> ActivationResponse {
-        let (activation, issuance) = rules::certificates(&self.cfg.signer, lic, a, self.now);
+    async fn acts_of(&self, licence_id: &str) -> Result<Vec<Activation>, String> {
+        Ok(self.activations_of(licence_id).await?.into_iter().map(|r| r.a).collect())
+    }
+
+    /// Seats the licence is using now ([`rules::seats_in_use`]).
+    pub async fn seats(&self, lic: &Licence) -> Result<u32, String> {
+        Ok(rules::seats_in_use(lic, &self.acts_of(&lic.id).await?, self.now))
+    }
+
+    fn respond(&self, lic: &Licence, acts: &[Activation], a: &Activation, consumed: bool) -> ActivationResponse {
+        let used = rules::seats_in_use(lic, acts, self.now);
+        let (activation, issuance) = rules::certificates(&self.cfg.signer, lic, a, used, self.now);
         ActivationResponse { activation, issuance, status: lic.status(self.now), consumed_use: consumed }
     }
 
@@ -356,20 +370,28 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
             });
         }
         self.db.run("UPDATE activations SET last_seen_at = ?1 WHERE activation_id = ?2", vec![self.now.into(), activation_id.into()]).await?;
-        Ok(self.respond(&lic, &a, false))
+        let acts = self.acts_of(&lic.id).await?;
+        Ok(self.respond(&lic, &acts, &a, false))
     }
 
-    /// POST /v1/deactivate. The use isn't given back.
+    /// POST /v1/deactivate. A perpetual licence's seat is freed (subject to the release cooldown);
+    /// a temporary licence's use isn't given back.
     pub async fn deactivate(&self, activation_id: &str, device_hash: &str) -> Result<(), Fail> {
         let a = self.activation(activation_id).await?.ok_or(Rejection::NotFound)?.a;
         if a.device_hash != device_hash {
             return Err(Fail::No(Rejection::ActivationIdConflict));
         }
-        if a.ended_at.is_none() {
+        self.release(&a, "app").await?;
+        Ok(())
+    }
+
+    /// Ends an activation by its owner's choice (`via`: "app" or "account").
+    pub async fn release(&self, a: &Activation, via: &str) -> Result<(), String> {
+        if a.ended_at.is_none() && a.voided.is_none() {
             self.db
                 .batch(vec![
-                    ("UPDATE activations SET ended_at = ?1 WHERE activation_id = ?2 AND ended_at IS NULL", vec![self.now.into(), activation_id.into()]),
-                    event_stmt(&a.licence_id, self.now, "deactivated", activation_id, "app"),
+                    ("UPDATE activations SET ended_at = ?1, released_via = ?2 WHERE activation_id = ?3 AND ended_at IS NULL", vec![self.now.into(), via.into(), (&a.activation_id).into()]),
+                    event_stmt(&a.licence_id, self.now, "deactivated", &a.activation_id, via),
                 ])
                 .await?;
         }
@@ -399,7 +421,8 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
             .map(|_| ())
     }
 
-    /// Reset activations: every use given back; machines already activated keep working.
+    /// Reset activations: a temporary licence gets every use back; a perpetual licence's release
+    /// cooldown is cleared. Machines already activated keep working (and keep their seats).
     pub async fn reset_activations(&self, licence_id: &str, reason: &str, actor: &str) -> Result<(), String> {
         let before = self.licence(licence_id).await?.map_or(0, |r| r.lic.activations_used);
         self.db
@@ -505,6 +528,11 @@ pub fn describe(v: &Validity, max: u32) -> String {
     match v {
         Validity::FirstActivation { days } => format!("temporary, {days} days from first activation, {max} activations"),
         Validity::FixedExpiry { expires_at } => format!("temporary, until {}, {max} activations", filescape_licence::export::date_time(*expires_at)),
-        Validity::Perpetual { updates_until } => format!("perpetual, updates until {}, {max} activations", filescape_licence::export::date_time(*updates_until)),
+        Validity::Perpetual { updates_until } => format!("perpetual, updates until {}, {max} computers at once", filescape_licence::export::date_time(*updates_until)),
     }
+}
+
+/// The operating system name the app sent, if it's one we know (it's shown on the account page).
+pub fn clean_os(os: Option<&str>) -> Option<String> {
+    os.filter(|o| matches!(*o, "Windows" | "macOS" | "Linux")).map(str::to_string)
 }

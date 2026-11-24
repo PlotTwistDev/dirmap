@@ -31,9 +31,13 @@ pub const HOUR: Ts = 3_600;
 pub const DEFAULT_TEMPORARY_DAYS: u32 = 30;
 /// Activation limit of a temporary licence (the spec: three uses, ever).
 pub const DEFAULT_MAX_ACTIVATIONS: u32 = 3;
-/// Default activation limit of a perpetual licence (Rich, 23 Nov 2026: generous, and adjustable
-/// from the admin site once real numbers are in).
-pub const DEFAULT_PERPETUAL_ACTIVATIONS: u32 = 10;
+/// Default number of computers a perpetual licence can have active at once (Rich, 24 Nov 2026:
+/// three active computers; deactivating one frees its seat). Adjustable from the admin site.
+pub const DEFAULT_PERPETUAL_ACTIVATIONS: u32 = 3;
+/// A perpetual licence's first self-service release in this many days frees its seat at once;
+/// each further release in the window keeps the seat taken until the window passes, so a serial
+/// can't be rotated round many computers.
+pub const RELEASE_COOLDOWN_DAYS: i64 = 7;
 /// The admin Activations page flags a licence with more new machines than this in
 /// [`SHARING_WINDOW_DAYS`] as possibly shared.
 pub const SHARING_FLAG_MACHINES: usize = 5;
