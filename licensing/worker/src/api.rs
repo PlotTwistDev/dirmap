@@ -6,6 +6,7 @@
 use crate::store::Fail;
 use crate::{Ctx, Db, Net, Req, Resp};
 use filescape_licence::model::{ActivationRequest, OFFLINE_REQUEST_FORMAT, OfflineRequest, Rejection};
+use filescape_licence::sign::Purpose;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -72,7 +73,18 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str) -> 
             Err(resp) => Ok(resp),
         },
         ("POST", "/v1/paddle") => crate::paddle::webhook(cx, req).await,
-        (_, "/v1/activate" | "/v1/offline" | "/v1/validate" | "/v1/deactivate" | "/v1/paddle") => Ok(Resp::text(405, "Method not allowed.")),
+        // The app's update check at launch. A plain GET: nothing about the user or the computer
+        // is sent, and the answer is the same for everyone, so caches may keep it a few minutes.
+        ("GET", "/v1/release") => {
+            let mut resp = match cx.latest_release().await? {
+                Some(m) => Resp::json(200, &serde_json::json!({ "release": cx.cfg.signer.sign(Purpose::Release, &m) })),
+                None => Resp::json(404, &serde_json::json!({ "error": "no_release" })),
+            };
+            resp.headers.retain(|(k, _)| k != "cache-control");
+            resp.headers.push(("cache-control".into(), "public, max-age=300".into()));
+            Ok(resp)
+        }
+        (_, "/v1/activate" | "/v1/offline" | "/v1/validate" | "/v1/deactivate" | "/v1/paddle" | "/v1/release") => Ok(Resp::text(405, "Method not allowed.")),
         _ => Ok(Resp::text(404, "Not found.")),
     }
 }

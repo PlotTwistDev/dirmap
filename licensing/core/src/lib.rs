@@ -11,12 +11,14 @@
 //! - [`standing`]: which licence applies on this machine now (precedence, evaluation, clock checks)
 //! - [`features`]: what is free and what needs a licence, and the start-only [`features::Permit`]
 //! - [`export`]: the licence certificate file and the human-readable details
+//! - [`release`]: the signed newest-release manifest, and whether a licence covers that release
 //!
 //! Times are Unix seconds, UTC.
 
 pub mod export;
 pub mod features;
 pub mod model;
+pub mod release;
 pub mod rules;
 pub mod serial;
 pub mod sign;

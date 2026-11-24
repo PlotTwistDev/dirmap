@@ -25,6 +25,9 @@ pub enum Purpose {
     /// The server's authenticated word that an activation ended or its licence was revoked
     /// ([`crate::model::StatusStatement`]). Unlocks nothing.
     Status,
+    /// The newest release ([`crate::release::ReleaseManifest`]), for the app's update notice.
+    /// Unlocks nothing.
+    Release,
 }
 
 impl Purpose {
@@ -34,6 +37,7 @@ impl Purpose {
             Purpose::Issuance => "issuance",
             Purpose::Time => "time",
             Purpose::Status => "status",
+            Purpose::Release => "release",
         }
     }
 }

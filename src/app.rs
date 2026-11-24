@@ -2560,6 +2560,7 @@ impl eframe::App for App {
         self.help_regions.clear();
 
         self.licence.tick(&ctx);
+        self.licence.update_tick(&ctx, self.settings.check_updates);
         self.licence.prompt(&ctx);
         if std::mem::take(&mut self.licence.ui.open_settings) {
             self.dialog.open_licensing(&self.settings);
@@ -2667,6 +2668,7 @@ impl eframe::App for App {
         self.poll_sequences(&ctx);
 
         self.licence.banner(ui);
+        self.licence.update_notice(ui);
         let r = egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(2.0);
             if analysis {

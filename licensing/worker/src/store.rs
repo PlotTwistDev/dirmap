@@ -11,6 +11,7 @@
 use crate::db::{self, ACTIVATION_COLS, ActivationRow, Db, LICENCE_COLS, LicenceRow, Stmt, V};
 use crate::{Ctx, Net, secret};
 use filescape_licence::model::*;
+use filescape_licence::release::ReleaseManifest;
 use filescape_licence::rules::{self, ActivationReportRow, Decision, IssueError, TemporaryOptions};
 use filescape_licence::{Ts, serial};
 
@@ -177,6 +178,36 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
             ])
             .await?;
         Ok(Ok(()))
+    }
+
+    /// The newest release, as set on the admin Releases page, with `signed_at` set to now. `None`
+    /// until one is set.
+    pub async fn latest_release(&self) -> Result<Option<ReleaseManifest>, String> {
+        let r = self.db.first("SELECT value FROM settings WHERE key = 'latest_release'", vec![]).await?;
+        Ok(r.and_then(|r| db::text(&r, "value")).and_then(|v| serde_json::from_str::<ReleaseManifest>(&v).ok()).map(|mut m| {
+            m.signed_at = self.now;
+            m
+        }))
+    }
+
+    /// Announce a release to every copy of Filescape (they check at launch), or with `None` stop
+    /// announcing one.
+    pub async fn set_latest_release(&self, m: Option<&ReleaseManifest>, actor: &str) -> Result<(), String> {
+        let set: Stmt = match m {
+            Some(m) => (
+                "INSERT INTO settings (key, value) VALUES ('latest_release', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                vec![serde_json::to_string(m).unwrap().into()],
+            ),
+            None => ("DELETE FROM settings WHERE key = 'latest_release'", vec![]),
+        };
+        let what = m.map_or("latest release: none".to_string(), |m| format!("latest release: {} ({})", m.version, crate::web::date(m.released_at)));
+        self.db
+            .batch(vec![
+                set,
+                ("INSERT INTO events (licence_id, at, what, detail, actor) VALUES (NULL, ?1, 'setting', ?2, ?3)", vec![self.now.into(), what.into(), actor.into()]),
+            ])
+            .await
+            .map(|_| ())
     }
 
     // ---- Issuing ----

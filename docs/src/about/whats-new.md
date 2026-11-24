@@ -2,6 +2,12 @@
 
 ## Next version
 
+### Update notices
+
+- Filescape checks for a newer version each time it starts and, when there is one, says so at
+  the top of the window, with a download link and whether your licence covers it. See
+  [Updates](../settings/licensing.md#updates). Turn it off in **Settings > General**.
+
 ### A new look for the treemap
 
 - The treemap has a new **Modern** tile style, the same look as the map on filescape.app: soft
