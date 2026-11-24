@@ -308,6 +308,9 @@ impl Help {
                         );
                         ui.ctx().copy_text(text);
                     }
+                    if ui.button("Contact Us…").on_hover_text("Opens the contact form on filescape.app (paste the copied details into a problem report)").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(format!("{}?topic=bug", crate::licence::CONTACT_URL)));
+                    }
                     if ui.button("More about Filescape…").clicked() {
                         more = true;
                     }

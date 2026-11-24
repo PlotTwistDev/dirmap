@@ -1,7 +1,7 @@
 //! The Cloudflare Worker: environment, D1, outbound fetch, and the request/response conversion.
 
 use crate::db::{Db, Row, Stmt, V};
-use crate::{AccessConfig, Config, Ctx, Hosts, MailConfig, Net, PaddleConfig, Req};
+use crate::{AccessConfig, Config, ContactConfig, Ctx, Hosts, MailConfig, Net, PaddleConfig, Req};
 use filescape_licence::sign::Signer;
 use wasm_bindgen::JsValue;
 use worker::*;
@@ -87,7 +87,11 @@ fn config(env: &Env) -> std::result::Result<Config, String> {
     if let Some(h) = opt(env, "HOST_ADMIN") {
         hosts.admin = h;
     }
-    Ok(Config { signer, serial_key, paddle, mail, access, dev: opt(env, "DEV").is_some_and(|d| d == "1"), hosts })
+    if let Some(h) = opt(env, "HOST_SITE") {
+        hosts.site = h;
+    }
+    let contact = ContactConfig { notify_to: opt(env, "CONTACT_NOTIFY_TO"), turnstile_secret: opt(env, "TURNSTILE_SECRET") };
+    Ok(Config { signer, serial_key, paddle, mail, access, dev: opt(env, "DEV").is_some_and(|d| d == "1"), hosts, contact })
 }
 
 #[event(fetch)]

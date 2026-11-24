@@ -190,7 +190,7 @@ impl Licensing {
                 ui.label(match r {
                     Reason::ClockRollback => "This computer's clock is behind a time Filescape has already seen, so time-limited licences are paused. Set the clock right, or go online so Filescape can check the time.",
                     Reason::UpdatesLapsed(_) => "Your licence covers versions released while its updates last. This version is newer; use an earlier one, or buy a new licence.",
-                    Reason::Revoked => "Your licence has been revoked. Contact support if this is a mistake.",
+                    Reason::Revoked => "Your licence has been revoked. If you think this is a mistake, write to us at filescape.app/contact (Help > Contact Filescape).",
                     _ => "The evaluation has ended. The file browser, the disk map and basic filters stay free.",
                 });
             }

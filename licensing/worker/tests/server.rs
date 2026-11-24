@@ -5,14 +5,14 @@ use filescape_licence::model::*;
 use filescape_licence::sign::{Purpose, Signer, Verifier};
 use filescape_licence::{DAY, device_hash};
 use filescape_licence_server::db::{Row, Stmt, V};
-use filescape_licence_server::{AccessConfig, Config, Ctx, Db, Hosts, MailConfig, Net, PaddleConfig, Req, Resp, handle, paddle};
+use filescape_licence_server::{AccessConfig, Config, ContactConfig, Ctx, Db, Hosts, MailConfig, Net, PaddleConfig, Req, Resp, handle, paddle};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 const T0: i64 = 1_795_392_000; // 23 Nov 2026
-const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql")];
+const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql")];
 
 /// Gives way once, so two requests run with `join` interleave like concurrent Workers.
 struct YieldOnce(bool);
@@ -149,6 +149,7 @@ fn world() -> World {
             access: None,
             dev: true,
             hosts: Hosts::default(),
+            contact: ContactConfig { notify_to: Some("owner@example.net".into()), turnstile_secret: None },
         },
         now: Cell::new(T0),
     }
@@ -771,4 +772,119 @@ fn releases_are_announced_signed_and_only_with_filescape_links() {
     let env: filescape_licence::sign::Envelope = serde_json::from_value(serde_json::from_str::<serde_json::Value>(&r.body).unwrap()["release"].clone()).unwrap();
     assert_eq!(w.verifier().verify::<ReleaseManifest>(&env, Purpose::Release).unwrap().released_at, T0 + 3600);
     assert_eq!(w.call("POST", "api.filescape.app", "/v1/release", &[], "").status, 405);
+}
+
+// ---------- contact form ----------
+
+impl World {
+    fn contact(&self, form: &str, json: bool, ip: &str) -> Resp {
+        let mut h = vec![("origin", "https://filescape.app"), ("content-type", "application/x-www-form-urlencoded"), ("cf-connecting-ip", ip)];
+        if json {
+            h.push(("accept", "application/json"));
+        }
+        self.call("POST", "api.filescape.app", "/v1/contact", &h, form)
+    }
+
+    fn message_ids(&self) -> Vec<String> {
+        pollster::block_on(self.db.all("SELECT id FROM messages ORDER BY created_at", vec![])).unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect()
+    }
+}
+
+const MSG: &str = "name=Ada+Buyer&email=Ada%40Example.com&topic=Bug+report&message=The+map+is+blank+on+my+NAS.&elapsed=9000";
+
+#[test]
+fn contact_form_stores_notifies_and_is_answered_from_the_admin_site() {
+    let w = world();
+    let r = w.contact(MSG, true, "203.0.113.9");
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.header("access-control-allow-origin"), Some("https://filescape.app"));
+    let ids = w.message_ids();
+    assert_eq!(ids.len(), 1);
+    let id = &ids[0];
+
+    // The owner is told, with a link to the admin site and no Reply-To that would leak their address.
+    let mails = w.net.emails();
+    assert_eq!(mails.len(), 1);
+    let n: serde_json::Value = serde_json::from_str(&mails[0]).unwrap();
+    assert_eq!(n["to"][0], "owner@example.net");
+    assert!(n.get("reply_to").is_none());
+    assert!(n["text"].as_str().unwrap().contains(&format!("https://admin.filescape.app/messages/{id}")));
+    assert!(n["text"].as_str().unwrap().contains("The map is blank on my NAS."));
+
+    // The admin lists it as new, shows it, and replies.
+    let list = w.call("GET", "localhost", "/admin/messages", &[], "");
+    assert!(list.body.contains("ada@example.com") && list.body.contains("New"), "{}", list.body);
+    assert!(w.call("GET", "localhost", "/admin/", &[], "").body.contains("1 new message"));
+    let page = w.call("GET", "localhost", &format!("/admin/messages/{id}"), &[], "");
+    assert!(page.body.contains("The map is blank on my NAS."));
+    let r = w.admin(&format!("/messages/{id}/reply"), "reply=Thanks%2C+fixed+in+0.3.");
+    assert_eq!(r.status, 303);
+    let mails = w.net.emails();
+    let reply: serde_json::Value = serde_json::from_str(mails.last().unwrap()).unwrap();
+    assert_eq!(reply["to"][0], "ada@example.com");
+    let text = reply["text"].as_str().unwrap();
+    assert!(text.contains("Thanks, fixed in 0.3.") && text.contains("> The map is blank on my NAS.") && text.contains("https://filescape.app/contact"));
+    assert!(!text.contains("owner@example.net"));
+    let page = w.call("GET", "localhost", &format!("/admin/messages/{id}"), &[], "");
+    assert!(page.body.contains("Answered") && page.body.contains("Thanks, fixed in 0.3."));
+
+    // Close hides it from the open list; delete removes it and its replies.
+    w.admin(&format!("/messages/{id}/close"), "");
+    assert!(!w.call("GET", "localhost", "/admin/messages", &[], "").body.contains("ada@example.com"));
+    assert!(w.call("GET", "localhost", "/admin/messages?f=all", &[], "").body.contains("ada@example.com"));
+    w.admin(&format!("/messages/{id}/delete"), "");
+    assert!(w.message_ids().is_empty());
+    let left = pollster::block_on(w.db.all("SELECT count(*) AS n FROM message_replies", vec![])).unwrap();
+    assert_eq!(left[0]["n"], 0);
+}
+
+#[test]
+fn contact_form_refuses_bad_input_other_sites_and_floods() {
+    let w = world();
+    // Without the page's script the browser is sent back to the page with the outcome.
+    let r = w.contact("email=nope&message=Hello+there+friend", false, "203.0.113.1");
+    assert_eq!(r.status, 303);
+    assert_eq!(r.header("location"), Some("https://filescape.app/contact?error=email"));
+    let r = w.contact("email=a%40b.co&message=short", true, "203.0.113.1");
+    assert_eq!(r.status, 400);
+    assert!(r.body.contains("\"message\""));
+    let r = w.contact("email=a%40b.co&message=A+long+enough+message.", false, "203.0.113.1");
+    assert_eq!(r.header("location"), Some("https://filescape.app/contact?sent=1"));
+
+    // Another site can't post it.
+    let r = w.call("POST", "api.filescape.app", "/v1/contact", &[("origin", "https://evil.example")], MSG);
+    assert_eq!(r.status, 403);
+
+    // Honeypot and too-fast posts look sent but aren't kept.
+    assert_eq!(w.contact(&format!("{MSG}&website=http%3A%2F%2Fspam"), true, "203.0.113.2").status, 200);
+    assert_eq!(w.contact("email=b%40b.co&message=A+long+enough+message.&elapsed=400", true, "203.0.113.2").status, 200);
+    assert_eq!(w.message_ids().len(), 1);
+
+    // Five an hour from one address or one IP.
+    for i in 0..5 {
+        let r = w.contact(&format!("email=c{i}%40b.co&message=A+long+enough+message."), true, "198.51.100.7");
+        assert_eq!(r.status, 200, "{i}: {}", r.body);
+    }
+    let r = w.contact("email=z%40b.co&message=A+long+enough+message.", true, "198.51.100.7");
+    assert_eq!(r.status, 429);
+    w.now.set(w.now.get() + 3601);
+    assert_eq!(w.contact("email=z%40b.co&message=A+long+enough+message.", true, "198.51.100.7").status, 200);
+
+    // Only a keyed hash of the IP is stored.
+    let rows = pollster::block_on(w.db.all("SELECT ip_hash, topic FROM messages", vec![])).unwrap();
+    assert!(rows.iter().all(|r| !r["ip_hash"].as_str().unwrap().contains("198.51")));
+    assert!(rows.iter().all(|r| r["topic"] == "Other"));
+}
+
+#[test]
+fn contact_form_checks_turnstile_when_configured() {
+    let mut w = world();
+    w.cfg.contact.turnstile_secret = Some("0x4AAA-secret".into());
+    let r = w.contact(MSG, true, "203.0.113.9");
+    assert_eq!(r.status, 400);
+    assert!(r.body.contains("challenge"));
+    // The fake network answers 404 to siteverify, which is an error, not a pass.
+    let r = w.contact(&format!("{MSG}&cf-turnstile-response=tok"), true, "203.0.113.9");
+    assert_eq!(r.status, 500);
+    assert!(w.message_ids().is_empty());
 }

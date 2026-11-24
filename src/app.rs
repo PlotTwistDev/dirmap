@@ -855,6 +855,10 @@ impl App {
                 self.dialog.open_licensing(&self.settings);
                 ui.close();
             }
+            if ui.add(egui::Button::new(style::mi("Contact Filescape…"))).on_hover_text("Opens the contact form on filescape.app: questions, bug reports, licence problems").clicked() {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(crate::licence::CONTACT_URL));
+                ui.close();
+            }
             if ui.add(egui::Button::new(style::mi("About Filescape"))).clicked() {
                 self.help.about_open = true;
                 ui.close();

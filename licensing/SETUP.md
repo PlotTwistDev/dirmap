@@ -60,6 +60,7 @@ npx wrangler@4 secret put SERIAL_KEY
 npx wrangler@4 secret put PADDLE_WEBHOOK_SECRET     # step 6
 npx wrangler@4 secret put PADDLE_API_KEY            # "Filescape licence Worker" key in Paddle
 npx wrangler@4 secret put RESEND_API_KEY            # step 5
+npx wrangler@4 secret put CONTACT_NOTIFY_TO         # optional: your address, emailed about contact form messages
 ```
 
 You can add the Paddle and Resend ones later; until then purchases aren't processed and nothing
@@ -77,14 +78,26 @@ The admin site refuses everyone until this is set up.
 4. In `wrangler.toml`, set `ACCESS_TEAM_DOMAIN` to the team domain. Store the tag with
    `wrangler secret put ACCESS_AUD` (run in `licensing/worker`), so later deploys never blank it.
 
-## 5. Email (Resend) and support mail
+## 5. Email (Resend) and the contact form
 
 1. Sign up at resend.com, **Domains > Add domain** `filescape.app`, and add the DNS records it shows
    in Cloudflare DNS. Wait for it to verify.
 2. **API Keys > Create**, "Sending access", domain filescape.app. Put it in `RESEND_API_KEY` (step 3).
-3. Licence emails come from `licences@filescape.app` with replies to `support@filescape.app`
-   (`MAIL_FROM`, `MAIL_REPLY_TO` in `wrangler.toml`). To receive support mail, turn on Cloudflare
-   **Email Routing** for filescape.app and forward `support@` to your own address.
+3. Licence emails come from `licences@filescape.app` (`MAIL_FROM` in `wrangler.toml`) with no
+   Reply-To: there's no filescape.app mailbox. Every email and page points people at the contact
+   form, https://filescape.app/contact, instead.
+4. The contact form posts to `https://api.filescape.app/v1/contact`. Messages are kept in D1 and
+   listed at https://admin.filescape.app/messages, where you reply: replies are emailed from
+   `MAIL_FROM`, so your own address never appears. To be told when one arrives, store your address
+   as a secret (it never goes in the repository or on the site):
+   `npx wrangler@4 secret put CONTACT_NOTIFY_TO`. The notice has no Reply-To; answer from the
+   admin site.
+5. Spam: the form has a hidden honeypot field, a minimum time on the page, 5 messages an hour per
+   address and per IP (only a keyed hash of the IP is stored), and 300 a day in all. For more,
+   add Cloudflare **Turnstile** (free): **Turnstile > Add widget**, hostname `filescape.app`,
+   mode Managed. Put the site key in `turnstileSiteKey` in `licensing/site/config.js` and the
+   secret key in `npx wrangler@4 secret put TURNSTILE_SECRET`, then deploy both. (Set the secret
+   only once the site carries the site key, or the form refuses every message.)
 
 ## 6. Deploy the Worker
 
@@ -117,8 +130,8 @@ and redeploy the website (step 8).
 
 ## 8. The website (Cloudflare Pages)
 
-`licensing/site` is the whole site, ready to deploy: the homepage, `/buy`, `/terms`, `/privacy`
-and `/refunds`. The homepage is generated from `licensing/site-src`; after changing anything
+`licensing/site` is the whole site, ready to deploy: the homepage, `/buy`, `/contact`, `/terms`,
+`/privacy` and `/refunds`. The homepage is generated from `licensing/site-src`; after changing anything
 there, run `python3 licensing/site-src/build.py` to rebuild `site/index.html`. The Paddle token
 and price for both checkout buttons are in `licensing/site/config.js`.
 
@@ -240,6 +253,17 @@ Phase 2 (24 Nov 2026) adds computer seats and customer sign-in. On a server that
 4. Deploy the website (step 8) for the new "3 computers at once" copy, terms and privacy text.
 
 Sign-in links are emailed through Resend (step 5), so the account page needs `RESEND_API_KEY`.
+
+## Updating a server for the contact form
+
+The contact form (24 Nov 2026) replaces the support@ address. On a server that's already running:
+
+1. `npx wrangler@4 d1 migrations apply filescape-licences --remote` (applies
+   `0003_contact_messages.sql`: the `messages` and `message_replies` tables).
+2. Optionally `npx wrangler@4 secret put CONTACT_NOTIFY_TO` (step 5.4).
+3. Deploy the Worker (step 6), then the website (step 8).
+4. Send a test message at https://filescape.app/contact and answer it at
+   https://admin.filescape.app/messages.
 
 ## Local development
 

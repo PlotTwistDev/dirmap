@@ -7,6 +7,8 @@
 - Filescape checks for a newer version each time it starts and, when there is one, says so at
   the top of the window, with a download link and whether your licence covers it. See
   [Updates](../settings/licensing.md#updates). Turn it off in **Settings > General**.
+- **❓ Help > Contact Filescape…** (and **Contact Us…** in **About Filescape**) opens the contact
+  form on filescape.app. See [Still stuck? Contact us](../troubleshooting/index.md#still-stuck-contact-us).
 
 ### A new look for the treemap
 
