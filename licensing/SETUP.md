@@ -183,6 +183,31 @@ is checked against comes from the commit being built (or `SOURCE_DATE_EPOCH`), s
 to edit at release time. If you ever make a new signing key, add its public half to
 `PRODUCTION_KEYS` and ship that build *before* switching the Worker to the new key.
 
+## 10b. Releasing a new version (the in-app update notice)
+
+Every copy of Filescape asks `https://api.filescape.app/v1/release` at launch. The Worker answers
+with the release set on the admin site's **Releases** page, signed with the same key as the
+licences, so there's no extra key or file to look after. Until a release is set there, the app
+shows nothing.
+
+1. Bump `version` in `Cargo.toml` (for example `0.2.0` to `0.3.0`). The notice compares version
+   numbers: a build with the same version as the announced one never shows it.
+2. Commit, then tag and push: `git tag v0.3.0 && git push origin v0.3.0`. CI builds the three
+   downloads and attaches them to a GitHub release.
+3. Upload the downloads to R2 (step 9), so `downloads.filescape.app/latest/...` is the new version
+   before anyone is told about it.
+4. Get the release date the build uses for update entitlement: `git log -1 --format=%ct v0.3.0`.
+5. https://admin.filescape.app/releases: version `0.3.0`, release date (paste the number from
+   step 4, or type the date), an optional one-line summary and release notes link (on
+   filescape.app), then **Announce**. Download links can stay empty: they default to
+   `downloads.filescape.app/latest/<os>`.
+6. Copies of Filescape show the notice the next time they start (answers are cached for up to 5
+   minutes). A licence whose updates ended before the release date is told so, with a link to buy;
+   free and evaluation users are told it's a free update.
+
+**Stop announcing it** on the same page withdraws the notice, for example if a release has to be
+pulled.
+
 ## 11. Try a real purchase
 
 1. In Paddle, create a 100% discount code limited to one use.

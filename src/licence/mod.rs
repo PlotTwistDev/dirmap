@@ -14,6 +14,7 @@
 //! Expiry never deletes anything: settings, favourites, transfer history and scans stay.
 
 pub mod ui;
+pub mod update;
 
 use filescape_licence as core;
 use core::model::{ActivationCert, ActivationRequest, ActivationResponse, IssuanceCert, OFFLINE_REQUEST_FORMAT, OfflineRequest, Rejection, StatusStatement};
@@ -115,6 +116,8 @@ pub struct Licensing {
     keychain_high_water: Ts,
     rx: Option<mpsc::Receiver<Answer>>,
     pub ui: ui::State,
+    /// The update check at launch ([`update`]).
+    pub update: update::UpdateCheck,
 }
 
 fn system_now() -> Ts {
@@ -172,6 +175,7 @@ impl Licensing {
             keychain_high_water: kc_high,
             rx: None,
             ui: ui::State::default(),
+            update: update::UpdateCheck::default(),
         };
         me.refresh();
         me
@@ -728,6 +732,7 @@ mod tests {
             keychain_high_water: 0,
             rx: None,
             ui: ui::State::default(),
+            update: update::UpdateCheck::default(),
         };
         me.refresh();
         me

@@ -20,6 +20,7 @@ settings changed. Rescan**.
 | **Sizes** <!-- setting:units --> | Binary | **Binary** (1 KB = 1,024 bytes, like Explorer) or **Decimal** (1 kB = 1,000 bytes, like drive makers and macOS). Also changes how typed sizes are read. See [Units](../disk-usage/sizes.md#units-binary-and-decimal). |
 | **Striped rows in lists** <!-- setting:stripes --> | On | Shades every other row in the file manager and the side panel lists. |
 | **Show folders and files as they are found** <!-- setting:live_tree --> | On | Shows a tree of folders filling in during a scan. Off shows only the progress bar. |
+| **Check for a new version when Filescape starts** <!-- setting:check_updates --> | On | At each launch, asks filescape.app for the newest version number and shows a notice when there's a newer one, saying whether your licence covers it. Nothing about you or the computer is sent. See [Updates](licensing.md#updates). |
 
 ## Filtering
 

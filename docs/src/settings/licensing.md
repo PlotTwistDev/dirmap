@@ -41,6 +41,27 @@ If you have both, the perpetual licence is used. When a temporary licence expire
 shows **Your temporary Filescape licence has expired**, Professional features ask for a licence
 again, and everything you'd saved is kept.
 
+## Updates
+
+Each time Filescape starts it asks filescape.app for the newest version (in the background, so
+it never slows the start). When there's a newer one, a notice at the top of the window says
+**Filescape 0.3.0 is available** and what it means for your licence:
+
+| Notice | Meaning |
+|---|---|
+| **Your licence covers it.** | Your perpetual licence's updates include the new version: install it and everything stays unlocked. |
+| **Your licence's updates ended on …** | The new version was released after your updates ended. You can still install it, but only the free features would be unlocked there. The version you have keeps working with everything unlocked, as long as you like. **Buy a licence** opens the shop. |
+| **It's a free update.** | You're using the free features, the evaluation or a temporary licence, which work the same in the new version. |
+
+**Download** gets the new version for your system and **What's new** opens the release notes.
+**✖** hides the notice until Filescape next starts. Being offline, or the check failing, never
+locks or delays anything: there's simply no notice.
+
+The check sends no serial number, computer identifier or anything about your files: it's an
+ordinary request for the latest version number, and the answer is signed by the licence server so
+it can't be forged. Turn it off with **⚙ Settings > General > Check for a new version when
+Filescape starts**.
+
 ## Entering a licence
 
 Type or paste the serial number (it starts with `FST-` for a temporary licence or `FSP-` for a
