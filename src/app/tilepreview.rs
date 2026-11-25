@@ -36,6 +36,9 @@ pub(super) struct TilePreviews {
     sharp: Thumbs,
     /// When each preview on screen first appeared, for the fade-in.
     born: HashMap<PathBuf, Instant>,
+    /// A two-tone check, repeated behind pictures so transparent parts show as transparent
+    /// rather than taking the tile's colour.
+    checker: Option<egui::TextureHandle>,
 }
 
 impl Default for TilePreviews {
@@ -44,6 +47,7 @@ impl Default for TilePreviews {
             small: Thumbs::with(Config { max: SMALL, local_only: true, text: true, budget: 96 << 20 }),
             sharp: Thumbs::with(Config { max: SHARP, local_only: true, text: false, budget: 160 << 20 }),
             born: HashMap::new(),
+            checker: None,
         }
     }
 }
@@ -142,6 +146,16 @@ impl App {
                     p.image(id, page, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE.gamma_multiply(alpha));
                 }
                 Got::Tex(id, size) => {
+                    // Checks behind it, seen only through transparent pixels.
+                    let checker = self.tile_prev.checker.get_or_insert_with(|| {
+                        let (a, b) = (Color32::from_gray(46), Color32::from_gray(62));
+                        let img = egui::ColorImage::new([2, 2], vec![a, b, b, a]);
+                        let opts = egui::TextureOptions { magnification: egui::TextureFilter::Nearest, minification: egui::TextureFilter::Nearest, wrap_mode: egui::TextureWrapMode::Repeat, mipmap_mode: None };
+                        ctx.load_texture("tile-checker", img, opts)
+                    });
+                    // Two checks per 16 points, fixed to the tile so they don't crawl as it moves.
+                    let cells = inner.size() / 16.0;
+                    p.image(checker.id(), inner, Rect::from_min_max(pos2(0.0, 0.0), pos2(cells.x, cells.y)), Color32::WHITE.gamma_multiply(alpha));
                     // A picture fills the tile, cropped to its shape from the middle.
                     let s = (inner.width() / size.x).max(inner.height() / size.y);
                     let (fx, fy) = (inner.width() / (size.x * s), inner.height() / (size.y * s));
