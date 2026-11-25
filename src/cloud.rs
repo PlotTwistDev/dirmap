@@ -134,7 +134,8 @@ impl Root {
         use crate::scan::store;
         match self.kind {
             Kind::Mount => store::CLOUD | store::MOUNT,
-            _ => store::CLOUD,
+            Kind::OnDemand => store::CLOUD | store::ON_DEMAND,
+            Kind::Synced => store::CLOUD,
         }
     }
 }

@@ -41,6 +41,9 @@ pub enum Metric {
     /// Data that is in the cloud but not on this computer: the part of each online-only or
     /// partly downloaded file that isn't here. Zero for everything else.
     CloudOnly,
+    /// Space that freeing up cloud files would give back: the size on disk of downloaded cloud
+    /// files that the provider keeps on demand and that aren't set to stay on this computer.
+    Reclaimable,
 }
 
 impl Metric {
@@ -50,6 +53,7 @@ impl Metric {
             Metric::Disk => alloc,
             Metric::Logical => logical,
             Metric::CloudOnly => cloud_only(logical, alloc, flags),
+            Metric::Reclaimable => reclaimable(alloc, flags),
         }
     }
 
@@ -59,19 +63,40 @@ impl Metric {
             Metric::Disk => "Size on disk",
             Metric::Logical => "Logical size",
             Metric::CloudOnly => "Only in the cloud",
+            Metric::Reclaimable => "Reclaimable",
         }
     }
 
     /// What a scan still running can show: it keeps running totals of the two sizes only, so
     /// "only in the cloud" shows logical sizes until the scan is done.
     pub fn live(self) -> Metric {
-        if self == Metric::CloudOnly { Metric::Logical } else { self }
+        match self {
+            Metric::CloudOnly => Metric::Logical,
+            Metric::Reclaimable => Metric::Disk,
+            m => m,
+        }
+    }
+
+    /// Only counts some files: folders without the matching `store` bits are zero.
+    fn needs(self) -> u8 {
+        match self {
+            Metric::CloudOnly => store::NOT_LOCAL,
+            Metric::Reclaimable => store::ON_DEMAND,
+            _ => 0,
+        }
     }
 
     /// The metric to compare against a snapshot with: "only in the cloud" compares logical sizes.
     pub fn for_diff(self) -> Metric {
         self.live()
     }
+}
+
+/// Space on disk that freeing up a file would give back: only files the provider keeps on
+/// demand, not pinned, not online only already, and not on a mounted drive (whose figure is the
+/// drive's own guess).
+pub fn reclaimable(alloc: u64, flags: u8) -> u64 {
+    if flags & store::ON_DEMAND != 0 && flags & (store::PINNED | store::MOUNT | store::ONLINE_ONLY | store::ESTIMATED) == 0 { alloc } else { 0 }
 }
 
 /// Bytes of a file that are in the cloud and not on this computer.
@@ -100,6 +125,9 @@ pub mod store {
     /// On a mounted cloud drive (FUSE, rclone, Google Drive's G: drive) that doesn't say how
     /// much of a file is cached here: its size on disk is what the drive reports, not known.
     pub const MOUNT: u8 = 64;
+    /// The provider keeps this file on demand (macOS File Provider, Windows Cloud Files): it can
+    /// be freed up and downloaded again through the system.
+    pub const ON_DEMAND: u8 = 128;
     /// Reading this file's contents would download it.
     pub const NOT_LOCAL: u8 = ONLINE_ONLY | PARTIAL;
 }
@@ -112,6 +140,7 @@ pub fn metric() -> Metric {
     match METRIC.load(Ordering::Relaxed) {
         1 => Metric::Logical,
         2 => Metric::CloudOnly,
+        3 => Metric::Reclaimable,
         _ => Metric::Disk,
     }
 }
@@ -157,8 +186,8 @@ impl Node {
     /// The size under `m`, whatever the tree is sorted by. Instant for the first two metrics;
     /// "only in the cloud" walks the folders that hold cloud files.
     pub fn size_by(&self, m: Metric) -> u64 {
-        if m == Metric::CloudOnly && self.is_dir {
-            if self.flags & store::NOT_LOCAL == 0 { 0 } else { self.children.iter().map(|c| c.size_by(m)).sum() }
+        if m.needs() != 0 && self.is_dir {
+            if self.flags & m.needs() == 0 { 0 } else { self.children.iter().map(|c| c.size_by(m)).sum() }
         } else {
             m.pick(self.logical, self.alloc, self.flags)
         }
@@ -611,7 +640,7 @@ pub fn on_disk(md: &fs::Metadata, _path: impl FnOnce() -> PathBuf, _cluster: u64
         // contents are only in the cloud. Reading it would download it.
         const SF_DATALESS: u32 = 0x4000_0000;
         if std::os::macos::fs::MetadataExt::st_flags(md) & SF_DATALESS != 0 {
-            flags |= store::ONLINE_ONLY | store::CLOUD;
+            flags |= store::ONLINE_ONLY | store::CLOUD | store::ON_DEMAND;
         }
     }
     (alloc, flags)
@@ -635,9 +664,15 @@ pub fn on_disk(md: &fs::Metadata, path: impl FnOnce() -> PathBuf, cluster: u64) 
     let cloud = a & (OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS) != 0;
     // Pinned ("Always keep on this device") and unpinned ("Free up space") mark cloud files
     // whatever their state.
-    let kept = if a & PINNED != 0 { store::CLOUD | store::PINNED } else if a & UNPINNED != 0 || cloud { store::CLOUD } else { 0 };
+    let kept = if a & PINNED != 0 {
+        store::CLOUD | store::PINNED | store::ON_DEMAND
+    } else if a & UNPINNED != 0 || cloud {
+        store::CLOUD | store::ON_DEMAND
+    } else {
+        0
+    };
     if a & RECALL_ON_OPEN != 0 {
-        return (0, store::ONLINE_ONLY | kept | store::CLOUD); // not even opened for its size: that alone fetches it
+        return (0, store::ONLINE_ONLY | kept | store::CLOUD | store::ON_DEMAND); // not even opened for its size: that alone fetches it
     }
     if !cloud && a & (SPARSE | COMPRESSED) == 0 {
         return (round(len), kept);
@@ -898,6 +933,11 @@ pub struct CloudTally {
     /// Cloud files whose local copy is unknown (mounted drives), and their logical size.
     pub unknown: u64,
     pub unknown_bytes: u64,
+    /// Downloaded files that freeing up would give space back from, and that space.
+    pub reclaimable: u64,
+    pub reclaimable_bytes: u64,
+    /// Space on disk of pinned files: freeing them up means unpinning them.
+    pub pinned_alloc: u64,
 }
 
 impl CloudTally {
@@ -939,6 +979,14 @@ pub fn cloud_tally(n: &Node) -> CloudTally {
             }
         }
         t.online_bytes += cloud_only(n.logical, n.alloc, n.flags);
+        let r = reclaimable(n.alloc, n.flags);
+        if r > 0 {
+            t.reclaimable += 1;
+            t.reclaimable_bytes += r;
+        }
+        if n.flags & store::PINNED != 0 {
+            t.pinned_alloc += n.alloc;
+        }
     }
     walk(n, &mut t);
     t
@@ -1131,6 +1179,24 @@ mod tests {
         assert_eq!(Stored::of(store::CLOUD | store::PINNED), Stored::Pinned);
         assert_eq!(Stored::of_folder(root.flags), Stored::OnlineOnly);
         assert_eq!(Metric::CloudOnly.for_diff(), Metric::Logical);
+    }
+
+    #[test]
+    fn reclaimable_is_downloaded_unpinned_on_demand_space() {
+        let m = Metric::Reclaimable;
+        let od = store::CLOUD | store::ON_DEMAND;
+        let free = Node::file("free".into(), 500, 4096, od, 0, m);
+        let pinned = Node::file("pin".into(), 500, 8192, od | store::PINNED, 0, m);
+        let away = Node::file("away".into(), 900, 0, od | store::ONLINE_ONLY, 0, m);
+        let synced = Node::file("synced".into(), 500, 4096, store::CLOUD, 0, m); // a plain synced folder can't free up
+        let mount = Node::file("mount".into(), 500, 4096, od | store::MOUNT, 0, m);
+        let local = Node::file("local".into(), 500, 4096, 0, 0, m);
+        let root = Node::folder("r".into(), vec![Node::folder("d".into(), vec![free, pinned, away]), synced, mount, local]);
+        assert_eq!(root.size, 4096);
+        assert_eq!(root.size_by(m), 4096);
+        let t = cloud_tally(&root);
+        assert_eq!((t.reclaimable, t.reclaimable_bytes, t.pinned_alloc), (1, 4096, 8192));
+        assert_eq!(Metric::Reclaimable.live(), Metric::Disk);
     }
 
     #[test]

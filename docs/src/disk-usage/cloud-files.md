@@ -101,6 +101,37 @@ be slow and count against the service's limits. Turn on **Scan mounted cloud dri
 Settings to include them, or scan the mounted drive itself, which always works. On the command
 line, `--cloud-mounts` does the same for one run.
 
+## Freeing up space and keeping files here
+
+Right-click a cloud file or folder in the file manager, the Storage Analysis list or the tree:
+
+| System | Command | What it does |
+|---|---|---|
+| Windows | **Free Up Space** | Asks your cloud app to remove the local copies. The files stay in the cloud and download again when opened. Clears **Always keep on this device**. |
+| Windows | **Always Keep on This Device** | Pins the files: your cloud app downloads them and won't free them up. |
+| macOS | **Remove Download** | Asks your cloud app to remove the local copies, as Finder's command does. |
+| macOS | **Download Now** | Asks your cloud app to download the files. |
+
+These are the same switches Explorer and Finder use, so Filescape never deletes anything and
+your cloud app stays in charge: it leaves alone files with changes not yet uploaded and files
+open in an app, and Filescape says how many it couldn't change and why. Keeping files that are
+only in the cloud asks first, saying how many would download and how much, unless **Ask before
+downloading** is off. Freed-up space shows in the map within a few seconds; downloads continue in
+the background, so press **F5** later to see them.
+
+The commands appear only for files your cloud app keeps on demand: not for synced folders (where
+freeing up would mean deleting), mounted cloud drives or Linux, which have no supported way.
+
+### Reclaimable space
+
+The **Reclaimable** size on the **Size** switch shows where freeing up would give space back: the
+size on disk of downloaded cloud files, without pinned ones. The storage breakdown says how much
+that is in total; click the figure to switch to the view. Select what you want to free up there,
+with **Stored** filters if you like, and right-click.
+
+One file at a time is free. Folders, several items at once and the Reclaimable view are part of
+Filescape Professional. On the command line, `--free-up PATH` and `--keep PATH` do the same.
+
 ## Filescape doesn't download your files
 
 Scanning, browsing, sorting, filtering and switching sizes only read what the folder listing says,

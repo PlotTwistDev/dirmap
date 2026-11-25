@@ -95,6 +95,7 @@ impl Col {
                 scan::Metric::Disk => "On disk",
                 scan::Metric::Logical => "Size",
                 scan::Metric::CloudOnly => "Cloud only",
+                scan::Metric::Reclaimable => "Reclaimable",
             },
             Col::Other if scan::metric() == scan::Metric::Disk => "Logical",
             Col::Other => "On disk",
@@ -662,6 +663,8 @@ impl App {
                 | TreeAction::Exclude
                 | TreeAction::CopyItems
                 | TreeAction::CutItems
+                | TreeAction::FreeUp
+                | TreeAction::KeepHere
         );
         if multi && chosen.len() > 1 && chosen.contains(&path) {
             self.items_action(a, chosen);
@@ -680,6 +683,10 @@ impl App {
         let disks: Vec<PathBuf> = paths.iter().map(|p| self.full_path(p)).collect();
         let count = |n: usize| if n == 1 { "1 item".to_string() } else { format!("{n} items") };
         match a {
+            TreeAction::FreeUp | TreeAction::KeepHere => {
+                let items: Vec<(PathBuf, &Node)> = disks.iter().cloned().zip(nodes.iter().copied()).collect();
+                self.cloud_manage(menus::cloud_action(a), items);
+            }
             TreeAction::Rename => self.start_rename(disks[0].clone()),
             TreeAction::CopyItems | TreeAction::CutItems => {
                 let cut = a == TreeAction::CutItems;
@@ -1674,6 +1681,7 @@ impl App {
             in_browser: true,
             count,
             can_paste: self.browser.clip.is_some(),
+            cloud: cloud::manageable(n),
         };
         resp.context_menu(|ui| {
             if let Some(a) = Self::tree_menu(ui, &info) {

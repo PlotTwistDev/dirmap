@@ -1105,6 +1105,9 @@ pub(super) enum FAction {
     Tags,
     /// Windows' own right-click menu, with other apps' items (true: with the Shift extras).
     SystemMenu(bool),
+    /// Cloud files: remove the local copy, or keep them on this computer (`cloudops`).
+    FreeUp,
+    KeepHere,
 }
 
 impl App {
@@ -2412,6 +2415,7 @@ impl App {
                 let title = match (col, scan::metric()) {
                     (FSort::Size, scan::Metric::Disk) => "On disk",
                     (FSort::Size, scan::Metric::CloudOnly) => "Cloud only",
+                    (FSort::Size, scan::Metric::Reclaimable) => "Reclaimable",
                     _ => col.title(),
                 };
                 let g = ui2.painter().layout_no_wrap(title.to_string(), font, color);
@@ -3441,7 +3445,7 @@ impl App {
         let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
         let colour = self.files.marks.get(disk).and_then(|m| m.colour);
         let caps = crate::fsys::remote::is_remote(disk).then(|| crate::fsys::remote::caps(disk));
-        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh) };
+        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk) };
         let ext = disk
             .file_name()
             .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
@@ -3555,6 +3559,20 @@ impl App {
             return;
         }
         match a {
+            FAction::FreeUp | FAction::KeepHere => {
+                let act = if a == FAction::FreeUp { crate::cloudops::Action::FreeUp } else { crate::cloudops::Action::Keep };
+                // Files in the listing on show: what would download is known. Anything else
+                // (folders, items from the map) is asked about without a figure.
+                let here = self.files.here().dir().map(Path::to_path_buf);
+                let listed_files = self.files.cur().listing.as_ref().is_some_and(|l| {
+                    paths.iter().all(|p| {
+                        p.parent() == here.as_deref() && p.file_name().is_some_and(|n| l.entries.iter().any(|e| !e.is_dir && *e.name == *n.to_string_lossy()))
+                    })
+                });
+                let known = listed_files.then(|| self.cloud_in_listing(paths.iter().map(|p| p.as_path())));
+                let bulk = !listed_files || paths.len() > 1;
+                self.cloud_run(act, paths, known, bulk);
+            }
             FAction::Open if paths.is_empty() => self.files.refresh(),
             FAction::Open => {
                 // Folders open here (the first one); files open in their apps.
@@ -3727,6 +3745,8 @@ pub(super) struct RowMenu {
     /// terminal can open there.
     pub server: bool,
     pub ssh: bool,
+    /// In a cloud folder whose files the system can free up or keep.
+    pub cloud: bool,
 }
 
 /// Said when something would change an archive.
@@ -3795,7 +3815,11 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     let colour = c.marks.get(&path).and_then(|m| m.colour);
     let caps = crate::fsys::remote::is_remote(dir).then(|| crate::fsys::remote::caps(dir));
     let server = caps.is_some();
-    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh) };
+    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false };
+    let ctx_menu = RowMenu {
+        cloud: !server && !read_only && crate::cloudops::supported() && (e.flags & scan::store::ON_DEMAND != 0 || (e.is_dir && super::cloud::on_demand_dir(&path))),
+        ..ctx_menu
+    };
     // Shift+right-click: straight to Windows' own menu, with its Shift extras, as in Explorer.
     if cfg!(windows) && !read_only && !server && resp.secondary_clicked() && ui.input(|i| i.modifiers.shift) {
         let paths = if selected { t.chosen_paths() } else { t.row_paths(dir, l, i) };
@@ -3908,6 +3932,11 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
             item(ui, true, label, String::new(), FAction::Terminal(*which));
         }
         item(ui, true, "Properties", k(M::ALT, Key::Enter), FAction::Properties);
+    }
+    if m.cloud {
+        ui.separator();
+        item(ui, true, crate::cloudops::Action::FreeUp.label(), String::new(), FAction::FreeUp);
+        item(ui, true, crate::cloudops::Action::Keep.label(), String::new(), FAction::KeepHere);
     }
     if cfg!(windows) && !m.read_only && !m.server {
         ui.separator();

@@ -34,10 +34,13 @@ pub enum Feature {
     Archives,
     SavedSearches,
     Snapshots,
+    /// Managing cloud storage: the Reclaimable view, and freeing up or keeping folders or several
+    /// items at once (one file at a time is free).
+    CloudManagement,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 14] = [
+    pub const ALL: [Feature; 15] = [
         Feature::FileBrowser,
         Feature::DiskMap,
         Feature::Filters,
@@ -52,6 +55,7 @@ impl Feature {
         Feature::Archives,
         Feature::SavedSearches,
         Feature::Snapshots,
+        Feature::CloudManagement,
     ];
 
     /// The one table of free features.

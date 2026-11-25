@@ -33,6 +33,9 @@ pub(super) enum TreeAction {
     Paste,
     NewFolder,
     NewTab,
+    /// Cloud files: remove the local copy, or keep them on this computer (`cloudops`).
+    FreeUp,
+    KeepHere,
 }
 
 /// Something to do with a row of the extension list.
@@ -61,6 +64,8 @@ pub(super) struct ItemInfo {
     pub count: usize,
     /// Something has been copied or cut, ready to paste.
     pub can_paste: bool,
+    /// Cloud files the system can free up or keep are in it (see `cloudops`).
+    pub cloud: bool,
 }
 
 /// A file operation running in the background.
@@ -266,6 +271,11 @@ impl App {
             set(item(ui, can_change && !info.is_drive, "Empty Folder…", ""), TreeAction::Empty);
         }
         set(item(ui, deletable, "Move to…", &k(M::COMMAND, Key::M)), TreeAction::MoveTo);
+        if info.cloud {
+            ui.separator();
+            set(item(ui, can_change, crate::cloudops::Action::FreeUp.label(), ""), TreeAction::FreeUp);
+            set(item(ui, can_change, crate::cloudops::Action::Keep.label(), ""), TreeAction::KeepHere);
+        }
         pick
     }
 
@@ -306,6 +316,7 @@ impl App {
             in_browser: false,
             count: 1,
             can_paste: false,
+            cloud: super::cloud::manageable(n),
         })
     }
 
@@ -399,6 +410,10 @@ impl App {
             }
             TreeAction::Hash => {
                 self.start_hash(disk, n.size);
+                Ok(())
+            }
+            TreeAction::FreeUp | TreeAction::KeepHere => {
+                self.cloud_manage(cloud_action(a), vec![(disk, n)]);
                 Ok(())
             }
             TreeAction::Exclude => {
@@ -1325,4 +1340,9 @@ mod tests {
         add_line(&mut s, "D:\\x");
         assert_eq!(s, "C:\\Windows\nD:\\x");
     }
+}
+
+/// The cloud command a menu action stands for.
+pub(super) fn cloud_action(a: TreeAction) -> crate::cloudops::Action {
+    if a == TreeAction::FreeUp { crate::cloudops::Action::FreeUp } else { crate::cloudops::Action::Keep }
 }
