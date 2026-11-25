@@ -24,6 +24,9 @@
   tiles and in icon views they show a large "Aa".
 - Sound previews show the album cover and the waveform, which fills in as it plays and jumps
   where you click, and the details list the title, artist, album, length and format.
+- Camera RAW photos (CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 and more) preview on tiles, in icon
+  views and in the panes, from the preview the camera stores in the file, with the camera, lens
+  and exposure in the details.
 - Files with a missing or wrong extension, such as a download saved as `file`, now preview by
   what they really are when Filescape can tell from their first bytes.
 - **Help > About Filescape > Third-party licences** lists the open-source software Filescape is

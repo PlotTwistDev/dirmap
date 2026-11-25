@@ -32,6 +32,8 @@ pub(super) enum Content {
         /// A drawing's source (SVG), shown instead when asked; its size is the drawing's own
         /// and it can be shown larger than that.
         source: Option<(String, bool)>,
+        /// More about it for the details (a photo's camera and exposure).
+        facts: Vec<(&'static str, String)>,
     },
     /// Sound: played with the controls in the preview, from this file (a fetched copy for one
     /// on a server).
@@ -102,6 +104,8 @@ pub(super) enum Kind {
     Drawing,
     /// A font: a specimen.
     Font,
+    /// Camera RAW: the camera's own preview inside it.
+    Raw,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -122,6 +126,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Text => Kind::Text,
         C::Drawing => Kind::Drawing,
         C::Font => Kind::Font,
+        C::Raw => Kind::Raw,
         C::Video => Kind::Media(Media::Video),
         C::Audio => Kind::Media(Media::Audio),
         C::Pdf => Kind::Media(Media::Pdf),
@@ -201,6 +206,23 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Content::Text { text, truncated, .. } => coloured(path, text, truncated),
             c => c,
         },
+        Kind::Raw => match crate::camraw::preview(path, 0) {
+            Ok(r) => {
+                let img = if r.image.width() > SHOW_MAX || r.image.height() > SHOW_MAX { r.image.thumbnail(SHOW_MAX, SHOW_MAX) } else { r.image };
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                Content::Image {
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba)),
+                    tex: None,
+                    size: [w, h],
+                    info: "The camera's preview".into(),
+                    poster: true,
+                    source: None,
+                    facts: r.facts,
+                }
+            }
+            Err(e) => Content::Error(e),
+        },
         Kind::Font => match crate::fontview::specimen(path, 800) {
             Ok(s) => Content::Image {
                 pixels: Some(egui::ColorImage::from_rgba_unmultiplied([s.width as usize, s.height as usize], &s.rgba)),
@@ -209,6 +231,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                 info: s.about.line(),
                 poster: true,
                 source: None,
+                facts: Vec::new(),
             },
             Err(e) => Content::Error(e),
         },
@@ -225,6 +248,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                     info: "Vector drawing (sharp at any size)".into(),
                     poster: false,
                     source: source.or(Some((String::new(), false))),
+                    facts: Vec::new(),
                 }
             }
             // Not a drawing resvg can read: show the markup.
@@ -244,6 +268,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                 info: if m == crate::media::Media::Pdf { "The first page".into() } else { "A frame from the video".into() },
                 poster: true,
                 source: None,
+                facts: Vec::new(),
             },
             Err(_) => Content::Error(if m == crate::media::Media::Pdf { "No picture of this PDF: it couldn't be drawn (it may be damaged or password-protected, or the system can't draw PDFs)".into() } else { "No picture of this video: the system has no thumbnailer for it".into() }),
         },
@@ -272,7 +297,7 @@ fn sniffed(path: &Path) -> Option<Kind> {
 
 fn load_image(path: &Path, linear: bool, size: u64) -> Content {
     match decode_image(path, linear, size, SHOW_MAX) {
-        Ok((pixels, size, info)) => Content::Image { pixels: Some(pixels), tex: None, size, info, poster: false, source: None },
+        Ok((pixels, size, info)) => Content::Image { pixels: Some(pixels), tex: None, size, info, poster: false, source: None, facts: Vec::new() },
         Err(e) => Content::Error(e),
     }
 }
@@ -628,6 +653,13 @@ impl App {
                 ui.weak("Font");
                 ui.add(egui::Label::new(info.as_str()).wrap());
                 ui.end_row();
+            }
+            if let Some(Content::Image { facts, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+                for (k, v) in facts {
+                    ui.weak(*k);
+                    ui.add(egui::Label::new(v.as_str()).wrap());
+                    ui.end_row();
+                }
             }
             if let Some(Content::Sound { info, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
                 for (k, v) in &info.facts {
@@ -1184,6 +1216,7 @@ mod tests {
         assert_eq!(kind_of("song.FLAC"), Kind::Media(crate::media::Media::Audio));
         assert_eq!(kind_of("logo.svg"), Kind::Drawing);
         assert_eq!(kind_of("Inter.otf"), Kind::Font);
+        assert_eq!(kind_of("IMG_0001.CR3"), Kind::Raw);
         // A file with no extension is known by its first bytes.
         let dir = std::env::temp_dir().join(format!("fs-sniff-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

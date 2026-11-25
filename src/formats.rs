@@ -24,6 +24,8 @@ pub enum Category {
     Drawing,
     /// Fonts: a specimen drawn in the font.
     Font,
+    /// Camera RAW: the JPEG preview the camera stores in the file.
+    Raw,
     /// A picture and playback from the system's decoders.
     Video,
     /// Playback and a waveform from the system's decoders.
@@ -68,6 +70,15 @@ pub static FORMATS: &[Format] = &[
     Format { id: "ico", name: "Windows icon", category: Category::Picture, exts: &["ico"] },
     Format { id: "qoi", name: "QOI image", category: Category::Picture, exts: &["qoi"] },
     Format { id: "pnm", name: "Netpbm image", category: Category::Picture, exts: &["pbm", "pgm", "ppm", "pnm"] },
+    Format {
+        id: "raw",
+        name: "Camera RAW photo",
+        category: Category::Raw,
+        exts: &[
+            "cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "dng", "raf", "orf", "rw2", "rwl", "pef", "srw", "erf", "3fr", "fff", "iiq", "mos", "mef", "mrw",
+            "x3f", "kdc", "dcr",
+        ],
+    },
     Format { id: "exr", name: "OpenEXR image", category: Category::LinearPicture, exts: &["exr"] },
     Format { id: "hdr", name: "Radiance HDR image", category: Category::LinearPicture, exts: &["hdr"] },
     Format { id: "svg", name: "SVG drawing", category: Category::Drawing, exts: &["svg", "svgz"] },
