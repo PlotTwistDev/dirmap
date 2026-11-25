@@ -84,6 +84,9 @@ pub struct Settings {
     /// Ask filescape.app for the newest version at launch and show a notice when there's a newer
     /// one. Nothing about the user or the computer is sent.
     pub check_updates: bool,
+    /// At launch, remind the user to keep offline backups, since Filescape can delete and
+    /// overwrite files. The reminder's "Don't show this again" box turns it off.
+    pub backup_reminder: bool,
     /// Size of everything on screen (1 = 100%). Ctrl + and Ctrl − change it too.
     pub ui_scale: f32,
 
@@ -160,6 +163,7 @@ impl Default for Settings {
             cloud_confirm: true,
             cloud_mounts: false,
             check_updates: true,
+            backup_reminder: true,
             ui_scale: 1.0,
             exclude_folders: String::new(),
             exclude_files: String::new(),
@@ -239,8 +243,8 @@ impl Settings {
         let def = Settings::default();
         match page {
             Tab::General => {
-                (self.theme, self.units, self.stripes, self.live_tree, self.check_updates, self.ui_scale, self.system_notes) =
-                    (def.theme, def.units, def.stripes, def.live_tree, def.check_updates, def.ui_scale, def.system_notes);
+                (self.theme, self.units, self.stripes, self.live_tree, self.check_updates, self.ui_scale, self.system_notes, self.backup_reminder) =
+                    (def.theme, def.units, def.stripes, def.live_tree, def.check_updates, def.ui_scale, def.system_notes, def.backup_reminder);
             }
             Tab::Filtering => {
                 self.exclude_folders = def.exclude_folders;

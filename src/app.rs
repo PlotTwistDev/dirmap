@@ -312,6 +312,9 @@ pub struct App {
     admin_prompt: bool,
     /// Set when a restart as administrator didn't happen, to say so.
     admin_declined: bool,
+    /// The backup reminder was closed this session (it comes back next launch unless its
+    /// "Don't show this again" box was ticked, which turns `Settings::backup_reminder` off).
+    backup_reminder_closed: bool,
     /// Right-click menus: running file operation, their windows and the last result.
     ops: menus::Ops,
     /// Text to put on the clipboard this frame.
@@ -432,6 +435,7 @@ impl App {
             cloud_sum: None,
             admin_prompt,
             admin_declined: false,
+            backup_reminder_closed: false,
             ops: Default::default(),
             ctx_copy: None,
             help: Default::default(),
@@ -618,6 +622,56 @@ impl App {
 
     /// Asked once, the first time dirmap starts without administrator rights; the answer is
     /// remembered and can be changed under Settings > Advanced.
+    /// At launch: keep offline backups, Filescape can delete and overwrite files. Waits for the
+    /// administrator question so the two don't open on top of each other.
+    fn backup_reminder(&mut self, ctx: &egui::Context) {
+        if !self.settings.backup_reminder || self.backup_reminder_closed || self.admin_prompt || self.admin_declined {
+            return;
+        }
+        let id = egui::Id::new("backup-reminder");
+        let mut dont_show = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+        let mut ok = false;
+        egui::Modal::new(id).show(ctx, |ui| {
+            ui.set_max_width(460.0);
+            ui.heading("Keep backups of your files");
+            ui.add_space(6.0);
+            ui.label(
+                "Filescape can delete, move, rename and overwrite files, on this computer and on servers you \
+                 connect to. Some of that can't be undone: a permanent delete, anything deleted on a server, \
+                 and a file replaced by another.",
+            );
+            ui.add_space(4.0);
+            ui.label(
+                "Before you change files, make sure you have a recent backup of anything you can't afford to \
+                 lose, ideally on a drive that is kept unplugged or offline. Check what's selected before you confirm.",
+            );
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.weak("Filescape is provided \"as is\", and we aren't liable for lost files, to the extent the law allows.");
+                if ui.link("Terms of use").clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(crate::licence::TERMS_URL));
+                }
+            });
+            ui.add_space(10.0);
+            ui.checkbox(&mut dont_show, "Don't show this again")
+                .on_hover_text("Turn it back on under Settings > General > Backup reminder at start");
+            ui.add_space(6.0);
+            ok = ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape));
+        });
+        ctx.data_mut(|d| d.insert_temp(id, dont_show));
+        if ok {
+            ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            });
+            self.backup_reminder_closed = true;
+            if dont_show {
+                self.settings.backup_reminder = false;
+                self.dialog.draft.backup_reminder = false;
+            }
+        }
+    }
+
     fn admin_question(&mut self, ctx: &egui::Context) {
         if self.admin_declined {
             let mut open = true;
@@ -2804,6 +2858,7 @@ impl eframe::App for App {
             self.restart_as_admin(&ctx);
         }
         self.admin_question(&ctx);
+        self.backup_reminder(&ctx);
         self.workspace_keys(&ctx);
         let analysis = self.files.prefs.workspace == Workspace::Analysis;
         // Shortcuts that act on the scan only work where the scan is on screen.
