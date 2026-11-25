@@ -17,6 +17,8 @@
   publisher's notes), how its numbers are stored, and every tensor and metadata entry, searchable
   and sortable. PyTorch checkpoints are never opened, since they can run code. See
   [Inspecting a model](../views/ai-models.md#inspecting-a-model).
+- A model's **Structure** shows its layers in order and draws the model as a map of its layers
+  and tensors, coloured by what each part does or by how its numbers are stored.
 
 ### See what's in files on the map
 

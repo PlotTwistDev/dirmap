@@ -392,6 +392,189 @@ fn front_matter(text: &str, key: &str) -> Option<String> {
     None
 }
 
+// ---------- structure ----------
+
+/// What a tensor does in the model, for colouring the structure views.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Part {
+    Embeddings,
+    Attention,
+    FeedForward,
+    Experts,
+    Norm,
+    Output,
+    Other,
+}
+
+impl Part {
+    pub const ALL: [Part; 7] = [Part::Embeddings, Part::Attention, Part::FeedForward, Part::Experts, Part::Norm, Part::Output, Part::Other];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Part::Embeddings => "Embeddings",
+            Part::Attention => "Attention",
+            Part::FeedForward => "Feed-forward",
+            Part::Experts => "Experts",
+            Part::Norm => "Normalisation",
+            Part::Output => "Output",
+            Part::Other => "Other",
+        }
+    }
+
+    pub fn explain(self) -> &'static str {
+        match self {
+            Part::Embeddings => "Turns each token into numbers the model works with.",
+            Part::Attention => "Lets each token look at the others: query, key, value and output weights.",
+            Part::FeedForward => "The per-token network in each layer, usually its largest part.",
+            Part::Experts => "Mixture-of-experts networks: only a few run for each token.",
+            Part::Norm => "Small scaling vectors that keep the numbers in range.",
+            Part::Output => "Turns the final numbers back into a score for every token in the vocabulary.",
+            Part::Other => "Anything else, such as a vision encoder or position tables.",
+        }
+    }
+
+    fn index(self) -> usize {
+        Part::ALL.iter().position(|&p| p == self).unwrap_or(6)
+    }
+}
+
+/// The part a tensor belongs to, from its name (GGUF and Hugging Face naming).
+pub fn part_of(name: &str) -> Part {
+    let n = name.to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
+    if has(&["_exps", ".experts.", "_shexp", "shared_expert"]) {
+        Part::Experts
+    } else if has(&["norm", "ln_", ".ln", "layernorm"]) {
+        Part::Norm
+    } else if has(&["attn", "attention", "q_proj", "k_proj", "v_proj", "o_proj", "qkv"]) {
+        Part::Attention
+    } else if has(&["ffn", "mlp", "feed_forward", "gate_proj", "up_proj", "down_proj", "fc1", "fc2", "router", "gate_inp"]) {
+        Part::FeedForward
+    } else if has(&["token_embd", "embed", "wte", "wpe", "tok_embeddings"]) {
+        Part::Embeddings
+    } else if has(&["output", "lm_head"]) {
+        Part::Output
+    } else {
+        Part::Other
+    }
+}
+
+/// The layer a tensor is in: (what comes before the number, the number), as in `blk.3.` or
+/// `model.layers.3.`.
+pub fn layer_of(name: &str) -> Option<(String, u32)> {
+    let segs: Vec<&str> = name.split('.').collect();
+    for i in 1..segs.len().saturating_sub(1) {
+        if let Ok(n) = segs[i].parse::<u32>()
+            && matches!(segs[i - 1], "blk" | "layers" | "layer" | "h" | "block" | "blocks")
+        {
+            return Some((segs[..i].join("."), n));
+        }
+    }
+    None
+}
+
+/// A layer, or the tensors before or after the layers.
+#[derive(Clone, Debug)]
+pub struct Group {
+    pub name: String,
+    pub layer: Option<u32>,
+    /// Indexes into `Inspection::tensors`, largest first.
+    pub tensors: Vec<usize>,
+    pub bytes: u64,
+    pub elements: u64,
+}
+
+/// The model as groups (in the model's own order) and as a tree for the treemap, whose
+/// children are the groups and their tensors, largest first.
+pub struct Structure {
+    pub groups: Vec<Group>,
+    pub tree: crate::scan::Node,
+    /// For each child of `tree`, its index in `groups`.
+    pub order: Vec<usize>,
+    /// Bytes of each part across the model, by `Part::ALL`.
+    pub parts: [u64; 7],
+}
+
+impl Structure {
+    /// Bytes of each part in a group, by `Part::ALL`.
+    pub fn group_parts(&self, d: &Inspection, g: usize) -> [u64; 7] {
+        let mut out = [0u64; 7];
+        for &t in &self.groups[g].tensors {
+            out[part_of(&d.tensors[t].name).index()] += d.tensors[t].bytes;
+        }
+        out
+    }
+
+    /// The layers, counted.
+    pub fn layers(&self) -> usize {
+        self.groups.iter().filter(|g| g.layer.is_some()).count()
+    }
+}
+
+pub fn structure(d: &Inspection) -> Structure {
+    // The commonest layer prefix is the model's own stack; others (a vision encoder) are named.
+    let mut prefixes: BTreeMap<String, usize> = BTreeMap::new();
+    for t in &d.tensors {
+        if let Some((p, _)) = layer_of(&t.name) {
+            *prefixes.entry(p).or_default() += 1;
+        }
+    }
+    let main = prefixes.iter().max_by_key(|(_, n)| **n).map(|(p, _)| p.clone());
+    // Key: (place in the model, group name). Places: 0 before the layers, 1 the main layers, 2
+    // other stacks, 3 after.
+    let mut by: BTreeMap<(u8, String, u32), Vec<usize>> = BTreeMap::new();
+    for (i, t) in d.tensors.iter().enumerate() {
+        let key = match layer_of(&t.name) {
+            Some((p, n)) if Some(&p) == main.as_ref() => (1, String::new(), n),
+            Some((p, n)) => (2, p, n),
+            None => match part_of(&t.name) {
+                Part::Embeddings => (0, "Embeddings".into(), 0),
+                Part::Output | Part::Norm => (3, "Output".into(), 0),
+                _ => (4, "Other".into(), 0),
+            },
+        };
+        by.entry(key).or_default().push(i);
+    }
+    let mut groups = Vec::new();
+    for ((place, name, n), mut ts) in by {
+        ts.sort_by(|&a, &b| d.tensors[b].bytes.cmp(&d.tensors[a].bytes));
+        let bytes = ts.iter().map(|&t| d.tensors[t].bytes).sum();
+        let elements = ts.iter().map(|&t| d.tensors[t].elements).sum();
+        let (name, layer) = match place {
+            1 => (format!("Layer {n}"), Some(n)),
+            2 => (format!("{name}.{n}"), None),
+            _ => (name, None),
+        };
+        groups.push(Group { name, layer, tensors: ts, bytes, elements });
+    }
+    let mut order: Vec<usize> = (0..groups.len()).collect();
+    order.sort_by(|&a, &b| groups[b].bytes.cmp(&groups[a].bytes).then(a.cmp(&b)));
+    let node = |name: &str, size: u64, children: Vec<crate::scan::Node>| crate::scan::Node {
+        name: name.into(),
+        size,
+        logical: size,
+        alloc: size,
+        files: children.len().max(1) as u64,
+        modified: 0,
+        is_dir: !children.is_empty(),
+        flags: 0,
+        children,
+    };
+    let kids = order
+        .iter()
+        .map(|&g| {
+            let g = &groups[g];
+            node(&g.name, g.bytes, g.tensors.iter().map(|&t| node(&d.tensors[t].name, d.tensors[t].bytes, Vec::new())).collect())
+        })
+        .collect();
+    let total = groups.iter().map(|g| g.bytes).sum();
+    let mut parts = [0u64; 7];
+    for t in &d.tensors {
+        parts[part_of(&t.name).index()] += t.bytes;
+    }
+    Structure { groups, tree: node("model", total, kids), order, parts }
+}
+
 // ---------- totals ----------
 
 fn summarise(out: &mut Inspection) {
@@ -562,6 +745,34 @@ mod tests {
         assert_eq!(fact(&i, "Licence").unwrap().value, "mit");
         assert_eq!(fact(&i, "Weights size").unwrap().value, crate::scan::human(96));
         assert_eq!(i.meta, vec![("format".to_string(), "pt".to_string())]);
+    }
+
+    #[test]
+    fn parts_layers_and_groups() {
+        assert_eq!(part_of("blk.3.attn_norm.weight"), Part::Norm);
+        assert_eq!(part_of("blk.3.attn_output.weight"), Part::Attention);
+        assert_eq!(part_of("model.layers.2.mlp.down_proj.weight"), Part::FeedForward);
+        assert_eq!(part_of("blk.0.ffn_up_exps.weight"), Part::Experts);
+        assert_eq!(part_of("token_embd.weight"), Part::Embeddings);
+        assert_eq!(part_of("lm_head.weight"), Part::Output);
+        assert_eq!(layer_of("model.layers.12.self_attn.q_proj.weight"), Some(("model.layers".into(), 12)));
+        assert_eq!(layer_of("blk.0.attn_q.weight"), Some(("blk".into(), 0)));
+        assert_eq!(layer_of("token_embd.weight"), None);
+        let t = |name: &str, bytes| Tensor { name: name.into(), kind: "F16".into(), shape: vec![bytes / 2], elements: bytes / 2, bytes, file: 0 };
+        let d = Inspection {
+            tensors: vec![t("token_embd.weight", 100), t("blk.10.attn_q.weight", 20), t("blk.2.attn_q.weight", 30), t("blk.2.ffn_up.weight", 50), t("output_norm.weight", 2), t("output.weight", 90)],
+            ..Default::default()
+        };
+        let s = structure(&d);
+        let names: Vec<&str> = s.groups.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, ["Embeddings", "Layer 2", "Layer 10", "Output"]);
+        assert_eq!(s.layers(), 2);
+        // The tree is largest first, and its children map back to the groups.
+        let sizes: Vec<u64> = s.tree.children.iter().map(|c| c.size).collect();
+        assert_eq!(sizes, [100, 92, 80, 20]);
+        assert_eq!(s.groups[s.order[1]].name, "Output");
+        assert_eq!(s.tree.size, 292);
+        assert_eq!(s.parts[Part::Attention.index()], 50);
     }
 
     #[test]
