@@ -22,6 +22,8 @@
 - Code previews in syntax colours, for about 200 languages, and the details say which language.
 - Fonts preview as a specimen drawn in the font, with its family, style and glyph count; on
   tiles and in icon views they show a large "Aa".
+- Sound previews show the album cover and the waveform, which fills in as it plays and jumps
+  where you click, and the details list the title, artist, album, length and format.
 - Files with a missing or wrong extension, such as a download saved as `file`, now preview by
   what they really are when Filescape can tell from their first bytes.
 - **Help > About Filescape > Third-party licences** lists the open-source software Filescape is

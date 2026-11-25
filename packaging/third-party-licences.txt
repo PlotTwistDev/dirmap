@@ -263,6 +263,8 @@ linux-raw-sys 0.4.15	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 litemap 0.8.3	Unicode-3.0
 litrs 1.0.1	MIT OR Apache-2.0
 lock_api 0.4.14	MIT OR Apache-2.0
+lofty 0.25.5	MIT OR Apache-2.0
+lofty_attr 0.13.0	MIT OR Apache-2.0
 log 0.4.34	MIT OR Apache-2.0
 lzma-rust2 0.25.0	Apache-2.0
 md5 0.8.1	Apache-2.0 OR MIT
@@ -312,6 +314,7 @@ objc2-metal 0.2.2	MIT
 objc2-metal 0.3.2	Zlib OR Apache-2.0 OR MIT
 objc2-quartz-core 0.2.2	MIT
 objc2-quartz-core 0.3.2	Zlib OR Apache-2.0 OR MIT
+ogg_pager 0.8.0	MIT OR Apache-2.0
 once_cell 1.21.4	MIT OR Apache-2.0
 openssl-probe 0.2.2	MIT OR Apache-2.0
 ordered-float 5.5.0	MIT
@@ -325,6 +328,7 @@ parking 2.2.1	Apache-2.0 OR MIT
 parking_lot 0.12.5	MIT OR Apache-2.0
 parking_lot_core 0.9.12	MIT OR Apache-2.0
 password-hash 0.6.1	MIT OR Apache-2.0
+paste 1.0.15	MIT OR Apache-2.0
 pbkdf2 0.13.0	MIT OR Apache-2.0
 pem-rfc7468 1.0.0	Apache-2.0 OR MIT
 peniko 0.6.1	Apache-2.0 OR MIT
@@ -1055,14 +1059,14 @@ Used by: adler2 2.0.1, allocator-api2 0.2.21, async-channel 2.5.0, async-executo
 2.5.0, curve25519-dalek-derive 0.1.1, displaydoc 0.2.7, endi 1.1.1, enumn 0.1.14, event-listener
 5.4.2, event-listener-strategy 0.5.4, fastrand 2.5.0, futures-lite 2.6.1, glow 0.17.0, group 0.14.0,
 itoa 1.0.19, khronos-egl 6.0.0, linux-raw-sys 0.12.1, linux-raw-sys 0.4.15, once_cell 1.21.4,
-ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0,
-proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote 1.0.47, rsa 0.10.0, rustc-hash 1.1.0, rustc-hash
-2.1.3, rustix 0.38.44, rustix 1.1.5, rustversion 1.0.23, semver 1.0.28, serde 1.0.229, serde_bytes
-0.11.19, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.154, serde_repr 0.1.21, smol_str
-0.2.2, syn 2.0.119, syn 3.0.9, thiserror 1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69,
-thiserror-impl 2.0.21, typed-path 0.13.0, typeid 1.0.3, unicode-ident 1.0.27, utf8-zero 0.8.1,
-x11-dl 2.21.0, xdg-home 1.3.0, zbus-lockstep 0.5.2, zbus-lockstep-macros 0.5.2, zbus_names 3.0.0,
-zmij 1.0.23, zvariant_utils 2.1.0, zvariant_utils 4.2.0
+ordered-stream 0.2.0, parking 2.2.1, paste 1.0.15, pin-project-lite 0.2.17, piper 0.2.5, polling
+3.11.0, proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote 1.0.47, rsa 0.10.0, rustc-hash 1.1.0,
+rustc-hash 2.1.3, rustix 0.38.44, rustix 1.1.5, rustversion 1.0.23, semver 1.0.28, serde 1.0.229,
+serde_bytes 0.11.19, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.154, serde_repr
+0.1.21, smol_str 0.2.2, syn 2.0.119, syn 3.0.9, thiserror 1.0.69, thiserror 2.0.21, thiserror-impl
+1.0.69, thiserror-impl 2.0.21, typed-path 0.13.0, typeid 1.0.3, unicode-ident 1.0.27, utf8-zero
+0.8.1, x11-dl 2.21.0, xdg-home 1.3.0, zbus-lockstep 0.5.2, zbus-lockstep-macros 0.5.2, zbus_names
+3.0.0, zmij 1.0.23, zvariant_utils 2.1.0, zvariant_utils 4.2.0
 ========================================================================
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -1745,11 +1749,11 @@ For more information, please refer to <http://unlicense.org/>
 
 ========================================================================
 Used by: allocator-api2 0.2.21, async-trait 0.1.92, constant_time_eq 0.6.1, enumn 0.1.14, glifo
-0.2.0, itoa 1.0.19, libc 0.2.190, litrs 1.0.1, proc-macro2 1.0.107, quote 1.0.47, rustc-hash 2.1.3,
-rustversion 1.0.23, semver 1.0.28, serde 1.0.229, serde_bytes 0.11.19, serde_core 1.0.229,
-serde_derive 1.0.229, serde_json 1.0.154, serde_repr 0.1.21, syn 2.0.119, syn 3.0.9, thiserror
-1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69, thiserror-impl 2.0.21, typed-path 0.13.0, typeid
-1.0.3, unicode-ident 1.0.27, utf8-zero 0.8.1
+0.2.0, itoa 1.0.19, libc 0.2.190, litrs 1.0.1, paste 1.0.15, proc-macro2 1.0.107, quote 1.0.47,
+rustc-hash 2.1.3, rustversion 1.0.23, semver 1.0.28, serde 1.0.229, serde_bytes 0.11.19, serde_core
+1.0.229, serde_derive 1.0.229, serde_json 1.0.154, serde_repr 0.1.21, syn 2.0.119, syn 3.0.9,
+thiserror 1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69, thiserror-impl 2.0.21, typed-path 0.13.0,
+typeid 1.0.3, unicode-ident 1.0.27, utf8-zero 0.8.1
 ========================================================================
                               Apache License
                         Version 2.0, January 2004
@@ -10668,6 +10672,26 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+========================================================================
+Used by: lofty 0.25.5, lofty_attr 0.13.0, ogg_pager 0.8.0
+========================================================================
+Copyright (c) Serial
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================
 Used by: md5 0.8.1

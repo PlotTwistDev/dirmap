@@ -187,4 +187,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Third-party licence notices in About | #45 | Merged |
 | SVG drawings (resvg) | #46 | Merged |
 | Syntax colouring (syntect + two-face) | #47 | Merged |
-| Font specimens | | In review |
+| Font specimens | #48 | Merged |
+| Sound pane: tags, cover, waveform | | In review |

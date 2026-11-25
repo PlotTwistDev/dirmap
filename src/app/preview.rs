@@ -35,7 +35,14 @@ pub(super) enum Content {
     },
     /// Sound: played with the controls in the preview, from this file (a fetched copy for one
     /// on a server).
-    Sound(PathBuf),
+    Sound {
+        play: PathBuf,
+        /// Tags, format and cover, from the file.
+        info: crate::soundinfo::SoundInfo,
+        /// The waveform, if the system could decode it.
+        peaks: Option<Arc<[f32]>>,
+        cover: Option<egui::TextureHandle>,
+    },
     Text {
         text: String,
         truncated: bool,
@@ -223,7 +230,12 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             // Not a drawing resvg can read: show the markup.
             Err(_) => load_text(path),
         },
-        Kind::Media(crate::media::Media::Audio) => Content::Sound(path.to_path_buf()),
+        Kind::Media(crate::media::Media::Audio) => Content::Sound {
+            play: path.to_path_buf(),
+            info: crate::soundinfo::read(path),
+            peaks: crate::wave::peaks(path, WAVE_BARS).ok().map(Into::into),
+            cover: None,
+        },
         Kind::Media(m) => match crate::media::thumbnail(path, 1024) {
             Ok((w, h, rgba)) => Content::Image {
                 pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
@@ -617,6 +629,13 @@ impl App {
                 ui.add(egui::Label::new(info.as_str()).wrap());
                 ui.end_row();
             }
+            if let Some(Content::Sound { info, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+                for (k, v) in &info.facts {
+                    ui.weak(*k);
+                    ui.add(egui::Label::new(v.as_str()).wrap());
+                    ui.end_row();
+                }
+            }
             if let Some(Content::Text { colours: Some(c), .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
                 ui.weak("Language");
                 ui.label(&c.language);
@@ -798,12 +817,37 @@ impl App {
                 }
                 text_view(ui, path, &text, truncated, size, colours.as_deref());
             }
-            Content::Sound(play) => {
+            Content::Sound { play, info, peaks, cover } => {
                 let play = play.clone();
+                let peaks = peaks.clone();
+                let secs = info.secs;
+                if cover.is_none() && let Some((w, h, rgba)) = info.cover.take() {
+                    *cover = Some(ctx.load_texture(format!("cover:{}", path.display()), egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba), egui::TextureOptions::LINEAR));
+                }
+                let cover = cover.clone();
                 let (r, _) = ui.allocate_exact_size(size, Sense::hover());
-                let icon = Rect::from_center_size(r.center() - vec2(0.0, 44.0), vec2(80.0, 80.0));
-                self.icons.paint_big(ui, icon, false, e.ext(), tint);
-                sound_controls(ui, &mut self.files.look.player, &play, path, Rect::from_center_size(r.center() + vec2(0.0, 47.0), vec2((r.width() - 24.0).min(360.0), 62.0)));
+                // Cover (or the icon), then the waveform, then the controls, as a block in the middle.
+                let wide = (r.width() - 24.0).min(480.0);
+                let wave_h = if peaks.is_some() { 52.0 } else { 0.0 };
+                let art = (r.height() - 62.0 - wave_h - 36.0).clamp(80.0, wide.min(260.0));
+                let block = art + 12.0 + wave_h + 8.0 + 62.0;
+                let top = r.center().y - block / 2.0;
+                let art_rect = Rect::from_center_size(pos2(r.center().x, top + art / 2.0), vec2(art, art));
+                match &cover {
+                    Some(t) => {
+                        let ts = t.size_vec2();
+                        let f = (art / ts.x).min(art / ts.y);
+                        ui.painter().image(t.id(), Rect::from_center_size(art_rect.center(), ts * f), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                    }
+                    None => self.icons.paint_big(ui, Rect::from_center_size(art_rect.center(), vec2(80.0, 80.0)), false, e.ext(), tint),
+                }
+                let mut y = art_rect.bottom() + 12.0;
+                if let Some(w) = &peaks {
+                    let wr = Rect::from_center_size(pos2(r.center().x, y + wave_h / 2.0), vec2(wide, wave_h));
+                    waveform(ui, &mut self.files.look.player, w, path, wr, secs);
+                    y += wave_h + 8.0;
+                }
+                sound_controls(ui, &mut self.files.look.player, &play, path, Rect::from_center_size(pos2(r.center().x, y + 31.0), vec2(wide.min(360.0), 62.0)));
             }
             Content::Binary | Content::None | Content::Error(_) => {
                 let note = match c {
@@ -1001,6 +1045,38 @@ fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, si
 
 /// Play or pause on its own line (a fixed width, so it stays put as its label changes), and
 /// under it how far through, with a bar to jump about where the player can.
+/// Bars in the waveform shown in the preview.
+const WAVE_BARS: usize = 240;
+
+/// A sound's waveform: what has played in the accent colour, and a click jumps there.
+fn waveform(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, w: &[f32], path: &Path, r: Rect, secs: Option<f64>) {
+    let pal = style::pal(ui);
+    let st = player.as_ref().filter(|p| p.path == path).map(|p| p.state()).unwrap_or_default();
+    // The player's length, or the file's own when the player doesn't say (ffplay).
+    let done = match st.length.or(secs).filter(|l| *l > 0.0) {
+        Some(l) => (st.position / l).clamp(0.0, 1.0) as f32,
+        None => 0.0,
+    };
+    let seekable = player.as_ref().is_some_and(|p| p.path == path && p.can_seek()) && st.length.is_some_and(|l| l > 0.0);
+    let resp = ui.interact(r, ui.id().with(("wave", path)), if seekable { Sense::click() } else { Sense::hover() });
+    let p = ui.painter().with_clip_rect(r);
+    let bars = w.len().max(1);
+    let bw = r.width() / bars as f32;
+    let mid = r.center().y;
+    for (i, v) in w.iter().enumerate() {
+        let x = r.left() + i as f32 * bw;
+        let h = (v * r.height() * 0.5).max(0.75);
+        let c = if (i as f32 + 0.5) / bars as f32 <= done { pal.accent } else { pal.weak.gamma_multiply(0.6) };
+        p.rect_filled(Rect::from_min_max(pos2(x + bw * 0.15, mid - h), pos2(x + bw * 0.85, mid + h)), 0.5, c);
+    }
+    if seekable {
+        let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Click to jump there");
+        if resp.clicked() && let (Some(pos), Some(l), Some(pl)) = (resp.interact_pointer_pos(), st.length, player.as_ref()) {
+            pl.seek(((pos.x - r.left()) / r.width()).clamp(0.0, 1.0) as f64 * l);
+        }
+    }
+}
+
 fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, play: &Path, path: &Path, r: Rect) {
     let pal = style::pal(ui);
     let st = player.as_ref().map(|p| p.state()).unwrap_or_default();
