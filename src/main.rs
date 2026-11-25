@@ -33,6 +33,7 @@ mod icons;
 mod known;
 mod kit;
 mod licence;
+mod models;
 mod mapview;
 mod netdrives;
 mod officedoc;
@@ -76,6 +77,7 @@ fn main() -> eframe::Result {
     let mut compare = None;
     let mut restarted = false;
     let mut manage = None;
+    let mut list_models = false;
     let mut opts = scan::Options { one_file_system: true, ..Default::default() };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -88,6 +90,7 @@ fn main() -> eframe::Result {
             "--cloud-mounts" => opts.cloud_mounts = true,
             "--free-up" => manage = Some(cloudops::Action::FreeUp),
             "--keep" => manage = Some(cloudops::Action::Keep),
+            "--models" => list_models = true,
             "--top" => top = args.next().and_then(|s| s.parse().ok()).unwrap_or(top),
             "--save-snapshot" => save_snapshot = args.next().map(PathBuf::from),
             "--compare" => compare = args.next().map(PathBuf::from),
@@ -97,6 +100,7 @@ fn main() -> eframe::Result {
                 println!("usage: filescape [--cli [--top N] [--logical | --cloud-only | --reclaimable] [--save-snapshot FILE]] [--cloud-mounts] [--compare FILE] [--all-fs] [PATH]");
                 println!("       filescape --cli --free-up PATH   free up the cloud files in PATH (they stay in the cloud)");
                 println!("       filescape --cli --keep PATH      keep the cloud files in PATH on this computer (downloads them)");
+                println!("       filescape --cli --models PATH    list the AI models in PATH and their copies");
                 return Ok(());
             }
             _ => path = Some(PathBuf::from(a)),
@@ -126,6 +130,10 @@ fn main() -> eframe::Result {
                 println!("  {}: {why}", p.display());
             }
             std::process::exit(if o.failed > 0 { 1 } else { 0 });
+        }
+        if list_models {
+            models_report(&path, opts);
+            return Ok(());
         }
         report(&path, opts, top, save_snapshot);
         return Ok(());
@@ -185,6 +193,36 @@ fn main() -> eframe::Result {
             run(eframe::Renderer::Glow, path)
         }
         r => r,
+    }
+}
+
+/// `--cli --models`: the AI models in a folder, largest first.
+fn models_report(root: &std::path::Path, opts: scan::Options) {
+    let progress = Arc::new(scan::Progress::default());
+    let tree = scan::scan(root, &opts, &progress, &scan::new_live(root));
+    let Some(list) = models::find(&tree, root, &models::Progress::default()) else { return };
+    let total: u64 = list.iter().map(|m| m.size).sum();
+    println!("{}: {} AI models, {}", root.display(), list.iter().filter(|m| !m.orphan).count(), scan::human(total));
+    for m in &list {
+        let mut note = String::new();
+        if m.orphan {
+            note.push_str("  [not used by any Ollama model]");
+        } else if m.extra > 0 {
+            note.push_str("  [copy]");
+        } else if !m.copies.is_empty() {
+            note.push_str("  [has copies]");
+        }
+        if m.runnable() {
+            note.push_str("  [can run]");
+        }
+        println!("{:>10}  {}  ({} · {}){note}", scan::human(m.size), m.name, m.details(), m.source.label());
+        for f in &m.files {
+            println!("{:>10}    {}", "", f.path.display());
+        }
+    }
+    let extra: u64 = list.iter().map(|m| m.extra).sum();
+    if extra > 0 {
+        println!("{} in extra copies", scan::human(extra));
     }
 }
 

@@ -9,7 +9,7 @@ folder you're in, and follows you as you browse.
 
 ## Workspaces
 
-The buttons at the left of the toolbar switch between the three workspaces. Filescape reopens in the
+The buttons at the left of the toolbar switch between the four workspaces. Filescape reopens in the
 one you used last.
 
 | Workspace | What it's for |
@@ -17,6 +17,7 @@ one you used last.
 | **🗀 Files** (**Ctrl+1**, **⌘1** on a Mac) | Browse drives, folders and network shares, and open files. Folders are read from the disk as you open them, so there's nothing to wait for. |
 | **🖧 Remote** (**Ctrl+2**, **⌘2**) | This computer beside a server, with saved sites and quick connect. It's this file manager with its own panes: see [The Remote workspace](remote.md). |
 | **⊞ Storage Analysis** (**Ctrl+3**, **⌘3**) | The scan, with its [file manager](file-browser.md), [treemap](treemap.md), sunburst, file types, duplicates, snapshots and sequences. |
+| **✨ AI Models** (**Ctrl+4**, **⌘4**) | The AI models on this computer, from Ollama, LM Studio, Hugging Face and model files, with their copies: see [The AI Models workspace](ai-models.md). |
 
 Switching keeps your place:
 
