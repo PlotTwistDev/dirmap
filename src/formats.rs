@@ -38,7 +38,7 @@ pub enum Category {
     Audio,
     /// A picture of the first page from the system.
     Pdf,
-    /// A word-processing document whose words are read here.
+    /// Word, PowerPoint and OpenDocument files, read and formatted here.
     Document,
 }
 
@@ -120,6 +120,8 @@ pub static FORMATS: &[Format] = &[
     Format { id: "docx", name: "Word document", category: Category::Document, exts: &["docx", "docm", "dotx"] },
     Format { id: "sheet", name: "Spreadsheet", category: Category::Spreadsheet, exts: &["xlsx", "xlsm", "xlsb", "xls", "xltx", "xltm", "ods", "ots"] },
     Format { id: "odt", name: "OpenDocument text", category: Category::Document, exts: &["odt", "ott"] },
+    Format { id: "pptx", name: "PowerPoint presentation", category: Category::Document, exts: &["pptx", "pptm", "ppsx", "potx"] },
+    Format { id: "odp", name: "OpenDocument presentation", category: Category::Document, exts: &["odp", "otp"] },
 ];
 
 fn by_ext() -> &'static HashMap<&'static str, &'static Format> {

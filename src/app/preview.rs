@@ -53,6 +53,8 @@ pub(super) enum Content {
     },
     /// A spreadsheet's cells.
     Sheet(Arc<crate::sheets::Book>),
+    /// A Word, PowerPoint or OpenDocument file, formatted.
+    Doc(Arc<Vec<crate::help::doc::Block>>),
     Binary,
     /// Nothing to show beyond the facts.
     None,
@@ -112,6 +114,8 @@ pub(super) enum Kind {
     Psd,
     /// A spreadsheet: its cells.
     Sheet,
+    /// Word, PowerPoint or OpenDocument: formatted.
+    Doc,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -121,8 +125,7 @@ pub(super) fn kind_of(name: &str) -> Kind {
     crate::formats::by_name(name).map_or(Kind::Other, kind_for)
 }
 
-/// The kind of preview a format gets. Word and OpenDocument files are read in `load` by name,
-/// before the kind is looked at.
+/// The kind of preview a format gets.
 pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
     use crate::formats::Category as C;
     use crate::media::Media;
@@ -139,7 +142,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Audio => Kind::Media(Media::Audio),
         C::Pdf => Kind::Media(Media::Pdf),
         C::SystemPicture => Kind::Media(Media::Picture),
-        C::Document => Kind::Other,
+        C::Document => Kind::Doc,
     }
 }
 
@@ -197,24 +200,13 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(e) => Content::Error(e),
         };
     }
-    // Word and OpenDocument text: the words in them.
-    if let Some(k @ (thumbs::TextKind::Docx | thumbs::TextKind::Odt)) = path.file_name().and_then(|n| thumbs::text_kind(&n.to_string_lossy())) {
-        return match thumbs::doc_text(path, k) {
-            Some(text) => {
-                let truncated = text.len() > TEXT_MAX;
-                let mut text = text;
-                text.truncate(text.floor_char_boundary(TEXT_MAX));
-                Content::Text { text, truncated, colours: None }
-            }
-            None => Content::Error("Couldn't read the text in this document".into()),
-        };
-    }
     match kind {
         Kind::Image | Kind::LinearImage => load_image(path, kind == Kind::LinearImage, size),
         Kind::Text => match load_text(path) {
             Content::Text { text, truncated, .. } => coloured(path, text, truncated),
             c => c,
         },
+        Kind::Doc => load_doc(path),
         Kind::Sheet => match crate::sheets::read(path, crate::sheets::ROWS, crate::sheets::COLS) {
             Ok(b) => Content::Sheet(Arc::new(b)),
             Err(e) => Content::Error(e),
@@ -932,6 +924,18 @@ impl App {
                 let book = book.clone();
                 sheet_view(ui, path, &book, size);
             }
+            Content::Doc(blocks) => {
+                let blocks = blocks.clone();
+                let pal = style::pal(ui);
+                egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+                    ui.set_min_size(size - vec2(16.0, 16.0));
+                    ui.set_max_size(size - vec2(16.0, 16.0));
+                    egui::ScrollArea::vertical().id_salt(("look-doc", path)).auto_shrink(false).show(ui, |ui| {
+                        ui.set_max_width(ui.available_width());
+                        doc_blocks(ui, &blocks);
+                    });
+                });
+            }
             Content::Binary | Content::None | Content::Error(_) => {
                 let note = match c {
                     Content::Error(e) => e.clone(),
@@ -1146,9 +1150,57 @@ fn coloured_job(text: &str, spans: &[crate::highlight::Span], plain: Color32) ->
     job
 }
 
-fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2) {
+/// Blocks drawn with the Help Centre's renderer. Web links open in the browser; links to other
+/// files or headings do nothing, and pictures aren't fetched.
+fn doc_blocks(ui: &mut egui::Ui, blocks: &[crate::help::doc::Block]) {
     use crate::help::{doc, render};
     static NO_DOCS: std::sync::OnceLock<doc::Docs> = std::sync::OnceLock::new();
+    let mut images = HashMap::new();
+    let mut out = render::Out {
+        page: "",
+        docs: NO_DOCS.get_or_init(|| doc::Docs::from_sources(&[])),
+        images: &mut images,
+        nav: None,
+        request: None,
+        anchors: Vec::new(),
+    };
+    render::blocks(ui, &mut out, blocks);
+    if let Some(render::Nav::Url(u)) = out.nav.take()
+        && (u.contains("://") || u.starts_with("mailto:"))
+    {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(u));
+    }
+}
+
+/// A Word, PowerPoint or OpenDocument file: formatted, or the picture saved with it when its
+/// words can't be read.
+fn load_doc(path: &Path) -> Content {
+    let Some(kind) = path.file_name().and_then(|n| crate::officedoc::kind_of(&n.to_string_lossy())) else {
+        return Content::Binary;
+    };
+    match crate::officedoc::read(path, kind) {
+        Ok(b) => Content::Doc(Arc::new(b)),
+        Err(e) => match crate::officedoc::saved_thumbnail(path) {
+            Some(img) => {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                Content::Image {
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba)),
+                    tex: None,
+                    size: [w, h],
+                    info: "The picture saved with it".into(),
+                    poster: true,
+                    source: None,
+                    facts: Vec::new(),
+                }
+            }
+            None => Content::Error(e),
+        },
+    }
+}
+
+fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2) {
+    use crate::help::doc;
     let pal = style::pal(ui);
     let raw_id = egui::Id::new("preview-markdown-raw");
     let mut raw = ui.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(raw_id));
@@ -1172,22 +1224,7 @@ fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, si
                     b
                 });
                 ui.set_max_width(ui.available_width());
-                let mut images = HashMap::new();
-                let mut out = render::Out {
-                    page: "",
-                    docs: NO_DOCS.get_or_init(|| doc::Docs::from_sources(&[])),
-                    images: &mut images,
-                    nav: None,
-                    request: None,
-                    anchors: Vec::new(),
-                };
-                render::blocks(ui, &mut out, &blocks);
-                // Web links open in the browser; links to other files or headings do nothing.
-                if let Some(render::Nav::Url(u)) = out.nav.take() {
-                    if u.contains("://") || u.starts_with("mailto:") {
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(u));
-                    }
-                }
+                doc_blocks(ui, &blocks);
             }
             if truncated {
                 ui.weak("… (only the first 256 KB is shown)");
@@ -1334,7 +1371,9 @@ mod tests {
         assert_eq!(kind_of("README"), Kind::Text);
         assert_eq!(kind_of("movie.mov"), Kind::Media(crate::media::Media::Video));
         assert_eq!(kind_of("data.xyz"), Kind::Other);
-        assert_eq!(kind_of("report.docx"), Kind::Other, "Word files are read by name in load");
+        assert_eq!(kind_of("report.docx"), Kind::Doc);
+        assert_eq!(kind_of("Talk.PPTX"), Kind::Doc);
+        assert_eq!(kind_of("notes.odp"), Kind::Doc);
         assert_eq!(kind_of("song.FLAC"), Kind::Media(crate::media::Media::Audio));
         assert_eq!(kind_of("logo.svg"), Kind::Drawing);
         assert_eq!(kind_of("Inter.otf"), Kind::Font);
