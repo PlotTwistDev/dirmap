@@ -87,8 +87,8 @@ Checked on crates.io, 25 November 2026.
 | Fonts | `ttf-parser` 0.25 | MIT or Apache-2.0 | Names, axes, glyph outlines | **Use** |
 |  | `ab_glyph` 0.2 | Apache-2.0 | Rasterise sample text into a picture | **Use** (already in the tree via egui) |
 | Spreadsheets | `calamine` 0.38 | MIT | xlsx, xlsm, xlsb, xls, ods; cached values only, never runs formulas or macros | **Use** |
-| PDF pages | `hayro` 0.9 | MIT or Apache-2.0 | Pure-Rust renderer, young; would give every page on every system | Evaluate (Phase 1 spike) |
-|  | `pdfium-render` 0.9 | MIT or Apache-2.0 | Needs the PDFium library (BSD-3) shipped beside the app, ~5 MB a platform | Fallback if hayro falls short |
+| PDF pages | `hayro` 0.9 | MIT or Apache-2.0 | Pure-Rust renderer, young; would give every page on every system | **Use** (chosen 25 Nov) |
+|  | `pdfium-render` 0.9 | MIT or Apache-2.0 | Needs the PDFium library (BSD-3) shipped beside the app, ~5 MB a platform | Not needed |
 |  | System | n/a | Windows.Data.Pdf and `pdftoppm` already render any page; macOS needs CGPDFDocument | Use where there today |
 | Photoshop | `psd` 0.3 | MIT or Apache-2.0 | Flattened composite; plus the embedded JPEG thumbnail (resource 1036) as a cheap path | **Use**, guarded by limits |
 | Camera RAW | own reader + `kamadak-exif` 0.6 | BSD-2-Clause | Embedded JPEG previews from TIFF-based RAWs (CR2, NEF, ARW, DNG, PEF, ORF, RW2…) and CR3/ISO boxes; EXIF metadata | **Use** |
@@ -175,8 +175,10 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 
 1. **Free or Professional**: decided 25 Nov, every preview is free for now.
 2. **Third-party notices** (finding 10): decided 25 Nov, yes, a generated page in Help > About.
-3. **PDF renderer**: pure-Rust hayro (no extra files) vs PDFium (more mature, ~5 MB extra per
-   platform). Decided after the Phase 1 spike.
+3. **PDF renderer**: decided 25 Nov, hayro. In the spike it drew a 14-page TeX paper and pdf.js
+   test files correctly in 1-20 ms a page at 1000 px wide, adds about 4 MB to the app and
+   needs nothing shipped beside it. PDFs it can't open (password-protected, damaged) fall back
+   to the system's first-page picture.
 
 ## 6. Tracker
 
@@ -193,4 +195,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | HEIC and AVIF through the system | #51 | Merged |
 | Photoshop PSD/PSB (own reader) | #52 | Merged |
 | Spreadsheets (calamine) | #53 | Merged |
-| Word, PowerPoint and OpenDocument formatted | | In review |
+| Word, PowerPoint and OpenDocument formatted | #54 | Merged |
+| Every PDF page (hayro) | | In review |

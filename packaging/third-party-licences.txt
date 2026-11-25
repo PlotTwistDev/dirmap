@@ -20,6 +20,8 @@ aes 0.9.4	MIT OR Apache-2.0
 aes-gcm 0.11.1	Apache-2.0 OR MIT
 ahash 0.8.12	MIT OR Apache-2.0
 aho-corasick 1.1.5	Unlicense OR MIT
+alloc-no-stdlib 2.0.4	BSD-3-Clause
+alloc-stdlib 0.2.4	BSD-3-Clause
 allocator-api2 0.2.21	MIT OR Apache-2.0
 arboard 3.7.0	MIT OR Apache-2.0
 argon2 0.6.0	MIT OR Apache-2.0
@@ -65,6 +67,8 @@ block2 0.5.1	MIT
 block2 0.6.2	MIT
 blocking 1.7.0	Apache-2.0 OR MIT
 blowfish 0.10.0	MIT OR Apache-2.0
+brotli 8.0.4	BSD-3-Clause AND MIT
+brotli-decompressor 5.0.3	BSD-3-Clause/MIT
 bumpalo 3.20.3	MIT OR Apache-2.0
 bytemuck 1.25.2	Zlib OR Apache-2.0 OR MIT
 bytemuck_derive 1.12.1	Zlib OR Apache-2.0 OR MIT
@@ -170,6 +174,8 @@ fastrand 2.5.0	Apache-2.0 OR MIT
 fax 0.2.7	MIT
 fdeflate 0.3.7	MIT OR Apache-2.0
 fearless_simd 0.4.1	Apache-2.0 OR MIT
+fearless_simd 0.7.0	Apache-2.0 OR MIT
+fearless_simd 1.3.0	Apache-2.0 OR MIT
 ff 0.14.0	MIT/Apache-2.0
 filetime 0.2.30	MIT/Apache-2.0
 find-msvc-tools 0.1.14	MIT OR Apache-2.0
@@ -204,6 +210,7 @@ ghash 0.6.0	Apache-2.0 OR MIT
 gif 0.14.2	MIT OR Apache-2.0
 gl_generator 0.14.0	Apache-2.0
 glifo 0.2.0	Apache-2.0 OR MIT
+glifo 0.4.0	Apache-2.0 OR MIT
 glow 0.17.0	MIT OR Apache-2.0 OR Zlib
 glutin 0.32.3	Apache-2.0
 glutin-winit 0.5.0	MIT
@@ -219,6 +226,15 @@ harfrust 0.15.0	MIT
 hashbrown 0.14.5	MIT OR Apache-2.0
 hashbrown 0.16.1	MIT OR Apache-2.0
 hashbrown 0.17.1	MIT OR Apache-2.0
+hayro 0.9.0	Apache-2.0 OR MIT
+hayro-ccitt 0.5.0	Apache-2.0 OR MIT
+hayro-cmap 0.1.1	Apache-2.0 OR MIT
+hayro-font 0.5.0	Apache-2.0 OR MIT
+hayro-interpret 0.9.0	Apache-2.0 OR MIT
+hayro-jbig2 0.4.0	Apache-2.0 OR MIT
+hayro-jpeg2000 0.5.0	Apache-2.0 OR MIT
+hayro-postscript 0.2.0	Apache-2.0 OR MIT
+hayro-syntax 0.9.0	Apache-2.0 OR MIT
 hex 0.4.3	MIT OR Apache-2.0
 hex-literal 1.1.0	MIT OR Apache-2.0
 hkdf 0.12.4	MIT OR Apache-2.0
@@ -349,6 +365,7 @@ phf 0.13.1	MIT
 phf_generator 0.13.1	MIT
 phf_macros 0.13.1	MIT
 phf_shared 0.13.1	MIT
+pic-scale 0.7.14	BSD-3-Clause OR Apache-2.0
 pico-args 0.5.0	MIT
 pin-project-lite 0.2.17	Apache-2.0 OR MIT
 piper 0.2.5	MIT OR Apache-2.0
@@ -531,7 +548,9 @@ utf8-zero 0.8.1	MIT OR Apache-2.0
 utf8_iter 1.0.4	Apache-2.0 OR MIT
 uuid 1.28.0	Apache-2.0 OR MIT
 vello_common 0.1.0	Apache-2.0 OR MIT
+vello_common 0.3.0	Apache-2.0 OR MIT
 vello_cpu 0.1.0	Apache-2.0 OR MIT
+vello_cpu 0.3.0	Apache-2.0 OR MIT
 version_check 0.9.5	MIT/Apache-2.0
 walkdir 2.5.0	Unlicense/MIT
 wayland-backend 0.3.17	MIT
@@ -632,12 +651,15 @@ zvariant_utils 4.2.0	MIT
 
 ========================================================================
 Used by: ab_glyph 0.2.32, ab_glyph_rasterizer 0.1.10, arboard 3.7.0, color 0.3.3, fdeflate 0.3.7,
-fearless_simd 0.4.1, half 2.7.1, image 0.25.10, image-webp 0.2.4, linebender_resource_handle 0.1.1,
-miniz_oxide 0.8.9, miniz_oxide 0.9.1, naga 30.0.1, naga-types 30.0.1, owned_ttf_parser 0.25.1,
-pin-project-lite 0.2.17, range-alloc 0.1.5, raw-window-handle 0.6.2, resvg 0.50.0, simdutf8 0.1.5,
-usvg 0.50.0, vello_common 0.1.0, vello_cpu 0.1.0, wgpu 30.0.1, wgpu-core 30.0.1,
-wgpu-core-deps-apple 30.0.1, wgpu-core-deps-windows-linux-android 30.0.1, wgpu-hal 30.0.1,
-wgpu-naga-bridge 30.0.1, wgpu-types 30.0.1
+fearless_simd 0.4.1, fearless_simd 0.7.0, fearless_simd 1.3.0, half 2.7.1, hayro 0.9.0, hayro-ccitt
+0.5.0, hayro-cmap 0.1.1, hayro-font 0.5.0, hayro-interpret 0.9.0, hayro-jbig2 0.4.0, hayro-jpeg2000
+0.5.0, hayro-postscript 0.2.0, hayro-syntax 0.9.0, image 0.25.10, image-webp 0.2.4,
+linebender_resource_handle 0.1.1, miniz_oxide 0.8.9, miniz_oxide 0.9.1, naga 30.0.1, naga-types
+30.0.1, owned_ttf_parser 0.25.1, pin-project-lite 0.2.17, range-alloc 0.1.5, raw-window-handle
+0.6.2, resvg 0.50.0, simdutf8 0.1.5, usvg 0.50.0, vello_common 0.1.0, vello_common 0.3.0, vello_cpu
+0.1.0, vello_cpu 0.3.0, wgpu 30.0.1, wgpu-core 30.0.1, wgpu-core-deps-apple 30.0.1,
+wgpu-core-deps-windows-linux-android 30.0.1, wgpu-hal 30.0.1, wgpu-naga-bridge 30.0.1, wgpu-types
+30.0.1
 ========================================================================
                                  Apache License
                            Version 2.0, January 2004
@@ -1763,12 +1785,35 @@ OTHER DEALINGS IN THE SOFTWARE.
 For more information, please refer to <http://unlicense.org/>
 
 ========================================================================
+Used by: alloc-no-stdlib 2.0.4, brotli 8.0.4, brotli-decompressor 5.0.3
+========================================================================
+Copyright (c) 2016 Dropbox, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+========================================================================
+Used by: alloc-stdlib 0.2.4
+========================================================================
+Copyright (c) Daniel Reiter Horn
+
+Licensed under BSD-3-Clause. The crate ships no licence file; see https://github.com/dropbox/rust-alloc-no-stdlib.
+
+========================================================================
 Used by: allocator-api2 0.2.21, async-trait 0.1.92, constant_time_eq 0.6.1, enumn 0.1.14, glifo
-0.2.0, itoa 1.0.19, libc 0.2.190, litrs 1.0.1, paste 1.0.15, proc-macro2 1.0.107, quote 1.0.47,
-rustc-hash 2.1.3, rustversion 1.0.23, semver 1.0.28, serde 1.0.229, serde_bytes 0.11.19, serde_core
-1.0.229, serde_derive 1.0.229, serde_json 1.0.154, serde_repr 0.1.21, syn 2.0.119, syn 3.0.9,
-thiserror 1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69, thiserror-impl 2.0.21, typed-path 0.13.0,
-typeid 1.0.3, unicode-ident 1.0.27, utf8-zero 0.8.1
+0.2.0, glifo 0.4.0, itoa 1.0.19, libc 0.2.190, litrs 1.0.1, paste 1.0.15, proc-macro2 1.0.107, quote
+1.0.47, rustc-hash 2.1.3, rustversion 1.0.23, semver 1.0.28, serde 1.0.229, serde_bytes 0.11.19,
+serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.154, serde_repr 0.1.21, syn 2.0.119, syn
+3.0.9, thiserror 1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69, thiserror-impl 2.0.21, typed-path
+0.13.0, typeid 1.0.3, unicode-ident 1.0.27, utf8-zero 0.8.1
 ========================================================================
                               Apache License
                         Version 2.0, January 2004
@@ -3983,6 +4028,29 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+========================================================================
+Used by: brotli 8.0.4
+========================================================================
+Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ========================================================================
 Used by: bumpalo 3.20.3
@@ -8161,7 +8229,8 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ========================================================================
-Used by: fearless_simd 0.4.1, kurbo 0.13.1, peniko 0.6.1, polycool 0.4.0
+Used by: fearless_simd 0.4.1, fearless_simd 0.7.0, fearless_simd 1.3.0, kurbo 0.13.1, peniko 0.6.1,
+polycool 0.4.0
 ========================================================================
 Copyright (c) 2018 Raph Levien
 
@@ -9113,7 +9182,7 @@ Copyright (c) Brendan Zabarauskas, Corey Richardson, Arseny Kapoulkine
 Licensed under Apache-2.0. The crate ships no licence file; see https://github.com/brendanzab/gl-rs/.
 
 ========================================================================
-Used by: glifo 0.2.0
+Used by: glifo 0.2.0, glifo 0.4.0
 ========================================================================
 Copyright 2025 the Vello Authors
 
@@ -9717,6 +9786,18 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+========================================================================
+Used by: hayro 0.9.0, hayro-ccitt 0.5.0, hayro-cmap 0.1.1, hayro-font 0.5.0, hayro-interpret 0.9.0,
+hayro-jbig2 0.4.0, hayro-jpeg2000 0.5.0, hayro-postscript 0.2.0, hayro-syntax 0.9.0
+========================================================================
+Copyright (c) The Hayro Authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================
 Used by: hex 0.4.3
@@ -12019,7 +12100,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ========================================================================
-Used by: moxcms 0.8.1, pxfm 0.1.30
+Used by: moxcms 0.8.1, pic-scale 0.7.14, pxfm 0.1.30
 ========================================================================
                                  Apache License
                            Version 2.0, January 2004
@@ -12224,7 +12305,7 @@ Used by: moxcms 0.8.1, pxfm 0.1.30
    limitations under the License.
 
 ========================================================================
-Used by: moxcms 0.8.1, pxfm 0.1.30
+Used by: moxcms 0.8.1, pic-scale 0.7.14, pxfm 0.1.30
 ========================================================================
 Copyright (c) Radzivon Bartoshyk. All rights reserved.
 
@@ -18325,7 +18406,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ========================================================================
-Used by: vello_common 0.1.0, vello_cpu 0.1.0
+Used by: vello_common 0.1.0, vello_common 0.3.0, vello_cpu 0.1.0, vello_cpu 0.3.0
 ========================================================================
 Copyright 2020 the Vello Authors
 

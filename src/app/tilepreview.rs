@@ -395,7 +395,7 @@ impl App {
                 ui.add(egui::Label::new(info.as_str()).wrap());
                 ui.end_row();
             }
-            if let Some(Content::Image { facts, .. }) = self.files.look.cached(&path) {
+            if let Some(facts) = self.files.look.cached(&path).map(|c| c.facts()) {
                 for (k, v) in facts {
                     ui.weak(*k);
                     ui.add(egui::Label::new(v.as_str()).wrap());
