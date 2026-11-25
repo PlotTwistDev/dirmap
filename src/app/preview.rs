@@ -130,6 +130,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Video => Kind::Media(Media::Video),
         C::Audio => Kind::Media(Media::Audio),
         C::Pdf => Kind::Media(Media::Pdf),
+        C::SystemPicture => Kind::Media(Media::Picture),
         C::Document => Kind::Other,
     }
 }
@@ -265,12 +266,28 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                 pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
                 tex: None,
                 size: [w as u32, h as u32],
-                info: if m == crate::media::Media::Pdf { "The first page".into() } else { "A frame from the video".into() },
+                info: match m {
+                    crate::media::Media::Pdf => "The first page".into(),
+                    crate::media::Media::Picture => "Drawn by the system".into(),
+                    _ => "A frame from the video".into(),
+                },
                 poster: true,
                 source: None,
                 facts: Vec::new(),
             },
-            Err(_) => Content::Error(if m == crate::media::Media::Pdf { "No picture of this PDF: it couldn't be drawn (it may be damaged or password-protected, or the system can't draw PDFs)".into() } else { "No picture of this video: the system has no thumbnailer for it".into() }),
+            Err(_) => Content::Error(match m {
+                crate::media::Media::Pdf => "No picture of this PDF: it couldn't be drawn (it may be damaged or password-protected, or the system can't draw PDFs)".into(),
+                crate::media::Media::Picture => {
+                    if cfg!(windows) {
+                        "The system can't draw this picture. Windows needs the free HEIF and AV1 Video Extensions from the Microsoft Store for HEIC and AVIF.".into()
+                    } else if cfg!(target_os = "macos") {
+                        "The system couldn't draw this picture (it may be damaged).".into()
+                    } else {
+                        "No program here can draw this picture: install libheif's heif-thumbnailer (for HEIC) or ffmpeg (for AVIF).".into()
+                    }
+                }
+                _ => "No picture of this video: the system has no thumbnailer for it".into(),
+            }),
         },
         Kind::Other => {
             // Unknown or missing extension: its first bytes may say what it is.

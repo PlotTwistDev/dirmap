@@ -27,6 +27,7 @@
 - Camera RAW photos (CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 and more) preview on tiles, in icon
   views and in the panes, from the preview the camera stores in the file, with the camera, lens
   and exposure in the details.
+- HEIC (iPhone) and AVIF pictures preview through the system's own decoders.
 - Files with a missing or wrong extension, such as a download saved as `file`, now preview by
   what they really are when Filescape can tell from their first bytes.
 - **Help > About Filescape > Third-party licences** lists the open-source software Filescape is

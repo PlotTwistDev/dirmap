@@ -26,6 +26,8 @@ pub enum Category {
     Font,
     /// Camera RAW: the JPEG preview the camera stores in the file.
     Raw,
+    /// Pictures only the system can decode (HEIC, AVIF: patent-encumbered or C decoders).
+    SystemPicture,
     /// A picture and playback from the system's decoders.
     Video,
     /// Playback and a waveform from the system's decoders.
@@ -79,6 +81,7 @@ pub static FORMATS: &[Format] = &[
             "x3f", "kdc", "dcr",
         ],
     },
+    Format { id: "heif", name: "HEIC or AVIF picture", category: Category::SystemPicture, exts: &["heic", "heif", "hif", "avif"] },
     Format { id: "exr", name: "OpenEXR image", category: Category::LinearPicture, exts: &["exr"] },
     Format { id: "hdr", name: "Radiance HDR image", category: Category::LinearPicture, exts: &["hdr"] },
     Format { id: "svg", name: "SVG drawing", category: Category::Drawing, exts: &["svg", "svgz"] },
@@ -155,7 +158,7 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
     } else if at(4, b"ftyp") {
         // ISO media: video, unless the brand says it's a picture (HEIC, AVIF) or sound.
         match head.get(8..12) {
-            Some(b"heic" | b"heix" | b"heim" | b"heis" | b"hevc" | b"mif1" | b"msf1" | b"avif" | b"avis") => return None,
+            Some(b"heic" | b"heix" | b"heim" | b"heis" | b"hevc" | b"mif1" | b"msf1" | b"avif" | b"avis") => "heif",
             Some(b"M4A " | b"M4B ") => "audio",
             _ => "video",
         }
@@ -203,7 +206,7 @@ mod tests {
         assert_eq!(sniff(b"%PDF-1.7\n").map(|f| f.id), Some("pdf"));
         assert_eq!(sniff(b"\0\0\0\x18ftypqt  \0\0\0\0").map(|f| f.id), Some("video"));
         assert_eq!(sniff(b"\0\0\0\x18ftypM4A \0\0\0\0").map(|f| f.id), Some("audio"));
-        assert!(sniff(b"\0\0\0\x18ftypheic\0\0\0\0").is_none(), "HEIC isn't decoded yet");
+        assert_eq!(sniff(b"\0\0\0\x18ftypheic\0\0\0\0").map(|f| f.id), Some("heif"));
         assert!(sniff(b"hello, world").is_none());
         assert_eq!(sniff(b"OTTO\0\x0b\0\x80").map(|f| f.id), Some("font"));
         assert_eq!(by_name("Inter.TTF").map(|f| f.category), Some(Category::Font));

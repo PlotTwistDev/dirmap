@@ -24,6 +24,8 @@ pub enum Media {
     Video,
     Audio,
     Pdf,
+    /// HEIC and AVIF pictures, decoded by the system.
+    Picture,
 }
 
 pub fn media_of(name: &str) -> Option<Media> {
@@ -32,6 +34,7 @@ pub fn media_of(name: &str) -> Option<Media> {
         C::Video => Media::Video,
         C::Audio => Media::Audio,
         C::Pdf => Media::Pdf,
+        C::SystemPicture => Media::Picture,
         _ => return None,
     })
 }
@@ -364,6 +367,19 @@ mod imp {
             let mut c = Command::new("/usr/bin/qlmanage");
             c.arg("-t").arg("-s").arg(&size).arg("-o").arg(&dir).arg(path);
             tries.push(c);
+        } else if kind == Some(Media::Picture) {
+            // HEIC: libheif's thumbnailer if installed; AVIF (and some HEIC): ffmpeg.
+            if let Some(p) = find("heif-thumbnailer") {
+                let mut c = Command::new(p);
+                c.args(["-s", &size]).arg(path).arg(&out);
+                tries.push(c);
+            }
+            if let Some(p) = find("ffmpeg") {
+                let mut c = Command::new(p);
+                let scale = format!("scale='min({size},iw)':'min({size},ih)':force_original_aspect_ratio=decrease");
+                c.args(["-hide_banner", "-loglevel", "error", "-y"]).arg("-i").arg(path).args(["-frames:v", "1", "-vf", &scale]).arg(&out);
+                tries.push(c);
+            }
         } else if kind == Some(Media::Pdf) {
             if let Some(p) = find("pdftoppm") {
                 let mut c = Command::new(p);
@@ -537,6 +553,7 @@ mod tests {
         assert_eq!(media_of("Clip.MOV"), Some(Media::Video));
         assert_eq!(media_of("song.flac"), Some(Media::Audio));
         assert_eq!(media_of("paper.pdf"), Some(Media::Pdf));
+        assert_eq!(media_of("IMG_1234.HEIC"), Some(Media::Picture));
         assert_eq!(media_of("notes.txt"), None);
         assert_eq!(clock(75.4), "1:15");
         assert_eq!(clock(3725.0), "1:02:05");
