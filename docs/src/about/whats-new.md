@@ -2,6 +2,17 @@
 
 ## Next version
 
+### The AI Models workspace
+
+- A new **✨ AI Models** workspace (**Ctrl+4**) lists the AI models on this computer: what Ollama,
+  LM Studio and Hugging Face have downloaded, model files in Downloads and in folders you add, and
+  those in the Storage Analysis scan. Each shows its size, format, family, parameters, precision
+  and context length, read from the file without loading it. See
+  [The AI Models workspace](../views/ai-models.md).
+- Files that are byte-for-byte copies of another model are marked, as are Ollama downloads no
+  installed model uses.
+- `filescape --cli --models PATH` prints the same list.
+
 ### See what's in files on the map
 
 - Zoom in on the treemap and tiles big enough show what's in the file: pictures, video frames,

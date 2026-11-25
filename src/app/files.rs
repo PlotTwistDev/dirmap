@@ -30,6 +30,8 @@ pub(super) enum Workspace {
     /// Servers: the File Manager with its own panes (this computer beside a server), saved
     /// sites and quick connect (`remoteui.rs`).
     Remote,
+    /// The AI models on this computer (`models.rs`).
+    Models,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
@@ -85,6 +87,9 @@ pub(super) struct FilesPrefs {
     pub sequences: bool,
     /// Searches saved in the sidebar.
     pub searches: Vec<SavedSearch>,
+    /// Extra folders the AI Models workspace looks in (besides Ollama, LM Studio, Hugging Face
+    /// and Downloads).
+    pub model_folders: Vec<PathBuf>,
     /// Programs offered under Open With.
     pub apps: Vec<openwith::UserApp>,
     /// The sequence player's settings.
@@ -174,6 +179,7 @@ impl Default for FilesPrefs {
             sites: Vec::new(),
             sequences: true,
             searches: Vec::new(),
+            model_folders: Vec::new(),
             apps: Vec::new(),
             player: Default::default(),
             recent: Vec::new(),
@@ -1131,7 +1137,7 @@ impl App {
                 }
             }
             Workspace::Files if from == Workspace::Analysis => self.files_follow_analysis(),
-            Workspace::Files | Workspace::Remote => {}
+            Workspace::Files | Workspace::Remote | Workspace::Models => {}
         }
         self.files.prefs.workspace = to;
     }
@@ -1196,6 +1202,13 @@ impl App {
             {
                 to = Some(Workspace::Analysis);
             }
+            if ui
+                .add(egui::Button::selectable(ws == Workspace::Models, if narrow { "✨" } else { "✨ AI Models" }))
+                .on_hover_text(format!("The AI models on this computer: Ollama, LM Studio, Hugging Face and model files ({})", k(egui::Key::Num4)))
+                .clicked()
+            {
+                to = Some(Workspace::Models);
+            }
         });
         if let Some(w) = to {
             self.set_workspace(w);
@@ -1203,13 +1216,18 @@ impl App {
         ui.separator();
     }
 
-    /// Ctrl/⌘+1 and Ctrl/⌘+3 switch workspace from anywhere.
+    /// Ctrl/⌘+1 to 4 switch workspace from anywhere.
     pub(super) fn workspace_keys(&mut self, ctx: &egui::Context) {
         if self.ops.modal() {
             return;
         }
-        let (files, remote, analysis) = ctx.input_mut(|i| {
-            (i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num1), i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num2), i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num3))
+        let (files, remote, analysis, models) = ctx.input_mut(|i| {
+            (
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num1),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num2),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num3),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num4),
+            )
         });
         if files {
             self.set_workspace(Workspace::Files);
@@ -1217,6 +1235,8 @@ impl App {
             self.set_workspace(Workspace::Remote);
         } else if analysis {
             self.set_workspace(Workspace::Analysis);
+        } else if models {
+            self.set_workspace(Workspace::Models);
         }
     }
 
