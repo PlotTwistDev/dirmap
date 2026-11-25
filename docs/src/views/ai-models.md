@@ -48,9 +48,43 @@ a line of details:
 | Context | The longest text the model can read at once, in tokens (roughly ¾ of a word each). |
 | Add-on | A vision projector or adapter that works together with a model, not on its own. |
 
-Click a model to see everything known about it on the right, with the full path of each of its
-files. Double-click it, or right-click and choose **Show in Files**, to open the folder it's in
-with the file selected. **Copy path** copies the path of its first file.
+Click a model to see what's known about it on the right, with the full path of each of its files.
+Right-click it and choose **Show in Files**, or press **Show in Files** on the right, to open the
+folder it's in with the file selected. **Copy path** copies the path of its first file.
+
+## Inspecting a model
+
+Double-click a model, or press **🔍 Inspect**, to see what's inside it. Filescape reads only the
+part of each file where the model describes itself and lists its pieces, never the weights, so
+this takes a moment even for a model of many gigabytes. **⏴ All models** or **Esc** goes back to the
+list.
+
+**Overview** lists what's known about the model, such as its architecture, layers, attention
+heads, context length, vocabulary, licence and number of parameters. A tag beside each fact says
+where it comes from:
+
+| Tag | Meaning |
+|---|---|
+| **file** | Read from the model file itself. |
+| **calculated** | Worked out by Filescape from the model file, for example the number of parameters, by adding up its tensors. |
+| **publisher** | Stated in the publisher's files beside the model (`config.json` or the README of a Hugging Face download). Filescape hasn't checked it against the weights. |
+
+Below, **How the numbers are stored** shows how much of the model is kept in each number type. A
+**Q4_K_M** model, for example, keeps most of its numbers as Q4_K and a few important ones at the
+higher Q6_K precision.
+
+**Tensors** lists every tensor (block of numbers) in the model with its type, shape, number of
+values and size. Type in the box to show only some, such as `attn` for the attention tensors or
+`Q6_K` for one type. Click a column heading to sort by it, and again to reverse. Right-click a
+tensor to copy its name.
+
+**Metadata** lists every entry the model file carries, such as its training settings and
+tokenizer, with a box to find one.
+
+GGUF and safetensors models can be inspected. PyTorch checkpoints (`.ckpt`, `.pt`, `.pth` and
+`.bin`) are never opened, because they are saved with Python's pickle, which can run code when a
+file is opened. Their names and sizes are shown, and the same model in safetensors or GGUF format
+can be inspected instead. Files only in the cloud aren't read, so as not to download them.
 
 ## Copies and unused downloads
 

@@ -12,6 +12,11 @@
 - Files that are byte-for-byte copies of another model are marked, as are Ollama downloads no
   installed model uses.
 - `filescape --cli --models PATH` prints the same list.
+- Double-click a model to inspect it: its architecture, layers, heads, vocabulary, licence and
+  parameters, each tagged with where it comes from (the file, Filescape's own count, or the
+  publisher's notes), how its numbers are stored, and every tensor and metadata entry, searchable
+  and sortable. PyTorch checkpoints are never opened, since they can run code. See
+  [Inspecting a model](../views/ai-models.md#inspecting-a-model).
 
 ### See what's in files on the map
 

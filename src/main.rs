@@ -34,6 +34,8 @@ mod icons;
 mod known;
 mod kit;
 mod licence;
+mod gguf;
+mod inspect;
 mod models;
 mod mapview;
 mod netdrives;

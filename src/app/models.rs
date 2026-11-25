@@ -6,6 +6,8 @@
 use super::files::Workspace;
 use super::*;
 use crate::fsys::PathShow;
+use crate::inspect::{self, How, Inspection};
+use crate::kit::{self, Tone};
 use crate::models::{self, Model};
 use std::path::Path;
 use std::sync::Mutex;
@@ -19,6 +21,39 @@ pub(super) struct ModelsState {
     pub chosen: Option<usize>,
     /// Folders looked in by the last search, as (label, folder).
     pub places: Vec<(String, PathBuf)>,
+    /// The model being inspected, shown instead of the list.
+    page: Option<ModelPage>,
+}
+
+/// A model's own page: what's inside it.
+struct ModelPage {
+    model: usize,
+    tab: PageTab,
+    rx: Option<mpsc::Receiver<Inspection>>,
+    data: Option<Arc<Inspection>>,
+    filter: String,
+    sort: TensorCol,
+    descending: bool,
+    /// Tensors to show, in order (indexes into `data.tensors`), for `shown_for`.
+    shown: Vec<usize>,
+    shown_for: Option<(String, TensorCol, bool)>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PageTab {
+    Overview,
+    Tensors,
+    Metadata,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TensorCol {
+    /// File order.
+    Order,
+    Name,
+    Kind,
+    Shape,
+    Size,
 }
 
 struct ModelsJob {
@@ -54,7 +89,7 @@ impl App {
         std::thread::spawn(move || {
             let _ = tx.send(search(roots, analysis, &progress, &slot, &status));
         });
-        self.models = ModelsState { job: Some(job), list: None, chosen: None, places };
+        self.models = ModelsState { job: Some(job), list: None, chosen: None, places, page: None };
     }
 
     pub(super) fn poll_models(&mut self, ctx: &egui::Context) {
@@ -114,7 +149,7 @@ impl App {
         });
         self.help_regions.push((r.response.rect, topics::AI_MODELS));
         let chosen = self.models.chosen.filter(|&i| self.models.list.as_ref().is_some_and(|l| i < l.len()));
-        if chosen.is_some() {
+        if chosen.is_some() && self.models.page.is_none() {
             let frame = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::same(10));
             let r = egui::Panel::right("model-details").default_size(340.0).min_size(240.0).resizable(true).frame(frame).show(ui, |ui| {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.model_details(ui));
@@ -122,7 +157,13 @@ impl App {
             self.help_regions.push((r.response.rect, topics::AI_MODELS));
         }
         let frame = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::same(10));
-        let r = egui::CentralPanel::default().frame(frame).show(ui, |ui| self.models_main(ui));
+        let r = egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+            if self.models.page.is_some() && self.models.job.is_none() {
+                self.model_page(ui);
+            } else {
+                self.models_main(ui);
+            }
+        });
         self.help_regions.push((r.response.rect, topics::AI_MODELS));
     }
 
@@ -220,6 +261,7 @@ impl App {
 
         let mut chosen = None;
         let mut open = None;
+        let mut inspect = None;
         ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW, list.len(), |ui, range| {
             for (k, m) in list[range.clone()].iter().enumerate() {
@@ -258,9 +300,13 @@ impl App {
                     chosen = Some(i);
                 }
                 if resp.double_clicked() {
-                    open = Some(i);
+                    inspect = Some(i);
                 }
                 resp.context_menu(|ui| {
+                    if ui.button("Inspect").clicked() {
+                        inspect = Some(i);
+                        ui.close();
+                    }
                     if ui.button("Show in Files").clicked() {
                         open = Some(i);
                         ui.close();
@@ -276,6 +322,12 @@ impl App {
         });
         if let Some(i) = chosen {
             self.models.chosen = Some(i);
+        }
+        if let Some(i) = inspect
+            && let Some(m) = list.get(i)
+        {
+            self.models.chosen = Some(i);
+            self.inspect_model(i, m);
         }
         if let Some(i) = open
             && let Some(f) = list.get(i).and_then(|m| m.files.first())
@@ -363,8 +415,15 @@ impl App {
             );
         }
         ui.add_space(10.0);
-        if ui.button("Show in Files").clicked() {
-            open = m.files.first().map(|f| f.path.clone());
+        let mut look = false;
+        ui.horizontal(|ui| {
+            look = ui.button("🔍 Inspect").on_hover_text("See what's inside this model: its architecture, tensors and metadata").clicked();
+            if ui.button("Show in Files").clicked() {
+                open = m.files.first().map(|f| f.path.clone());
+            }
+        });
+        if look && let Some(i) = self.models.chosen {
+            self.inspect_model(i, m);
         }
         self.models.list = Some(list);
         if pick.is_some() {
@@ -374,6 +433,305 @@ impl App {
             self.show_model_file(&p);
         }
     }
+}
+
+impl App {
+    /// Opens a model's page and starts reading what's inside it.
+    fn inspect_model(&mut self, i: usize, m: &Model) {
+        let (tx, rx) = mpsc::channel();
+        let m = m.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(inspect::inspect(&m));
+        });
+        self.models.page = Some(ModelPage {
+            model: i,
+            tab: PageTab::Overview,
+            rx: Some(rx),
+            data: None,
+            filter: String::new(),
+            sort: TensorCol::Order,
+            descending: false,
+            shown: Vec::new(),
+            shown_for: None,
+        });
+    }
+
+    /// The model page, in place of the list.
+    fn model_page(&mut self, ui: &mut egui::Ui) {
+        let Some(list) = self.models.list.take() else { return };
+        let Some(mut page) = self.models.page.take() else {
+            self.models.list = Some(list);
+            return;
+        };
+        let Some(m) = list.get(page.model) else {
+            self.models.list = Some(list);
+            return;
+        };
+        if let Some(rx) = &page.rx {
+            match rx.try_recv() {
+                Ok(d) => {
+                    page.data = Some(Arc::new(d));
+                    page.rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => ui.ctx().request_repaint_after(Duration::from_millis(50)),
+                Err(mpsc::TryRecvError::Disconnected) => page.rx = None,
+            }
+        }
+        let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input();
+        let mut open = None;
+        ui.horizontal(|ui| {
+            close |= ui.button("⏴ All models").on_hover_text("Back to the list (Esc)").clicked();
+            ui.add_space(8.0);
+            ui.add(egui::Label::new(egui::RichText::new(&m.name).heading()).truncate());
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.weak(format!("{} · {} · {}", m.details(), scan::human(m.size), m.source.label()));
+            if let Some(n) = note(m) {
+                ui.colored_label(ui.visuals().warn_fg_color, n);
+            }
+        });
+        ui.add_space(6.0);
+        let tensors = page.data.as_ref().map_or(0, |d| d.tensors.len());
+        let metas = page.data.as_ref().map_or(0, |d| d.meta.len());
+        let tensors_label = format!("Tensors ({})", group(tensors as u64));
+        let meta_label = format!("Metadata ({metas})");
+        let mut tabs = vec![(PageTab::Overview, "Overview")];
+        if tensors > 0 {
+            tabs.push((PageTab::Tensors, tensors_label.as_str()));
+        }
+        if metas > 0 {
+            tabs.push((PageTab::Metadata, meta_label.as_str()));
+        }
+        if tabs.len() > 1 {
+            kit::segmented(ui, &mut page.tab, &tabs, false);
+            ui.add_space(8.0);
+        }
+        match (&page.data, page.tab) {
+            (None, _) => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Reading the model…");
+                });
+            }
+            (Some(d), PageTab::Overview) => {
+                let d = d.clone();
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    if let Some(p) = page_overview(ui, m, &d) {
+                        open = Some(p);
+                    }
+                });
+            }
+            (Some(d), PageTab::Tensors) => {
+                let d = d.clone();
+                page_tensors(ui, &mut page, m, &d);
+            }
+            (Some(d), PageTab::Metadata) => {
+                let d = d.clone();
+                page_metadata(ui, &mut page.filter, &d);
+            }
+        }
+        self.models.list = Some(list);
+        if !close {
+            self.models.page = Some(page);
+        }
+        if let Some(p) = open {
+            self.show_model_file(&p);
+        }
+    }
+}
+
+/// Overview: the facts with where each comes from, the number types and the files. Returns a file
+/// to show in Files, when one is clicked.
+fn page_overview(ui: &mut egui::Ui, m: &Model, d: &Inspection) -> Option<PathBuf> {
+    let mut open = None;
+    if let Some(why) = &d.unread {
+        kit::callout(ui, Tone::Neutral, why.clone());
+        ui.add_space(8.0);
+    }
+    for p in &d.problems {
+        kit::callout(ui, Tone::Warn, p.clone());
+        ui.add_space(4.0);
+    }
+    if !d.facts.is_empty() {
+        egui::Grid::new("inspect-facts").num_columns(3).spacing([14.0, 5.0]).striped(true).show(ui, |ui| {
+            for f in &d.facts {
+                ui.weak(f.label);
+                let tone = match f.how {
+                    How::Verified => Tone::Success,
+                    How::Calculated => Tone::Accent,
+                    How::Documented => Tone::Neutral,
+                };
+                kit::badge(ui, f.how.label(), tone).on_hover_text(f.how.explain());
+                ui.add(egui::Label::new(&f.value).wrap());
+                ui.end_row();
+            }
+        });
+        ui.add_space(4.0);
+        ui.weak("file: read from the model file · calculated: worked out from it · publisher: stated beside it, not checked");
+    }
+    if d.kinds.len() > 1 {
+        ui.add_space(12.0);
+        ui.strong("How the numbers are stored");
+        ui.add_space(4.0);
+        let total: u64 = d.kinds.iter().map(|k| k.bytes).sum::<u64>().max(1);
+        egui::Grid::new("inspect-kinds").num_columns(4).spacing([14.0, 4.0]).show(ui, |ui| {
+            for k in &d.kinds {
+                let frac = k.bytes as f32 / total as f32;
+                ui.label(&k.kind).on_hover_text(precision_words(&k.kind));
+                ui.weak(format!("{} tensor{}", group(k.tensors as u64), if k.tensors == 1 { "" } else { "s" }));
+                ui.label(scan::human(k.bytes));
+                let (rect, _) = ui.allocate_exact_size(vec2(160.0, 10.0), Sense::hover());
+                ui.painter().rect_filled(rect, 3.0, ui.visuals().faint_bg_color);
+                let mut bar = rect;
+                bar.set_width((rect.width() * frac).max(1.0));
+                ui.painter().rect_filled(bar, 3.0, ui.visuals().selection.bg_fill);
+                ui.end_row();
+            }
+        });
+    }
+    ui.add_space(12.0);
+    ui.strong(if m.files.len() == 1 { "File" } else { "Files" });
+    for f in &m.files {
+        let r = ui.add(egui::Label::new(egui::RichText::new(f.path.shown())).wrap().sense(Sense::click())).on_hover_text("Click to show it in Files");
+        if r.clicked() {
+            open = Some(f.path.clone());
+        }
+        ui.weak(format!("{}{}", scan::human(f.size), if f.not_local { " · ☁ in the cloud, not read" } else { "" }));
+        ui.add_space(2.0);
+    }
+    open
+}
+
+/// Tensors: a searchable list, sorted by any column.
+fn page_tensors(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) {
+    ui.push_id("tensor-search", |ui| {
+        ui.set_max_width(420.0);
+        kit::search_field(ui, &mut page.filter, "Filter by name or type, such as attn or Q6_K");
+    });
+    let key = (page.filter.clone(), page.sort, page.descending);
+    if page.shown_for.as_ref() != Some(&key) {
+        page.shown = tensor_order(d, &page.filter, page.sort, page.descending);
+        page.shown_for = Some(key);
+    }
+    let bytes: u64 = page.shown.iter().map(|&i| d.tensors[i].bytes).sum();
+    let elements: u64 = page.shown.iter().map(|&i| d.tensors[i].elements).sum();
+    ui.add_space(4.0);
+    ui.weak(format!(
+        "{} of {} tensors · {} parameters · {}",
+        group(page.shown.len() as u64),
+        group(d.tensors.len() as u64),
+        models::params_label(elements),
+        scan::human(bytes)
+    ));
+    ui.add_space(4.0);
+
+    let w = ui.available_width();
+    let cols: [(TensorCol, &str, f32); 5] = [(TensorCol::Name, "Name", 0.0), (TensorCol::Kind, "Type", 80.0), (TensorCol::Shape, "Shape", 150.0), (TensorCol::Shape, "Parameters", 100.0), (TensorCol::Size, "Size", 90.0)];
+    let fixed: f32 = cols.iter().map(|c| c.2).sum();
+    let name_w = (w - fixed).max(160.0);
+    let x_of = |k: usize| -> f32 { if k == 0 { 0.0 } else { name_w + cols[1..k].iter().map(|c| c.2).sum::<f32>() } };
+    let (head, _) = ui.allocate_exact_size(vec2(w, ROW_H + 4.0), Sense::hover());
+    for (k, (col, label, cw)) in cols.iter().enumerate() {
+        let width = if k == 0 { name_w } else { *cw };
+        let r = Rect::from_min_size(pos2(head.left() + x_of(k), head.top()), vec2(width, head.height()));
+        let resp = ui.interact(r, ui.id().with(("tensor-col", k)), Sense::click());
+        let on = page.sort == *col && (k != 3 || page.sort == TensorCol::Shape);
+        let arrow = if on && k != 3 { if page.descending { " ⏷" } else { " ⏶" } } else { "" };
+        let align = if k >= 3 { Align2::RIGHT_CENTER } else { Align2::LEFT_CENTER };
+        let x = if k >= 3 { r.right() - 8.0 } else { r.left() + 8.0 };
+        let color = if resp.hovered() { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() };
+        ui.painter().text(pos2(x, r.center().y), align, format!("{label}{arrow}"), FontId::proportional(12.5), color);
+        if resp.on_hover_text("Click to sort; click again to reverse").clicked() {
+            if page.sort == *col {
+                page.descending = !page.descending;
+            } else {
+                page.sort = *col;
+                // Biggest first is the useful start for sizes.
+                page.descending = matches!(col, TensorCol::Shape | TensorCol::Size);
+            }
+        }
+    }
+    ui.painter().hline(head.x_range(), head.bottom(), ui.visuals().widgets.noninteractive.bg_stroke);
+
+    ui.spacing_mut().item_spacing.y = 0.0;
+    let font = FontId::monospace(12.0);
+    let plain = FontId::proportional(12.5);
+    egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW_H, page.shown.len(), |ui, range| {
+        for row in range {
+            let t = &d.tensors[page.shown[row]];
+            let (rect, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::click());
+            let vis = ui.visuals();
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, 3.0, vis.widgets.hovered.weak_bg_fill);
+            } else if row % 2 == 1 {
+                ui.painter().rect_filled(rect, 0.0, vis.faint_bg_color);
+            }
+            let y = rect.center().y;
+            let cell = |k: usize| Rect::from_min_size(pos2(rect.left() + x_of(k), rect.top()), vec2(if k == 0 { name_w } else { cols[k].2 }, rect.height()));
+            let name_clip = cell(0).shrink2(vec2(4.0, 0.0)).intersect(ui.clip_rect());
+            ui.painter().with_clip_rect(name_clip).text(pos2(rect.left() + 8.0, y), Align2::LEFT_CENTER, &t.name, font.clone(), vis.text_color());
+            ui.painter().text(pos2(cell(1).left() + 8.0, y), Align2::LEFT_CENTER, &t.kind, plain.clone(), vis.text_color());
+            ui.painter().with_clip_rect(cell(2).intersect(ui.clip_rect())).text(pos2(cell(2).left() + 8.0, y), Align2::LEFT_CENTER, t.shape_text(), plain.clone(), vis.weak_text_color());
+            ui.painter().text(pos2(cell(3).right() - 8.0, y), Align2::RIGHT_CENTER, count(t.elements), plain.clone(), vis.text_color());
+            ui.painter().text(pos2(cell(4).right() - 8.0, y), Align2::RIGHT_CENTER, scan::human(t.bytes), plain.clone(), vis.text_color());
+            let file = if m.files.len() > 1 { m.files.get(t.file).and_then(|f| f.path.file_name()).map(|n| format!("\nIn {}", n.to_string_lossy())).unwrap_or_default() } else { String::new() };
+            let resp = resp.on_hover_text(format!("{}\n{} · {} · {} values · {}{file}", t.name, t.kind, t.shape_text(), group(t.elements), scan::human(t.bytes)));
+            resp.context_menu(|ui| {
+                if ui.button("Copy name").clicked() {
+                    ui.ctx().copy_text(t.name.clone());
+                    ui.close();
+                }
+            });
+        }
+    });
+}
+
+/// A number of values: exact below a million, then 17M, 8.2B.
+fn count(n: u64) -> String {
+    if n < 1_000_000 { group(n) } else { models::params_label(n) }
+}
+
+/// Indexes of the tensors matching `filter`, in the chosen order.
+fn tensor_order(d: &Inspection, filter: &str, col: TensorCol, descending: bool) -> Vec<usize> {
+    let words: Vec<String> = filter.split_whitespace().map(str::to_lowercase).collect();
+    let mut v: Vec<usize> = (0..d.tensors.len())
+        .filter(|&i| {
+            let t = &d.tensors[i];
+            words.iter().all(|w| t.name.to_lowercase().contains(w) || t.kind.to_lowercase() == *w)
+        })
+        .collect();
+    let ts = &d.tensors;
+    let name = |a: usize, b: usize| inspect::natural(&ts[a].name, &ts[b].name);
+    // Reversing flips the column, while ties stay in name order.
+    let dir = |o: std::cmp::Ordering| if descending { o.reverse() } else { o };
+    match col {
+        TensorCol::Order if descending => v.reverse(),
+        TensorCol::Order => {}
+        TensorCol::Name => v.sort_by(|&a, &b| dir(name(a, b))),
+        TensorCol::Kind => v.sort_by(|&a, &b| dir(ts[a].kind.cmp(&ts[b].kind)).then_with(|| name(a, b))),
+        TensorCol::Shape => v.sort_by(|&a, &b| dir(ts[a].elements.cmp(&ts[b].elements)).then_with(|| name(a, b))),
+        TensorCol::Size => v.sort_by(|&a, &b| dir(ts[a].bytes.cmp(&ts[b].bytes)).then_with(|| name(a, b))),
+    }
+    v
+}
+
+/// Metadata: every key and value in the file, filterable.
+fn page_metadata(ui: &mut egui::Ui, filter: &mut String, d: &Inspection) {
+    ui.push_id("meta-search", |ui| {
+        ui.set_max_width(420.0);
+        kit::search_field(ui, filter, "Filter keys and values");
+    });
+    ui.add_space(6.0);
+    let f = filter.to_lowercase();
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        egui::Grid::new("inspect-meta").num_columns(2).spacing([14.0, 4.0]).striped(true).show(ui, |ui| {
+            for (k, v) in d.meta.iter().filter(|(k, v)| f.is_empty() || k.to_lowercase().contains(&f) || v.to_lowercase().contains(&f)) {
+                ui.add(egui::Label::new(egui::RichText::new(k).monospace().size(12.0)).selectable(true));
+                ui.add(egui::Label::new(v).wrap().selectable(true));
+                ui.end_row();
+            }
+        });
+    });
 }
 
 /// The warning shown after a model's details, if any.
