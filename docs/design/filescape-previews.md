@@ -173,10 +173,8 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 
 ## 5. Open decisions for Rich
 
-1. **Free or Professional** for each new preview. The brief's split is a suggestion; nothing is
-   gated until Rich decides. Recommendation: put viewing in Free, and deeper inspection
-   (channels, spreadsheet search, 3D, databases) in Professional.
-2. **Third-party notices** (finding 10): agree to add a generated notices page to About.
+1. **Free or Professional**: decided 25 Nov, every preview is free for now.
+2. **Third-party notices** (finding 10): decided 25 Nov, yes, a generated page in Help > About.
 3. **PDF renderer**: pure-Rust hayro (no extra files) vs PDFium (more mature, ~5 MB extra per
    platform). Decided after the Phase 1 spike.
 
@@ -184,4 +182,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 
 | Step | PR | State |
 |---|---|---|
-| Review and roadmap (this doc) | | |
+| Review and roadmap (this doc) | #43 | Merged |
+| Format registry and file signatures | | In review |

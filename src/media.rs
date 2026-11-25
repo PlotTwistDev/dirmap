@@ -27,11 +27,11 @@ pub enum Media {
 }
 
 pub fn media_of(name: &str) -> Option<Media> {
-    let ext = crate::scan::ext_of(name).to_ascii_lowercase();
-    Some(match ext.as_str() {
-        "mp4" | "m4v" | "mov" | "mkv" | "avi" | "wmv" | "webm" | "mpg" | "mpeg" | "m2ts" | "mts" | "3gp" | "flv" | "mxf" => Media::Video,
-        "mp3" | "wav" | "flac" | "m4a" | "aac" | "ogg" | "oga" | "opus" | "wma" | "aif" | "aiff" | "alac" => Media::Audio,
-        "pdf" => Media::Pdf,
+    use crate::formats::Category as C;
+    Some(match crate::formats::by_name(name)?.category {
+        C::Video => Media::Video,
+        C::Audio => Media::Audio,
+        C::Pdf => Media::Pdf,
         _ => return None,
     })
 }
