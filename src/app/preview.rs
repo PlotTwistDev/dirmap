@@ -29,6 +29,9 @@ pub(super) enum Content {
         info: String,
         /// A picture the system made of a video or document (its size isn't the file's).
         poster: bool,
+        /// A drawing's source (SVG), shown instead when asked; its size is the drawing's own
+        /// and it can be shown larger than that.
+        source: Option<(String, bool)>,
     },
     /// Sound: played with the controls in the preview, from this file (a fetched copy for one
     /// on a server).
@@ -86,6 +89,8 @@ pub(super) enum Kind {
     /// Linear-light images, shown through an sRGB display transform.
     LinearImage,
     Text,
+    /// SVG: drawn, with the source a click away.
+    Drawing,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -104,6 +109,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Picture => Kind::Image,
         C::LinearPicture => Kind::LinearImage,
         C::Text => Kind::Text,
+        C::Drawing => Kind::Drawing,
         C::Video => Kind::Media(Media::Video),
         C::Audio => Kind::Media(Media::Audio),
         C::Pdf => Kind::Media(Media::Pdf),
@@ -180,6 +186,24 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
     match kind {
         Kind::Image | Kind::LinearImage => load_image(path, kind == Kind::LinearImage, size),
         Kind::Text => load_text(path),
+        Kind::Drawing => match crate::svg::render(path, SHOW_MAX.min(1600)) {
+            Ok(d) => {
+                let source = match load_text(path) {
+                    Content::Text { text, truncated } => Some((text, truncated)),
+                    _ => None, // .svgz: compressed, no source to show
+                };
+                Content::Image {
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([d.width as usize, d.height as usize], &d.rgba)),
+                    tex: None,
+                    size: [d.natural[0].round().max(1.0) as u32, d.natural[1].round().max(1.0) as u32],
+                    info: "Vector drawing (sharp at any size)".into(),
+                    poster: false,
+                    source: source.or(Some((String::new(), false))),
+                }
+            }
+            // Not a drawing resvg can read: show the markup.
+            Err(_) => load_text(path),
+        },
         Kind::Media(crate::media::Media::Audio) => Content::Sound(path.to_path_buf()),
         Kind::Media(m) => match crate::media::thumbnail(path, 1024) {
             Ok((w, h, rgba)) => Content::Image {
@@ -188,6 +212,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                 size: [w as u32, h as u32],
                 info: if m == crate::media::Media::Pdf { "The first page".into() } else { "A frame from the video".into() },
                 poster: true,
+                source: None,
             },
             Err(_) => Content::Error(if m == crate::media::Media::Pdf { "No picture of this PDF: it couldn't be drawn (it may be damaged or password-protected, or the system can't draw PDFs)".into() } else { "No picture of this video: the system has no thumbnailer for it".into() }),
         },
@@ -216,7 +241,7 @@ fn sniffed(path: &Path) -> Option<Kind> {
 
 fn load_image(path: &Path, linear: bool, size: u64) -> Content {
     match decode_image(path, linear, size, SHOW_MAX) {
-        Ok((pixels, size, info)) => Content::Image { pixels: Some(pixels), tex: None, size, info, poster: false },
+        Ok((pixels, size, info)) => Content::Image { pixels: Some(pixels), tex: None, size, info, poster: false, source: None },
         Err(e) => Content::Error(e),
     }
 }
@@ -581,7 +606,7 @@ impl App {
     }
 
     /// The preview itself: an image, text, or a large icon.
-    pub(super) fn preview_body(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, size: Vec2) {
+    pub(super) fn preview_body(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
         let pal = style::pal(ui);
         if e.is_dir {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -639,8 +664,27 @@ impl App {
             return;
         };
         let mut new_view = None;
+        // A drawing: the picture, or its source.
+        if let Content::Image { source: Some((text, truncated)), .. } = c {
+            let src_id = egui::Id::new("preview-drawing-source");
+            let mut show_src = ui.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(src_id));
+            let has_text = !text.is_empty();
+            let (text, truncated) = (text.clone(), *truncated);
+            if has_text {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut show_src, false, "Drawing");
+                    ui.selectable_value(&mut show_src, true, "Source");
+                });
+                ui.data_mut(|d| d.insert_persisted(src_id, show_src));
+                size.y -= ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+            }
+            if has_text && show_src {
+                text_view(ui, path, &text, truncated, size);
+                return;
+            }
+        }
         match c {
-            Content::Image { pixels, tex, size: full, .. } => {
+            Content::Image { pixels, tex, size: full, source, .. } => {
                 if let Some(px) = pixels.take() {
                     *tex = Some(ctx.load_texture(format!("look:{}", path.display()), px, egui::TextureOptions::LINEAR));
                 }
@@ -648,7 +692,8 @@ impl App {
                 let (r, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
                 let ts = tex.size_vec2();
                 // Scale against the full image, so 1:1 means actual pixels even when shown smaller.
-                let fit = (r.width() / full[0] as f32).min(r.height() / full[1] as f32).min(1.0);
+                // A drawing can be shown larger than its own size: it was drawn big enough.
+                let fit = (r.width() / full[0] as f32).min(r.height() / full[1] as f32).min(if source.is_some() { 8.0 } else { 1.0 });
                 let scale = zoom.unwrap_or(fit);
                 let shown = vec2(full[0] as f32, full[1] as f32) * scale;
                 let img_rect = Rect::from_center_size(r.center() + pan, shown);
@@ -714,16 +759,7 @@ impl App {
                     markdown_view(ui, path, &text, truncated, size);
                     return;
                 }
-                egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
-                    ui.set_min_size(size - vec2(16.0, 16.0));
-                    ui.set_max_size(size - vec2(16.0, 16.0));
-                    egui::ScrollArea::vertical().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
-                        ui.add(egui::Label::new(egui::RichText::new(&text).monospace().size(12.0)).wrap());
-                        if truncated {
-                            ui.weak("… (only the first 256 KB is shown)");
-                        }
-                    });
-                });
+                text_view(ui, path, &text, truncated, size);
             }
             Content::Sound(play) => {
                 let play = play.clone();
@@ -832,6 +868,21 @@ fn is_markdown(name: &str) -> bool {
 
 /// A Markdown file, formatted (as the Help Centre draws its pages) or as raw text, with a switch
 /// between the two that's remembered.
+/// Text in a scrolling well, wrapped.
+fn text_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2) {
+    let pal = style::pal(ui);
+    egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        ui.set_min_size(size - vec2(16.0, 16.0));
+        ui.set_max_size(size - vec2(16.0, 16.0));
+        egui::ScrollArea::vertical().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
+            ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).wrap());
+            if truncated {
+                ui.weak("… (only the first 256 KB is shown)");
+            }
+        });
+    });
+}
+
 fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2) {
     use crate::help::{doc, render};
     static NO_DOCS: std::sync::OnceLock<doc::Docs> = std::sync::OnceLock::new();
@@ -990,6 +1041,7 @@ mod tests {
         assert_eq!(kind_of("data.xyz"), Kind::Other);
         assert_eq!(kind_of("report.docx"), Kind::Other, "Word files are read by name in load");
         assert_eq!(kind_of("song.FLAC"), Kind::Media(crate::media::Media::Audio));
+        assert_eq!(kind_of("logo.svg"), Kind::Drawing);
         // A file with no extension is known by its first bytes.
         let dir = std::env::temp_dir().join(format!("fs-sniff-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1033,6 +1085,19 @@ mod tests {
             }
             _ => panic!("png"),
         }
+        // A drawing: drawn larger than its own size, with its source; broken markup is text.
+        let svg = d.join("icon.svg");
+        std::fs::write(&svg, r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="12"><rect width="24" height="12" fill="#00f"/></svg>"##).unwrap();
+        match load(&svg, Kind::Drawing, 100) {
+            Content::Image { size, pixels, source: Some((text, _)), .. } => {
+                assert_eq!(size, [24, 12]);
+                assert!(pixels.unwrap().size[0] > 24);
+                assert!(text.starts_with("<svg"));
+            }
+            _ => panic!("svg"),
+        }
+        std::fs::write(&svg, "<svg oops").unwrap();
+        assert!(matches!(load(&svg, Kind::Drawing, 9), Content::Text { .. }));
         let bad = d.join("bad.png");
         std::fs::write(&bad, b"\x89PNG\r\n\x1a\nnonsense").unwrap();
         assert!(matches!(load(&bad, Kind::Image, 20), Content::Error(_)));

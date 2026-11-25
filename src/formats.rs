@@ -20,6 +20,8 @@ pub enum Category {
     LinearPicture,
     /// Text, code and markup, read as text.
     Text,
+    /// Vector drawings, drawn here (resvg), with their source a click away.
+    Drawing,
     /// A picture and playback from the system's decoders.
     Video,
     /// Playback and a waveform from the system's decoders.
@@ -66,7 +68,7 @@ pub static FORMATS: &[Format] = &[
     Format { id: "pnm", name: "Netpbm image", category: Category::Picture, exts: &["pbm", "pgm", "ppm", "pnm"] },
     Format { id: "exr", name: "OpenEXR image", category: Category::LinearPicture, exts: &["exr"] },
     Format { id: "hdr", name: "Radiance HDR image", category: Category::LinearPicture, exts: &["hdr"] },
-    Format { id: "svg", name: "SVG drawing", category: Category::Text, exts: &["svg"] },
+    Format { id: "svg", name: "SVG drawing", category: Category::Drawing, exts: &["svg", "svgz"] },
     Format { id: "markdown", name: "Markdown", category: Category::Text, exts: &["md", "markdown"] },
     Format {
         id: "text",
