@@ -45,6 +45,8 @@
 - Word, PowerPoint and OpenDocument files preview formatted: headings, bold and italic, lists and
   tables, and each slide's title and points. Icon views show the picture of the first page or
   slide saved with them.
+- EPUB books preview as formatted text, chapter by chapter, with the title and author in the
+  details and the cover in icon views.
 - PDFs preview every page, drawn by Filescape itself: scroll through them in the preview panes,
   with the title, page count and paper size in the details. Thumbnails and map tiles of PDFs are
   drawn the same way, so they no longer need a PDF tool installed on Linux.

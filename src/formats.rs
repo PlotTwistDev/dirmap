@@ -38,7 +38,7 @@ pub enum Category {
     Audio,
     /// A picture of the first page from the system.
     Pdf,
-    /// Word, PowerPoint and OpenDocument files, read and formatted here.
+    /// Word, PowerPoint, OpenDocument and EPUB files, read and formatted here.
     Document,
 }
 
@@ -122,6 +122,7 @@ pub static FORMATS: &[Format] = &[
     Format { id: "odt", name: "OpenDocument text", category: Category::Document, exts: &["odt", "ott"] },
     Format { id: "pptx", name: "PowerPoint presentation", category: Category::Document, exts: &["pptx", "pptm", "ppsx", "potx"] },
     Format { id: "odp", name: "OpenDocument presentation", category: Category::Document, exts: &["odp", "otp"] },
+    Format { id: "epub", name: "EPUB book", category: Category::Document, exts: &["epub"] },
 ];
 
 fn by_ext() -> &'static HashMap<&'static str, &'static Format> {

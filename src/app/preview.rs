@@ -53,8 +53,8 @@ pub(super) enum Content {
     },
     /// A spreadsheet's cells.
     Sheet(Arc<crate::sheets::Book>),
-    /// A Word, PowerPoint or OpenDocument file, formatted.
-    Doc(Arc<Vec<crate::help::doc::Block>>),
+    /// A Word, PowerPoint, OpenDocument or EPUB file, formatted.
+    Doc { blocks: Arc<Vec<crate::help::doc::Block>>, facts: Vec<(&'static str, String)> },
     /// A PDF: every page, drawn as it comes into view.
     Pdf(Arc<PdfShown>),
     Binary,
@@ -69,6 +69,7 @@ impl Content {
         match self {
             Content::Image { facts, .. } => facts,
             Content::Pdf(p) => &p.doc.facts,
+            Content::Doc { facts, .. } => facts,
             _ => &[],
         }
     }
@@ -969,7 +970,7 @@ impl App {
                 let shown = shown.clone();
                 pdf_view(ui, path, &shown, size);
             }
-            Content::Doc(blocks) => {
+            Content::Doc { blocks, .. } => {
                 let blocks = blocks.clone();
                 let pal = style::pal(ui);
                 egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
@@ -1309,11 +1310,17 @@ fn doc_blocks(ui: &mut egui::Ui, blocks: &[crate::help::doc::Block]) {
 /// A Word, PowerPoint or OpenDocument file: formatted, or the picture saved with it when its
 /// words can't be read.
 fn load_doc(path: &Path) -> Content {
+    if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("epub")) {
+        return match crate::epub::read(path) {
+            Ok(b) => Content::Doc { blocks: Arc::new(b.blocks), facts: b.facts },
+            Err(e) => Content::Error(e),
+        };
+    }
     let Some(kind) = path.file_name().and_then(|n| crate::officedoc::kind_of(&n.to_string_lossy())) else {
         return Content::Binary;
     };
     match crate::officedoc::read(path, kind) {
-        Ok(b) => Content::Doc(Arc::new(b)),
+        Ok(b) => Content::Doc { blocks: Arc::new(b), facts: Vec::new() },
         Err(e) => match crate::officedoc::saved_thumbnail(path) {
             Some(img) => {
                 let rgba = img.to_rgba8();

@@ -312,7 +312,7 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
         Kind::Font => crate::fontview::specimen(&local, max.min(512)).ok().map(|s| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([s.width as usize, s.height as usize], &s.rgba))),
         Kind::Drawing => crate::svg::render(&local, max).ok().map(|d| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([d.width as usize, d.height as usize], &d.rgba))),
         // The picture Office and LibreOffice save of the first page or slide.
-        Kind::Doc => crate::officedoc::saved_thumbnail(&local).map(|img| {
+        Kind::Doc => if name.to_ascii_lowercase().ends_with(".epub") { crate::epub::cover(&local) } else { crate::officedoc::saved_thumbnail(&local) }.map(|img| {
             let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };
             let rgba = img.to_rgba8();
             Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
@@ -337,6 +337,8 @@ pub(super) enum TextKind {
     Sheet,
     /// PowerPoint or OpenDocument slides: their titles and points.
     Slides,
+    /// An EPUB book: its first lines.
+    Book,
 }
 
 pub(super) fn text_kind(name: &str) -> Option<TextKind> {
@@ -346,6 +348,7 @@ pub(super) fn text_kind(name: &str) -> Option<TextKind> {
         "sheet" => Some(TextKind::Sheet),
         "odt" => Some(TextKind::Odt),
         "pptx" | "odp" => Some(TextKind::Slides),
+        "epub" => Some(TextKind::Book),
         _ => (f.category == crate::formats::Category::Text).then_some(TextKind::Plain),
     }
 }
@@ -365,6 +368,7 @@ fn snippet(path: &Path, kind: TextKind) -> Option<String> {
             let k = crate::officedoc::kind_of(&path.file_name()?.to_string_lossy())?;
             crate::officedoc::plain_text(&crate::officedoc::read(path, k).ok()?)
         }
+        TextKind::Book => crate::officedoc::plain_text(&crate::epub::open(path, 40).ok()?.blocks),
     };
     let mut out = String::new();
     for line in raw.lines().take(SNIPPET_LINES) {
