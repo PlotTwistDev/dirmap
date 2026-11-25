@@ -41,6 +41,10 @@ mod snapshot;
 mod sunburst;
 mod templates;
 mod tilegpu;
+mod video;
+mod wave;
+#[cfg(target_os = "macos")]
+mod macaudio;
 mod transfer;
 mod media;
 mod treemap;
