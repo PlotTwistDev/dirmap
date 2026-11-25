@@ -93,6 +93,8 @@ pub(super) enum Kind {
     Text,
     /// SVG: drawn, with the source a click away.
     Drawing,
+    /// A font: a specimen.
+    Font,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -112,6 +114,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::LinearPicture => Kind::LinearImage,
         C::Text => Kind::Text,
         C::Drawing => Kind::Drawing,
+        C::Font => Kind::Font,
         C::Video => Kind::Media(Media::Video),
         C::Audio => Kind::Media(Media::Audio),
         C::Pdf => Kind::Media(Media::Pdf),
@@ -190,6 +193,17 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
         Kind::Text => match load_text(path) {
             Content::Text { text, truncated, .. } => coloured(path, text, truncated),
             c => c,
+        },
+        Kind::Font => match crate::fontview::specimen(path, 800) {
+            Ok(s) => Content::Image {
+                pixels: Some(egui::ColorImage::from_rgba_unmultiplied([s.width as usize, s.height as usize], &s.rgba)),
+                tex: None,
+                size: [s.width, s.height],
+                info: s.about.line(),
+                poster: true,
+                source: None,
+            },
+            Err(e) => Content::Error(e),
         },
         Kind::Drawing => match crate::svg::render(path, SHOW_MAX.min(1600)) {
             Ok(d) => {
@@ -596,6 +610,11 @@ impl App {
                 ui.end_row();
                 ui.weak("Pixels");
                 ui.label(info);
+                ui.end_row();
+            }
+            if kind_of(&e.name) == Kind::Font && let Some(Content::Image { info, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+                ui.weak("Font");
+                ui.add(egui::Label::new(info.as_str()).wrap());
                 ui.end_row();
             }
             if let Some(Content::Text { colours: Some(c), .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
@@ -1088,6 +1107,7 @@ mod tests {
         assert_eq!(kind_of("report.docx"), Kind::Other, "Word files are read by name in load");
         assert_eq!(kind_of("song.FLAC"), Kind::Media(crate::media::Media::Audio));
         assert_eq!(kind_of("logo.svg"), Kind::Drawing);
+        assert_eq!(kind_of("Inter.otf"), Kind::Font);
         // A file with no extension is known by its first bytes.
         let dir = std::env::temp_dir().join(format!("fs-sniff-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
