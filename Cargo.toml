@@ -58,6 +58,10 @@ raw-window-handle = "0.6"
 [target."cfg(unix)".dependencies]
 libc = "0.2.190"
 
+# Catches Objective-C exceptions from AVFoundation, which would otherwise abort the app.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", features = ["exception"] }
+
 # File and line numbers in crash.log backtraces (no effect on speed; kept in a .pdb on Windows).
 [profile.release]
 debug = "line-tables-only"
