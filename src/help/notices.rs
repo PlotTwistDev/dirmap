@@ -4,8 +4,11 @@
 
 use eframe::egui::{self, RichText};
 
-/// The notices, as generated.
-pub static TEXT: &str = include_str!("../../packaging/third-party-licences.txt");
+/// The notices, as generated (with plain line ends, however the file was checked out).
+fn text() -> &'static str {
+    static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TEXT.get_or_init(|| include_str!("../../packaging/third-party-licences.txt").replace("\r\n", "\n"))
+}
 
 /// Lines are cut to this many characters for display, so every row is one line high.
 const COLS: usize = 88;
@@ -36,12 +39,12 @@ impl Notices {
                     ui.label("Filter");
                     ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("A crate or licence, e.g. egui or MIT").desired_width(260.0));
                     if ui.button("Copy all").on_hover_text("Copy every notice to the clipboard").clicked() {
-                        ui.ctx().copy_text(TEXT.to_string());
+                        ui.ctx().copy_text(text().to_string());
                     }
                 });
                 ui.add_space(4.0);
                 if self.rows.as_ref().is_none_or(|r| r.0 != self.filter) {
-                    self.rows = Some((self.filter.clone(), rows(TEXT, &self.filter)));
+                    self.rows = Some((self.filter.clone(), rows(text(), &self.filter)));
                 }
                 let rows = &self.rows.as_ref().unwrap().1;
                 let font = egui::TextStyle::Monospace.resolve(ui.style());
@@ -111,9 +114,12 @@ mod tests {
 
     #[test]
     fn notices_are_there_and_filter() {
-        assert!(TEXT.contains("eframe ") && TEXT.contains("Permission is hereby granted"));
-        let all = rows(TEXT, "");
-        let some = rows(TEXT, "eframe");
+        let text = text();
+        assert!(text.contains("eframe ") && text.contains("Permission is hereby granted"));
+        let all = rows(text, "");
+        let some = rows(text, "eframe");
+        // A Windows checkout may have CRLF line ends, which the sections are split without.
+        assert!(!text.contains('\r'));
         assert!(some.len() < all.len() && some.iter().any(|r| r.starts_with("eframe ")));
         assert!(some.iter().any(|r| r.starts_with("Used by:") && r.contains("eframe")));
         assert!(all.iter().all(|r| r.chars().count() <= COLS + 8));
