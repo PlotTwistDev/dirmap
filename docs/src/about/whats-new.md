@@ -17,6 +17,8 @@
 - Markdown files preview formatted, with headings, lists, tables and links. **Raw** shows the
   text as written, and the preview panes remember which one you picked.
 - Right-click any part of the path above the file list, or a tab, and choose **Copy Path**.
+- SVG drawings now preview as pictures, on map tiles, in icon views and in the preview panes,
+  sharp at any zoom, with **Source** to see the markup.
 - Files with a missing or wrong extension, such as a download saved as `file`, now preview by
   what they really are when Filescape can tell from their first bytes.
 - **Help > About Filescape > Third-party licences** lists the open-source software Filescape is
