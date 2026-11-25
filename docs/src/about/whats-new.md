@@ -23,7 +23,7 @@
   download. See [Freeing up space](../disk-usage/cloud-files.md#freeing-up-space-and-keeping-files-here).
 - A **Reclaimable** size on the **Size** switch maps the space freeing up would give back, and
   the storage breakdown says how much that is. Click it to see where.
-- On the command line, `--free-up PATH` and `--keep PATH` do the same, and `--reclaimable` ranks a
+- On the command line, `--free-up PATH` and `--keep PATH` do the same (with Filescape Professional), and `--reclaimable` ranks a
   report by reclaimable space.
 - One file at a time is free; folders, several items at once and the Reclaimable view are part of
   Filescape Professional.

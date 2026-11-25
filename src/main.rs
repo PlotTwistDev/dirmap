@@ -104,6 +104,11 @@ fn main() -> eframe::Result {
                 eprintln!("{}: this system has no supported way to free up or keep cloud files.", a.label());
                 std::process::exit(2);
             }
+            // Like bulk work in the app, freeing up or keeping from the command line is Pro.
+            if !licence::Licensing::load().allows(licence::Feature::CloudManagement) {
+                eprintln!("{}: freeing up or keeping cloud files from the command line needs a Filescape Pro licence. Enter one in the app under Settings > Licensing, or use the file's right-click menu in the app to do one file at a time.", a.label());
+                std::process::exit(3);
+            }
             let o = cloudops::apply(std::slice::from_ref(&path), a, &std::sync::atomic::AtomicBool::new(false));
             println!("{}", o.summary(a));
             for (p, why) in &o.reasons {

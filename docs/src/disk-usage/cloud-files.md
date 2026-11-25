@@ -130,7 +130,8 @@ that is in total; click the figure to switch to the view. Select what you want t
 with **Stored** filters if you like, and right-click.
 
 One file at a time is free. Folders, several items at once and the Reclaimable view are part of
-Filescape Professional. On the command line, `--free-up PATH` and `--keep PATH` do the same.
+Filescape Professional. On the command line, `--free-up PATH` and `--keep PATH` do the same, and
+also need Filescape Professional.
 
 ## Filescape doesn't download your files
 
