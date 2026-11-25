@@ -14,6 +14,9 @@
   items). **Alt+P** shows or hides it. Videos play right in the preview panes, and on macOS
   sound now pauses at once and can jump to any point. Word and OpenDocument files now preview as text in both
   workspaces.
+- Markdown files preview formatted, with headings, lists, tables and links. **Raw** shows the
+  text as written, and the preview panes remember which one you picked.
+- Right-click any part of the path above the file list, or a tab, and choose **Copy Path**.
 
 ### What system files and folders are
 

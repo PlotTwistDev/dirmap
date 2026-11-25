@@ -7,7 +7,7 @@
 pub mod doc;
 #[cfg(test)]
 pub mod reference;
-mod render;
+pub mod render;
 pub mod topics;
 #[cfg(test)]
 mod tests;

@@ -96,7 +96,10 @@ jobs:
           mkdir dist/dmg
           cp -R dist/Filescape.app dist/dmg/
           ln -s /Applications dist/dmg/Applications
-          hdiutil create -volname Filescape -srcfolder dist/dmg -ov -format UDZO dist/Filescape-${{ matrix.name }}.dmg
+          # An explicit size: hdiutil's own estimate from -srcfolder is sometimes too small, and
+          # the copy then fails with "No space left on device".
+          mb=$(( $(du -sm dist/dmg | cut -f1) + 64 ))
+          hdiutil create -volname Filescape -srcfolder dist/dmg -size ${mb}m -ov -format UDZO dist/Filescape-${{ matrix.name }}.dmg
           rm -rf dist/dmg dist/Filescape.app
 
       - uses: actions/upload-artifact@v4

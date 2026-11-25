@@ -697,6 +697,10 @@ impl App {
             Content::Text { text, truncated } => {
                 let truncated = *truncated;
                 let text = text.clone();
+                if is_markdown(&e.name) {
+                    markdown_view(ui, path, &text, truncated, size);
+                    return;
+                }
                 egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
                     ui.set_min_size(size - vec2(16.0, 16.0));
                     ui.set_max_size(size - vec2(16.0, 16.0));
@@ -711,9 +715,9 @@ impl App {
             Content::Sound(play) => {
                 let play = play.clone();
                 let (r, _) = ui.allocate_exact_size(size, Sense::hover());
-                let icon = Rect::from_center_size(r.center() - vec2(0.0, 30.0), vec2(80.0, 80.0));
+                let icon = Rect::from_center_size(r.center() - vec2(0.0, 44.0), vec2(80.0, 80.0));
                 self.icons.paint_big(ui, icon, false, e.ext(), tint);
-                sound_controls(ui, &mut self.files.look.player, &play, path, Rect::from_center_size(r.center() + vec2(0.0, 44.0), vec2((r.width() - 24.0).min(360.0), 28.0)));
+                sound_controls(ui, &mut self.files.look.player, &play, path, Rect::from_center_size(r.center() + vec2(0.0, 47.0), vec2((r.width() - 24.0).min(360.0), 62.0)));
             }
             Content::Binary | Content::None | Content::Error(_) => {
                 let note = match c {
@@ -808,16 +812,74 @@ fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
     outside
 }
 
-/// Play or pause, how far through, and a bar to jump about (where the player can).
+fn is_markdown(name: &str) -> bool {
+    let ext = name.rsplit_once('.').map(|(_, x)| x.to_ascii_lowercase()).unwrap_or_default();
+    matches!(ext.as_str(), "md" | "markdown" | "mdown" | "mkd")
+}
+
+/// A Markdown file, formatted (as the Help Centre draws its pages) or as raw text, with a switch
+/// between the two that's remembered.
+fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2) {
+    use crate::help::{doc, render};
+    static NO_DOCS: std::sync::OnceLock<doc::Docs> = std::sync::OnceLock::new();
+    let pal = style::pal(ui);
+    let raw_id = egui::Id::new("preview-markdown-raw");
+    let mut raw = ui.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(raw_id));
+    egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        ui.set_min_size(size - vec2(16.0, 16.0));
+        ui.set_max_size(size - vec2(16.0, 16.0));
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut raw, false, "Formatted");
+            ui.selectable_value(&mut raw, true, "Raw");
+        });
+        ui.separator();
+        egui::ScrollArea::both().id_salt(("look-md", path, raw)).auto_shrink(false).show(ui, |ui| {
+            if raw {
+                ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).extend());
+            } else {
+                // Parsed once per file shown, not every frame.
+                let key = egui::Id::new(("preview-markdown", path, text.len()));
+                let blocks = ui.data(|d| d.get_temp::<Arc<Vec<doc::Block>>>(key)).unwrap_or_else(|| {
+                    let b = Arc::new(doc::parse(text));
+                    ui.data_mut(|d| d.insert_temp(key, b.clone()));
+                    b
+                });
+                ui.set_max_width(ui.available_width());
+                let mut images = HashMap::new();
+                let mut out = render::Out {
+                    page: "",
+                    docs: NO_DOCS.get_or_init(|| doc::Docs::from_sources(&[])),
+                    images: &mut images,
+                    nav: None,
+                    request: None,
+                    anchors: Vec::new(),
+                };
+                render::blocks(ui, &mut out, &blocks);
+                // Web links open in the browser; links to other files or headings do nothing.
+                if let Some(render::Nav::Url(u)) = out.nav.take() {
+                    if u.contains("://") || u.starts_with("mailto:") {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(u));
+                    }
+                }
+            }
+            if truncated {
+                ui.weak("… (only the first 256 KB is shown)");
+            }
+        });
+    });
+    ui.data_mut(|d| d.insert_persisted(raw_id, raw));
+}
+
+/// Play or pause on its own line (a fixed width, so it stays put as its label changes), and
+/// under it how far through, with a bar to jump about where the player can.
 fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, play: &Path, path: &Path, r: Rect) {
     let pal = style::pal(ui);
     let st = player.as_ref().map(|p| p.state()).unwrap_or_default();
-    // Just the button and the time when there's no bar to show: keep them centred.
-    let r = if st.length.is_some() { r } else { Rect::from_center_size(r.center(), vec2(130.0, r.height())) };
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let ui = &mut child;
+    let top = Rect::from_min_size(r.min, vec2(r.width(), 28.0));
+    let bottom = Rect::from_min_max(pos2(r.min.x, r.min.y + 34.0), r.max);
     let label = if st.playing { "⏸ Pause" } else { "▶ Play" };
-    if ui.button(label).on_hover_text("Play the sound here").clicked() {
+    let button = egui::Button::new(label).min_size(vec2(96.0, 26.0));
+    if ui.put(Rect::from_center_size(top.center(), vec2(96.0, 26.0)), button).on_hover_text("Play the sound here").clicked() {
         match player {
             Some(p) if st.playing => p.pause(),
             Some(p) => p.play(),
@@ -829,24 +891,33 @@ fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, 
             }
         }
     }
+    let line = |ui: &mut egui::Ui, text: egui::RichText| {
+        ui.put(bottom, egui::Label::new(text).wrap());
+    };
     if let Some(e) = &st.error {
-        ui.label(egui::RichText::new(e).color(pal.weak).size(12.0));
+        line(ui, egui::RichText::new(e).color(pal.weak).size(12.0));
         return;
     }
     let time = match st.length {
         Some(l) => format!("{} / {}", crate::media::clock(st.position), crate::media::clock(l)),
         None => crate::media::clock(st.position),
     };
-    if let (Some(l), Some(p)) = (st.length.filter(|l| *l > 0.0), player.as_ref().filter(|p| p.can_seek())) {
-        let mut at = st.position.min(l);
-        let w = (ui.available_width() - 90.0).max(40.0);
-        ui.spacing_mut().slider_width = w;
-        let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
-        if s.drag_stopped() || (s.clicked() && !s.dragged()) {
-            p.seek(at);
+    let time = egui::RichText::new(time).monospace().size(12.0).color(pal.weak);
+    match (st.length.filter(|l| *l > 0.0), player.as_ref().filter(|p| p.can_seek())) {
+        (Some(l), Some(p)) => {
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bottom).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            let ui = &mut child;
+            let mut at = st.position.min(l);
+            ui.spacing_mut().slider_width = (ui.available_width() - 90.0).max(40.0);
+            let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
+            if s.drag_stopped() || (s.clicked() && !s.dragged()) {
+                p.seek(at);
+            }
+            ui.label(time);
         }
+        // No bar to show: just the time, centred under the button.
+        _ => line(ui, time),
     }
-    ui.label(egui::RichText::new(time).monospace().size(12.0).color(pal.weak));
     if st.playing {
         ui.ctx().request_repaint_after(Duration::from_millis(200));
     }
