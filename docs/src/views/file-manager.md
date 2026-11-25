@@ -464,7 +464,7 @@ the next. The selection stays as it is.
 |---|---|
 | Images | PNG, JPEG, GIF, WebP, TIFF, BMP, TGA, ICO, QOI, PNM, and HDR and OpenEXR (shown with a standard display curve). Transparent areas show a checkerboard. |
 | Drawings | SVG and SVGZ, drawn sharp at any zoom. **Source** shows the markup. Only what's in the file is drawn: pictures it links to elsewhere are left out. |
-| Text | Text and source files, the first 256 KB, in UTF-8 or UTF-16 (as PowerShell and many Windows tools write). |
+| Text | Text and source files, the first 256 KB, in UTF-8 or UTF-16 (as PowerShell and many Windows tools write). Code is shown in syntax colours, for about 200 languages and file types (Rust, Python, JavaScript, C and C++, shell scripts, JSON, YAML, Dockerfiles…), and the details name the language. |
 | Videos | A frame from the video, made by the system (see below), with a play button: it plays right there, with a bar to jump about; click the picture to pause. **Open** plays it in Quick Look on macOS or your usual player elsewhere. It stops when you move to another file. |
 | Word and OpenDocument | The text of .docx and .odt documents. |
 | PDFs | The first page, made by the system. |
