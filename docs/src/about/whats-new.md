@@ -29,6 +29,8 @@
   and exposure in the details.
 - HEIC (iPhone) and AVIF pictures preview through the system's own decoders.
 - Photoshop documents (PSD and PSB) preview from the flattened picture saved with them.
+- Spreadsheets (Excel and OpenDocument) preview as a table of their cells, sheet by sheet, and
+  their first rows show on map tiles. Formulas and macros are never run.
 - Files with a missing or wrong extension, such as a download saved as `file`, now preview by
   what they really are when Filescape can tell from their first bytes.
 - **Help > About Filescape > Third-party licences** lists the open-source software Filescape is

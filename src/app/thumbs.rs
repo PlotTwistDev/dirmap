@@ -326,12 +326,15 @@ pub(super) enum TextKind {
     /// Word (.docx), or OpenDocument text (.odt): the text from inside the zip.
     Docx,
     Odt,
+    /// A spreadsheet: its first rows.
+    Sheet,
 }
 
 pub(super) fn text_kind(name: &str) -> Option<TextKind> {
     let f = crate::formats::by_name(name)?;
     match f.id {
         "docx" => Some(TextKind::Docx),
+        "sheet" => Some(TextKind::Sheet),
         "odt" => Some(TextKind::Odt),
         _ => (f.category == crate::formats::Category::Text).then_some(TextKind::Plain),
     }
@@ -347,6 +350,7 @@ fn snippet(path: &Path, kind: TextKind) -> Option<String> {
             preview::decode_text(&buf)?
         }
         TextKind::Docx | TextKind::Odt => doc_text(path, kind)?,
+        TextKind::Sheet => crate::sheets::snippet(&crate::sheets::read(path, 40, 12).ok()?),
     };
     let mut out = String::new();
     for line in raw.lines().take(SNIPPET_LINES) {

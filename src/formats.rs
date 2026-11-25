@@ -28,6 +28,8 @@ pub enum Category {
     Raw,
     /// Photoshop documents: the flattened picture saved with them.
     Photoshop,
+    /// Spreadsheets: their cells' saved values.
+    Spreadsheet,
     /// Pictures only the system can decode (HEIC, AVIF: patent-encumbered or C decoders).
     SystemPicture,
     /// A picture and playback from the system's decoders.
@@ -116,6 +118,7 @@ pub static FORMATS: &[Format] = &[
     },
     Format { id: "pdf", name: "PDF document", category: Category::Pdf, exts: &["pdf"] },
     Format { id: "docx", name: "Word document", category: Category::Document, exts: &["docx", "docm", "dotx"] },
+    Format { id: "sheet", name: "Spreadsheet", category: Category::Spreadsheet, exts: &["xlsx", "xlsm", "xlsb", "xls", "xltx", "xltm", "ods", "ots"] },
     Format { id: "odt", name: "OpenDocument text", category: Category::Document, exts: &["odt", "ott"] },
 ];
 
