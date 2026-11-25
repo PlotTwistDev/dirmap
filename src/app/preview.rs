@@ -51,6 +51,8 @@ pub(super) enum Content {
         /// Syntax colours, for code.
         colours: Option<Arc<crate::highlight::Colours>>,
     },
+    /// A spreadsheet's cells.
+    Sheet(Arc<crate::sheets::Book>),
     Binary,
     /// Nothing to show beyond the facts.
     None,
@@ -108,6 +110,8 @@ pub(super) enum Kind {
     Raw,
     /// Photoshop: the flattened picture.
     Psd,
+    /// A spreadsheet: its cells.
+    Sheet,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -130,6 +134,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Font => Kind::Font,
         C::Raw => Kind::Raw,
         C::Photoshop => Kind::Psd,
+        C::Spreadsheet => Kind::Sheet,
         C::Video => Kind::Media(Media::Video),
         C::Audio => Kind::Media(Media::Audio),
         C::Pdf => Kind::Media(Media::Pdf),
@@ -209,6 +214,10 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
         Kind::Text => match load_text(path) {
             Content::Text { text, truncated, .. } => coloured(path, text, truncated),
             c => c,
+        },
+        Kind::Sheet => match crate::sheets::read(path, crate::sheets::ROWS, crate::sheets::COLS) {
+            Ok(b) => Content::Sheet(Arc::new(b)),
+            Err(e) => Content::Error(e),
         },
         Kind::Psd => match crate::psdview::picture(path, 0) {
             Ok(p) => {
@@ -919,6 +928,10 @@ impl App {
                 }
                 sound_controls(ui, &mut self.files.look.player, &play, path, Rect::from_center_size(pos2(r.center().x, y + 31.0), vec2(wide.min(360.0), 62.0)));
             }
+            Content::Sheet(book) => {
+                let book = book.clone();
+                sheet_view(ui, path, &book, size);
+            }
             Content::Binary | Content::None | Content::Error(_) => {
                 let note = match c {
                     Content::Error(e) => e.clone(),
@@ -1041,6 +1054,73 @@ fn text_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: 
             }
             if truncated {
                 ui.weak("… (only the first 256 KB is shown)");
+            }
+        });
+    });
+}
+
+/// A workbook: a switch between its sheets, and the cells of the one picked, drawn only where
+/// they're on screen.
+fn sheet_view(ui: &mut egui::Ui, path: &Path, book: &crate::sheets::Book, size: Vec2) {
+    let pal = style::pal(ui);
+    let pick_id = egui::Id::new(("preview-sheet", path));
+    let mut pick = ui.data(|d| d.get_temp::<usize>(pick_id)).unwrap_or(0).min(book.sheets.len() - 1);
+    egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+        ui.set_min_size(size - vec2(12.0, 12.0));
+        ui.set_max_size(size - vec2(12.0, 12.0));
+        if book.sheets.len() > 1 {
+            egui::ScrollArea::horizontal().id_salt(("sheet-tabs", path)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for (i, s) in book.sheets.iter().enumerate() {
+                        ui.selectable_value(&mut pick, i, &s.name);
+                    }
+                });
+            });
+            ui.data_mut(|d| d.insert_temp(pick_id, pick));
+        }
+        let sheet = &book.sheets[pick];
+        let (h, w) = sheet.size;
+        let mut note = format!("{} rows × {} columns", group(h as u64), group(w as u64));
+        if h > sheet.rows.len() || w > crate::sheets::COLS {
+            note.push_str(&format!(" · the first {} rows and {} columns", sheet.rows.len(), w.min(crate::sheets::COLS)));
+        }
+        if book.total > book.sheets.len() {
+            note.push_str(&format!(" · {} of {} sheets", book.sheets.len(), book.total));
+        }
+        ui.label(egui::RichText::new(note).size(11.5).color(pal.weak));
+        let font = FontId::proportional(12.0);
+        let cw = ui.fonts_mut(|f| f.glyph_width(&font, '0'));
+        let cols = sheet.rows.iter().map(|r| r.len()).max().unwrap_or(0);
+        let widths: Vec<f32> = (0..cols).map(|c| (sheet.rows.iter().map(|r| r.get(c).map_or(0, |s| s.chars().count())).max().unwrap_or(0).clamp(3, 32) as f32 * cw + 12.0).max(44.0)).collect();
+        let num_w = (group(sheet.rows.len() as u64).len() as f32 * cw + 14.0).max(30.0);
+        let row_h = 20.0;
+        let total_w = num_w + widths.iter().sum::<f32>();
+        egui::ScrollArea::both().id_salt(("sheet", path, pick)).auto_shrink(false).show_rows(ui, row_h, sheet.rows.len() + 1, |ui, range| {
+            let (rect, _) = ui.allocate_exact_size(vec2(total_w, row_h * range.len() as f32), Sense::hover());
+            let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+            let line = Stroke::new(1.0, pal.weak.gamma_multiply(0.18));
+            for (k, i) in range.clone().enumerate() {
+                let y = rect.top() + k as f32 * row_h;
+                let head = i == 0;
+                if head {
+                    p.rect_filled(Rect::from_min_size(pos2(rect.left(), y), vec2(total_w, row_h)), 0.0, pal.weak.gamma_multiply(0.12));
+                }
+                let num = if head { String::new() } else { group(i as u64) };
+                p.text(pos2(rect.left() + num_w - 6.0, y + row_h / 2.0), Align2::RIGHT_CENTER, num, font.clone(), pal.weak);
+                let mut x = rect.left() + num_w;
+                for (c, cw) in widths.iter().enumerate() {
+                    let cell = Rect::from_min_size(pos2(x, y), vec2(*cw, row_h));
+                    let (text, colour) = if head { (crate::sheets::column(c), pal.weak) } else { (sheet.rows[i - 1].get(c).cloned().unwrap_or_default(), pal.text) };
+                    if !text.is_empty() {
+                        // Numbers to the right, like a spreadsheet.
+                        let numeric = !head && text.parse::<f64>().is_ok();
+                        let (at, align) = if head { (cell.center(), Align2::CENTER_CENTER) } else if numeric { (pos2(cell.right() - 6.0, cell.center().y), Align2::RIGHT_CENTER) } else { (pos2(cell.left() + 6.0, cell.center().y), Align2::LEFT_CENTER) };
+                        p.with_clip_rect(cell.intersect(p.clip_rect())).text(at, align, text.replace('\n', " "), font.clone(), colour);
+                    }
+                    p.line_segment([cell.left_top(), cell.left_bottom()], line);
+                    x += cw;
+                }
+                p.line_segment([pos2(rect.left(), y + row_h), pos2(rect.left() + total_w, y + row_h)], line);
             }
         });
     });
@@ -1260,6 +1340,7 @@ mod tests {
         assert_eq!(kind_of("Inter.otf"), Kind::Font);
         assert_eq!(kind_of("IMG_0001.CR3"), Kind::Raw);
         assert_eq!(kind_of("poster.psd"), Kind::Psd);
+        assert_eq!(kind_of("Budget.XLSX"), Kind::Sheet);
         // A file with no extension is known by its first bytes.
         let dir = std::env::temp_dir().join(format!("fs-sniff-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

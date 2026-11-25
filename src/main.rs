@@ -39,6 +39,7 @@ mod pattern;
 mod player;
 mod psdview;
 mod settings;
+mod sheets;
 mod shellmenu;
 mod subset;
 mod scan;

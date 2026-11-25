@@ -191,4 +191,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Sound pane: tags, cover, waveform | #49 | Merged |
 | Camera RAW (embedded JPEG + EXIF) | #50 | Merged |
 | HEIC and AVIF through the system | #51 | Merged |
-| Photoshop PSD/PSB (own reader) | | In review |
+| Photoshop PSD/PSB (own reader) | #52 | Merged |
+| Spreadsheets (calamine) | | In review |
