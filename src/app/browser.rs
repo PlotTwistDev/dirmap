@@ -1526,6 +1526,8 @@ impl App {
         let hits = self.current_hits();
         let sel_row = self.selected_in(&folder_path).and_then(|s| order.iter().position(|&o| o == s));
         let cloud_icons = self.view().cloud_icons;
+        let sys_notes = self.settings.system_notes;
+        let mut explain_pick = None;
         let mut area = egui::ScrollArea::vertical().id_salt(("blist", &folder_path)).auto_shrink(false);
         if let Some(r) = sel_row.filter(|_| self.browser.scroll_to_sel) {
             area = area.vertical_scroll_offset(keep_in_view(self.browser.view, r as f32 * ROW, ROW));
@@ -1579,6 +1581,16 @@ impl App {
                                 cloud::paint_stored(ui, at, st, ui.id().with(("bcloud", &path)), tip);
                                 end -= 20.0;
                             }
+                            if sys_notes {
+                                let full = self.full_path(&path);
+                                if let Some(kn) = crate::known::explain(&full) {
+                                    let at = Rect::from_center_size(pos2(end - 8.0, cy), vec2(14.0, 14.0));
+                                    if explain::paint_badge(ui, at, kn, ui.id().with(("bsys", &path))) {
+                                        explain_pick = Some(full);
+                                    }
+                                    end -= 20.0;
+                                }
+                            }
                             let clip = Rect::from_min_max(pos2(cell.left() + 30.0, rect.top()), pos2(end, rect.bottom()));
                             let np = p.with_clip_rect(clip.intersect(p.clip_rect()));
                             np.text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &*n.name, font.clone(), tc);
@@ -1631,6 +1643,9 @@ impl App {
                 self.item_input(ui, &resp, &path, n, picks);
             }
         });
+        if let Some(p) = explain_pick {
+            self.explain_path(p);
+        }
         self.browser.view = (out.state.offset.y, out.inner_rect.height());
     }
 
@@ -1682,6 +1697,7 @@ impl App {
             count,
             can_paste: self.browser.clip.is_some(),
             cloud: cloud::manageable(n),
+            known: crate::known::about(&self.full_path(path)).is_some(),
         };
         resp.context_menu(|ui| {
             if let Some(a) = Self::tree_menu(ui, &info) {

@@ -20,6 +20,7 @@
 - [Cloud files](disk-usage/cloud-files.md)
 - [File types and extensions](disk-usage/file-types.md)
 - [Hidden, system and unreadable files](disk-usage/hidden-and-unreadable.md)
+- [What system files and folders are](disk-usage/system-files.md)
 - [Links, junctions and mounted drives](disk-usage/links-and-mounts.md)
 - [Virtual disk files (VHDX, VDI, VMDK)](disk-usage/virtual-disks.md)
 
