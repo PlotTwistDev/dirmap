@@ -23,6 +23,7 @@ mod cloudops;
 mod drives;
 mod dupes;
 mod elevate;
+mod fontview;
 mod formats;
 mod fsys;
 mod help;

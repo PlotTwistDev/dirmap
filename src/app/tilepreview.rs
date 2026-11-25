@@ -390,6 +390,11 @@ impl App {
                 ui.label(info);
                 ui.end_row();
             }
+            if preview::kind_of(&e.name) == preview::Kind::Font && let Some(Content::Image { info, .. }) = self.files.look.cached(&path) {
+                ui.weak("Font");
+                ui.add(egui::Label::new(info.as_str()).wrap());
+                ui.end_row();
+            }
             if let Some(Content::Text { colours: Some(c), .. }) = self.files.look.cached(&path) {
                 ui.weak("Language");
                 ui.label(&c.language);

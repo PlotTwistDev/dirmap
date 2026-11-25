@@ -22,6 +22,8 @@ pub enum Category {
     Text,
     /// Vector drawings, drawn here (resvg), with their source a click away.
     Drawing,
+    /// Fonts: a specimen drawn in the font.
+    Font,
     /// A picture and playback from the system's decoders.
     Video,
     /// Playback and a waveform from the system's decoders.
@@ -69,6 +71,7 @@ pub static FORMATS: &[Format] = &[
     Format { id: "exr", name: "OpenEXR image", category: Category::LinearPicture, exts: &["exr"] },
     Format { id: "hdr", name: "Radiance HDR image", category: Category::LinearPicture, exts: &["hdr"] },
     Format { id: "svg", name: "SVG drawing", category: Category::Drawing, exts: &["svg", "svgz"] },
+    Format { id: "font", name: "Font", category: Category::Font, exts: &["ttf", "otf", "ttc", "otc"] },
     Format { id: "markdown", name: "Markdown", category: Category::Text, exts: &["md", "markdown"] },
     Format {
         id: "text",
@@ -134,6 +137,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "exr"
     } else if at(0, b"#?RADIANCE") || at(0, b"#?RGBE") {
         "hdr"
+    } else if at(0, b"\0\x01\0\0") || at(0, b"OTTO") || at(0, b"ttcf") || at(0, b"true") {
+        "font"
     } else if at(0, b"%PDF-") {
         "pdf"
     } else if at(4, b"ftyp") {
@@ -189,5 +194,7 @@ mod tests {
         assert_eq!(sniff(b"\0\0\0\x18ftypM4A \0\0\0\0").map(|f| f.id), Some("audio"));
         assert!(sniff(b"\0\0\0\x18ftypheic\0\0\0\0").is_none(), "HEIC isn't decoded yet");
         assert!(sniff(b"hello, world").is_none());
+        assert_eq!(sniff(b"OTTO\0\x0b\0\x80").map(|f| f.id), Some("font"));
+        assert_eq!(by_name("Inter.TTF").map(|f| f.category), Some(Category::Font));
     }
 }
