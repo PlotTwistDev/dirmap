@@ -291,6 +291,35 @@ impl App {
 
     // ---------- the Storage Analysis preview pane ----------
 
+    /// The tile picked on the map, as a file to preview.
+    pub(super) fn map_target(&self) -> Option<(PathBuf, Entry)> {
+        let tree = self.shown_tree()?;
+        let sel = self.selected.as_ref()?;
+        let n = tree.at(sel)?;
+        let e = Entry {
+            name: n.name.clone(),
+            is_dir: n.is_dir,
+            is_link: false,
+            hidden: false,
+            size: n.logical,
+            alloc: n.alloc,
+            flags: n.flags,
+            modified: n.modified,
+        };
+        Some((self.full_path(sel), e))
+    }
+
+    /// Space on the map: Quick Look for the picked file.
+    pub(super) fn map_quick_look_key(&mut self, ctx: &egui::Context) {
+        if self.files.look.open || ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        if self.map_target().is_some_and(|(_, e)| !e.is_dir) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+            self.files.look.open = true;
+            self.files.look.from_map = true;
+        }
+    }
+
     /// The pane at the right of the map: the clicked tile's preview and what's known about it.
     pub(super) fn map_preview_pane(&mut self, ui: &mut egui::Ui) {
         let pal = style::pal(ui);
@@ -310,17 +339,7 @@ impl App {
             return;
         };
         let Some(n) = tree.at(&sel) else { return };
-        let path = self.full_path(&sel);
-        let e = Entry {
-            name: n.name.clone(),
-            is_dir: n.is_dir,
-            is_link: false,
-            hidden: false,
-            size: n.logical,
-            alloc: n.alloc,
-            flags: n.flags,
-            modified: n.modified,
-        };
+        let Some((path, e)) = self.map_target() else { return };
         ui.add_space(4.0);
         let w = ui.available_width();
         if n.is_dir {
@@ -446,6 +465,10 @@ impl App {
             if ui.button("Open").clicked() {
                 let p = path.clone();
                 self.files.spawn(move || crate::actions::open(&p));
+            }
+            if !n.is_dir && ui.button("Quick Look").on_hover_text("A large preview (Space)").clicked() {
+                self.files.look.open = true;
+                self.files.look.from_map = true;
             }
             if ui.button(if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in folder" }).clicked() {
                 let p = path.clone();

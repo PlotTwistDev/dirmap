@@ -197,4 +197,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Spreadsheets (calamine) | #53 | Merged |
 | Word, PowerPoint and OpenDocument formatted | #54 | Merged |
 | Every PDF page (hayro) | #55 | Merged |
-| EPUB books (own reader) | | In review |
+| EPUB books (own reader) | #56 | Merged |
+| Quick Look from Storage Analysis, full screen | | In review |
