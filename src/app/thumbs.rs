@@ -30,7 +30,7 @@ pub(super) fn stamp(size: u64, modified: i64) -> u64 {
 /// Whether a file of this name gets a thumbnail: images, and videos, PDFs and sound (album
 /// covers) where the system can make a picture of them.
 pub(super) fn wants_thumb(name: &str) -> bool {
-    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Media(_))
+    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Media(_))
 }
 
 struct Job {
@@ -297,6 +297,11 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
     match kind {
         Kind::Media(_) => crate::media::thumbnail(&local, max).ok().map(|(w, h, rgba)| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba))),
         Kind::Image | Kind::LinearImage => preview::decode_image(&local, kind == Kind::LinearImage, job.size, max).ok().map(|r| Decoded::Image(r.0)),
+        Kind::Raw => crate::camraw::preview(&local, max).ok().map(|r| {
+            let img = if r.image.width() > max || r.image.height() > max { r.image.thumbnail(max, max) } else { r.image };
+            let rgba = img.to_rgba8();
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
+        }),
         Kind::Font => crate::fontview::specimen(&local, max.min(512)).ok().map(|s| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([s.width as usize, s.height as usize], &s.rgba))),
         Kind::Drawing => crate::svg::render(&local, max).ok().map(|d| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([d.width as usize, d.height as usize], &d.rgba))),
         _ => None,

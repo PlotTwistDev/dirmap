@@ -17,6 +17,7 @@ mod asking;
 mod actions;
 mod app;
 mod camera;
+mod camraw;
 mod categories;
 mod cloud;
 mod cloudops;
