@@ -1114,6 +1114,8 @@ pub(super) enum FAction {
     /// Cloud files: remove the local copy, or keep them on this computer (`cloudops`).
     FreeUp,
     KeepHere,
+    /// The "What Is This?" window for a system file or folder.
+    Explain,
 }
 
 impl App {
@@ -2537,6 +2539,8 @@ impl App {
             let heads = &t.groups;
             let chevrons = view == FView::Columns;
             let cloud_icons = self.view().cloud_icons;
+            let sys_notes = self.settings.system_notes && !crate::fsys::remote::is_remote(dir);
+            let mut explain_pick = None;
             ui2.spacing_mut().item_spacing.y = 0.0;
             let vis = ui2.visuals().clone();
             let (sel_bg, sel_fg) = if focused { (pal.sel, pal.strong) } else { (pal.sel_dim, pal.strong) };
@@ -2632,6 +2636,13 @@ impl App {
                                     cloud::paint_stored(ui, at, st, ui.id().with(("fcloud", &*e.name)), tip);
                                     end -= 20.0;
                                 }
+                                if sys_notes && let Some(kn) = crate::known::explain(&dir.join(&*e.name)) {
+                                    let at = Rect::from_center_size(pos2(end - 8.0, cy), vec2(14.0, 14.0));
+                                    if explain::paint_badge(ui, at, kn, ui.id().with(("fsys", &*e.name))) {
+                                        explain_pick = Some(dir.join(&*e.name));
+                                    }
+                                    end -= 20.0;
+                                }
                                 let clip = Rect::from_min_max(pos2(cell.left() + 33.0, rect.top()), pos2(end, rect.bottom()));
                                 let name = seq.map_or(&*e.name, |s| s.label.as_str());
                                 let g = p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, name, font.clone(), tc);
@@ -2693,6 +2704,9 @@ impl App {
                 }
             });
             let _ = hovered_row;
+            if let Some(p) = explain_pick {
+                self.explain_path(p);
+            }
             for (resp, p) in rows_drop {
                 if let Some(d) = self.folder_drop(ui, &resp, &p) {
                     picks.drop = Some(d);
@@ -2816,6 +2830,7 @@ impl App {
         self.files.panes[pane].grid = (cols, cell_h);
         let can_paste = self.can_paste();
         let two_panes = self.files.panes.len() > 1;
+        let sys_notes = self.settings.system_notes && !crate::fsys::remote::is_remote(dir);
         let files = &mut self.files;
         let (panes, thumb_cache, favourites, marks, apps) = (&files.panes, &mut files.thumbs, &files.prefs.favourites, &files.marks, &files.prefs.apps);
         let icons = &mut self.icons;
@@ -2901,7 +2916,11 @@ impl App {
                     p.galley(pos2(cell.center().x, pic.bottom() + 6.0), g, tc);
                     let pinned = e.is_dir && favourites.iter().any(|g| g.items.iter().any(|f| f.path == path));
                     let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste, marks, apps };
-                    let resp = resp.on_hover_text_at_pointer(if e.is_dir { e.name.to_string() } else { format!("{}\n{}", e.name, scan::human(e.size)) });
+                    let mut tip = if e.is_dir { e.name.to_string() } else { format!("{}\n{}", e.name, scan::human(e.size)) };
+                    if let Some(kn) = crate::known::explain(&path).filter(|_| sys_notes) {
+                        tip = format!("{tip}\n\n{}", kn.text().replace('`', ""));
+                    }
+                    let resp = resp.on_hover_text_at_pointer(tip);
                     item_actions(ui, resp, i, &ic, pinned, picks, &mut drops);
                 }
             }
@@ -3465,7 +3484,7 @@ impl App {
         let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
         let colour = self.files.marks.get(disk).and_then(|m| m.colour);
         let caps = crate::fsys::remote::is_remote(disk).then(|| crate::fsys::remote::caps(disk));
-        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk) };
+        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some() };
         let ext = disk
             .file_name()
             .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
@@ -3628,6 +3647,11 @@ impl App {
                 }
             }
             FAction::CopyPath => self.ctx_copy = Some(paths.iter().map(|p| p.shown()).collect::<Vec<_>>().join("\n")),
+            FAction::Explain => {
+                if let Some(p) = paths.into_iter().next() {
+                    self.explain_path(p);
+                }
+            }
             FAction::CopyUnc => {
                 // Asking Windows can wait on the network, so it's done in the background.
                 let (tx, rx) = mpsc::channel();
@@ -3767,6 +3791,8 @@ pub(super) struct RowMenu {
     pub ssh: bool,
     /// In a cloud folder whose files the system can free up or keep.
     pub cloud: bool,
+    /// A system file or folder Filescape can explain (What Is This?).
+    pub known: bool,
 }
 
 /// Said when something would change an archive.
@@ -3835,7 +3861,7 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     let colour = c.marks.get(&path).and_then(|m| m.colour);
     let caps = crate::fsys::remote::is_remote(dir).then(|| crate::fsys::remote::caps(dir));
     let server = caps.is_some();
-    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false };
+    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some() };
     let ctx_menu = RowMenu {
         cloud: !server && !read_only && crate::cloudops::supported() && (e.flags & scan::store::ON_DEMAND != 0 || (e.is_dir && super::cloud::on_demand_dir(&path))),
         ..ctx_menu
@@ -3952,6 +3978,9 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
             item(ui, true, label, String::new(), FAction::Terminal(*which));
         }
         item(ui, true, "Properties", k(M::ALT, Key::Enter), FAction::Properties);
+    }
+    if m.known && !many {
+        item(ui, true, "What Is This?", String::new(), FAction::Explain);
     }
     if m.cloud {
         ui.separator();

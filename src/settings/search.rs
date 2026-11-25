@@ -23,6 +23,7 @@ pub const ENTRIES: &[Entry] = &[
     e(Tab::General, "appearance", "Appearance", "Theme", "dark light system mode appearance colour color night"),
     e(Tab::General, "appearance", "Appearance", "Interface size", "scale scaling zoom dpi bigger smaller text size font high resolution display"),
     e(Tab::General, "appearance", "Appearance", "Striped rows", "stripes alternating rows zebra lists"),
+    e(Tab::General, "appearance", "Appearance", "Explain system files", "system files folders explain what is this pagefile hiberfil winsxs spotlight proc swap safe to delete info badge"),
     e(Tab::General, "sizes", "File sizes", "Size units", "binary decimal kb kib mb gb 1024 1000 units bytes format"),
     e(Tab::General, "scanning", "Scanning", "Live scan results", "live tree progress scanning while found"),
     e(Tab::General, "updates", "Updates", "Check for updates", "update updates version new release notes automatic download latest"),

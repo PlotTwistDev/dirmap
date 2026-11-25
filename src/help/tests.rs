@@ -234,12 +234,16 @@ fn reference_bindings_match_the_code() {
 }
 
 fn check_generated(page: &str, groups: &[Group]) {
+    check_generated_text(page, &reference::markdown(groups));
+}
+
+fn check_generated_text(page: &str, body: &str) {
     let path = root().join("docs/src").join(page);
     // Git on Windows may check the page out with CRLF line endings.
     let src = std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
     let start = src.find(reference::BEGIN).unwrap_or_else(|| panic!("{page}: no BEGIN GENERATED marker"));
     let end = src.find(reference::END).unwrap_or_else(|| panic!("{page}: no END GENERATED marker"));
-    let want = format!("{}\n\n{}\n{}", reference::BEGIN, reference::markdown(groups), reference::END);
+    let want = format!("{}\n\n{}\n{}", reference::BEGIN, body, reference::END);
     let have = &src[start..end + reference::END.len()];
     if have == want {
         return;
@@ -261,6 +265,12 @@ fn keyboard_reference_is_current() {
 #[test]
 fn mouse_reference_is_current() {
     check_generated(topics::MOUSE, MOUSE);
+}
+
+#[test]
+fn system_files_list_is_current() {
+    let page = topics::SYSTEM_FILES;
+    check_generated_text(page, &format!("{}\n", crate::known::markdown()));
 }
 
 #[test]

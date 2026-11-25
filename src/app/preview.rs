@@ -524,6 +524,9 @@ impl App {
             ui.add(egui::Label::new(path.parent().map(|p| p.shown()).unwrap_or_default()).wrap());
             ui.end_row();
         });
+        if self.settings.system_notes && !crate::fsys::remote::is_remote(&path) {
+            super::explain::preview_section(ui, &path, &e.name);
+        }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             if ui.button("Open").clicked() {

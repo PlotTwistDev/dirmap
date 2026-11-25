@@ -25,6 +25,7 @@ mod elevate;
 mod fsys;
 mod help;
 mod icons;
+mod known;
 mod kit;
 mod licence;
 mod models;

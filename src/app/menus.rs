@@ -36,6 +36,8 @@ pub(super) enum TreeAction {
     /// Cloud files: remove the local copy, or keep them on this computer (`cloudops`).
     FreeUp,
     KeepHere,
+    /// The "What Is This?" window for a system file or folder.
+    Explain,
 }
 
 /// Something to do with a row of the extension list.
@@ -66,6 +68,8 @@ pub(super) struct ItemInfo {
     pub can_paste: bool,
     /// Cloud files the system can free up or keep are in it (see `cloudops`).
     pub cloud: bool,
+    /// A system file or folder Filescape can explain, or one inside such a folder.
+    pub known: bool,
 }
 
 /// A file operation running in the background.
@@ -260,6 +264,9 @@ impl App {
         }
         set(item(ui, can_change, "Refresh Selected", &k(M::NONE, Key::F5)), TreeAction::Refresh);
         set(item(ui, true, "Properties", &k(M::ALT, Key::Enter)), TreeAction::Properties);
+        if info.known && info.count <= 1 {
+            set(item(ui, true, "What Is This?", ""), TreeAction::Explain);
+        }
         set(item(ui, !info.is_dir, "Compute Hash (SHA-256)", &k(M::COMMAND, Key::H)), TreeAction::Hash);
         set(item(ui, !info.is_root, "Add to Exclusion Filter", ""), TreeAction::Exclude);
         ui.separator();
@@ -317,6 +324,7 @@ impl App {
             count: 1,
             can_paste: false,
             cloud: super::cloud::manageable(n),
+            known: crate::known::about(&self.full_path(path)).is_some(),
         })
     }
 
@@ -402,6 +410,10 @@ impl App {
             }
             TreeAction::Reveal => actions::reveal(&disk),
             TreeAction::Terminal(t) => actions::terminal(&disk, t),
+            TreeAction::Explain => {
+                self.explain_path(disk.clone());
+                Ok(())
+            }
             TreeAction::Properties => {
                 if !actions::shell_properties(&disk) {
                     self.ops.props = Some(disk);
