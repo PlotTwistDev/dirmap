@@ -64,6 +64,7 @@ pub fn feature_name(f: Feature) -> &'static str {
         Feature::Archives => "Archives",
         Feature::SavedSearches => "Saved searches",
         Feature::Snapshots => "Snapshots",
+        Feature::CloudManagement => "Managing cloud storage",
     }
 }
 

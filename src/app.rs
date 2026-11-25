@@ -707,6 +707,16 @@ impl App {
                 "Only data that is in the cloud and not on this computer: the part of each online-only or partly downloaded file that isn't here. Everything else counts as nothing, so the map shows where your cloud-only data is.",
             );
         }
+        let on_demand = self.tree.as_ref().is_some_and(|t| t.flags & scan::store::ON_DEMAND != 0);
+        if on_demand || m == Metric::Reclaimable {
+            let pro = if self.licence.allows(crate::licence::Feature::CloudManagement) { "" } else { "\n\nPart of Filescape Professional." };
+            ui.selectable_value(&mut m, Metric::Reclaimable, "Reclaimable").on_hover_text(format!(
+                "Space you could get back by freeing up downloaded cloud files: their size on disk. Files set to always stay on this device, files on mounted drives and everything outside cloud folders count as nothing. Freeing up never deletes anything: the files stay in the cloud.{pro}"
+            ));
+        }
+        if m == Metric::Reclaimable && m != self.metric && !self.premium(crate::licence::Feature::CloudManagement) {
+            return;
+        }
         if m != self.metric {
             self.set_metric(m);
         }
@@ -1038,6 +1048,7 @@ impl App {
                 "Name" => "File or folder name",
                 "Size" if self.metric == Metric::Disk => "Space everything inside takes on this computer's drive (cloud files that are only online take none)",
                 "Size" if self.metric == Metric::CloudOnly => "Data inside that is in the cloud and not on this computer",
+                "Size" if self.metric == Metric::Reclaimable => "Space freeing up the cloud files inside would give back",
                 "Size" => "Total logical size of everything inside: the files' own sizes, wherever their data is",
                 "% of parent" => "Share of the folder this item is in",
                 "Files" => "How many files are inside, counting subfolders",
@@ -1052,6 +1063,7 @@ impl App {
             let shown = match (*title, self.metric) {
                 ("Size", Metric::Disk) => "On disk",
                 ("Size", Metric::CloudOnly) => "Cloud only",
+                ("Size", Metric::Reclaimable) => "Reclaimable",
                 _ => title,
             };
             let text = format!("{shown}{arrow}");
@@ -1236,6 +1248,7 @@ impl App {
                     in_browser: false,
                     count: 1,
                     can_paste: false,
+                    cloud: cloud::manageable(n),
                 };
                 resp.context_menu(|ui| {
                     if let Some(a) = Self::tree_menu(ui, &info) {
@@ -3281,6 +3294,9 @@ pub(crate) fn sizes_text(n: &Node, m: Metric) -> String {
         let mut s = format!("{} only in the cloud", scan::human(n.size_by(m)));
         s.push_str(&format!(" ({} logical, {} on disk)", scan::human(n.logical), scan::human(n.alloc)));
         return s;
+    }
+    if m == Metric::Reclaimable {
+        return format!("{} reclaimable ({} on disk, {} logical)", scan::human(n.size_by(m)), scan::human(n.alloc), scan::human(n.logical));
     }
     let (shown, other) = (n.size_by(m), n.size_by(if m == Metric::Disk { Metric::Logical } else { Metric::Disk }));
     let mut s = scan::human(shown);

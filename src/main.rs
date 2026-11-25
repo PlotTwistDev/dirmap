@@ -4,6 +4,7 @@
 //!   dirmap --cli PATH [--top N]        print a text report instead
 //!   --logical                          (with --cli) rank by logical size instead of size on disk
 //!   --cloud-only                       (with --cli) rank by data only in the cloud
+//!   --reclaimable                      (with --cli) rank by space freeing up cloud files would give back
 //!   --cloud-mounts                     also walk mounted cloud drives (rclone, FUSE) inside PATH
 //!   --all-fs                           descend into other mounted filesystems
 //!   --save-snapshot FILE               (with --cli) also save the scan for later comparison
@@ -17,6 +18,7 @@ mod app;
 mod camera;
 mod categories;
 mod cloud;
+mod cloudops;
 mod drives;
 mod dupes;
 mod elevate;
@@ -58,6 +60,7 @@ fn main() -> eframe::Result {
     let mut save_snapshot = None;
     let mut compare = None;
     let mut restarted = false;
+    let mut manage = None;
     let mut opts = scan::Options { one_file_system: true, ..Default::default() };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -66,14 +69,19 @@ fn main() -> eframe::Result {
             "--all-fs" => opts.one_file_system = false,
             "--logical" => opts.metric = scan::Metric::Logical,
             "--cloud-only" => opts.metric = scan::Metric::CloudOnly,
+            "--reclaimable" => opts.metric = scan::Metric::Reclaimable,
             "--cloud-mounts" => opts.cloud_mounts = true,
+            "--free-up" => manage = Some(cloudops::Action::FreeUp),
+            "--keep" => manage = Some(cloudops::Action::Keep),
             "--top" => top = args.next().and_then(|s| s.parse().ok()).unwrap_or(top),
             "--save-snapshot" => save_snapshot = args.next().map(PathBuf::from),
             "--compare" => compare = args.next().map(PathBuf::from),
             // Added when Filescape restarts itself as administrator; stops it trying twice.
             elevate::ELEVATED_FLAG => restarted = true,
             "-h" | "--help" => {
-                println!("usage: filescape [--cli [--top N] [--logical | --cloud-only] [--save-snapshot FILE]] [--cloud-mounts] [--compare FILE] [--all-fs] [PATH]");
+                println!("usage: filescape [--cli [--top N] [--logical | --cloud-only | --reclaimable] [--save-snapshot FILE]] [--cloud-mounts] [--compare FILE] [--all-fs] [PATH]");
+                println!("       filescape --cli --free-up PATH   free up the cloud files in PATH (they stay in the cloud)");
+                println!("       filescape --cli --keep PATH      keep the cloud files in PATH on this computer (downloads them)");
                 return Ok(());
             }
             _ => path = Some(PathBuf::from(a)),
@@ -86,7 +94,20 @@ fn main() -> eframe::Result {
             use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
             AttachConsole(ATTACH_PARENT_PROCESS);
         }
-        report(&path.unwrap_or_else(|| PathBuf::from(".")), opts, top, save_snapshot);
+        let path = path.unwrap_or_else(|| PathBuf::from("."));
+        if let Some(a) = manage {
+            if !cloudops::supported() {
+                eprintln!("{}: this system has no supported way to free up or keep cloud files.", a.label());
+                std::process::exit(2);
+            }
+            let o = cloudops::apply(std::slice::from_ref(&path), a, &std::sync::atomic::AtomicBool::new(false));
+            println!("{}", o.summary(a));
+            for (p, why) in &o.reasons {
+                println!("  {}: {why}", p.display());
+            }
+            std::process::exit(if o.failed > 0 { 1 } else { 0 });
+        }
+        report(&path, opts, top, save_snapshot);
         return Ok(());
     }
 
@@ -168,14 +189,15 @@ fn report(root: &std::path::Path, opts: scan::Options, top: usize, save_snapshot
         names.sort_unstable();
         names.dedup();
         println!(
-            "Cloud{}: {} files, {} downloaded, {} online-only ({} only in the cloud), {} partly downloaded, {} unknown",
+            "Cloud{}: {} files, {} downloaded, {} online-only ({} only in the cloud), {} partly downloaded, {} unknown, {} can be freed up",
             if names.is_empty() { String::new() } else { format!(" ({})", names.join(", ")) },
             cloud.cloud_files,
             cloud.downloaded,
             cloud.online_only,
             scan::human(cloud.online_bytes),
             cloud.partial,
-            cloud.unknown
+            cloud.unknown,
+            scan::human(cloud.reclaimable_bytes)
         );
     }
     println!("Sizes below: {} (bytes are {})", opts.metric.label().to_lowercase(), scan::human(tree.size));

@@ -708,6 +708,7 @@ pub fn cloud(ui: &mut egui::Ui, cx: &mut PageCx) {
                 Metric::Disk => "Space files take on this computer, as du and Explorer's \"Size on disk\" count it. Cloud files that are only online take none. Recommended.",
                 Metric::Logical => "Each file's full size, wherever its data is. Cloud files count in full even when none of them is on this computer.",
                 Metric::CloudOnly => "Only data that's in the cloud and not on this computer, to see where it is. Everything else counts as nothing.",
+                Metric::Reclaimable => "Space freeing up downloaded cloud files would give back (Professional). Choose it with the Size switch above the map.",
             });
         });
         kit::divider(ui);

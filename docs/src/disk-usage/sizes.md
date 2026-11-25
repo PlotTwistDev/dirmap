@@ -25,6 +25,10 @@ and open folders stay where they are. Filescape remembers the choice for next ti
   counts only the data that is in the cloud and not on this computer, so the map shows where that
   data is. While a scan is still running, the live view shows logical sizes in its place, and a
   snapshot comparison compares logical sizes.
+- **Reclaimable** appears when the scan has cloud files your cloud app keeps on demand. It counts
+  the size on disk of downloaded cloud files that freeing up would give back, leaving out files
+  set to always stay on this device and files on mounted drives. Part of Filescape Professional.
+  See [Freeing up space](cloud-files.md#freeing-up-space-and-keeping-files-here).
 
 Hovering a tile or selecting an item shows both sizes when they differ, for example
 `1.9 MB on disk (33.2 GB logical) · some files only in the cloud`. The file manager's **Size**

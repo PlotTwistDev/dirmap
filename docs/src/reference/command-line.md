@@ -5,7 +5,9 @@ Windows, run `filescape.exe`; elsewhere `filescape` (or the full path to it).
 
 ```text
 Filescape [PATH]                                  open Filescape and scan PATH
-filescape --cli [--top N] [--logical | --cloud-only] [--save-snapshot FILE] [--all-fs] [--cloud-mounts] PATH
+filescape --cli [--top N] [--logical | --cloud-only | --reclaimable] [--save-snapshot FILE] [--all-fs] [--cloud-mounts] PATH
+filescape --cli --free-up PATH
+filescape --cli --keep PATH
                                                print a text report instead of opening a window
 filescape --compare FILE [PATH]                   open Filescape comparing with a saved snapshot
 filescape --help                                  show the usage line
@@ -20,6 +22,9 @@ filescape --help                                  show the usage line
 | `--top N` | With `--cli`: how many rows to print in each part of the report (default 15). |
 | `--logical` | With `--cli`: rank and total by logical size instead of size on disk. See [Size on disk and logical size](../disk-usage/sizes.md#size-on-disk-and-logical-size). |
 | `--cloud-only` | With `--cli`: rank and total by data that is in the cloud and not on this computer. See [Cloud files](../disk-usage/cloud-files.md). |
+| `--reclaimable` | With `--cli`: rank and total by the space freeing up cloud files would give back. |
+| `--free-up` | With `--cli`: ask your cloud app to free up the cloud files in PATH (a file or a folder), as **Free Up Space** does. Prints what happened; exits with 1 if any file couldn't be freed up, 2 on systems without a supported way. |
+| `--keep` | With `--cli`: keep the cloud files in PATH on this computer, downloading what isn't here, as **Always Keep on This Device** (Windows) or **Download Now** (macOS) does. |
 | `--cloud-mounts` | Also walk into cloud drives mounted inside the folder (rclone, FUSE), which are left out by default. See [Mounted cloud drives](../disk-usage/cloud-files.md#mounted-cloud-drives). |
 | `--save-snapshot FILE` | With `--cli`: also save the scan as a snapshot file for comparing later. |
 | `--compare FILE` | Open the window with this snapshot loaded, so the scan is compared with it. See [Comparing with a snapshot](../analysis/snapshots.md). |

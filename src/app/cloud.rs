@@ -64,6 +64,9 @@ pub(super) struct CloudAsk {
     pub bytes: u64,
     /// Done when the user agrees.
     pub then: Box<dyn FnOnce(&mut App)>,
+    /// How much isn't known (a folder in the file manager, never scanned): `files` and `bytes`
+    /// are then 0 and the question says so.
+    pub unknown: bool,
 }
 
 impl App {
@@ -73,7 +76,7 @@ impl App {
         if files == 0 || !self.settings.cloud_confirm {
             then(self);
         } else {
-            self.cloud_ask = Some(CloudAsk { what: what.into(), files, bytes, then: Box::new(then) });
+            self.cloud_ask = Some(CloudAsk { what: what.into(), files, bytes, then: Box::new(then), unknown: false });
         }
     }
 
@@ -88,7 +91,11 @@ impl App {
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .show(ctx, |ui| {
                 ui.set_max_width(380.0);
-                ui.label(format!("{files} only in the cloud. {} has to read them, which downloads about {} to this computer.", ask.what, scan::human(ask.bytes)));
+                if ask.unknown {
+                    ui.label(format!("{} downloads everything in it that is only in the cloud to this computer. Filescape can't tell how much that is without a scan.", ask.what));
+                } else {
+                    ui.label(format!("{files} only in the cloud. {} has to read them, which downloads about {} to this computer.", ask.what, scan::human(ask.bytes)));
+                }
                 ui.add_space(4.0);
                 ui.weak("They then take space here until your cloud app frees it again.");
                 ui.add_space(8.0);
@@ -170,6 +177,7 @@ impl App {
         let pal = style::pal(ui);
         let mono = FontId::monospace(11.5);
         let mut pick = None;
+        let mut reclaim = false;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let services = self.services();
@@ -217,7 +225,21 @@ impl App {
             };
             ui.label(egui::RichText::new(format!("{:.0}% here", here as f64 * 100.0 / total as f64)).font(mono.clone()).color(pal.weak))
                 .on_hover_text(format!("{:.0}% of the data in this scan is on this computer. {counts}.", here as f64 * 100.0 / total as f64));
+            if t.reclaimable_bytes > 0 && crate::cloudops::supported() {
+                let text = format!(" · {} can be freed up", scan::human(t.reclaimable_bytes));
+                let r = ui.add(egui::Label::new(egui::RichText::new(text).font(mono.clone()).color(pal.text)).sense(Sense::click()));
+                let pinned = if t.pinned_alloc > 0 { format!(" Files set to always stay on this device ({}) aren't counted.", scan::human(t.pinned_alloc)) } else { String::new() };
+                if r.on_hover_text(format!(
+                    "Downloaded cloud files ({}) whose space your cloud app can free up while keeping them in the cloud.{pinned} Click to see where they are (the Reclaimable view), then right-click items and choose {}.",
+                    group(t.reclaimable), crate::cloudops::Action::FreeUp.label()
+                )).clicked() {
+                    reclaim = true;
+                }
+            }
         });
+        if reclaim && self.premium(crate::licence::Feature::CloudManagement) {
+            self.set_metric(scan::Metric::Reclaimable);
+        }
         if let Some((Some(s), on)) = pick
             && (on || self.premium(crate::licence::Feature::Filters))
         {
@@ -260,5 +282,64 @@ impl App {
                 }
             }
         });
+    }
+}
+
+/// A folder in a cloud folder whose files are kept on demand (from what's already detected).
+pub(super) fn on_demand_dir(p: &Path) -> bool {
+    crate::cloud::root_of(&crate::cloud::known(), p).is_some_and(|r| r.kind == crate::cloud::Kind::OnDemand)
+}
+
+/// Whether the system can free up or keep this item's cloud files.
+pub(super) fn manageable(n: &Node) -> bool {
+    crate::cloudops::supported() && n.flags & scan::store::ON_DEMAND != 0 && n.flags & scan::store::MOUNT == 0
+}
+
+impl App {
+    /// Free up or keep items from the tree, with what the scan knows about them.
+    pub(super) fn cloud_manage(&mut self, a: crate::cloudops::Action, items: Vec<(PathBuf, &Node)>) {
+        let items: Vec<(PathBuf, &Node)> = items.into_iter().filter(|(_, n)| manageable(n)).collect();
+        if items.is_empty() {
+            return;
+        }
+        let bulk = items.len() > 1 || items.iter().any(|(_, n)| n.is_dir);
+        let (mut files, mut bytes) = (0, 0);
+        for (_, n) in &items {
+            let t = scan::cloud_tally(n);
+            files += t.online_only + t.partial;
+            bytes += t.online_bytes;
+        }
+        self.cloud_run(a, items.into_iter().map(|(p, _)| p).collect(), Some((files, bytes)), bulk);
+    }
+
+    /// Ask the system to free up or keep `paths` on a background thread, then read them again.
+    /// Folders and several items at once are part of Filescape Professional; keeping files asks
+    /// first when it would download (`download`: files and bytes, `None` when not known).
+    pub(super) fn cloud_run(&mut self, a: crate::cloudops::Action, paths: Vec<PathBuf>, download: Option<(u64, u64)>, bulk: bool) {
+        use crate::cloudops::{self, Action};
+        if paths.is_empty() || (bulk && !self.premium(crate::licence::Feature::CloudManagement)) {
+            return;
+        }
+        let what = if paths.len() == 1 {
+            paths[0].file_name().map(|n| format!("\"{}\"", n.to_string_lossy())).unwrap_or_else(|| "the item".into())
+        } else {
+            format!("{} items", paths.len())
+        };
+        let label = format!("{} {what}", a.label());
+        let go = move |app: &mut App| {
+            app.run_op(label, move || {
+                let o = cloudops::apply(&paths, a, &std::sync::atomic::AtomicBool::new(false));
+                let r = if o.done == 0 && o.failed > 0 { Err(o.summary(a)) } else { Ok(Some(o.summary(a))) };
+                (r, paths)
+            });
+        };
+        match (a, download) {
+            (Action::FreeUp, _) | (Action::Keep, Some((0, _))) => go(self),
+            (Action::Keep, Some((files, bytes))) => self.after_cloud_ok(format!("{} {what}", a.label()), files, bytes, go),
+            (Action::Keep, None) if !self.settings.cloud_confirm => go(self),
+            (Action::Keep, None) => {
+                self.cloud_ask = Some(CloudAsk { what: format!("{} {what}", a.label()), files: 0, bytes: 0, then: Box::new(go), unknown: true });
+            }
+        }
     }
 }

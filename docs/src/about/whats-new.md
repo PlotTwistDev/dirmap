@@ -2,6 +2,21 @@
 
 ## Next version
 
+### Freeing up cloud space
+
+- **Free Up Space** and **Always Keep on This Device** (Windows), or **Remove Download** and
+  **Download Now** (macOS), in the right-click menu of cloud files and folders in the file
+  manager, the Storage Analysis list and the tree. Filescape asks the system, which asks your
+  cloud app: nothing is deleted, files stay in the cloud, and files with changes not yet
+  uploaded are left alone. Keeping files that aren't downloaded asks first, saying how much would
+  download. See [Freeing up space](../disk-usage/cloud-files.md#freeing-up-space-and-keeping-files-here).
+- A **Reclaimable** size on the **Size** switch maps the space freeing up would give back, and
+  the storage breakdown says how much that is. Click it to see where.
+- On the command line, `--free-up PATH` and `--keep PATH` do the same, and `--reclaimable` ranks a
+  report by reclaimable space.
+- One file at a time is free; folders, several items at once and the Reclaimable view are part of
+  Filescape Professional.
+
 ### Cloud storage awareness
 
 - Filescape recognises cloud folders and drives: Google Drive, OneDrive, SharePoint, iCloud
