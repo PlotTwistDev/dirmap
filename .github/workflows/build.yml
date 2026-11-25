@@ -131,6 +131,11 @@ jobs:
       - name: Build the manual
         run: mdbook build docs
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Third-party licence notices are up to date
+        run: python3 packaging/licences.py --check
+
       - uses: actions/upload-artifact@v4
         with:
           name: filescape-manual

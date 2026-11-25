@@ -17,6 +17,10 @@
 - Markdown files preview formatted, with headings, lists, tables and links. **Raw** shows the
   text as written, and the preview panes remember which one you picked.
 - Right-click any part of the path above the file list, or a tab, and choose **Copy Path**.
+- Files with a missing or wrong extension, such as a download saved as `file`, now preview by
+  what they really are when Filescape can tell from their first bytes.
+- **Help > About Filescape > Third-party licences** lists the open-source software Filescape is
+  built with and the full text of each licence.
 
 ### What system files and folders are
 
