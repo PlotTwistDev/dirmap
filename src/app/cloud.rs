@@ -236,6 +236,10 @@ impl App {
                     reclaim = true;
                 }
             }
+            if self.cloud_fade_on() {
+                ui.label(egui::RichText::new(" · faded tiles: online only (half-faded: partly downloaded)").font(mono.clone()).color(pal.weak))
+                    .on_hover_text("At Size: Logical, files not on this computer are drawn faded so what's here stands out. Turn this off in Settings > Cloud storage > Fade online-only tiles.");
+            }
         });
         if reclaim && self.premium(crate::licence::Feature::CloudManagement) {
             self.set_metric(scan::Metric::Reclaimable);
@@ -249,6 +253,10 @@ impl App {
                 (false, Stored::OnlineOnly) => Stored::OnlineOnly.bit() | Stored::Partial.bit(),
                 (false, s) => s.bit(),
             };
+            // As in the Stored row: online-only files have no area at Size: On disk.
+            if self.filter.stored & AWAY != 0 && self.metric == scan::Metric::Disk {
+                self.set_metric(scan::Metric::Logical);
+            }
         }
     }
 
@@ -279,11 +287,25 @@ impl App {
                 let resp = ui.selectable_label(on, s.label()).on_hover_text(s.explain());
                 if resp.clicked() && (on || self.premium(crate::licence::Feature::Filters)) {
                     self.filter.stored ^= s.bit();
+                    // Online-only files take no space on disk, so sized by what's on disk they
+                    // have no area on the maps and the filter would show nothing. Size them by
+                    // their logical size instead.
+                    if !on && self.filter.stored & AWAY != 0 && self.metric == scan::Metric::Disk {
+                        self.set_metric(scan::Metric::Logical);
+                    }
                 }
+            }
+            if self.filter.stored & AWAY != 0 && self.metric == scan::Metric::Disk {
+                ui.weak("· online-only files take no space on disk, so they don't show at Size: On disk. Choose Logical to see them.");
+            } else if self.filter.stored & AWAY != 0 && self.metric == scan::Metric::Logical {
+                ui.weak("· sizes are logical, since online-only files take no space on disk");
             }
         });
     }
 }
+
+/// Stored states whose data is (mostly) not on this computer.
+const AWAY: u8 = Stored::OnlineOnly.bit() | Stored::Partial.bit();
 
 /// A folder in a cloud folder whose files are kept on demand (from what's already detected).
 pub(super) fn on_demand_dir(p: &Path) -> bool {

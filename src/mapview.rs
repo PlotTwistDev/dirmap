@@ -1215,8 +1215,10 @@ const MIN_TILE_PT: f64 = 3.0;
 /// (so markers stay put as the view pans), and which squares already show a match.
 struct Spots {
     cell: f64,
-    /// Per square: sum of x, sum of y and how many.
-    at: HashMap<(i64, i64), (f64, f64, u32)>,
+    /// Per square: where the first match found in it is. A real match's place, not an average,
+    /// so a marker stays on that file as the view zooms (where the squares change size) instead
+    /// of drifting between matches.
+    at: HashMap<(i64, i64), (f64, f64)>,
     shown: std::collections::HashSet<(i64, i64)>,
 }
 
@@ -1241,10 +1243,7 @@ impl Spots {
         if self.at.len() >= Self::MAX && !self.at.contains_key(&k) {
             return;
         }
-        let e = self.at.entry(k).or_insert((0.0, 0.0, 0));
-        e.0 += p.0;
-        e.1 += p.1;
-        e.2 += 1;
+        self.at.entry(k).or_insert(p);
     }
     /// A match drawn big enough to see covers `r`.
     fn cover(&mut self, r: &DRect) {
@@ -1258,10 +1257,9 @@ impl Spots {
             }
         }
     }
-    /// Marker centres: the middle of each square's matches, leaving out squares where a match
-    /// is drawn.
+    /// Marker centres: one match in each square, leaving out squares where a match is drawn.
     fn markers(&self) -> Vec<(f64, f64)> {
-        let mut out: Vec<_> = self.at.iter().filter(|(k, _)| !self.shown.contains(*k)).map(|(_, &(sx, sy, n))| (sx / n as f64, sy / n as f64)).collect();
+        let mut out: Vec<_> = self.at.iter().filter(|(k, _)| !self.shown.contains(*k)).map(|(_, &p)| p).collect();
         out.sort_by(|a, b| a.partial_cmp(b).unwrap());
         out
     }
@@ -1348,7 +1346,11 @@ fn build_set(req: &Req) -> Option<TileSet> {
                     }
                     mark.get_or_insert(c);
                     if l.rect.w().max(l.rect.h()) < cell {
-                        spots.add(l.rect.center());
+                        // Put the marker on a match inside (a short look), not the folder's middle,
+                        // so it stays put as zooming divides the folder.
+                        if !spots.has(l.rect.center()) && !hidden_spots_upto(l.node, &l.rect, l.hidden_from, &mut abs, &req.cover, &req.memo, &*req.paint.colorize, &**hidden, &mut spots, SMALL_LOOK) {
+                            spots.add(l.rect.center());
+                        }
                     } else {
                         // A big folder whose small files hold matches, or a long thin one too
                         // narrow to divide: find where in it the matches are.
@@ -1446,8 +1448,30 @@ fn hidden_spots(
     hidden: &(dyn Fn(&Node, &[u32], usize) -> Option<Color32> + Send + Sync),
     spots: &mut Spots,
 ) {
+    hidden_spots_upto(node, rect, from, abs, cover, memo, colorize, hidden, spots, 200_000);
+}
+
+/// How many children to look through to place the marker of a folder smaller than a square.
+const SMALL_LOOK: usize = 256;
+
+/// `hidden_spots`, looking at no more than `max` children. Whether it added a spot.
+#[allow(clippy::too_many_arguments)]
+fn hidden_spots_upto(
+    node: &Node,
+    rect: &DRect,
+    from: usize,
+    abs: &mut Vec<u32>,
+    cover: &DRect,
+    memo: &treemap::Memo,
+    colorize: &(dyn Fn(&Node, &[u32]) -> Option<(Color32, Color32)> + Send + Sync),
+    hidden: &(dyn Fn(&Node, &[u32], usize) -> Option<Color32> + Send + Sync),
+    spots: &mut Spots,
+    max: usize,
+) -> bool {
+    let before = spots.at.len();
     let mut looked = 0;
-    walk_spots(node, rect, from, abs, cover, memo, colorize, hidden, spots, &mut looked);
+    walk_spots(node, rect, from, abs, cover, memo, colorize, hidden, spots, &mut looked, max);
+    spots.at.len() > before
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1462,11 +1486,11 @@ fn walk_spots(
     hidden: &(dyn Fn(&Node, &[u32], usize) -> Option<Color32> + Send + Sync),
     spots: &mut Spots,
     looked: &mut usize,
+    max_look: usize,
 ) {
-    const MAX_LOOK: usize = 200_000;
     let rects = treemap::child_rects(node, rect, 0.0, Some(memo));
     for (i, r) in rects.iter().enumerate().skip(from) {
-        if *looked >= MAX_LOOK || spots.full() {
+        if *looked >= max_look || spots.full() {
             return;
         }
         *looked += 1;
@@ -1482,9 +1506,11 @@ fn walk_spots(
         abs.push(i as u32);
         if c.is_dir {
             if hidden(c, abs, 0).is_some() {
-                if big {
-                    walk_spots(c, r, 0, abs, cover, memo, colorize, hidden, spots, looked);
-                } else {
+                // Look inside for a match's own place; the folder's middle only if that runs
+                // out of looks.
+                let before = spots.at.len();
+                walk_spots(c, r, 0, abs, cover, memo, colorize, hidden, spots, looked, max_look);
+                if !big && spots.at.len() == before && !spots.has(r.center()) {
                     spots.add(r.center());
                 }
             }
@@ -1672,6 +1698,42 @@ mod tests {
         assert!(plain > 0.0);
         assert!(filtered >= plain * 0.9, "patches {filtered} vs {plain} unfiltered");
         assert!(marks < 50, "{marks} markers where everything matches");
+    }
+
+    #[test]
+    fn markers_sit_on_matches_so_they_stay_put_when_zooming() {
+        // A marker is drawn on a real match, not at the average of a square's matches or a
+        // folder's middle, so zooming in (which changes the squares) doesn't move it about.
+        let tree = Arc::new(treemap::synthetic(60_000, 7));
+        let never = AtomicBool::new(false);
+        let is = |n: &Node| n.name.ends_with(".txt");
+        let hits = Arc::new(crate::subset::hits(&tree, &is, &never).unwrap());
+        let world = DRect { x0: 0.0, y0: 0.0, x1: 1600.0, y1: 900.0 };
+        let mut found = Vec::new();
+        fn walk(n: &Node, r: DRect, is: &dyn Fn(&Node) -> bool, out: &mut Vec<DRect>) {
+            for (c, cr) in n.children.iter().zip(treemap::child_rects(n, &r, 0.0, None).iter()) {
+                if c.is_dir { walk(c, *cr, is, out) } else if is(c) { out.push(*cr) }
+            }
+        }
+        walk(&tree, world, &is, &mut found);
+        let (tile, mark) = (Color32::from_rgb(10, 250, 10), Color32::from_rgb(250, 10, 10));
+        for z in [1.0, 2.0, 4.0] {
+            let mut r = req(&tree, world, world, z);
+            r.paint.colorize = Arc::new(move |n: &Node, _: &[u32]| n.name.ends_with(".txt").then_some((tile, tile)));
+            let hh = hits.clone();
+            r.paint.hidden = Some(Arc::new(move |_: &Node, abs: &[u32], from: usize| hh.at(abs).filter(|x| x.any_from(from)).map(|_| mark)));
+            let set = build_set(&r).unwrap();
+            let o = set.origin;
+            let marks: Vec<(f64, f64)> = set
+                .instances
+                .iter()
+                .filter(|i| i.color == mark.to_array() && i.flags == tilegpu::FLAT)
+                .map(|i| (((i.rect[0] + i.rect[2]) / 2.0) as f64 / z + o.0, ((i.rect[1] + i.rect[3]) / 2.0) as f64 / z + o.1))
+                .collect();
+            assert!(marks.len() > 20, "zoom {z}: {} markers", marks.len());
+            let on = marks.iter().filter(|&&(x, y)| found.iter().any(|m| (m.center().0 - x).abs() < 1e-3 / z && (m.center().1 - y).abs() < 1e-3 / z)).count();
+            assert!(on * 10 >= marks.len() * 9, "zoom {z}: only {on} of {} markers on a match", marks.len());
+        }
     }
 
     #[test]

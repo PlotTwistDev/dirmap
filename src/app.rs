@@ -48,6 +48,7 @@ mod siteimport;
 mod preview;
 mod seqplayer;
 mod thumbs;
+mod tilepreview;
 mod views;
 mod summary;
 mod cloud;
@@ -246,6 +247,8 @@ pub struct App {
     /// The map is drawn in the File Manager's dock: right-click opens the item menu instead of
     /// zooming out, and the keys only reach it while the pointer is over it.
     map_in_dock: bool,
+    /// Previews on zoomed-in treemap tiles.
+    tile_prev: tilepreview::TilePreviews,
     /// The tile under the pointer last frame, as a path in the shown tree.
     map_hover: Option<Vec<u32>>,
     /// The analysis dock in the File Manager.
@@ -387,6 +390,7 @@ impl App {
             sort_desc: true,
             highlight_ext: None,
             map_in_dock: false,
+            tile_prev: Default::default(),
             map_hover: None,
             dock: Default::default(),
             scanned_at: 0,
@@ -1649,6 +1653,12 @@ impl App {
         }
     }
 
+    /// Whether map tiles of online-only files are drawn faded: at Size: Logical, with the
+    /// setting on, in a scan with such files, and no Stored filter (which already picks them).
+    pub(crate) fn cloud_fade_on(&self) -> bool {
+        self.view().cloud_fade && self.metric == Metric::Logical && self.filter.stored == 0 && self.tree.as_ref().is_some_and(|t| t.flags & scan::store::NOT_LOCAL != 0)
+    }
+
     /// Where a premium operation starts: false (and the licence prompt) when it needs a
     /// licence. Work already running is never checked again.
     pub(crate) fn premium(&mut self, f: crate::licence::Feature) -> bool {
@@ -1973,6 +1983,7 @@ impl App {
             segs.iter().position(|s| s.ring == ring && a >= s.a0 && a < s.a1)
         });
 
+        let fade = self.cloud_fade_on();
         let filtering = self.filter.active() || self.dupes_only;
         let need_full = self.dupes_only || self.color_mode == ColorMode::Change;
         let hits = self.current_hits();
@@ -2000,6 +2011,7 @@ impl App {
                 // A folder's newest file says little about the folder; keep folders neutral so files stand out.
                 (true, ColorMode::Age) => Color32::from_gray((110.0 - 8.0 * (s.ring - 1) as f32).max(60.0) as u8),
                 (true, ColorMode::Change) => self.node_color(n, &full).gamma_multiply(0.75),
+                (false, _) if fade => cloud_fade(self.node_color(n, &full), n.flags),
                 (false, _) => self.node_color(n, &full),
             };
             if n.is_dir {
@@ -2149,7 +2161,8 @@ impl App {
             self.paint_gen += 1;
         }
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key()).hash(&mut h);
+        let fade = self.cloud_fade_on();
+        (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key(), fade).hash(&mut h);
         self.shown.as_ref().map(|s| Arc::as_ptr(&s.tree) as usize).hash(&mut h);
         let hits = self.current_hits();
         hits.as_ref().map(|h| Arc::as_ptr(h) as usize).hash(&mut h);
@@ -2200,6 +2213,7 @@ impl App {
             if filtering && !filter.matches(n) {
                 return None;
             }
+            let c = if fade { cloud_fade(c, n.flags) } else { c };
             let fill = match &highlight {
                 Some(h) if !n.ext().eq_ignore_ascii_case(h) => c.gamma_multiply(0.15),
                 _ => c,
@@ -2431,13 +2445,15 @@ impl App {
         let zroot = tree.at(&root).unwrap_or(&tree);
 
         let modern = self.view().tile_style == TileStyle::Modern;
+        // Zoomed-in tiles big enough show what's in the file; their names go on the preview.
+        let previewed = self.draw_tile_previews(&painter, &tree, &root, bounds, frame.hover.as_ref().map(|h| &h.0[..]));
         // Modern: name and size written straight on the tile, as on the website.
         if self.view().show_labels && modern {
             let labels: Vec<(Rect, Vec<u32>, f32)> = self
                 .map
                 .labels(bounds)
                 .into_iter()
-                .filter(|(r, _, _)| r.width() >= 80.0 && r.height() >= 22.0)
+                .filter(|(r, l, _)| r.width() >= 80.0 && r.height() >= 22.0 && !previewed.contains(&l.path))
                 .take(2500)
                 .map(|(r, l, a)| (r, l.path.clone(), a))
                 .collect();
@@ -2469,6 +2485,9 @@ impl App {
         if self.view().show_labels && !modern {
             let labels = self.map.labels(bounds);
             for (r, l, a) in labels.into_iter().take(2500) {
+                if previewed.contains(&l.path) {
+                    continue;
+                }
                 let Some(n) = zroot.at(&l.path) else { continue };
                 // Bigger tiles get bigger names, so zooming in helps.
                 let font = FontId::proportional((r.width().min(r.height() * 2.0) / 10.0).clamp(11.0, 17.0));
@@ -2666,6 +2685,15 @@ impl App {
             if ui.checkbox(&mut labels, "File names on tiles").changed() {
                 self.settings.show_labels = labels;
                 self.dialog.draft.show_labels = labels;
+            }
+            let mut previews = self.settings.tile_previews;
+            if ui.checkbox(&mut previews, "Previews").on_hover_text("Zoomed-in tiles show what's in the file: pictures, PDF pages, text").changed() {
+                self.settings.tile_previews = previews;
+                self.dialog.draft.tile_previews = previews;
+            }
+            let mut pane = self.files.prefs.map_preview;
+            if ui.checkbox(&mut pane, "Preview pane").on_hover_text("The clicked tile's preview and details, beside the map (Alt+P)").changed() {
+                self.files.prefs.map_preview = pane;
             }
         });
     }
@@ -3059,6 +3087,9 @@ impl eframe::App for App {
             return;
         }
 
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::P)) {
+            self.files.prefs.map_preview = !self.files.prefs.map_preview;
+        }
         let r = egui::Panel::right("exts").default_size(330.0).resizable(true).show(ui, |ui| self.side_panel(ui));
         self.help_regions.push((r.response.rect, self.side_topic()));
         let r = egui::Panel::top("tree").default_size(340.0).resizable(true).show(ui, |ui| self.file_manager(ui));
@@ -3079,6 +3110,19 @@ impl eframe::App for App {
             ui.add_space(3.0);
         });
         self.help_regions.push((r.response.rect, topics::MAP_SUMMARY));
+        // The clicked tile's preview and facts, beside the map.
+        if self.files.prefs.map_preview {
+            let pal = style::pal(ui);
+            let r = egui::Panel::right("map-preview")
+                .resizable(true)
+                .default_size(self.files.prefs.preview_width)
+                .size_range(200.0..=520.0)
+                .frame(egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 8 }))
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().id_salt("map-preview-scroll").auto_shrink(false).show(ui, |ui| self.map_preview_pane(ui));
+                });
+            self.help_regions.push((r.response.rect, topics::TREEMAP_NAV));
+        }
         let map_topic = match self.map_kind {
             MapKind::Treemap => topics::TREEMAP_NAV,
             MapKind::Sunburst => topics::SUNBURST,
@@ -3218,6 +3262,19 @@ fn wheel_zoom(wheel: &mut f32, ui: &egui::Ui, hovered: bool, tree: &Node, zoom: 
 }
 
 /// Color for "color by age": hot for recent, cool for old, blended between the bands.
+/// A tile colour faded for a file not (fully) on this computer: online-only files most,
+/// partly downloaded ones half as much. Others unchanged.
+fn cloud_fade(c: Color32, flags: u8) -> Color32 {
+    let k = if flags & scan::store::ONLINE_ONLY != 0 {
+        0.32
+    } else if flags & scan::store::PARTIAL != 0 {
+        0.62
+    } else {
+        return c;
+    };
+    c.gamma_multiply(k)
+}
+
 fn age_color(modified: i64) -> Color32 {
     let days = ((chrono::Utc::now().timestamp() - modified).max(0) as f32 / 86_400.0).max(0.0);
     let t = |d: f32| (d + 1.0).ln();

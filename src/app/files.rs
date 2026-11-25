@@ -118,6 +118,8 @@ pub(super) struct FilesPrefs {
     /// The preview pane at the right.
     pub preview: bool,
     pub preview_width: f32,
+    /// The preview pane beside the map in Storage Analysis.
+    pub map_preview: bool,
     /// The first pane's view (the second pane's is in `second`), and the Icons view's size.
     pub view: FView,
     pub icon_size: f32,
@@ -195,6 +197,7 @@ impl Default for FilesPrefs {
             second: PaneSave::default(),
             preview: false,
             preview_width: 300.0,
+            map_preview: true,
             view: FView::Details,
             icon_size: 96.0,
             remember_looks: true,

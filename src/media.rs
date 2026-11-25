@@ -4,7 +4,7 @@
 //!
 //! - Windows: the shell's thumbnail handlers (the ones Explorer uses) through
 //!   IShellItemImageFactory, and MCI for sound.
-//! - macOS: Quick Look (`qlmanage -t`) for pictures, `afplay` for sound.
+//! - macOS: Quick Look (`qlmanage -t`) for pictures, AVAudioPlayer for sound (`macaudio.rs`).
 //! - Linux and other systems: `pdftoppm`, `ffmpegthumbnailer` or `ffmpeg` for pictures and
 //!   `ffplay`, `gst-play-1.0`, `paplay` or `aplay` for sound, whichever is installed.
 //!
@@ -45,6 +45,24 @@ pub fn thumbnail(path: &Path, max: u32) -> Result<Picture, String> {
     imp::thumbnail(path, max)
 }
 
+/// Play a video in the system's quick viewer: Quick Look on macOS (a floating player that
+/// closes with Space or Escape), the default video app elsewhere.
+pub fn play_video(path: &Path) -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        std::process::Command::new("/usr/bin/qlmanage")
+            .arg("-p")
+            .arg(path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    } else {
+        crate::actions::open(path)
+    }
+}
+
 // ---- the player ----
 
 /// How the player is doing, for the UI.
@@ -59,7 +77,7 @@ pub struct PlayState {
     pub ended: bool,
 }
 
-enum Cmd {
+pub(crate) enum Cmd {
     Play,
     Pause,
     /// Seconds from the start (where the player can).
@@ -410,6 +428,14 @@ mod imp {
     }
 
     pub fn play(path: &Path, rx: &mpsc::Receiver<Cmd>, state: &Mutex<PlayState>) {
+        // macOS: AVAudioPlayer, which pauses at once and seeks (afplay plays on what it has
+        // buffered after being stopped, and can't start part way).
+        #[cfg(target_os = "macos")]
+        {
+            crate::macaudio::play(path, rx, state);
+            return;
+        }
+        #[allow(unreachable_code)]
         let mut child: Option<Child> = None;
         let mut paused = false;
         // Position: where the current run started, plus time spent playing.

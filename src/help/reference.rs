@@ -89,7 +89,7 @@ pub const KEYBOARD: &[Group] = &[
             b("Alt+Enter", "⌥Enter", "Properties: size, contents and dates.", &[(FILES, "if i.consume_key(M::ALT, Key::Enter) {")]),
             b("Shift+F10", "", "Windows: Windows' own menu for the selected items, with what other apps add to it.", &[(FILES, "if cfg!(windows) && i.consume_key(M::SHIFT, Key::F10) {")]),
             b("Space", "", "Quick Look: a large preview of the selected file. ↑ / ↓ move to the next file while it's open; Space or Escape closes it.", &[(FILES, "if !look && i.consume_key(M::NONE, Key::Space) {"), (PREVIEW, "i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) || i.consume_key(egui::Modifiers::NONE, egui::Key::Space)")]),
-            b("Alt+P", "⌥P", "Show or hide the preview pane (works while typing elsewhere too).", &[(FILES, "i.consume_key(M::ALT, Key::P)")]),
+            b("Alt+P", "⌥P", "Show or hide the preview pane (works while typing elsewhere too). In Storage Analysis, the preview pane beside the map.", &[(FILES, "i.consume_key(M::ALT, Key::P)"), (APP, "i.consume_key(egui::Modifiers::ALT, egui::Key::P)")]),
             b("Ctrl+\\", "⌘\\", "One pane or two side by side (works while typing elsewhere too).", &[(FILES, "i.consume_key(M::COMMAND, Key::Backslash)")]),
             b("Tab", "", "Two panes: work in the other pane.", &[(FILES, "if i.consume_key(M::NONE, Key::Tab) {")]),
             b("Shift+F5 / Shift+F6", "⇧F5 / ⇧F6", "Two panes: copy or move the selected items to the other pane's folder.", &[(FILES, "if i.consume_key(M::SHIFT, Key::F5) {"), (FILES, "if i.consume_key(M::SHIFT, Key::F6) {")]),

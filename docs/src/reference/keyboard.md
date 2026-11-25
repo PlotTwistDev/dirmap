@@ -59,7 +59,7 @@ After you've clicked in the list or the sidebar, unless the cursor is in a text 
 | **Alt+Enter** | **⌥Enter** | Properties: size, contents and dates. |
 | **Shift+F10** | **Shift+F10** | Windows: Windows' own menu for the selected items, with what other apps add to it. |
 | **Space** | **Space** | Quick Look: a large preview of the selected file. ↑ / ↓ move to the next file while it's open; Space or Escape closes it. |
-| **Alt+P** | **⌥P** | Show or hide the preview pane (works while typing elsewhere too). |
+| **Alt+P** | **⌥P** | Show or hide the preview pane (works while typing elsewhere too). In Storage Analysis, the preview pane beside the map. |
 | **Ctrl+\** | **⌘\** | One pane or two side by side (works while typing elsewhere too). |
 | **Tab** | **Tab** | Two panes: work in the other pane. |
 | **Shift+F5 / Shift+F6** | **⇧F5 / ⇧F6** | Two panes: copy or move the selected items to the other pane's folder. |

@@ -557,6 +557,8 @@ pub fn treemap(ui: &mut egui::Ui, cx: &mut PageCx) {
     kit::section(ui, Icon::Pencil, "Tile details", f.of("details"), |ui| {
         kit::toggle_row(ui, "File labels", Some("Write names (and sizes) on tiles big enough to hold them, on the treemap and the sunburst."), &mut d.show_labels);
         kit::divider(ui);
+        kit::toggle_row(ui, "Previews on tiles", Some("When you zoom in, tiles big enough show what's in the file: pictures, video frames, PDF pages and the first lines of text and documents. Files only in the cloud are never downloaded for this."), &mut d.tile_previews);
+        kit::divider(ui);
         kit::row(ui, "Selection border", Some("The outline around the selected item."), |ui| {
             let def = Settings::default().selection_color;
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -720,6 +722,7 @@ pub fn cloud(ui: &mut egui::Ui, cx: &mut PageCx) {
     kit::section(ui, Icon::Cloud, "Status", f.of("status"), |ui| {
         kit::toggle_row(ui, "Status icons", Some("Show an icon after the name of cloud files: online only, partly downloaded, downloaded, always kept on this device, or unknown. Hover one to see what it means."), &mut d.cloud_icons);
         kit::divider(ui);
+        kit::toggle_row(ui, "Fade online-only tiles", Some("At Size: Logical, draw the map tiles of online-only files faded (partly downloaded ones half as much), so the files actually on this computer stand out. At Size: On disk they take no space and don't appear."), &mut d.cloud_fade);
         kit::toggle_row(ui, "Storage breakdown", Some("Under the map, a bar splitting the scan into files not in the cloud, downloaded cloud files and data only in the cloud."), &mut d.cloud_breakdown);
     });
 
