@@ -133,6 +133,11 @@ fn main() -> eframe::Result {
             }
             std::process::exit(if o.failed > 0 { 1 } else { 0 });
         }
+        // Saving a snapshot is Pro in the app, so it is from the command line too.
+        if save_snapshot.is_some() && !licence::Licensing::load().allows(licence::Feature::Snapshots) {
+            eprintln!("--save-snapshot: saving snapshots needs a Filescape Pro licence. Enter one in the app under Settings > Licensing.");
+            std::process::exit(3);
+        }
         if list_models {
             models_report(&path, opts);
             return Ok(());

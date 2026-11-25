@@ -51,23 +51,7 @@ impl State {
 }
 
 pub fn feature_name(f: Feature) -> &'static str {
-    match f {
-        Feature::FileBrowser => "The file browser",
-        Feature::DiskMap => "The disk map",
-        Feature::Filters => "Filtering by type or size",
-        Feature::CustomFilter => "The Custom filter",
-        Feature::SequenceFilter => "Finding numbered sequences",
-        Feature::Remote => "Connecting to servers",
-        Feature::RemoteTransfers => "Server transfers",
-        Feature::SequencePlayer => "The sequence player",
-        Feature::BatchRename => "Batch rename",
-        Feature::FolderCompare => "Folder compare",
-        Feature::Duplicates => "The duplicate finder",
-        Feature::Archives => "Archives",
-        Feature::SavedSearches => "Saved searches",
-        Feature::Snapshots => "Snapshots",
-        Feature::CloudManagement => "Managing cloud storage",
-    }
+    f.name()
 }
 
 impl Licensing {
@@ -80,7 +64,7 @@ impl Licensing {
             Standing::Temporary { days_left, .. } if *days_left <= 7 => (format!("Your temporary Filescape licence ends in {}.", days(*days_left)), false),
             Standing::Evaluation { days_left, .. } if *days_left <= 7 => (format!("Filescape evaluation: {} left.", days(*days_left)), false),
             Standing::Restricted(Reason::TemporaryExpired(_)) => ("Your temporary Filescape licence has expired. Your files, settings and saved data are intact.".into(), true),
-            Standing::Restricted(Reason::EvaluationOver) => ("The Filescape evaluation has ended. The file browser, the disk map and basic filters stay free.".into(), true),
+            Standing::Restricted(Reason::EvaluationOver) => ("The Filescape evaluation has ended. The file browser, the disk map and the AI Models workspace stay free.".into(), true),
             Standing::Restricted(Reason::ClockRollback) => ("This computer's clock is behind a time Filescape has already seen, so time-limited licences are paused until it's right again.".into(), true),
             Standing::Restricted(Reason::UpdatesLapsed(_)) => ("Your Filescape licence's updates ended before this version was released.".into(), true),
             Standing::Restricted(Reason::Revoked) => ("Your Filescape licence has been revoked.".into(), true),
@@ -115,7 +99,7 @@ impl Licensing {
             ui.label(match &self.standing {
                 Standing::Restricted(Reason::TemporaryExpired(_)) => "Your temporary licence has expired. Enter another licence, or buy a perpetual one.",
                 Standing::Restricted(Reason::ClockRollback) => "Time-limited licences are paused because this computer's clock is behind. Set the clock right and try again.",
-                _ => "Enter a licence, or buy one. The file browser, the disk map and basic filters stay free.",
+                _ => "Enter a licence, or buy one. The file browser, the disk map and the AI Models workspace stay free.",
             });
             ui.label(RichText::new("Your files, settings and saved data are untouched, and anything already running carries on.").weak());
             ui.add_space(6.0);
@@ -180,7 +164,7 @@ impl Licensing {
                         Reason::ClockRollback => "This computer's clock is behind a time Filescape has already seen, so time-limited licences are paused. Set the clock right, or go online so Filescape can check the time.",
                         Reason::UpdatesLapsed(_) => "Your licence covers versions released while its updates last. This version is newer, so it runs with the free features; use an earlier version, or buy a new licence.",
                         Reason::Revoked => "Your licence has been revoked. If you think this is a mistake, write to us at filescape.app/contact (Help > Contact Filescape).",
-                        _ => "The evaluation has ended. The file browser, the disk map and basic filters stay free.",
+                        _ => "The evaluation has ended. The file browser, the disk map and the AI Models workspace stay free.",
                     }
                     .into(),
                 ),
@@ -201,7 +185,7 @@ impl Licensing {
                         });
                     });
                     ui.add_space(8.0);
-                    kit::callout(ui, Tone::Neutral, "Free after the evaluation: the file browser, the disk map and basic filters. Your files, settings and saved data are never affected.");
+                    kit::callout(ui, Tone::Neutral, "Free after the evaluation: the file browser, the disk map and the AI Models workspace. Your files, settings and saved data are never affected.");
                     ui.add_space(8.0);
                 }
                 Standing::Temporary { cert, days_left } => {
