@@ -7,6 +7,7 @@
 pub mod doc;
 #[cfg(test)]
 pub mod reference;
+pub mod notices;
 pub mod render;
 pub mod topics;
 #[cfg(test)]
@@ -49,6 +50,7 @@ pub struct AboutInfo {
 pub struct Help {
     pub open: bool,
     pub about_open: bool,
+    notices: notices::Notices,
     docs: Option<Docs>,
     at: Option<Loc>,
     back: Vec<Loc>,
@@ -101,6 +103,7 @@ impl Help {
     /// Draw the help and About windows. Call once per frame, before the panels.
     pub fn ui(&mut self, ctx: &egui::Context, about: &AboutInfo) -> Option<Action> {
         self.about_window(ctx, about);
+        self.notices.window(ctx);
         self.hovered = false;
         if !self.open {
             return None;
@@ -296,7 +299,7 @@ impl Help {
                     ui.end_row();
                 });
                 ui.add_space(8.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("Copy details").on_hover_text("For a problem report").clicked() {
                         let text = format!(
                             "Filescape {} · {} {} · drawing: {} · administrator: {}",
@@ -313,6 +316,9 @@ impl Help {
                     }
                     if ui.button("More about Filescape…").clicked() {
                         more = true;
+                    }
+                    if ui.button("Third-party licences…").on_hover_text("The open-source software Filescape is built with, and its licences").clicked() {
+                        self.notices.open = true;
                     }
                 });
             });
