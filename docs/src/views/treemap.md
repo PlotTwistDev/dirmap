@@ -57,6 +57,35 @@ by: Age** or **Change** only the totals line is shown, since the colours then me
   rectangles big enough to hold them, in white on a dark backing so they read on any colour.
   They fade in as you zoom in, and get bigger on bigger tiles.
 
+## Previews on tiles
+
+As you zoom in, a file's rectangle that grows big enough shows what's in the file instead of a
+plain colour: a picture fills it, a video shows a frame (rest the pointer on it and it plays,
+silently, until you move away), a sound shows its waveform, a PDF shows its first page, and text
+files, code and Word or OpenDocument documents show their first lines. The file's name and size
+move to a dark strip along the bottom, and a thin edge of the type colour stays round it.
+Transparent parts of pictures show a grey check pattern, not the tile's colour. Bigger
+tiles get sharper pictures and bigger text.
+
+Previews load in the background, so zooming never waits for them, and only for tiles on screen.
+Only files on this computer are read: a cloud file that isn't downloaded, a file on a mounted
+cloud drive or a server, or one inside an archive keeps its plain colour, so zooming never
+downloads anything. Turn previews off with **Previews** in the filter bar, or **Previews on
+tiles** in Settings > Treemap.
+
+## The preview pane
+
+The **Preview** pane at the right of the map shows the item you clicked: a large preview of the
+file (pictures can be zoomed and dragged, text scrolls, sound plays with the controls under it,
+and a video's frame has a play button that plays it right there, with its sound, a bar to jump
+about and **Open** to watch it in Quick Look on macOS or your video app elsewhere (on Linux,
+playing in the pane needs `ffmpeg`; on Windows the pane plays the picture only, so use **Open**
+for sound); a cloud file that isn't downloaded is only fetched if you ask), and its kind, size in bytes, size on disk, share of the analysis, date, where
+it is and, for a cloud file, how it's stored. For a folder it lists the largest items inside;
+click one to select it. **Open** opens the item and **Show in folder** (**Show in Finder** on macOS)
+shows it in your file manager. Hide or show the pane with **Preview pane** in the filter bar or
+**Alt+P** (**⌥P** on macOS).
+
 ## Very small files
 
 A drive can have millions of files too small to draw even as a single pixel. Filescape draws

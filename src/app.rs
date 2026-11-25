@@ -48,6 +48,8 @@ mod siteimport;
 mod preview;
 mod seqplayer;
 mod thumbs;
+mod tilepreview;
+mod dialogs;
 mod views;
 mod summary;
 mod cloud;
@@ -245,6 +247,10 @@ pub struct App {
     /// The map is drawn in the File Manager's dock: right-click opens the item menu instead of
     /// zooming out, and the keys only reach it while the pointer is over it.
     map_in_dock: bool,
+    /// Previews on zoomed-in treemap tiles.
+    tile_prev: tilepreview::TilePreviews,
+    /// File and folder pickers waiting for an answer (see dialogs.rs).
+    asking: Vec<dialogs::Asking>,
     /// The tile under the pointer last frame, as a path in the shown tree.
     map_hover: Option<Vec<u32>>,
     /// The analysis dock in the File Manager.
@@ -388,6 +394,8 @@ impl App {
             sort_desc: true,
             highlight_ext: None,
             map_in_dock: false,
+            tile_prev: Default::default(),
+            asking: Vec::new(),
             map_hover: None,
             dock: Default::default(),
             scanned_at: 0,
@@ -946,10 +954,11 @@ impl App {
             }
             let edit = ui.add(egui::TextEdit::singleline(&mut self.path_input).desired_width(380.0).hint_text("Folder to scan"));
             if ui.button("Browse…").clicked() {
-                if let Some(dir) = rfd::FileDialog::new().set_directory(self.path_input.trim()).pick_folder() {
-                    self.path_input = dir.shown();
-                    self.start_scan();
-                }
+                let d = dialogs::Dialog::new().set_directory(self.path_input.trim());
+                self.ask_path(d, dialogs::Pick::Folder, |app, dir| {
+                    app.path_input = dir.shown();
+                    app.start_scan();
+                });
             }
             let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if ui.button("⟳ Scan").clicked() || enter {
@@ -1700,6 +1709,12 @@ impl App {
         }
     }
 
+    /// Whether map tiles of online-only files are drawn faded: at Size: Logical, with the
+    /// setting on, in a scan with such files, and no Stored filter (which already picks them).
+    pub(crate) fn cloud_fade_on(&self) -> bool {
+        self.view().cloud_fade && self.metric == Metric::Logical && self.filter.stored == 0 && self.tree.as_ref().is_some_and(|t| t.flags & scan::store::NOT_LOCAL != 0)
+    }
+
     /// Where a premium operation starts: false (and the licence prompt) when it needs a
     /// licence. Work already running is never checked again.
     pub(crate) fn premium(&mut self, f: crate::licence::Feature) -> bool {
@@ -1713,19 +1728,19 @@ impl App {
         let Some(tree) = &self.tree else { return };
         let label: String = tree.name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
         let name = format!("Filescape {} {}.dmsnap", label.trim_matches('_'), chrono::Local::now().format("%Y-%m-%d %H%M"));
-        let dialog = rfd::FileDialog::new().add_filter("Filescape snapshot", &["dmsnap"]).set_file_name(name);
-        if let Some(f) = dialog.save_file() {
-            self.snap_msg = Some(match snapshot::save(&f, &self.scanned_path, tree) {
+        let dialog = dialogs::Dialog::new().add_filter("Filescape snapshot", &["dmsnap"]).set_file_name(name);
+        self.ask_path(dialog, dialogs::Pick::Save, |app, f| {
+            let Some(tree) = &app.tree else { return };
+            app.snap_msg = Some(match snapshot::save(&f, &app.scanned_path, tree) {
                 Ok(()) => format!("Saved {}", f.display()),
                 Err(e) => format!("Couldn't save the snapshot: {e}"),
             });
-        }
+        });
     }
 
     fn load_snapshot(&mut self) {
-        if let Some(f) = rfd::FileDialog::new().add_filter("Filescape snapshot", &["dmsnap"]).pick_file() {
-            self.load_snapshot_from(f);
-        }
+        let d = dialogs::Dialog::new().add_filter("Filescape snapshot", &["dmsnap"]);
+        self.ask_path(d, dialogs::Pick::File, |app, f| app.load_snapshot_from(f));
     }
 
     fn load_snapshot_from(&mut self, f: PathBuf) {
@@ -2024,6 +2039,7 @@ impl App {
             segs.iter().position(|s| s.ring == ring && a >= s.a0 && a < s.a1)
         });
 
+        let fade = self.cloud_fade_on();
         let filtering = self.filter.active() || self.dupes_only;
         let need_full = self.dupes_only || self.color_mode == ColorMode::Change;
         let hits = self.current_hits();
@@ -2051,6 +2067,7 @@ impl App {
                 // A folder's newest file says little about the folder; keep folders neutral so files stand out.
                 (true, ColorMode::Age) => Color32::from_gray((110.0 - 8.0 * (s.ring - 1) as f32).max(60.0) as u8),
                 (true, ColorMode::Change) => self.node_color(n, &full).gamma_multiply(0.75),
+                (false, _) if fade => cloud_fade(self.node_color(n, &full), n.flags),
                 (false, _) => self.node_color(n, &full),
             };
             if n.is_dir {
@@ -2200,7 +2217,8 @@ impl App {
             self.paint_gen += 1;
         }
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key()).hash(&mut h);
+        let fade = self.cloud_fade_on();
+        (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key(), fade).hash(&mut h);
         self.shown.as_ref().map(|s| Arc::as_ptr(&s.tree) as usize).hash(&mut h);
         let hits = self.current_hits();
         hits.as_ref().map(|h| Arc::as_ptr(h) as usize).hash(&mut h);
@@ -2251,6 +2269,7 @@ impl App {
             if filtering && !filter.matches(n) {
                 return None;
             }
+            let c = if fade { cloud_fade(c, n.flags) } else { c };
             let fill = match &highlight {
                 Some(h) if !n.ext().eq_ignore_ascii_case(h) => c.gamma_multiply(0.15),
                 _ => c,
@@ -2482,16 +2501,25 @@ impl App {
         let zroot = tree.at(&root).unwrap_or(&tree);
 
         let modern = self.view().tile_style == TileStyle::Modern;
+        // Zoomed-in tiles big enough show what's in the file; their names go on the preview.
+        let previewed = self.draw_tile_previews(&painter, &tree, &root, bounds, frame.hover.as_ref().map(|h| &h.0[..]));
+        // Tiles with room for a name (asked for once a frame: it moves the names' fading on).
+        let cloud_marks = self.view().cloud_icons && tree.flags & scan::store::NOT_LOCAL != 0;
+        // Room kept clear of names in the top right corner for the cloud mark.
+        let marked = |r: Rect, n: &Node| cloud_marks && !n.is_dir && n.flags & scan::store::NOT_LOCAL != 0 && r.width() >= 30.0 && r.height() >= 20.0;
+        let name_clip = |r: Rect, n: &Node, inset: f32| {
+            let c = r.shrink(inset);
+            if marked(r, n) { Rect::from_min_max(c.min, pos2((r.right() - 24.0).max(c.left()), c.bottom())) } else { c }
+        };
+        let all_labels: Vec<(Rect, Vec<u32>, f32)> = if self.view().show_labels || cloud_marks {
+            self.map.labels(bounds).into_iter().take(2500).map(|(r, l, a)| (r, l.path.clone(), a)).collect()
+        } else {
+            Vec::new()
+        };
         // Modern: name and size written straight on the tile, as on the website.
         if self.view().show_labels && modern {
-            let labels: Vec<(Rect, Vec<u32>, f32)> = self
-                .map
-                .labels(bounds)
-                .into_iter()
-                .filter(|(r, _, _)| r.width() >= 80.0 && r.height() >= 22.0)
-                .take(2500)
-                .map(|(r, l, a)| (r, l.path.clone(), a))
-                .collect();
+            let labels: Vec<(Rect, Vec<u32>, f32)> =
+                all_labels.iter().filter(|(r, path, _)| r.width() >= 80.0 && r.height() >= 22.0 && !previewed.contains(path)).cloned().collect();
             let name_font = FontId::monospace(12.0);
             let size_font = FontId::monospace(11.0);
             for (r, path, a) in labels {
@@ -2502,7 +2530,7 @@ impl App {
                 let c = self.node_color(n, &abs);
                 let lum = (0.2126 * c.r() as f32 + 0.7152 * c.g() as f32 + 0.0722 * c.b() as f32) / 255.0;
                 let ink = if lum > 0.42 { Color32::from_rgb(10, 10, 12) } else { Color32::WHITE };
-                let p = painter.with_clip_rect(r.shrink(2.0).intersect(painter.clip_rect()));
+                let p = painter.with_clip_rect(name_clip(r, n, 2.0).intersect(painter.clip_rect()));
                 let at = r.min + vec2(6.0, 6.0);
                 p.text(at, Align2::LEFT_TOP, &*n.name, name_font.clone(), ink.gamma_multiply(0.86 * a));
                 if r.height() >= 36.0 {
@@ -2518,12 +2546,14 @@ impl App {
 
         // File names on tiles with room for them, fading in with size.
         if self.view().show_labels && !modern {
-            let labels = self.map.labels(bounds);
-            for (r, l, a) in labels.into_iter().take(2500) {
-                let Some(n) = zroot.at(&l.path) else { continue };
+            for &(r, ref path, a) in &all_labels {
+                if previewed.contains(path) {
+                    continue;
+                }
+                let Some(n) = zroot.at(path) else { continue };
                 // Bigger tiles get bigger names, so zooming in helps.
                 let font = FontId::proportional((r.width().min(r.height() * 2.0) / 10.0).clamp(11.0, 17.0));
-                let p = painter.with_clip_rect(r.shrink(1.0).intersect(painter.clip_rect()));
+                let p = painter.with_clip_rect(name_clip(r, n, 1.0).intersect(painter.clip_rect()));
                 let at = r.min + vec2(3.0, 2.0);
                 // White text on a dark chip reads on any tile, however it's coloured or lit.
                 let name = p.layout_no_wrap(n.name.to_string(), font.clone(), Color32::WHITE);
@@ -2537,6 +2567,23 @@ impl App {
                 if let Some(g) = size {
                     p.galley_with_override_text_color(at + vec2(0.0, name.size().y), g, Color32::from_white_alpha(215).gamma_multiply(sa));
                 }
+            }
+        }
+
+        // A cloud in the top right corner of files that aren't (all) on this computer, as in the
+        // lists: online only, or partly downloaded (half-filled cloud).
+        if cloud_marks {
+            for &(r, ref path, a) in &all_labels {
+                if previewed.contains(path) {
+                    continue;
+                }
+                let Some(n) = zroot.at(path).filter(|n| marked(r, n)) else { continue };
+                let icon = if n.flags & scan::store::ONLINE_ONLY != 0 { crate::kit::icons::Icon::Cloud } else { crate::kit::icons::Icon::CloudHalf };
+                let at = Rect::from_min_size(pos2(r.right() - 22.0, r.top() + 4.0), vec2(18.0, 18.0));
+                let p = painter.with_clip_rect(r.shrink(1.0).intersect(painter.clip_rect()));
+                // On a dark disc so it reads on any tile colour, like the names' chips.
+                p.circle_filled(at.center(), 9.5, Color32::from_black_alpha((130.0 * a) as u8));
+                crate::kit::icons::paint(&p, at.shrink(2.5), icon, Color32::from_white_alpha(235).gamma_multiply(a));
             }
         }
 
@@ -2718,6 +2765,15 @@ impl App {
                 self.settings.show_labels = labels;
                 self.dialog.draft.show_labels = labels;
             }
+            let mut previews = self.settings.tile_previews;
+            if ui.checkbox(&mut previews, "Previews").on_hover_text("Zoomed-in tiles show what's in the file: pictures, PDF pages, text").changed() {
+                self.settings.tile_previews = previews;
+                self.dialog.draft.tile_previews = previews;
+            }
+            let mut pane = self.files.prefs.map_preview;
+            if ui.checkbox(&mut pane, "Preview pane").on_hover_text("The clicked tile's preview and details, beside the map (Alt+P)").changed() {
+                self.files.prefs.map_preview = pane;
+            }
         });
     }
 
@@ -2867,6 +2923,7 @@ impl eframe::App for App {
         }
         self.transfers_poll(&ctx);
         self.ops_ui(&ctx);
+        self.poll_dialogs(&ctx);
 
         if let Some(rx) = &self.drives_rx {
             match rx.try_recv() {
@@ -3104,6 +3161,9 @@ impl eframe::App for App {
             return;
         }
 
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::P)) {
+            self.files.prefs.map_preview = !self.files.prefs.map_preview;
+        }
         let r = egui::Panel::right("exts").default_size(330.0).resizable(true).show(ui, |ui| self.side_panel(ui));
         self.help_regions.push((r.response.rect, self.side_topic()));
         let r = egui::Panel::top("tree").default_size(340.0).resizable(true).show(ui, |ui| self.file_manager(ui));
@@ -3124,6 +3184,19 @@ impl eframe::App for App {
             ui.add_space(3.0);
         });
         self.help_regions.push((r.response.rect, topics::MAP_SUMMARY));
+        // The clicked tile's preview and facts, beside the map.
+        if self.files.prefs.map_preview {
+            let pal = style::pal(ui);
+            let r = egui::Panel::right("map-preview")
+                .resizable(true)
+                .default_size(self.files.prefs.preview_width)
+                .size_range(200.0..=520.0)
+                .frame(egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 8 }))
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().id_salt("map-preview-scroll").auto_shrink(false).show(ui, |ui| self.map_preview_pane(ui));
+                });
+            self.help_regions.push((r.response.rect, topics::TREEMAP_NAV));
+        }
         let map_topic = match self.map_kind {
             MapKind::Treemap => topics::TREEMAP_NAV,
             MapKind::Sunburst => topics::SUNBURST,
@@ -3263,6 +3336,19 @@ fn wheel_zoom(wheel: &mut f32, ui: &egui::Ui, hovered: bool, tree: &Node, zoom: 
 }
 
 /// Color for "color by age": hot for recent, cool for old, blended between the bands.
+/// A tile colour faded for a file not (fully) on this computer: online-only files most,
+/// partly downloaded ones half as much. Others unchanged.
+fn cloud_fade(c: Color32, flags: u8) -> Color32 {
+    let k = if flags & scan::store::ONLINE_ONLY != 0 {
+        0.32
+    } else if flags & scan::store::PARTIAL != 0 {
+        0.62
+    } else {
+        return c;
+    };
+    c.gamma_multiply(k)
+}
+
 fn age_color(modified: i64) -> Color32 {
     let days = ((chrono::Utc::now().timestamp() - modified).max(0) as f32 / 86_400.0).max(0.0);
     let t = |d: f32| (d + 1.0).ln();

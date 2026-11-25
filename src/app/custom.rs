@@ -630,6 +630,11 @@ impl App {
             Some((_, files, bytes)) => {
                 let pct = *bytes as f64 * 100.0 / total.max(1) as f64;
                 ui.strong(format!("{} files match · {} ({pct:.1}% of the scan)", group(*files), scan::human(*bytes)));
+                if *bytes == 0 {
+                    // Nothing for the maps to draw: say why rather than leave them looking empty.
+                    let why = if self.metric == scan::Metric::Disk { "· they take no space on disk, so the maps can't show them (try Size: Logical)" } else { "· they're all empty, so the maps can't show them" };
+                    ui.weak(why);
+                }
             }
             None => {}
         }

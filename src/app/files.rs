@@ -113,6 +113,8 @@ pub(super) struct FilesPrefs {
     /// The preview pane at the right.
     pub preview: bool,
     pub preview_width: f32,
+    /// The preview pane beside the map in Storage Analysis.
+    pub map_preview: bool,
     /// The first pane's view (the second pane's is in `second`), and the Icons view's size.
     pub view: FView,
     pub icon_size: f32,
@@ -189,6 +191,7 @@ impl Default for FilesPrefs {
             second: PaneSave::default(),
             preview: false,
             preview_width: 300.0,
+            map_preview: true,
             view: FView::Details,
             icon_size: 96.0,
             remember_looks: true,
@@ -3626,7 +3629,11 @@ impl App {
                     self.remove_favourite(&p);
                 }
             }
-            FAction::CopyPath => self.ctx_copy = Some(paths.iter().map(|p| p.shown()).collect::<Vec<_>>().join("\n")),
+            FAction::CopyPath => {
+                self.ctx_copy = Some(paths.iter().map(|p| p.shown()).collect::<Vec<_>>().join("\n"));
+                let what = if paths.len() == 1 { "the path".to_string() } else { format!("{} paths", paths.len()) };
+                self.ops.notice = Some((format!("Copied {what}"), false));
+            }
             FAction::Explain => {
                 if let Some(p) = paths.into_iter().next() {
                     self.explain_path(p);
@@ -3720,18 +3727,18 @@ impl App {
             }
             FAction::ExtractTo => {
                 let start = paths.first().and_then(|p| archive::split(p)).and_then(|(a, _)| a.parent().map(Path::to_path_buf));
-                let mut d = rfd::FileDialog::new().set_title("Extract to folder");
+                let mut d = super::dialogs::Dialog::new().set_title("Extract to folder");
                 if let Some(s) = start {
                     d = d.set_directory(s);
                 }
-                if let Some(dest) = d.pick_folder() {
+                self.ask_path(d, super::dialogs::Pick::Folder, move |app, dest| {
                     if paths.iter().all(|p| archive::inside(p)) {
                         // Items from inside an archive: copied out, asking about names taken.
-                        self.transfer(paths, dest, true);
+                        app.transfer(paths, dest, true);
                     } else {
-                        self.extract_archives(paths.into_iter().filter(|p| !archive::inside(p)).collect(), Some(dest));
+                        app.extract_archives(paths.into_iter().filter(|p| !archive::inside(p)).collect(), Some(dest));
                     }
-                }
+                });
             }
             FAction::OpenWithApp => {
                 if let Some(p) = paths.into_iter().next() {

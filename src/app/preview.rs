@@ -61,6 +61,22 @@ pub(super) struct Look {
     pub player: Option<crate::media::Player>,
     /// Cloud files the user agreed to download to preview (others aren't read: see `preview_body`).
     pub download_ok: std::collections::HashSet<PathBuf>,
+    /// A video playing in the preview.
+    pub video: Option<VideoView>,
+}
+
+/// A video playing in a preview, and its picture.
+pub(super) struct VideoView {
+    pub video: crate::video::Video,
+    tex: Option<egui::TextureHandle>,
+    serial: u64,
+}
+
+impl Look {
+    /// What a file decoded to, if it's in the cache.
+    pub(super) fn cached(&self, path: &Path) -> Option<&Content> {
+        self.cache.iter().find(|c| c.0 == path).map(|c| &c.2)
+    }
 }
 
 /// The kind of preview a file gets, from its extension.
@@ -76,21 +92,22 @@ pub(super) enum Kind {
 }
 
 pub(super) fn kind_of(name: &str) -> Kind {
-    let ext = crate::scan::ext_of(name).to_ascii_lowercase();
-    match ext.as_str() {
-        "png" | "jpg" | "jpeg" | "jpe" | "gif" | "webp" | "tif" | "tiff" | "bmp" | "tga" | "ico" | "qoi" | "pbm" | "pgm" | "ppm" | "pnm" => Kind::Image,
-        "exr" | "hdr" => Kind::LinearImage,
-        "txt" | "md" | "markdown" | "rst" | "log" | "csv" | "tsv" | "json" | "jsonl" | "xml" | "yaml" | "yml" | "toml" | "ini" | "cfg" | "conf" | "rs" | "py" | "js"
-        | "mjs" | "ts" | "tsx" | "jsx" | "c" | "h" | "cpp" | "hpp" | "cc" | "cs" | "java" | "kt" | "go" | "rb" | "php" | "swift" | "m" | "mm" | "sh" | "bash" | "zsh"
-        | "fish" | "ps1" | "psm1" | "bat" | "cmd" | "lua" | "sql" | "html" | "htm" | "css" | "scss" | "less" | "vue" | "svelte" | "glsl" | "hlsl" | "wgsl" | "osl"
-        | "vex" | "mel" | "nk" | "usda" | "obj" | "mtl" | "gitignore" | "dockerfile" | "makefile" | "cmake" | "gradle" | "properties" | "env" | "srt" | "vtt"
-        | "tex" | "bib" | "r" | "jl" | "dart" | "zig" | "nim" | "ex" | "exs" | "erl" | "hs" | "ml" | "clj" | "scala" | "pl" | "pm" | "tcl" | "diff" | "patch"
-        | "lock" | "svg" => Kind::Text,
-        "" if matches!(name.to_ascii_lowercase().as_str(), "readme" | "license" | "makefile" | "dockerfile" | "changelog" | "authors") => Kind::Text,
-        _ => match crate::media::media_of(name) {
-            Some(m) => Kind::Media(m),
-            None => Kind::Other,
-        },
+    crate::formats::by_name(name).map_or(Kind::Other, kind_for)
+}
+
+/// The kind of preview a format gets. Word and OpenDocument files are read in `load` by name,
+/// before the kind is looked at.
+pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
+    use crate::formats::Category as C;
+    use crate::media::Media;
+    match f.category {
+        C::Picture => Kind::Image,
+        C::LinearPicture => Kind::LinearImage,
+        C::Text => Kind::Text,
+        C::Video => Kind::Media(Media::Video),
+        C::Audio => Kind::Media(Media::Audio),
+        C::Pdf => Kind::Media(Media::Pdf),
+        C::Document => Kind::Other,
     }
 }
 
@@ -148,6 +165,18 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(e) => Content::Error(e),
         };
     }
+    // Word and OpenDocument text: the words in them.
+    if let Some(k @ (thumbs::TextKind::Docx | thumbs::TextKind::Odt)) = path.file_name().and_then(|n| thumbs::text_kind(&n.to_string_lossy())) {
+        return match thumbs::doc_text(path, k) {
+            Some(text) => {
+                let truncated = text.len() > TEXT_MAX;
+                let mut text = text;
+                text.truncate(text.floor_char_boundary(TEXT_MAX));
+                Content::Text { text, truncated }
+            }
+            None => Content::Error("Couldn't read the text in this document".into()),
+        };
+    }
     match kind {
         Kind::Image | Kind::LinearImage => load_image(path, kind == Kind::LinearImage, size),
         Kind::Text => load_text(path),
@@ -163,7 +192,11 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(_) => Content::Error(if m == crate::media::Media::Pdf { "No picture of this PDF: it couldn't be drawn (it may be damaged or password-protected, or the system can't draw PDFs)".into() } else { "No picture of this video: the system has no thumbnailer for it".into() }),
         },
         Kind::Other => {
-            // Unknown extension: show it as text if it looks like text.
+            // Unknown or missing extension: its first bytes may say what it is.
+            if let Some(k) = sniffed(path).filter(|k| *k != Kind::Other) {
+                return load(path, k, size);
+            }
+            // Otherwise show it as text if it looks like text.
             match load_text(path) {
                 Content::Text { text, truncated } if size <= TEXT_MAX as u64 * 4 => Content::Text { text, truncated },
                 Content::Error(e) => Content::Error(e),
@@ -171,6 +204,14 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             }
         }
     }
+}
+
+/// The kind a file's first bytes say it is, for a file whose name doesn't say.
+fn sniffed(path: &Path) -> Option<Kind> {
+    use std::io::Read;
+    let mut head = [0u8; 32];
+    let n = std::fs::File::open(path).ok()?.read(&mut head).ok()?;
+    crate::formats::sniff(&head[..n]).map(kind_for)
 }
 
 fn load_image(path: &Path, linear: bool, size: u64) -> Content {
@@ -553,6 +594,9 @@ impl App {
         if self.files.look.player.as_ref().is_some_and(|p| p.path != path) {
             self.files.look.player = None;
         }
+        if self.files.look.video.as_ref().is_some_and(|v| v.video.path != path) {
+            self.files.look.video = None;
+        }
         if self.files.look.view_of.as_deref() != Some(path) {
             self.files.look.view_of = Some(path.to_path_buf());
             self.files.look.zoom = None;
@@ -577,6 +621,18 @@ impl App {
             }
             return;
         }
+        if let Some(v) = self.files.look.video.as_mut() {
+            let open_outside = video_view(ui, v, size);
+            if open_outside {
+                if let Some(v) = &self.files.look.video {
+                    v.video.pause();
+                }
+                let v = path.to_path_buf();
+                self.files.spawn(move || crate::media::play_video(&v));
+            }
+            return;
+        }
+        let mut start_video = false;
         let Some(c) = self.files.look.get(&ctx, path, e) else {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             ui.put(Rect::from_center_size(r.center(), vec2(24.0, 24.0)), egui::Spinner::new());
@@ -628,16 +684,41 @@ impl App {
                 let lr = Rect::from_min_size(r.left_bottom() + vec2(6.0, -g.size().y - 10.0), g.size() + vec2(10.0, 4.0));
                 ui.painter().rect_filled(lr, 3.0, Color32::from_black_alpha(150));
                 ui.painter().galley(lr.min + vec2(5.0, 2.0), g, Color32::WHITE);
-                resp.on_hover_text("Scroll to zoom, drag to move, double-click for actual pixels or fit");
+                // A video's frame: a play button over it.
+                let video = crate::media::media_of(&e.name) == Some(crate::media::Media::Video) && !crate::fsys::remote::is_remote(path) && !crate::fsys::archive::inside(path);
+                if !video {
+                    resp.on_hover_text("Scroll to zoom, drag to move, double-click for actual pixels or fit");
+                } else {
+                    let br = Rect::from_center_size(r.center(), vec2(56.0, 56.0));
+                    let b = ui.interact(br, ui.id().with(("play-video", path)), Sense::click());
+                    let p = ui.painter();
+                    p.circle_filled(br.center(), 28.0, Color32::from_black_alpha(if b.hovered() { 200 } else { 150 }));
+                    let c = br.center() + vec2(3.0, 0.0);
+                    p.add(egui::Shape::convex_polygon(vec![c + vec2(-9.0, -13.0), c + vec2(13.0, 0.0), c + vec2(-9.0, 13.0)], Color32::WHITE, Stroke::NONE));
+                    let tip = if crate::video::supported() {
+                        "Play it here"
+                    } else if cfg!(target_os = "macos") {
+                        "Play in Quick Look (Space or Esc closes it)"
+                    } else {
+                        "Play in your video app (playing here needs ffmpeg)"
+                    };
+                    if b.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
+                        start_video = true;
+                    }
+                }
             }
             Content::Text { text, truncated } => {
                 let truncated = *truncated;
                 let text = text.clone();
+                if is_markdown(&e.name) {
+                    markdown_view(ui, path, &text, truncated, size);
+                    return;
+                }
                 egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
                     ui.set_min_size(size - vec2(16.0, 16.0));
                     ui.set_max_size(size - vec2(16.0, 16.0));
-                    egui::ScrollArea::both().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
-                        ui.add(egui::Label::new(egui::RichText::new(&text).monospace().size(12.0)).extend());
+                    egui::ScrollArea::vertical().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
+                        ui.add(egui::Label::new(egui::RichText::new(&text).monospace().size(12.0)).wrap());
                         if truncated {
                             ui.weak("… (only the first 256 KB is shown)");
                         }
@@ -647,9 +728,9 @@ impl App {
             Content::Sound(play) => {
                 let play = play.clone();
                 let (r, _) = ui.allocate_exact_size(size, Sense::hover());
-                let icon = Rect::from_center_size(r.center() - vec2(0.0, 30.0), vec2(80.0, 80.0));
+                let icon = Rect::from_center_size(r.center() - vec2(0.0, 44.0), vec2(80.0, 80.0));
                 self.icons.paint_big(ui, icon, false, e.ext(), tint);
-                sound_controls(ui, &mut self.files.look.player, &play, path, Rect::from_center_size(r.center() + vec2(0.0, 44.0), vec2((r.width() - 24.0).min(360.0), 28.0)));
+                sound_controls(ui, &mut self.files.look.player, &play, path, Rect::from_center_size(r.center() + vec2(0.0, 47.0), vec2((r.width() - 24.0).min(360.0), 62.0)));
             }
             Content::Binary | Content::None | Content::Error(_) => {
                 let note = match c {
@@ -666,19 +747,152 @@ impl App {
             self.files.look.zoom = z;
             self.files.look.pan = p;
         }
+        if start_video {
+            if crate::video::supported() {
+                let ctx = ui.ctx().clone();
+                let video = crate::video::Video::start(path, true, move || ctx.request_repaint());
+                self.files.look.video = Some(VideoView { video, tex: None, serial: 0 });
+            } else {
+                let v = path.to_path_buf();
+                self.files.spawn(move || crate::media::play_video(&v));
+            }
+        }
     }
 }
 
-/// Play or pause, how far through, and a bar to jump about (where the player can).
+/// A playing video: the picture (click to play or pause) and the controls under it. Returns
+/// whether it was asked to open in the system's player.
+fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
+    let pal = style::pal(ui);
+    if let Some(f) = v.video.take_frame(&mut v.serial) {
+        let img = egui::ColorImage::from_rgba_unmultiplied(f.size, &f.rgba);
+        match &mut v.tex {
+            Some(t) => t.set(img, egui::TextureOptions::LINEAR),
+            None => v.tex = Some(ui.ctx().load_texture("preview-video", img, egui::TextureOptions::LINEAR)),
+        }
+    }
+    let st = v.video.state();
+    let (r, resp) = ui.allocate_exact_size(size, Sense::click());
+    let pic = Rect::from_min_max(r.min, pos2(r.max.x, (r.max.y - 34.0).max(r.min.y + 20.0)));
+    let p = ui.painter().with_clip_rect(pic.intersect(ui.clip_rect()));
+    p.rect_filled(pic, style::RADIUS, Color32::BLACK);
+    match &v.tex {
+        Some(t) => {
+            let ts = t.size_vec2();
+            let s = (pic.width() / ts.x).min(pic.height() / ts.y);
+            p.image(t.id(), Rect::from_center_size(pic.center(), ts * s), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        None if st.error.is_none() => {
+            ui.put(Rect::from_center_size(pic.center(), vec2(24.0, 24.0)), egui::Spinner::new());
+        }
+        None => {}
+    }
+    if let Some(e) = &st.error {
+        p.text(pic.center(), Align2::CENTER_CENTER, e, FontId::proportional(12.0), Color32::from_gray(200));
+    }
+    let toggle = |v: &VideoView, st: &crate::video::State| if st.playing { v.video.pause() } else { v.video.play() };
+    if resp.clicked() && resp.interact_pointer_pos().is_some_and(|q| pic.contains(q)) {
+        toggle(v, &st);
+    }
+    let bar = Rect::from_min_max(pos2(r.min.x, pic.max.y + 4.0), r.max);
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let ui = &mut child;
+    if ui.button(if st.playing { "⏸" } else { "▶" }).on_hover_text(if st.playing { "Pause" } else { "Play" }).clicked() {
+        toggle(v, &st);
+    }
+    let mut outside = false;
+    let time = match st.info.and_then(|i| i.duration) {
+        Some(l) => format!("{} / {}", crate::media::clock(st.position), crate::media::clock(l)),
+        None => crate::media::clock(st.position),
+    };
+    let tw = 140.0;
+    if let Some(l) = st.info.and_then(|i| i.duration).filter(|l| *l > 0.0) {
+        let mut at = st.position.min(l);
+        ui.spacing_mut().slider_width = (ui.available_width() - tw - 34.0).max(40.0);
+        let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
+        if s.drag_stopped() || (s.clicked() && !s.dragged()) {
+            v.video.seek(at);
+        }
+    }
+    ui.label(egui::RichText::new(time).monospace().size(12.0).color(pal.weak));
+    let tip = if cfg!(target_os = "macos") { "Open in Quick Look" } else { "Open in your video app" };
+    if ui.small_button("Open").on_hover_text(tip).clicked() {
+        outside = true;
+    }
+    if st.playing {
+        ui.ctx().request_repaint_after(Duration::from_millis(250));
+    }
+    outside
+}
+
+fn is_markdown(name: &str) -> bool {
+    let ext = name.rsplit_once('.').map(|(_, x)| x.to_ascii_lowercase()).unwrap_or_default();
+    matches!(ext.as_str(), "md" | "markdown" | "mdown" | "mkd")
+}
+
+/// A Markdown file, formatted (as the Help Centre draws its pages) or as raw text, with a switch
+/// between the two that's remembered.
+fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2) {
+    use crate::help::{doc, render};
+    static NO_DOCS: std::sync::OnceLock<doc::Docs> = std::sync::OnceLock::new();
+    let pal = style::pal(ui);
+    let raw_id = egui::Id::new("preview-markdown-raw");
+    let mut raw = ui.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(raw_id));
+    egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        ui.set_min_size(size - vec2(16.0, 16.0));
+        ui.set_max_size(size - vec2(16.0, 16.0));
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut raw, false, "Formatted");
+            ui.selectable_value(&mut raw, true, "Raw");
+        });
+        ui.separator();
+        egui::ScrollArea::vertical().id_salt(("look-md", path, raw)).auto_shrink(false).show(ui, |ui| {
+            if raw {
+                ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).wrap());
+            } else {
+                // Parsed once per file shown, not every frame.
+                let key = egui::Id::new(("preview-markdown", path, text.len()));
+                let blocks = ui.data(|d| d.get_temp::<Arc<Vec<doc::Block>>>(key)).unwrap_or_else(|| {
+                    let b = Arc::new(doc::parse(text));
+                    ui.data_mut(|d| d.insert_temp(key, b.clone()));
+                    b
+                });
+                ui.set_max_width(ui.available_width());
+                let mut images = HashMap::new();
+                let mut out = render::Out {
+                    page: "",
+                    docs: NO_DOCS.get_or_init(|| doc::Docs::from_sources(&[])),
+                    images: &mut images,
+                    nav: None,
+                    request: None,
+                    anchors: Vec::new(),
+                };
+                render::blocks(ui, &mut out, &blocks);
+                // Web links open in the browser; links to other files or headings do nothing.
+                if let Some(render::Nav::Url(u)) = out.nav.take() {
+                    if u.contains("://") || u.starts_with("mailto:") {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(u));
+                    }
+                }
+            }
+            if truncated {
+                ui.weak("… (only the first 256 KB is shown)");
+            }
+        });
+    });
+    ui.data_mut(|d| d.insert_persisted(raw_id, raw));
+}
+
+/// Play or pause on its own line (a fixed width, so it stays put as its label changes), and
+/// under it how far through, with a bar to jump about where the player can.
 fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, play: &Path, path: &Path, r: Rect) {
     let pal = style::pal(ui);
     let st = player.as_ref().map(|p| p.state()).unwrap_or_default();
-    // Just the button and the time when there's no bar to show: keep them centred.
-    let r = if st.length.is_some() { r } else { Rect::from_center_size(r.center(), vec2(130.0, r.height())) };
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let ui = &mut child;
+    let top = Rect::from_min_size(r.min, vec2(r.width(), 28.0));
+    let bottom = Rect::from_min_max(pos2(r.min.x, r.min.y + 34.0), r.max);
     let label = if st.playing { "⏸ Pause" } else { "▶ Play" };
-    if ui.button(label).on_hover_text("Play the sound here").clicked() {
+    let button = egui::Button::new(label).min_size(vec2(96.0, 26.0));
+    if ui.put(Rect::from_center_size(top.center(), vec2(96.0, 26.0)), button).on_hover_text("Play the sound here").clicked() {
         match player {
             Some(p) if st.playing => p.pause(),
             Some(p) => p.play(),
@@ -690,24 +904,33 @@ fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, 
             }
         }
     }
+    let line = |ui: &mut egui::Ui, text: egui::RichText| {
+        ui.put(bottom, egui::Label::new(text).wrap());
+    };
     if let Some(e) = &st.error {
-        ui.label(egui::RichText::new(e).color(pal.weak).size(12.0));
+        line(ui, egui::RichText::new(e).color(pal.weak).size(12.0));
         return;
     }
     let time = match st.length {
         Some(l) => format!("{} / {}", crate::media::clock(st.position), crate::media::clock(l)),
         None => crate::media::clock(st.position),
     };
-    if let (Some(l), Some(p)) = (st.length.filter(|l| *l > 0.0), player.as_ref().filter(|p| p.can_seek())) {
-        let mut at = st.position.min(l);
-        let w = (ui.available_width() - 90.0).max(40.0);
-        ui.spacing_mut().slider_width = w;
-        let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
-        if s.drag_stopped() || (s.clicked() && !s.dragged()) {
-            p.seek(at);
+    let time = egui::RichText::new(time).monospace().size(12.0).color(pal.weak);
+    match (st.length.filter(|l| *l > 0.0), player.as_ref().filter(|p| p.can_seek())) {
+        (Some(l), Some(p)) => {
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bottom).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            let ui = &mut child;
+            let mut at = st.position.min(l);
+            ui.spacing_mut().slider_width = (ui.available_width() - 90.0).max(40.0);
+            let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
+            if s.drag_stopped() || (s.clicked() && !s.dragged()) {
+                p.seek(at);
+            }
+            ui.label(time);
         }
+        // No bar to show: just the time, centred under the button.
+        _ => line(ui, time),
     }
-    ui.label(egui::RichText::new(time).monospace().size(12.0).color(pal.weak));
     if st.playing {
         ui.ctx().request_repaint_after(Duration::from_millis(200));
     }
@@ -765,6 +988,17 @@ mod tests {
         assert_eq!(kind_of("README"), Kind::Text);
         assert_eq!(kind_of("movie.mov"), Kind::Media(crate::media::Media::Video));
         assert_eq!(kind_of("data.xyz"), Kind::Other);
+        assert_eq!(kind_of("report.docx"), Kind::Other, "Word files are read by name in load");
+        assert_eq!(kind_of("song.FLAC"), Kind::Media(crate::media::Media::Audio));
+        // A file with no extension is known by its first bytes.
+        let dir = std::env::temp_dir().join(format!("fs-sniff-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("download");
+        std::fs::write(&p, b"%PDF-1.7\n").unwrap();
+        assert_eq!(sniffed(&p), Some(Kind::Media(crate::media::Media::Pdf)));
+        std::fs::write(&p, b"just some words").unwrap();
+        assert_eq!(sniffed(&p), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
