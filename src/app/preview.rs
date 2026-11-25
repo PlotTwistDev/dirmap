@@ -92,21 +92,22 @@ pub(super) enum Kind {
 }
 
 pub(super) fn kind_of(name: &str) -> Kind {
-    let ext = crate::scan::ext_of(name).to_ascii_lowercase();
-    match ext.as_str() {
-        "png" | "jpg" | "jpeg" | "jpe" | "gif" | "webp" | "tif" | "tiff" | "bmp" | "tga" | "ico" | "qoi" | "pbm" | "pgm" | "ppm" | "pnm" => Kind::Image,
-        "exr" | "hdr" => Kind::LinearImage,
-        "txt" | "md" | "markdown" | "rst" | "log" | "csv" | "tsv" | "json" | "jsonl" | "xml" | "yaml" | "yml" | "toml" | "ini" | "cfg" | "conf" | "rs" | "py" | "js"
-        | "mjs" | "ts" | "tsx" | "jsx" | "c" | "h" | "cpp" | "hpp" | "cc" | "cs" | "java" | "kt" | "go" | "rb" | "php" | "swift" | "m" | "mm" | "sh" | "bash" | "zsh"
-        | "fish" | "ps1" | "psm1" | "bat" | "cmd" | "lua" | "sql" | "html" | "htm" | "css" | "scss" | "less" | "vue" | "svelte" | "glsl" | "hlsl" | "wgsl" | "osl"
-        | "vex" | "mel" | "nk" | "usda" | "obj" | "mtl" | "gitignore" | "dockerfile" | "makefile" | "cmake" | "gradle" | "properties" | "env" | "srt" | "vtt"
-        | "tex" | "bib" | "r" | "jl" | "dart" | "zig" | "nim" | "ex" | "exs" | "erl" | "hs" | "ml" | "clj" | "scala" | "pl" | "pm" | "tcl" | "diff" | "patch"
-        | "lock" | "svg" => Kind::Text,
-        "" if matches!(name.to_ascii_lowercase().as_str(), "readme" | "license" | "makefile" | "dockerfile" | "changelog" | "authors") => Kind::Text,
-        _ => match crate::media::media_of(name) {
-            Some(m) => Kind::Media(m),
-            None => Kind::Other,
-        },
+    crate::formats::by_name(name).map_or(Kind::Other, kind_for)
+}
+
+/// The kind of preview a format gets. Word and OpenDocument files are read in `load` by name,
+/// before the kind is looked at.
+pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
+    use crate::formats::Category as C;
+    use crate::media::Media;
+    match f.category {
+        C::Picture => Kind::Image,
+        C::LinearPicture => Kind::LinearImage,
+        C::Text => Kind::Text,
+        C::Video => Kind::Media(Media::Video),
+        C::Audio => Kind::Media(Media::Audio),
+        C::Pdf => Kind::Media(Media::Pdf),
+        C::Document => Kind::Other,
     }
 }
 
@@ -191,7 +192,11 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(_) => Content::Error(if m == crate::media::Media::Pdf { "No picture of this PDF: it couldn't be drawn (it may be damaged or password-protected, or the system can't draw PDFs)".into() } else { "No picture of this video: the system has no thumbnailer for it".into() }),
         },
         Kind::Other => {
-            // Unknown extension: show it as text if it looks like text.
+            // Unknown or missing extension: its first bytes may say what it is.
+            if let Some(k) = sniffed(path).filter(|k| *k != Kind::Other) {
+                return load(path, k, size);
+            }
+            // Otherwise show it as text if it looks like text.
             match load_text(path) {
                 Content::Text { text, truncated } if size <= TEXT_MAX as u64 * 4 => Content::Text { text, truncated },
                 Content::Error(e) => Content::Error(e),
@@ -199,6 +204,14 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             }
         }
     }
+}
+
+/// The kind a file's first bytes say it is, for a file whose name doesn't say.
+fn sniffed(path: &Path) -> Option<Kind> {
+    use std::io::Read;
+    let mut head = [0u8; 32];
+    let n = std::fs::File::open(path).ok()?.read(&mut head).ok()?;
+    crate::formats::sniff(&head[..n]).map(kind_for)
 }
 
 fn load_image(path: &Path, linear: bool, size: u64) -> Content {
@@ -975,6 +988,17 @@ mod tests {
         assert_eq!(kind_of("README"), Kind::Text);
         assert_eq!(kind_of("movie.mov"), Kind::Media(crate::media::Media::Video));
         assert_eq!(kind_of("data.xyz"), Kind::Other);
+        assert_eq!(kind_of("report.docx"), Kind::Other, "Word files are read by name in load");
+        assert_eq!(kind_of("song.FLAC"), Kind::Media(crate::media::Media::Audio));
+        // A file with no extension is known by its first bytes.
+        let dir = std::env::temp_dir().join(format!("fs-sniff-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("download");
+        std::fs::write(&p, b"%PDF-1.7\n").unwrap();
+        assert_eq!(sniffed(&p), Some(Kind::Media(crate::media::Media::Pdf)));
+        std::fs::write(&p, b"just some words").unwrap();
+        assert_eq!(sniffed(&p), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

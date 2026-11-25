@@ -316,13 +316,13 @@ pub(super) enum TextKind {
 }
 
 pub(super) fn text_kind(name: &str) -> Option<TextKind> {
-    let ext = crate::scan::ext_of(name).to_ascii_lowercase();
-    match ext.as_str() {
-        "docx" | "docm" | "dotx" => Some(TextKind::Docx),
-        "odt" | "ott" => Some(TextKind::Odt),
+    let f = crate::formats::by_name(name)?;
+    match f.id {
+        "docx" => Some(TextKind::Docx),
+        "odt" => Some(TextKind::Odt),
         // SVG is drawn as text in previews, but as a tile its markup isn't worth reading.
         "svg" => None,
-        _ => (preview::kind_of(name) == Kind::Text).then_some(TextKind::Plain),
+        _ => (f.category == crate::formats::Category::Text).then_some(TextKind::Plain),
     }
 }
 
