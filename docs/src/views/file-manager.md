@@ -469,7 +469,7 @@ the next. The selection stays as it is.
 | Videos | A frame from the video, made by the system (see below), with a play button: it plays right there, with a bar to jump about; click the picture to pause. **Open** plays it in Quick Look on macOS or your usual player elsewhere. It stops when you move to another file. |
 | Word and OpenDocument | The text of .docx and .odt documents. |
 | PDFs | The first page, made by the system. |
-| Sound | MP3, WAV, FLAC, M4A, AAC, OGG and others: **▶ Play** plays it here, **⏸ Pause** pauses it, and on Windows and macOS the bar under it jumps to any point. It stops when you move to another file. |
+| Sound | MP3, WAV, FLAC, M4A, AAC, OGG and others: the album cover if the file has one, the waveform, and **▶ Play** / **⏸ Pause**. The waveform fills in as it plays, and on Windows and macOS clicking it (or the bar under the button) jumps to that point. The details show the title, artist, album, year, genre, length and format (sample rate, bit depth, channels, bit rate). It stops when you move to another file. |
 | Archives | What's inside: every file and folder, with sizes. |
 | Other files | The file's details, and **Open**. A file with a missing or unknown extension that is really a picture, video, sound or PDF (judged by its first bytes) is previewed as one. |
 

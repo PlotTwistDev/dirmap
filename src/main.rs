@@ -42,6 +42,7 @@ mod subset;
 mod scan;
 mod sequences;
 mod snapshot;
+mod soundinfo;
 mod sunburst;
 mod svg;
 mod templates;

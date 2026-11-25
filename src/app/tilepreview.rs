@@ -395,6 +395,13 @@ impl App {
                 ui.add(egui::Label::new(info.as_str()).wrap());
                 ui.end_row();
             }
+            if let Some(Content::Sound { info, .. }) = self.files.look.cached(&path) {
+                for (k, v) in &info.facts {
+                    ui.weak(*k);
+                    ui.add(egui::Label::new(v.as_str()).wrap());
+                    ui.end_row();
+                }
+            }
             if let Some(Content::Text { colours: Some(c), .. }) = self.files.look.cached(&path) {
                 ui.weak("Language");
                 ui.label(&c.language);
