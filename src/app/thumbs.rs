@@ -2,6 +2,9 @@
 //! first, and only for what's on screen: scrolling past a folder of 10,000 renders drops the
 //! requests for rows no longer visible. The textures are kept up to a memory budget, the least
 //! recently drawn going first. The UI thread never reads a file.
+//!
+//! The treemap's tile previews use the same machinery with their own caches (bigger pictures,
+//! local files only, and text snippets as well as pictures): see `tilepreview.rs`.
 
 use super::preview::{self, Kind};
 use eframe::egui::{self, TextureHandle};
@@ -36,18 +39,53 @@ struct Job {
     size: u64,
 }
 
+/// A finished thumbnail: a picture, or for text and documents the first lines of the text.
+pub(super) enum Pic {
+    Tex(TextureHandle),
+    Text(Arc<str>),
+}
+
+enum Decoded {
+    Image(egui::ColorImage),
+    Text(String),
+}
+
+/// How a cache decodes: the Icons view's default, or the treemap's.
+#[derive(Clone, Copy)]
+pub(super) struct Config {
+    /// Largest side of a picture, in pixels.
+    pub max: u32,
+    /// Never fetch from servers or take out of archives (zooming must never start a download).
+    pub local_only: bool,
+    /// Text files and documents give their first lines (`Pic::Text`).
+    pub text: bool,
+    /// GPU memory the pictures may use.
+    pub budget: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config { max: THUMB_MAX, local_only: false, text: false, budget: BUDGET }
+    }
+}
+
+/// Text kept for a text snippet: enough to fill a big tile.
+const SNIPPET_LINES: usize = 80;
+const SNIPPET_COLS: usize = 160;
+
 enum Slot {
     Pending(u64),
-    Ready { tex: TextureHandle, stamp: u64, bytes: usize, used: Cell<u64> },
+    Ready { pic: Pic, stamp: u64, bytes: usize, used: Cell<u64> },
     /// Couldn't be read: the type icon is drawn instead, and it isn't tried again until the
     /// file changes.
     Failed(u64),
 }
 
-type Done = (PathBuf, u64, Option<egui::ColorImage>);
+type Done = (PathBuf, u64, Option<Decoded>);
 
 #[derive(Default)]
 pub(super) struct Thumbs {
+    config: Config,
     cache: HashMap<PathBuf, Slot>,
     queue: Option<Arc<(Mutex<Vec<Job>>, Condvar)>>,
     rx: Option<mpsc::Receiver<Done>>,
@@ -58,8 +96,20 @@ pub(super) struct Thumbs {
 }
 
 impl Thumbs {
-    /// The thumbnail for a file, if it's ready. Asks for it otherwise (see `flush`).
+    pub(super) fn with(config: Config) -> Self {
+        Thumbs { config, ..Default::default() }
+    }
+
+    /// The thumbnail for a file, if it's ready and a picture. Asks for it otherwise (see `flush`).
     pub(super) fn get(&mut self, path: &Path, stamp: u64, size: u64) -> Option<&TextureHandle> {
+        match self.pic(path, stamp, size) {
+            Some(Pic::Tex(t)) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// The thumbnail for a file (picture or text), if it's ready. Asks for it otherwise.
+    pub(super) fn pic(&mut self, path: &Path, stamp: u64, size: u64) -> Option<&Pic> {
         let fresh = match self.cache.get(path) {
             Some(Slot::Ready { stamp: s, .. }) | Some(Slot::Pending(s)) | Some(Slot::Failed(s)) => *s == stamp,
             None => false,
@@ -69,9 +119,9 @@ impl Thumbs {
             return None;
         }
         match self.cache.get(path) {
-            Some(Slot::Ready { tex, used, .. }) => {
+            Some(Slot::Ready { pic, used, .. }) => {
                 used.set(self.frame);
-                Some(tex)
+                Some(pic)
             }
             Some(Slot::Pending(_)) => {
                 // Still wanted: keep it in the queue.
@@ -128,11 +178,16 @@ impl Thumbs {
                 continue;
             }
             let slot = match img {
-                Some(img) => {
+                Some(Decoded::Image(img)) => {
                     let bytes = img.pixels.len() * 4;
                     self.bytes += bytes;
                     let tex = ctx.load_texture(format!("thumb:{}", path.display()), img, egui::TextureOptions::LINEAR);
-                    Slot::Ready { tex, stamp, bytes, used: Cell::new(self.frame) }
+                    Slot::Ready { pic: Pic::Tex(tex), stamp, bytes, used: Cell::new(self.frame) }
+                }
+                Some(Decoded::Text(t)) => {
+                    let bytes = t.len();
+                    self.bytes += bytes;
+                    Slot::Ready { pic: Pic::Text(t.into()), stamp, bytes, used: Cell::new(self.frame) }
                 }
                 None => Slot::Failed(stamp),
             };
@@ -140,7 +195,7 @@ impl Thumbs {
                 self.bytes -= bytes;
             }
         }
-        if self.bytes > BUDGET {
+        if self.bytes > self.config.budget {
             self.evict();
         }
         let busy = self.cache.values().any(|s| matches!(s, Slot::Pending(_)));
@@ -163,7 +218,7 @@ impl Thumbs {
             .collect();
         ready.sort_by_key(|r| r.0);
         for (_, p, b) in ready {
-            if self.bytes <= BUDGET * 3 / 4 {
+            if self.bytes <= self.config.budget * 3 / 4 {
                 break;
             }
             self.cache.remove(&p);
@@ -176,7 +231,7 @@ impl Thumbs {
         let (tx, rx) = mpsc::channel::<Done>();
         let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8) / 2;
         for _ in 0..n.max(1) {
-            let (q, tx) = (q.clone(), tx.clone());
+            let (q, tx, config) = (q.clone(), tx.clone(), self.config);
             std::thread::spawn(move || {
                 loop {
                     let job = {
@@ -189,19 +244,7 @@ impl Thumbs {
                             jobs = cv.wait(jobs).unwrap();
                         }
                     };
-                    let kind = preview::kind_of(&job.path.to_string_lossy());
-                    // On a server: only pictures, fetched when they're small enough.
-                    let local = if crate::fsys::remote::is_remote(&job.path) {
-                        if matches!(kind, Kind::Image | Kind::LinearImage) && job.size <= REMOTE_MAX { crate::fsys::remote::fetch(&job.path, REMOTE_MAX).ok() } else { None }
-                    } else {
-                        Some(job.path.clone())
-                    };
-                    let img = local.and_then(|local| std::panic::catch_unwind(|| match kind {
-                        Kind::Media(_) => crate::media::thumbnail(&local, THUMB_MAX).ok().map(|(w, h, rgba)| egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
-                        _ => preview::decode_image(&local, kind == Kind::LinearImage, job.size, THUMB_MAX).ok().map(|r| r.0),
-                    })
-                    .ok()
-                    .flatten());
+                    let img = std::panic::catch_unwind(|| decode(&job, config)).ok().flatten();
                     if tx.send((job.path, job.stamp, img)).is_err() {
                         return;
                     }
@@ -212,6 +255,119 @@ impl Thumbs {
         self.rx = Some(rx);
         q
     }
+}
+
+/// Make one thumbnail. Runs on a worker thread.
+fn decode(job: &Job, config: Config) -> Option<Decoded> {
+    let name = job.path.to_string_lossy();
+    let kind = preview::kind_of(&name);
+    if config.text && let Some(doc) = text_kind(&job.path.file_name()?.to_string_lossy()) {
+        if config.local_only && !is_local(&job.path) {
+            return None;
+        }
+        return snippet(&job.path, doc).map(Decoded::Text);
+    }
+    let local = if crate::fsys::remote::is_remote(&job.path) {
+        // On a server: only pictures, fetched when they're small enough (never for the map).
+        if !config.local_only && matches!(kind, Kind::Image | Kind::LinearImage) && job.size <= REMOTE_MAX { crate::fsys::remote::fetch(&job.path, REMOTE_MAX).ok()? } else { return None }
+    } else if config.local_only && !is_local(&job.path) {
+        return None;
+    } else {
+        job.path.clone()
+    };
+    let max = config.max;
+    match kind {
+        Kind::Media(_) => crate::media::thumbnail(&local, max).ok().map(|(w, h, rgba)| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba))),
+        Kind::Image | Kind::LinearImage => preview::decode_image(&local, kind == Kind::LinearImage, job.size, max).ok().map(|r| Decoded::Image(r.0)),
+        _ => None,
+    }
+}
+
+/// A plain file on this computer (not on a server or inside an archive).
+fn is_local(p: &Path) -> bool {
+    !crate::fsys::remote::is_remote(p) && !crate::fsys::archive::inside(p)
+}
+
+/// Files whose text can be shown as a snippet.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum TextKind {
+    Plain,
+    /// Word (.docx), or OpenDocument text (.odt): the text from inside the zip.
+    Docx,
+    Odt,
+}
+
+pub(super) fn text_kind(name: &str) -> Option<TextKind> {
+    let ext = crate::scan::ext_of(name).to_ascii_lowercase();
+    match ext.as_str() {
+        "docx" | "docm" | "dotx" => Some(TextKind::Docx),
+        "odt" | "ott" => Some(TextKind::Odt),
+        // SVG is drawn as text in previews, but as a tile its markup isn't worth reading.
+        "svg" => None,
+        _ => (preview::kind_of(name) == Kind::Text).then_some(TextKind::Plain),
+    }
+}
+
+/// The first lines of a text file or document, tabs expanded and long lines cut.
+fn snippet(path: &Path, kind: TextKind) -> Option<String> {
+    use std::io::Read;
+    let raw = match kind {
+        TextKind::Plain => {
+            let mut buf = Vec::with_capacity(8192);
+            std::fs::File::open(path).ok()?.take(12 << 10).read_to_end(&mut buf).ok()?;
+            preview::decode_text(&buf)?
+        }
+        TextKind::Docx | TextKind::Odt => doc_text(path, kind)?,
+    };
+    let mut out = String::new();
+    for line in raw.lines().take(SNIPPET_LINES) {
+        let line: String = line.replace('\t', "    ").chars().filter(|c| !c.is_control()).take(SNIPPET_COLS).collect();
+        out.push_str(line.trim_end());
+        out.push('\n');
+    }
+    let out = out.trim_end().to_string();
+    (!out.trim().is_empty()).then_some(out)
+}
+
+/// The paragraphs of a Word or OpenDocument file, from the XML inside it (limited, so a huge
+/// document can't hold up a worker).
+pub(super) fn doc_text(path: &Path, kind: TextKind) -> Option<String> {
+    use std::io::Read;
+    const XML_MAX: u64 = 16 << 20;
+    let entry = if kind == TextKind::Docx { "word/document.xml" } else { "content.xml" };
+    // w:p in Word; text:p and text:h (headings) in OpenDocument.
+    let para = |n: &roxmltree::Node| n.is_element() && (n.tag_name().name() == "p" || kind == TextKind::Odt && n.tag_name().name() == "h");
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(path).ok()?).ok()?;
+    let f = zip.by_name(entry).ok()?;
+    if f.size() > XML_MAX {
+        return None;
+    }
+    let mut xml = String::new();
+    f.take(XML_MAX).read_to_string(&mut xml).ok()?;
+    let doc = roxmltree::Document::parse_with_options(&xml, roxmltree::ParsingOptions { allow_dtd: false, ..Default::default() }).ok()?;
+    let mut out = String::new();
+    for p in doc.descendants().filter(para) {
+        // Paragraphs inside paragraphs (text boxes) are read with the one around them.
+        if p.ancestors().skip(1).any(|a| para(&a)) {
+            continue;
+        }
+        let mut line = String::new();
+        for t in p.descendants() {
+            match (kind, t.tag_name().name()) {
+                (TextKind::Docx, "t") if t.is_element() => line.push_str(t.text().unwrap_or("")),
+                (TextKind::Docx, "tab") if t.is_element() => line.push('\t'),
+                (TextKind::Odt, _) if t.is_text() => line.push_str(t.text().unwrap_or("")),
+                (TextKind::Odt, "tab") if t.is_element() => line.push('\t'),
+                _ => {}
+            }
+        }
+        out.push_str(&line);
+        out.push('\n');
+        if out.len() > 256 << 10 {
+            break;
+        }
+    }
+    Some(out)
 }
 
 #[cfg(test)]

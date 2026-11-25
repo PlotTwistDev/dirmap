@@ -63,6 +63,13 @@ pub(super) struct Look {
     pub download_ok: std::collections::HashSet<PathBuf>,
 }
 
+impl Look {
+    /// What a file decoded to, if it's in the cache.
+    pub(super) fn cached(&self, path: &Path) -> Option<&Content> {
+        self.cache.iter().find(|c| c.0 == path).map(|c| &c.2)
+    }
+}
+
 /// The kind of preview a file gets, from its extension.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) enum Kind {
@@ -146,6 +153,18 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                 Content::Text { text, truncated }
             }
             Err(e) => Content::Error(e),
+        };
+    }
+    // Word and OpenDocument text: the words in them.
+    if let Some(k @ (thumbs::TextKind::Docx | thumbs::TextKind::Odt)) = path.file_name().and_then(|n| thumbs::text_kind(&n.to_string_lossy())) {
+        return match thumbs::doc_text(path, k) {
+            Some(text) => {
+                let truncated = text.len() > TEXT_MAX;
+                let mut text = text;
+                text.truncate(text.floor_char_boundary(TEXT_MAX));
+                Content::Text { text, truncated }
+            }
+            None => Content::Error("Couldn't read the text in this document".into()),
         };
     }
     match kind {

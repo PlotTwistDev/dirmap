@@ -2,6 +2,17 @@
 
 ## Next version
 
+### See what's in files on the map
+
+- Zoom in on the treemap and tiles big enough show what's in the file: pictures, video frames,
+  a PDF's first page, and the first lines of text, code and Word or OpenDocument documents.
+  They load in the background and never download cloud files. See
+  [Previews on tiles](../views/treemap.md#previews-on-tiles).
+- Storage Analysis has a preview pane beside the map: click a tile to see its preview and details
+  (bytes, size on disk, share of the analysis, how a cloud file is stored, and a folder's largest
+  items). **Alt+P** shows or hides it. Word and OpenDocument files now preview as text in both
+  workspaces.
+
 ### What system files and folders are
 
 - Filescape explains the files and folders you didn't make and whose names say little:

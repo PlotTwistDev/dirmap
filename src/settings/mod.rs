@@ -116,6 +116,8 @@ pub struct Settings {
     pub show_grid: bool,
     /// Write file names on treemap tiles big enough to hold them.
     pub show_labels: bool,
+    /// Tiles big enough on screen show what's in the file (pictures, PDF pages, text).
+    pub tile_previews: bool,
     pub grid_color: Color32,
     pub selection_color: Color32,
 
@@ -178,6 +180,7 @@ impl Default for Settings {
             light_y: -1.0,
             show_grid: false,
             show_labels: true,
+            tile_previews: true,
             grid_color: Color32::BLACK,
             selection_color: Color32::WHITE,
             smooth_zoom: true,
@@ -265,6 +268,7 @@ impl Settings {
                     light_y: def.light_y,
                     show_grid: def.show_grid,
                     show_labels: def.show_labels,
+                    tile_previews: def.tile_previews,
                     grid_color: def.grid_color,
                     selection_color: def.selection_color,
                     smooth_zoom: def.smooth_zoom,

@@ -38,6 +38,7 @@ pub const ENTRIES: &[Entry] = &[
     e(Tab::FolderList, "rows", "Rows", "Striped rows", "stripes alternating rows zebra"),
     e(Tab::Treemap, "style", "Tile style", "Tile style", "modern classic cushion style tiles look"),
     e(Tab::Treemap, "details", "Tile details", "File labels", "names labels text on tiles"),
+    e(Tab::Treemap, "details", "Tile details", "Previews on tiles", "previews thumbnails pictures images pdf text contents reveal zoom tiles"),
     e(Tab::Treemap, "details", "Tile details", "Selection border", "selection border outline colour color highlight"),
     e(Tab::Treemap, "shading", "Classic cushion shading", "Brightness", "brightness light dark shading"),
     e(Tab::Treemap, "shading", "Classic cushion shading", "Cushion shading", "cushion shading flat 3d"),
