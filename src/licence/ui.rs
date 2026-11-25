@@ -23,6 +23,8 @@ pub struct State {
     pub(super) serial_for_keychain: Option<String>,
     /// Deactivate This Computer… was pressed: asking to confirm.
     confirm_deactivate: bool,
+    /// File pickers waiting for an answer (polled by the app each frame).
+    pub asking: Vec<crate::asking::Asking<Licensing>>,
     #[cfg(feature = "licence-dev")]
     test: TestForm,
 }
@@ -364,30 +366,25 @@ impl Licensing {
                         let s = self.ui.entry.clone();
                         match self.offline_request(&s) {
                             Ok(text) => {
-                                if let Some(f) = rfd::FileDialog::new().set_file_name("filescape-activation-request.json").save_file() {
-                                    match std::fs::write(&f, text) {
-                                        Ok(()) => self.ui.say(format!("Saved {}.", f.display()), false),
-                                        Err(e) => self.ui.say(format!("Couldn't save it: {e}"), true),
-                                    }
-                                }
+                                let d = crate::asking::Dialog::new().set_file_name("filescape-activation-request.json");
+                                crate::asking::ask(&mut self.ui.asking, d, crate::asking::Pick::Save, move |me, f| me.save_file(&f, text));
                             }
                             Err(e) => self.ui.say(e, true),
                         }
                     }
-                    if kit::button(ui, Kind::Secondary, Some(Icon::Folder), "Import Response…").clicked()
-                        && let Some(f) = rfd::FileDialog::new().add_filter("Activation response", &["json"]).pick_file()
-                    {
-                        match std::fs::read_to_string(&f) {
+                    if kit::button(ui, Kind::Secondary, Some(Icon::Folder), "Import Response…").clicked() {
+                        let d = crate::asking::Dialog::new().add_filter("Activation response", &["json"]);
+                        crate::asking::ask(&mut self.ui.asking, d, crate::asking::Pick::File, |me, f| match std::fs::read_to_string(&f) {
                             Ok(t) => {
-                                if self.ui.serial_for_keychain.is_none()
-                                    && let Ok((_, s)) = core::serial::normalize(&self.ui.entry)
+                                if me.ui.serial_for_keychain.is_none()
+                                    && let Ok((_, s)) = core::serial::normalize(&me.ui.entry)
                                 {
-                                    self.ui.serial_for_keychain = Some(s);
+                                    me.ui.serial_for_keychain = Some(s);
                                 }
-                                self.offline_response(&t)
+                                me.offline_response(&t)
                             }
-                            Err(e) => self.ui.say(format!("Couldn't read it: {e}"), true),
-                        }
+                            Err(e) => me.ui.say(format!("Couldn't read it: {e}"), true),
+                        });
                     }
                 });
                 ui.add_space(6.0);
@@ -395,19 +392,28 @@ impl Licensing {
             egui::CollapsingHeader::new(RichText::new("Verify a licence certificate").size(kit::LABEL).color(t.strong)).id_salt("lic-verify").show(ui, |ui| {
                 kit::note(ui, "Checks a .filescape-licence file's signature, for proof of purchase.");
                 ui.add_space(6.0);
-                if kit::button(ui, Kind::Secondary, Some(Icon::Shield), "Verify Certificate…").clicked()
-                    && let Some(f) = rfd::FileDialog::new().add_filter("Filescape licence certificate", &[core::export::CERTIFICATE_EXTENSION]).pick_file()
-                {
-                    let text = std::fs::read_to_string(&f).unwrap_or_default();
-                    match core::export::verify_certificate_file(&text, self.verifier()) {
-                        Ok(c) => self.ui.say(format!("Genuine: licence {} ({}), issued {}.", c.licence_id, c.owner.unwrap_or_else(|| "no owner".into()), date_time(c.issued_at)), false),
-                        Err(e) => self.ui.say(format!("Not a valid certificate: {e}."), true),
-                    }
+                if kit::button(ui, Kind::Secondary, Some(Icon::Shield), "Verify Certificate…").clicked() {
+                    let d = crate::asking::Dialog::new().add_filter("Filescape licence certificate", &[core::export::CERTIFICATE_EXTENSION]);
+                    crate::asking::ask(&mut self.ui.asking, d, crate::asking::Pick::File, |me, f| {
+                        let text = std::fs::read_to_string(&f).unwrap_or_default();
+                        match core::export::verify_certificate_file(&text, me.verifier()) {
+                            Ok(c) => me.ui.say(format!("Genuine: licence {} ({}), issued {}.", c.licence_id, c.owner.unwrap_or_else(|| "no owner".into()), date_time(c.issued_at)), false),
+                            Err(e) => me.ui.say(format!("Not a valid certificate: {e}."), true),
+                        }
+                    });
                 }
                 ui.add_space(6.0);
             });
             ui.add_space(4.0);
         });
+    }
+
+    /// Write `text` to a file the user picked, and say how it went.
+    fn save_file(&mut self, f: &std::path::Path, text: String) {
+        match std::fs::write(f, text) {
+            Ok(()) => self.ui.say(format!("Saved {}.", f.display()), false),
+            Err(e) => self.ui.say(format!("Couldn't save it: {e}"), true),
+        }
     }
 
     fn export_certificate(&mut self, licence_id: &str) {
@@ -416,12 +422,8 @@ impl Licensing {
         };
         match core::export::certificate_file(&env, self.verifier()) {
             Ok(text) => {
-                if let Some(f) = rfd::FileDialog::new().set_file_name(format!("{licence_id}.{}", core::export::CERTIFICATE_EXTENSION)).save_file() {
-                    match std::fs::write(&f, text) {
-                        Ok(()) => self.ui.say(format!("Saved {}.", f.display()), false),
-                        Err(e) => self.ui.say(format!("Couldn't save it: {e}"), true),
-                    }
-                }
+                let d = crate::asking::Dialog::new().set_file_name(format!("{licence_id}.{}", core::export::CERTIFICATE_EXTENSION));
+                crate::asking::ask(&mut self.ui.asking, d, crate::asking::Pick::Save, move |me, f| me.save_file(&f, text));
             }
             Err(e) => self.ui.say(format!("Couldn't export it: {e}."), true),
         }
@@ -432,12 +434,8 @@ impl Licensing {
             return self.ui.say("No details for this licence yet: they arrive with the next check.".into(), true);
         };
         let text = core::export::details_text(&c, &self.status_label());
-        if let Some(f) = rfd::FileDialog::new().set_file_name(format!("{licence_id} details.txt")).save_file() {
-            match std::fs::write(&f, text) {
-                Ok(()) => self.ui.say(format!("Saved {}.", f.display()), false),
-                Err(e) => self.ui.say(format!("Couldn't save it: {e}"), true),
-            }
-        }
+        let d = crate::asking::Dialog::new().set_file_name(format!("{licence_id} details.txt"));
+        crate::asking::ask(&mut self.ui.asking, d, crate::asking::Pick::Save, move |me, f| me.save_file(&f, text));
     }
 
     #[cfg(feature = "licence-dev")]

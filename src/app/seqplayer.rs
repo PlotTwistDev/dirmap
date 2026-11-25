@@ -103,6 +103,8 @@ pub(super) struct Player {
     cube: Option<Arc<player::Cube>>,
     cube_rx: Option<std::sync::mpsc::Receiver<Result<player::Cube, String>>>,
     cube_error: Option<String>,
+    /// "LUT…" was pressed: the app shows the picker after drawing.
+    want_lut: bool,
 }
 
 impl Player {
@@ -136,6 +138,7 @@ impl Player {
             cube: None,
             cube_rx: None,
             cube_error: None,
+            want_lut: false,
         }
     }
 
@@ -301,8 +304,18 @@ impl App {
     pub(super) fn sequence_player(&mut self, ctx: &egui::Context) {
         let Some(mut pl) = self.files.player.take() else { return };
         let open = player_ui(ctx, &mut pl, &mut self.files.prefs.player);
+        let want_lut = std::mem::take(&mut pl.want_lut);
         if open {
             self.files.player = Some(pl);
+        }
+        if want_lut {
+            let d = super::dialogs::Dialog::new().add_filter("Cube LUT", &["cube"]).set_title("Choose a .cube LUT");
+            self.ask_path(d, super::dialogs::Pick::File, |app, p| {
+                app.files.prefs.player.lut = Some(p.clone());
+                if let Some(pl) = app.files.player.as_mut() {
+                    pl.load_cube(p);
+                }
+            });
         }
     }
 }
@@ -628,11 +641,8 @@ fn controls(ui: &mut egui::Ui, pl: &mut Player, prefs: &mut PlayerPrefs) {
                 }
             }
             None => {
-                if ui.button("LUT…").on_hover_text("Use a .cube LUT file (3D or 1D) in place of the colour transform").clicked()
-                    && let Some(p) = rfd::FileDialog::new().add_filter("Cube LUT", &["cube"]).set_title("Choose a .cube LUT").pick_file()
-                {
-                    prefs.lut = Some(p.clone());
-                    pl.load_cube(p);
+                if ui.button("LUT…").on_hover_text("Use a .cube LUT file (3D or 1D) in place of the colour transform").clicked() {
+                    pl.want_lut = true;
                 }
             }
         }

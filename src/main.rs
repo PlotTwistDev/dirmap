@@ -13,6 +13,7 @@
 // No console window behind the GUI on Windows; --cli attaches to the calling terminal instead.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod asking;
 mod actions;
 mod app;
 mod camera;
