@@ -26,6 +26,8 @@ pub enum Category {
     Font,
     /// Camera RAW: the JPEG preview the camera stores in the file.
     Raw,
+    /// Photoshop documents: the flattened picture saved with them.
+    Photoshop,
     /// Pictures only the system can decode (HEIC, AVIF: patent-encumbered or C decoders).
     SystemPicture,
     /// A picture and playback from the system's decoders.
@@ -81,6 +83,7 @@ pub static FORMATS: &[Format] = &[
             "x3f", "kdc", "dcr",
         ],
     },
+    Format { id: "psd", name: "Photoshop document", category: Category::Photoshop, exts: &["psd", "psb"] },
     Format { id: "heif", name: "HEIC or AVIF picture", category: Category::SystemPicture, exts: &["heic", "heif", "hif", "avif"] },
     Format { id: "exr", name: "OpenEXR image", category: Category::LinearPicture, exts: &["exr"] },
     Format { id: "hdr", name: "Radiance HDR image", category: Category::LinearPicture, exts: &["hdr"] },
@@ -153,6 +156,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "hdr"
     } else if at(0, b"\0\x01\0\0") || at(0, b"OTTO") || at(0, b"ttcf") || at(0, b"true") {
         "font"
+    } else if at(0, b"8BPS") {
+        "psd"
     } else if at(0, b"%PDF-") {
         "pdf"
     } else if at(4, b"ftyp") {

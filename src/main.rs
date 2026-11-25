@@ -37,6 +37,7 @@ mod mapview;
 mod netdrives;
 mod pattern;
 mod player;
+mod psdview;
 mod settings;
 mod shellmenu;
 mod subset;

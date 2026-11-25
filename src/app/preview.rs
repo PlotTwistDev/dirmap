@@ -106,6 +106,8 @@ pub(super) enum Kind {
     Font,
     /// Camera RAW: the camera's own preview inside it.
     Raw,
+    /// Photoshop: the flattened picture.
+    Psd,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -127,6 +129,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Drawing => Kind::Drawing,
         C::Font => Kind::Font,
         C::Raw => Kind::Raw,
+        C::Photoshop => Kind::Psd,
         C::Video => Kind::Media(Media::Video),
         C::Audio => Kind::Media(Media::Audio),
         C::Pdf => Kind::Media(Media::Pdf),
@@ -206,6 +209,24 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
         Kind::Text => match load_text(path) {
             Content::Text { text, truncated, .. } => coloured(path, text, truncated),
             c => c,
+        },
+        Kind::Psd => match crate::psdview::picture(path, 0) {
+            Ok(p) => {
+                let img = image::DynamicImage::ImageRgba8(p.image);
+                let img = if img.width() > SHOW_MAX || img.height() > SHOW_MAX { img.thumbnail(SHOW_MAX, SHOW_MAX) } else { img };
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                Content::Image {
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba)),
+                    tex: None,
+                    size: p.size,
+                    info: if p.thumbnail_only { "Photoshop's small thumbnail (the document is too large to show in full)".into() } else { "The flattened picture".into() },
+                    poster: false,
+                    source: None,
+                    facts: Vec::new(),
+                }
+            }
+            Err(e) => Content::Error(e),
         },
         Kind::Raw => match crate::camraw::preview(path, 0) {
             Ok(r) => {
@@ -906,7 +927,11 @@ impl App {
                 };
                 let (r, _) = ui.allocate_exact_size(size, Sense::hover());
                 self.icons.paint(ui, Rect::from_center_size(r.center() - vec2(0.0, 14.0), vec2(80.0, 80.0)), false, e.ext(), tint);
-                ui.painter().text(r.center() + vec2(0.0, 44.0), Align2::CENTER_CENTER, note, FontId::proportional(12.0), pal.weak);
+                // Wrapped to the pane: some notes say what to install.
+                let mut job = egui::text::LayoutJob::simple(note, FontId::proportional(12.0), pal.weak, (r.width() - 24.0).max(60.0));
+                job.halign = egui::Align::Center;
+                let g = ui.painter().layout_job(job);
+                ui.painter().galley(pos2(r.center().x, r.center().y + 36.0), g, pal.weak);
             }
         }
         if let Some((z, p)) = new_view {
@@ -1234,6 +1259,7 @@ mod tests {
         assert_eq!(kind_of("logo.svg"), Kind::Drawing);
         assert_eq!(kind_of("Inter.otf"), Kind::Font);
         assert_eq!(kind_of("IMG_0001.CR3"), Kind::Raw);
+        assert_eq!(kind_of("poster.psd"), Kind::Psd);
         // A file with no extension is known by its first bytes.
         let dir = std::env::temp_dir().join(format!("fs-sniff-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
