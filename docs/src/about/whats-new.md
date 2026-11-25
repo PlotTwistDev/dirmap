@@ -31,6 +31,9 @@
 - Photoshop documents (PSD and PSB) preview from the flattened picture saved with them.
 - Spreadsheets (Excel and OpenDocument) preview as a table of their cells, sheet by sheet, and
   their first rows show on map tiles. Formulas and macros are never run.
+- Word, PowerPoint and OpenDocument files preview formatted: headings, bold and italic, lists and
+  tables, and each slide's title and points. Icon views show the picture of the first page or
+  slide saved with them.
 - Files with a missing or wrong extension, such as a download saved as `file`, now preview by
   what they really are when Filescape can tell from their first bytes.
 - **Help > About Filescape > Third-party licences** lists the open-source software Filescape is

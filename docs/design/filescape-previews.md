@@ -192,4 +192,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Camera RAW (embedded JPEG + EXIF) | #50 | Merged |
 | HEIC and AVIF through the system | #51 | Merged |
 | Photoshop PSD/PSB (own reader) | #52 | Merged |
-| Spreadsheets (calamine) | | In review |
+| Spreadsheets (calamine) | #53 | Merged |
+| Word, PowerPoint and OpenDocument formatted | | In review |
