@@ -73,6 +73,19 @@ Below, **How the numbers are stored** shows how much of the model is kept in eac
 **Q4_K_M** model, for example, keeps most of its numbers as Q4_K and a few important ones at the
 higher Q6_K precision.
 
+**Structure** shows how the model is built and where its space goes:
+
+- The strip at the top shows the model's layers in order, left to right. A taller column takes
+  more space, which shows at a glance which layers were kept at a higher precision.
+- Below, the model is drawn as a map, like the [treemap](treemap.md) of a drive: each box is a
+  layer, the embeddings or the output, sized by the space it takes and divided into its tensors.
+  Click a box, or a column of the strip, to see that layer on its own, with each tensor named.
+  **⏴ Whole model**, or a right-click on the map, goes back. Click a tensor to find it in the
+  Tensors list.
+- **Colour by** switches between **What it does** (embeddings, attention, feed-forward,
+  mixture-of-experts, normalisation and output) and **Number type** (such as Q4_K or Q6_K).
+  Rest the pointer on a colour in the key to see what it means.
+
 **Tensors** lists every tensor (block of numbers) in the model with its type, shape, number of
 values and size. Type in the box to show only some, such as `attn` for the attention tensors or
 `Q6_K` for one type. Click a column heading to sort by it, and again to reverse. Right-click a

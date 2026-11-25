@@ -34,14 +34,26 @@ struct ModelPage {
     filter: String,
     sort: TensorCol,
     descending: bool,
+    /// The model as layers, for the Structure tab.
+    structure: Option<Arc<inspect::Structure>>,
+    /// The group (index into `structure.groups`) the map is zoomed into.
+    zoom: Option<usize>,
+    colour: ColourBy,
     /// Tensors to show, in order (indexes into `data.tensors`), for `shown_for`.
     shown: Vec<usize>,
     shown_for: Option<(String, TensorCol, bool)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum ColourBy {
+    Part,
+    Kind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum PageTab {
     Overview,
+    Structure,
     Tensors,
     Metadata,
 }
@@ -453,6 +465,9 @@ impl App {
             descending: false,
             shown: Vec::new(),
             shown_for: None,
+            structure: None,
+            zoom: None,
+            colour: ColourBy::Part,
         });
     }
 
@@ -470,6 +485,9 @@ impl App {
         if let Some(rx) = &page.rx {
             match rx.try_recv() {
                 Ok(d) => {
+                    if !d.tensors.is_empty() {
+                        page.structure = Some(Arc::new(inspect::structure(&d)));
+                    }
                     page.data = Some(Arc::new(d));
                     page.rx = None;
                 }
@@ -497,6 +515,7 @@ impl App {
         let meta_label = format!("Metadata ({metas})");
         let mut tabs = vec![(PageTab::Overview, "Overview")];
         if tensors > 0 {
+            tabs.push((PageTab::Structure, "Structure"));
             tabs.push((PageTab::Tensors, tensors_label.as_str()));
         }
         if metas > 0 {
@@ -520,6 +539,12 @@ impl App {
                         open = Some(p);
                     }
                 });
+            }
+            (Some(d), PageTab::Structure) => {
+                let d = d.clone();
+                if let Some(st) = page.structure.clone() {
+                    page_structure(ui, &mut page, &d, &st);
+                }
             }
             (Some(d), PageTab::Tensors) => {
                 let d = d.clone();
@@ -600,6 +625,289 @@ fn page_overview(ui: &mut egui::Ui, m: &Model, d: &Inspection) -> Option<PathBuf
         ui.add_space(2.0);
     }
     open
+}
+
+/// Colours for the parts of a model, readable in both themes.
+fn part_colour(p: inspect::Part) -> Color32 {
+    use inspect::Part::*;
+    match p {
+        Embeddings => Color32::from_rgb(0x3d, 0xb8, 0x86),
+        Attention => Color32::from_rgb(0x4d, 0x8e, 0xf7),
+        FeedForward => Color32::from_rgb(0xee, 0x8a, 0x3c),
+        Experts => Color32::from_rgb(0xe0, 0xb3, 0x2e),
+        Norm => Color32::from_rgb(0x8c, 0x91, 0x9b),
+        Output => Color32::from_rgb(0xa0, 0x72, 0xf0),
+        Other => Color32::from_rgb(0x2f, 0xb5, 0xc4),
+    }
+}
+
+/// Colours for number types, by their place in `Inspection::kinds` (largest first).
+fn kind_colour(i: usize) -> Color32 {
+    const C: [Color32; 8] = [
+        Color32::from_rgb(0x4d, 0x8e, 0xf7),
+        Color32::from_rgb(0xee, 0x8a, 0x3c),
+        Color32::from_rgb(0x3d, 0xb8, 0x86),
+        Color32::from_rgb(0xa0, 0x72, 0xf0),
+        Color32::from_rgb(0xe0, 0xb3, 0x2e),
+        Color32::from_rgb(0x2f, 0xb5, 0xc4),
+        Color32::from_rgb(0xe0, 0x5d, 0x7a),
+        Color32::from_rgb(0x8c, 0x91, 0x9b),
+    ];
+    C[i.min(C.len() - 1)]
+}
+
+fn tensor_colour(d: &Inspection, t: usize, by: ColourBy) -> Color32 {
+    let t = &d.tensors[t];
+    match by {
+        ColourBy::Part => part_colour(inspect::part_of(&t.name)),
+        ColourBy::Kind => kind_colour(d.kinds.iter().position(|k| k.kind == t.kind).unwrap_or(7)),
+    }
+}
+
+/// The colour bands for one group, (colour, bytes), in a steady order.
+fn bands(d: &Inspection, st: &inspect::Structure, g: usize, by: ColourBy) -> Vec<(Color32, u64)> {
+    match by {
+        ColourBy::Part => {
+            let p = st.group_parts(d, g);
+            inspect::Part::ALL.iter().enumerate().filter(|(i, _)| p[*i] > 0).map(|(i, &part)| (part_colour(part), p[i])).collect()
+        }
+        ColourBy::Kind => {
+            let mut v = vec![0u64; d.kinds.len().max(1)];
+            for &t in &st.groups[g].tensors {
+                let k = d.kinds.iter().position(|k| k.kind == d.tensors[t].kind).unwrap_or(0);
+                v[k] += d.tensors[t].bytes;
+            }
+            v.into_iter().enumerate().filter(|(_, b)| *b > 0).map(|(i, b)| (kind_colour(i), b)).collect()
+        }
+    }
+}
+
+/// Structure: a strip of the model's layers in order, then the model as a treemap of its layers
+/// and their tensors.
+fn page_structure(ui: &mut egui::Ui, page: &mut ModelPage, d: &Inspection, st: &inspect::Structure) {
+    ui.horizontal(|ui| {
+        ui.weak("Colour by");
+        kit::segmented(ui, &mut page.colour, &[(ColourBy::Part, "What it does"), (ColourBy::Kind, "Number type")], false);
+        ui.add_space(12.0);
+        // Legend.
+        match page.colour {
+            ColourBy::Part => {
+                for (i, &p) in inspect::Part::ALL.iter().enumerate() {
+                    if st.parts[i] > 0 {
+                        swatch(ui, part_colour(p), p.label()).on_hover_text(format!("{}\n{}", p.explain(), scan::human(st.parts[i])));
+                    }
+                }
+            }
+            ColourBy::Kind => {
+                for (i, k) in d.kinds.iter().enumerate() {
+                    swatch(ui, kind_colour(i), &k.kind).on_hover_text(format!("{}\n{}", precision_words(&k.kind), scan::human(k.bytes)));
+                }
+            }
+        }
+    });
+    ui.add_space(6.0);
+    let mut zoom_to = None;
+
+    // The strip: each layer as a column, height by its size, banded by colour.
+    let layers: Vec<usize> = (0..st.groups.len()).filter(|&g| st.groups[g].layer.is_some()).collect();
+    if !layers.is_empty() {
+        ui.weak(format!("{} layers, in order. Taller layers take more space; click one to see it below.", st.layers()));
+        let h = 56.0;
+        let w = ui.available_width();
+        let (strip, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
+        let max = layers.iter().map(|&g| st.groups[g].bytes).max().unwrap_or(1).max(1);
+        let col_w = (w / layers.len() as f32).max(1.0);
+        let gap = if col_w >= 6.0 { 1.0 } else { 0.0 };
+        let pointer = ui.ctx().pointer_hover_pos();
+        for (k, &g) in layers.iter().enumerate() {
+            let grp = &st.groups[g];
+            let x0 = strip.left() + k as f32 * col_w;
+            let col = Rect::from_min_max(pos2(x0, strip.top()), pos2(x0 + col_w - gap, strip.bottom()));
+            let height = h * grp.bytes as f32 / max as f32;
+            let mut y = strip.bottom();
+            let total = grp.bytes.max(1) as f32;
+            for (c, b) in bands(d, st, g, page.colour) {
+                let bh = height * b as f32 / total;
+                ui.painter().rect_filled(Rect::from_min_max(pos2(col.left(), y - bh), pos2(col.right(), y)), 0.0, c);
+                y -= bh;
+            }
+            let hovered = pointer.is_some_and(|p| col.contains(p));
+            if page.zoom == Some(g) || hovered {
+                ui.painter().rect_stroke(col.expand(1.0), 1.0, Stroke::new(1.5, ui.visuals().strong_text_color()), egui::StrokeKind::Outside);
+            }
+            let resp = ui.interact(col, ui.id().with(("layer-col", g)), Sense::click());
+            if resp.clicked() {
+                zoom_to = Some(Some(g));
+            }
+            resp.on_hover_text(group_tip(d, st, g));
+        }
+        ui.add_space(8.0);
+    }
+
+    // The map.
+    ui.horizontal(|ui| {
+        if let Some(g) = page.zoom {
+            if ui.button("⏴ Whole model").clicked() {
+                zoom_to = Some(None);
+            }
+            ui.strong(&st.groups[g].name);
+            ui.weak(format!("{} · {}", scan::human(st.groups[g].bytes), models::params_label(st.groups[g].elements)));
+        } else {
+            ui.weak("Each box is a layer or part of the model, sized by the space it takes, divided into its tensors. Click one to look closer.");
+        }
+    });
+    ui.add_space(4.0);
+    let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click());
+    let map = paint_model_map(ui, rect, page, d, st);
+    if let Some(hit) = map {
+        match hit {
+            MapHit::Group(g) => {
+                if resp.clicked() {
+                    zoom_to = Some(Some(g));
+                }
+                let tip = group_tip(d, st, g);
+                resp.on_hover_ui_at_pointer(|ui| {
+                    ui.label(tip);
+                });
+            }
+            MapHit::Tensor(t) => {
+                let tt = &d.tensors[t];
+                let open = resp.clicked();
+                let tip = format!(
+                    "{}\n{} · {} · {} values · {}\n{}\nClick to find it in Tensors",
+                    tt.name,
+                    tt.kind,
+                    tt.shape_text(),
+                    group(tt.elements),
+                    scan::human(tt.bytes),
+                    inspect::part_of(&tt.name).label()
+                );
+                resp.on_hover_ui_at_pointer(|ui| {
+                    ui.label(tip);
+                });
+                if open {
+                    page.filter = tt.name.clone();
+                    page.tab = PageTab::Tensors;
+                }
+            }
+        }
+    } else if resp.secondary_clicked() {
+        zoom_to = Some(None);
+    }
+    if let Some(z) = zoom_to {
+        page.zoom = z;
+    }
+}
+
+fn group_tip(d: &Inspection, st: &inspect::Structure, g: usize) -> String {
+    let grp = &st.groups[g];
+    let mut s = format!("{}\n{} · {} parameters · {} tensors", grp.name, scan::human(grp.bytes), models::params_label(grp.elements), grp.tensors.len());
+    let parts = st.group_parts(d, g);
+    for (i, p) in inspect::Part::ALL.iter().enumerate() {
+        if parts[i] > 0 {
+            s.push_str(&format!("\n{}: {}", p.label(), scan::human(parts[i])));
+        }
+    }
+    let mut kinds: Vec<(&str, u64)> = Vec::new();
+    for &t in &grp.tensors {
+        let k = d.tensors[t].kind.as_str();
+        match kinds.iter_mut().find(|(n, _)| *n == k) {
+            Some(e) => e.1 += d.tensors[t].bytes,
+            None => kinds.push((k, d.tensors[t].bytes)),
+        }
+    }
+    kinds.sort_by(|a, b| b.1.cmp(&a.1));
+    s.push_str(&format!("\nStored as {}", kinds.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")));
+    s
+}
+
+fn swatch(ui: &mut egui::Ui, c: Color32, label: &str) -> egui::Response {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+        ui.painter().rect_filled(r, 2.0, c);
+        ui.label(egui::RichText::new(label).size(12.5));
+    })
+    .response
+}
+
+enum MapHit {
+    Group(usize),
+    Tensor(usize),
+}
+
+/// Draws the model (or the zoomed-in group) as a treemap and says what the pointer is over.
+fn paint_model_map(ui: &mut egui::Ui, rect: Rect, page: &ModelPage, d: &Inspection, st: &inspect::Structure) -> Option<MapHit> {
+    use crate::treemap::{child_rects, DRect};
+    let painter = ui.painter_at(rect);
+    let vis = ui.visuals().clone();
+    painter.rect_filled(rect, 4.0, vis.extreme_bg_color);
+    let pointer = ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p));
+    let to_rect = |r: &DRect| Rect::from_min_max(pos2(r.x0 as f32, r.y0 as f32), pos2(r.x1 as f32, r.y1 as f32));
+    let world = DRect::new(rect.left() as f64, rect.top() as f64, rect.right() as f64, rect.bottom() as f64);
+    let mut hit = None;
+    let label_font = FontId::proportional(12.0);
+    let small = FontId::proportional(11.0);
+    // Draws the tensors of one group inside `area`.
+    let tensors = |g: usize, node: &scan::Node, area: DRect, labels: bool, hit: &mut Option<MapHit>| {
+        let kids = child_rects(node, &area, 2.0, None);
+        for (i, r) in kids.iter().enumerate() {
+            let t = st.groups[g].tensors[i];
+            let rr = to_rect(r).shrink(0.5);
+            let mut c = tensor_colour(d, t, page.colour);
+            let over = pointer.is_some_and(|p| rr.contains(p));
+            if over {
+                c = c.gamma_multiply(1.25);
+                *hit = Some(MapHit::Tensor(t));
+            }
+            painter.rect_filled(rr, 1.5, c);
+            if labels && rr.width() > 70.0 && rr.height() > 18.0 {
+                let name = &d.tensors[t].name;
+                // Inside a layer, its prefix adds nothing.
+                let short = inspect::layer_of(name).map_or(name.as_str(), |(p, n)| name.get(p.len() + n.to_string().len() + 2..).unwrap_or(name));
+                let text = Color32::from_black_alpha(220);
+                let p = painter.with_clip_rect(rr.shrink(3.0));
+                p.text(rr.left_top() + vec2(5.0, 4.0), Align2::LEFT_TOP, short, label_font.clone(), text);
+                if rr.height() > 34.0 {
+                    p.text(rr.left_top() + vec2(5.0, 19.0), Align2::LEFT_TOP, format!("{} · {}", d.tensors[t].kind, scan::human(d.tensors[t].bytes)), small.clone(), text);
+                }
+            }
+        }
+    };
+    match page.zoom {
+        Some(g) => {
+            let k = st.order.iter().position(|&o| o == g)?;
+            tensors(g, &st.tree.children[k], world, true, &mut hit);
+        }
+        None => {
+            let kids = child_rects(&st.tree, &world, 4.0, None);
+            for (k, r) in kids.iter().enumerate() {
+                let g = st.order[k];
+                let gr = to_rect(r);
+                let inner = DRect::new(r.x0 + 1.5, r.y0 + 1.5, r.x1 - 1.5, r.y1 - 1.5);
+                if inner.w() <= 1.0 || inner.h() <= 1.0 {
+                    continue;
+                }
+                let mut tensor_hit = None;
+                tensors(g, &st.tree.children[k], inner, false, &mut tensor_hit);
+                let over = pointer.is_some_and(|p| gr.contains(p));
+                if over {
+                    hit = Some(MapHit::Group(g));
+                }
+                painter.rect_stroke(gr.shrink(0.5), 2.0, Stroke::new(if over { 2.0 } else { 1.0 }, if over { vis.strong_text_color() } else { vis.extreme_bg_color }), egui::StrokeKind::Inside);
+                if gr.width() > 56.0 && gr.height() > 22.0 {
+                    let name = &st.groups[g].name;
+                    let text = format!("{name}  {}", scan::human(st.groups[g].bytes));
+                    let galley = painter.layout_no_wrap(text, label_font.clone(), Color32::WHITE);
+                    let w = galley.size().x.min(gr.width() - 8.0);
+                    let chip = Rect::from_min_size(gr.left_top() + vec2(3.0, 3.0), vec2(w + 8.0, galley.size().y + 4.0));
+                    painter.rect_filled(chip, 3.0, Color32::from_black_alpha(150));
+                    painter.with_clip_rect(chip).galley(chip.left_top() + vec2(4.0, 2.0), galley, Color32::WHITE);
+                }
+            }
+        }
+    }
+    hit
 }
 
 /// Tensors: a searchable list, sorted by any column.
