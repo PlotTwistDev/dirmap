@@ -189,4 +189,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Syntax colouring (syntect + two-face) | #47 | Merged |
 | Font specimens | #48 | Merged |
 | Sound pane: tags, cover, waveform | #49 | Merged |
-| Camera RAW (embedded JPEG + EXIF) | | In review |
+| Camera RAW (embedded JPEG + EXIF) | #50 | Merged |
+| HEIC and AVIF through the system | | In review |
