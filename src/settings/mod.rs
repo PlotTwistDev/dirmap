@@ -75,6 +75,9 @@ pub struct Settings {
     pub cloud_breakdown: bool,
     /// The Stored column in the Storage Analysis list, when the scan has cloud files.
     pub cloud_column: bool,
+    /// At Size: Logical, fade the map tiles of online-only files (partly downloaded ones half
+    /// as much), so what's on this computer stands out.
+    pub cloud_fade: bool,
     /// Ask before anything Filescape does would download cloud files (previews, players,
     /// comparisons). Off downloads without asking.
     pub cloud_confirm: bool,
@@ -157,6 +160,7 @@ impl Default for Settings {
             system_notes: true,
             cloud_breakdown: true,
             cloud_column: true,
+            cloud_fade: true,
             cloud_confirm: true,
             cloud_mounts: false,
             check_updates: true,
@@ -281,8 +285,8 @@ impl Settings {
                 (self.one_file_system, self.skip_hidden, self.threads, self.admin) = (def.one_file_system, def.skip_hidden, def.threads, def.admin);
             }
             Tab::Cloud => {
-                (self.size_metric, self.cloud_icons, self.cloud_breakdown, self.cloud_column, self.cloud_confirm, self.cloud_mounts) =
-                    (def.size_metric, def.cloud_icons, def.cloud_breakdown, def.cloud_column, def.cloud_confirm, def.cloud_mounts);
+                (self.size_metric, self.cloud_icons, self.cloud_breakdown, self.cloud_column, self.cloud_fade, self.cloud_confirm, self.cloud_mounts) =
+                    (def.size_metric, def.cloud_icons, def.cloud_breakdown, def.cloud_column, def.cloud_fade, def.cloud_confirm, def.cloud_mounts);
             }
             Tab::Licensing => {}
         }

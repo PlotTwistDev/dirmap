@@ -720,6 +720,7 @@ pub fn cloud(ui: &mut egui::Ui, cx: &mut PageCx) {
     kit::section(ui, Icon::Cloud, "Status", f.of("status"), |ui| {
         kit::toggle_row(ui, "Status icons", Some("Show an icon after the name of cloud files: online only, partly downloaded, downloaded, always kept on this device, or unknown. Hover one to see what it means."), &mut d.cloud_icons);
         kit::divider(ui);
+        kit::toggle_row(ui, "Fade online-only tiles", Some("At Size: Logical, draw the map tiles of online-only files faded (partly downloaded ones half as much), so the files actually on this computer stand out. At Size: On disk they take no space and don't appear."), &mut d.cloud_fade);
         kit::toggle_row(ui, "Storage breakdown", Some("Under the map, a bar splitting the scan into files not in the cloud, downloaded cloud files and data only in the cloud."), &mut d.cloud_breakdown);
     });
 

@@ -1646,6 +1646,12 @@ impl App {
         }
     }
 
+    /// Whether map tiles of online-only files are drawn faded: at Size: Logical, with the
+    /// setting on, in a scan with such files, and no Stored filter (which already picks them).
+    pub(crate) fn cloud_fade_on(&self) -> bool {
+        self.view().cloud_fade && self.metric == Metric::Logical && self.filter.stored == 0 && self.tree.as_ref().is_some_and(|t| t.flags & scan::store::NOT_LOCAL != 0)
+    }
+
     /// Where a premium operation starts: false (and the licence prompt) when it needs a
     /// licence. Work already running is never checked again.
     pub(crate) fn premium(&mut self, f: crate::licence::Feature) -> bool {
@@ -1970,6 +1976,7 @@ impl App {
             segs.iter().position(|s| s.ring == ring && a >= s.a0 && a < s.a1)
         });
 
+        let fade = self.cloud_fade_on();
         let filtering = self.filter.active() || self.dupes_only;
         let need_full = self.dupes_only || self.color_mode == ColorMode::Change;
         let hits = self.current_hits();
@@ -1997,6 +2004,7 @@ impl App {
                 // A folder's newest file says little about the folder; keep folders neutral so files stand out.
                 (true, ColorMode::Age) => Color32::from_gray((110.0 - 8.0 * (s.ring - 1) as f32).max(60.0) as u8),
                 (true, ColorMode::Change) => self.node_color(n, &full).gamma_multiply(0.75),
+                (false, _) if fade => cloud_fade(self.node_color(n, &full), n.flags),
                 (false, _) => self.node_color(n, &full),
             };
             if n.is_dir {
@@ -2146,7 +2154,8 @@ impl App {
             self.paint_gen += 1;
         }
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key()).hash(&mut h);
+        let fade = self.cloud_fade_on();
+        (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key(), fade).hash(&mut h);
         self.shown.as_ref().map(|s| Arc::as_ptr(&s.tree) as usize).hash(&mut h);
         let hits = self.current_hits();
         hits.as_ref().map(|h| Arc::as_ptr(h) as usize).hash(&mut h);
@@ -2197,6 +2206,7 @@ impl App {
             if filtering && !filter.matches(n) {
                 return None;
             }
+            let c = if fade { cloud_fade(c, n.flags) } else { c };
             let fill = match &highlight {
                 Some(h) if !n.ext().eq_ignore_ascii_case(h) => c.gamma_multiply(0.15),
                 _ => c,
@@ -3208,6 +3218,19 @@ fn wheel_zoom(wheel: &mut f32, ui: &egui::Ui, hovered: bool, tree: &Node, zoom: 
 }
 
 /// Color for "color by age": hot for recent, cool for old, blended between the bands.
+/// A tile colour faded for a file not (fully) on this computer: online-only files most,
+/// partly downloaded ones half as much. Others unchanged.
+fn cloud_fade(c: Color32, flags: u8) -> Color32 {
+    let k = if flags & scan::store::ONLINE_ONLY != 0 {
+        0.32
+    } else if flags & scan::store::PARTIAL != 0 {
+        0.62
+    } else {
+        return c;
+    };
+    c.gamma_multiply(k)
+}
+
 fn age_color(modified: i64) -> Color32 {
     let days = ((chrono::Utc::now().timestamp() - modified).max(0) as f32 / 86_400.0).max(0.0);
     let t = |d: f32| (d + 1.0).ln();

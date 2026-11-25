@@ -53,6 +53,7 @@ pub const ENTRIES: &[Entry] = &[
     e(Tab::Cloud, "sizes", "Sizes", "Size shown", "size on disk logical allocated du metric cloud only default"),
     e(Tab::Cloud, "sizes", "Sizes", "Stored column", "stored column online only downloaded logical size on disk list"),
     e(Tab::Cloud, "status", "Status", "Status icons", "cloud status icons indicators online only downloaded pinned partial onedrive google drive icloud dropbox"),
+    e(Tab::Cloud, "status", "Status", "Fade online-only tiles", "fade dim faded online only cloud tiles map treemap sunburst logical partly downloaded"),
     e(Tab::Cloud, "status", "Status", "Storage breakdown", "breakdown bar cloud local downloaded only in the cloud percent"),
     e(Tab::Cloud, "downloads", "Keeping files in the cloud", "Ask before downloading", "download hydrate hydration confirm ask cloud files placeholders"),
     e(Tab::Cloud, "downloads", "Keeping files in the cloud", "Scan mounted cloud drives", "rclone fuse mount mounted cloud drive google drive g: pcloud webdav"),

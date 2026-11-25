@@ -236,6 +236,10 @@ impl App {
                     reclaim = true;
                 }
             }
+            if self.cloud_fade_on() {
+                ui.label(egui::RichText::new(" · faded tiles: online only (half-faded: partly downloaded)").font(mono.clone()).color(pal.weak))
+                    .on_hover_text("At Size: Logical, files not on this computer are drawn faded so what's here stands out. Turn this off in Settings > Cloud storage > Fade online-only tiles.");
+            }
         });
         if reclaim && self.premium(crate::licence::Feature::CloudManagement) {
             self.set_metric(scan::Metric::Reclaimable);
@@ -249,6 +253,10 @@ impl App {
                 (false, Stored::OnlineOnly) => Stored::OnlineOnly.bit() | Stored::Partial.bit(),
                 (false, s) => s.bit(),
             };
+            // As in the Stored row: online-only files have no area at Size: On disk.
+            if self.filter.stored & AWAY != 0 && self.metric == scan::Metric::Disk {
+                self.set_metric(scan::Metric::Logical);
+            }
         }
     }
 
