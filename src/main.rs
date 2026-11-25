@@ -23,6 +23,7 @@ mod cloud;
 mod cloudops;
 mod drives;
 mod dupes;
+mod epub;
 mod elevate;
 mod fontview;
 mod formats;

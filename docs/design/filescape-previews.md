@@ -196,4 +196,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Photoshop PSD/PSB (own reader) | #52 | Merged |
 | Spreadsheets (calamine) | #53 | Merged |
 | Word, PowerPoint and OpenDocument formatted | #54 | Merged |
-| Every PDF page (hayro) | | In review |
+| Every PDF page (hayro) | #55 | Merged |
+| EPUB books (own reader) | | In review |
