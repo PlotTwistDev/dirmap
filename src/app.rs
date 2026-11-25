@@ -49,6 +49,7 @@ mod preview;
 mod seqplayer;
 mod thumbs;
 mod tilepreview;
+mod dialogs;
 mod views;
 mod summary;
 mod cloud;
@@ -248,6 +249,8 @@ pub struct App {
     map_in_dock: bool,
     /// Previews on zoomed-in treemap tiles.
     tile_prev: tilepreview::TilePreviews,
+    /// File and folder pickers waiting for an answer (see dialogs.rs).
+    asking: Vec<dialogs::Asking>,
     /// The tile under the pointer last frame, as a path in the shown tree.
     map_hover: Option<Vec<u32>>,
     /// The analysis dock in the File Manager.
@@ -389,6 +392,7 @@ impl App {
             highlight_ext: None,
             map_in_dock: false,
             tile_prev: Default::default(),
+            asking: Vec::new(),
             map_hover: None,
             dock: Default::default(),
             scanned_at: 0,
@@ -896,10 +900,11 @@ impl App {
             }
             let edit = ui.add(egui::TextEdit::singleline(&mut self.path_input).desired_width(380.0).hint_text("Folder to scan"));
             if ui.button("Browse…").clicked() {
-                if let Some(dir) = rfd::FileDialog::new().set_directory(self.path_input.trim()).pick_folder() {
-                    self.path_input = dir.shown();
-                    self.start_scan();
-                }
+                let d = dialogs::Dialog::new().set_directory(self.path_input.trim());
+                self.ask_path(d, dialogs::Pick::Folder, |app, dir| {
+                    app.path_input = dir.shown();
+                    app.start_scan();
+                });
             }
             let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if ui.button("⟳ Scan").clicked() || enter {
@@ -1669,19 +1674,19 @@ impl App {
         let Some(tree) = &self.tree else { return };
         let label: String = tree.name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
         let name = format!("Filescape {} {}.dmsnap", label.trim_matches('_'), chrono::Local::now().format("%Y-%m-%d %H%M"));
-        let dialog = rfd::FileDialog::new().add_filter("Filescape snapshot", &["dmsnap"]).set_file_name(name);
-        if let Some(f) = dialog.save_file() {
-            self.snap_msg = Some(match snapshot::save(&f, &self.scanned_path, tree) {
+        let dialog = dialogs::Dialog::new().add_filter("Filescape snapshot", &["dmsnap"]).set_file_name(name);
+        self.ask_path(dialog, dialogs::Pick::Save, |app, f| {
+            let Some(tree) = &app.tree else { return };
+            app.snap_msg = Some(match snapshot::save(&f, &app.scanned_path, tree) {
                 Ok(()) => format!("Saved {}", f.display()),
                 Err(e) => format!("Couldn't save the snapshot: {e}"),
             });
-        }
+        });
     }
 
     fn load_snapshot(&mut self) {
-        if let Some(f) = rfd::FileDialog::new().add_filter("Filescape snapshot", &["dmsnap"]).pick_file() {
-            self.load_snapshot_from(f);
-        }
+        let d = dialogs::Dialog::new().add_filter("Filescape snapshot", &["dmsnap"]);
+        self.ask_path(d, dialogs::Pick::File, |app, f| app.load_snapshot_from(f));
     }
 
     fn load_snapshot_from(&mut self, f: PathBuf) {
@@ -2840,6 +2845,7 @@ impl eframe::App for App {
         }
         self.transfers_poll(&ctx);
         self.ops_ui(&ctx);
+        self.poll_dialogs(&ctx);
 
         if let Some(rx) = &self.drives_rx {
             match rx.try_recv() {

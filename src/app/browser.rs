@@ -371,6 +371,8 @@ struct Picks {
     close_tab: Option<usize>,
     new_folder: bool,
     paste: bool,
+    /// "Copy Path" on a part of the path.
+    copy: Option<PathBuf>,
 }
 
 impl App {
@@ -729,9 +731,8 @@ impl App {
                     return;
                 }
                 let start = disks[0].parent().map(Path::to_path_buf).unwrap_or_default();
-                if let Some(dest) = rfd::FileDialog::new().set_title("Move to folder").set_directory(start).pick_folder() {
-                    self.transfer(disks, dest, false);
-                }
+                let d = super::dialogs::Dialog::new().set_title("Move to folder").set_directory(start);
+                self.ask_path(d, super::dialogs::Pick::Folder, move |app, dest| app.transfer(disks, dest, false));
             }
             TreeAction::CopyPath => {
                 self.ctx_copy = Some(text_of(&disks));
@@ -1048,6 +1049,10 @@ impl App {
         if let Some((items, dest, copy)) = picks.drop {
             self.transfer(items, dest, copy);
         }
+        if let Some(p) = picks.copy {
+            self.ctx_copy = Some(p.shown());
+            self.ops.notice = Some(("Copied the path".into(), false));
+        }
         if let Some(f) = picks.new_tab {
             self.new_tab(f);
         }
@@ -1094,6 +1099,11 @@ impl App {
                 if resp.middle_clicked() {
                     picks.close_tab = Some(i);
                 }
+                resp.context_menu(|ui| {
+                    if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
+                        picks.copy = Some(if on { self.full_path(&self.browser.folder) } else { self.browser.tabs[i].folder.clone() });
+                    }
+                });
                 if resp.dnd_hover_payload::<DragItems>().is_some() {
                     ui.painter().rect_stroke(resp.rect, 3.0, Stroke::new(2.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
                 }
@@ -1156,6 +1166,11 @@ impl App {
                 if resp.clicked() && k != last {
                     picks.go = Some(self.browser.folder[..depth].to_vec());
                 }
+                resp.context_menu(|ui| {
+                    if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
+                        picks.copy = Some(self.full_path(&self.browser.folder[..depth]));
+                    }
+                });
                 if resp.dnd_hover_payload::<DragItems>().is_some() {
                     ui.painter().rect_stroke(resp.rect, 3.0, Stroke::new(2.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
                 }

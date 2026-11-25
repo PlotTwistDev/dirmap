@@ -697,6 +697,10 @@ impl App {
             Content::Text { text, truncated } => {
                 let truncated = *truncated;
                 let text = text.clone();
+                if is_markdown(&e.name) {
+                    markdown_view(ui, path, &text, truncated, size);
+                    return;
+                }
                 egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
                     ui.set_min_size(size - vec2(16.0, 16.0));
                     ui.set_max_size(size - vec2(16.0, 16.0));
@@ -806,6 +810,64 @@ fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
         ui.ctx().request_repaint_after(Duration::from_millis(250));
     }
     outside
+}
+
+fn is_markdown(name: &str) -> bool {
+    let ext = name.rsplit_once('.').map(|(_, x)| x.to_ascii_lowercase()).unwrap_or_default();
+    matches!(ext.as_str(), "md" | "markdown" | "mdown" | "mkd")
+}
+
+/// A Markdown file, formatted (as the Help Centre draws its pages) or as raw text, with a switch
+/// between the two that's remembered.
+fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2) {
+    use crate::help::{doc, render};
+    static NO_DOCS: std::sync::OnceLock<doc::Docs> = std::sync::OnceLock::new();
+    let pal = style::pal(ui);
+    let raw_id = egui::Id::new("preview-markdown-raw");
+    let mut raw = ui.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(raw_id));
+    egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        ui.set_min_size(size - vec2(16.0, 16.0));
+        ui.set_max_size(size - vec2(16.0, 16.0));
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut raw, false, "Formatted");
+            ui.selectable_value(&mut raw, true, "Raw");
+        });
+        ui.separator();
+        egui::ScrollArea::both().id_salt(("look-md", path, raw)).auto_shrink(false).show(ui, |ui| {
+            if raw {
+                ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).extend());
+            } else {
+                // Parsed once per file shown, not every frame.
+                let key = egui::Id::new(("preview-markdown", path, text.len()));
+                let blocks = ui.data(|d| d.get_temp::<Arc<Vec<doc::Block>>>(key)).unwrap_or_else(|| {
+                    let b = Arc::new(doc::parse(text));
+                    ui.data_mut(|d| d.insert_temp(key, b.clone()));
+                    b
+                });
+                ui.set_max_width(ui.available_width());
+                let mut images = HashMap::new();
+                let mut out = render::Out {
+                    page: "",
+                    docs: NO_DOCS.get_or_init(|| doc::Docs::from_sources(&[])),
+                    images: &mut images,
+                    nav: None,
+                    request: None,
+                    anchors: Vec::new(),
+                };
+                render::blocks(ui, &mut out, &blocks);
+                // Web links open in the browser; links to other files or headings do nothing.
+                if let Some(render::Nav::Url(u)) = out.nav.take() {
+                    if u.contains("://") || u.starts_with("mailto:") {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(u));
+                    }
+                }
+            }
+            if truncated {
+                ui.weak("… (only the first 256 KB is shown)");
+            }
+        });
+    });
+    ui.data_mut(|d| d.insert_persisted(raw_id, raw));
 }
 
 /// Play or pause on its own line (a fixed width, so it stays put as its label changes), and

@@ -219,11 +219,11 @@ impl App {
                         .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_lowercase())
                         .unwrap_or_default()
                 };
-                let mut dlg = rfd::FileDialog::new().set_title("Choose an app");
+                let mut dlg = super::dialogs::Dialog::new().set_title("Choose an app");
                 if cfg!(windows) {
                     dlg = dlg.add_filter("Programs", &["exe", "bat", "cmd"]);
                 }
-                if let Some(exe) = dlg.pick_file() {
+                self.ask_path(dlg, super::dialogs::Pick::File, move |this, exe| {
                     let types = if ext.is_empty() {
                         Vec::new()
                     } else {
@@ -235,7 +235,7 @@ impl App {
                         args: vec!["{file}".into()],
                         types,
                     };
-                    let i = match self
+                    let i = match this
                         .files
                         .prefs
                         .apps
@@ -243,7 +243,7 @@ impl App {
                         .position(|a| a.exe == app.exe && a.args == app.args)
                     {
                         Some(i) => {
-                            let a = &mut self.files.prefs.apps[i];
+                            let a = &mut this.files.prefs.apps[i];
                             for t in app.types {
                                 if !a.types.contains(&t) && !a.types.is_empty() {
                                     a.types.push(t);
@@ -252,12 +252,12 @@ impl App {
                             i
                         }
                         None => {
-                            self.files.prefs.apps.push(app);
-                            self.files.prefs.apps.len() - 1
+                            this.files.prefs.apps.push(app);
+                            this.files.prefs.apps.len() - 1
                         }
                     };
-                    self.open_with(Pick::Run(i), paths);
-                }
+                    this.open_with(Pick::Run(i), paths);
+                });
             }
             Pick::Manage => self.files.apps_box = Some(AppsBox::new(&self.files.prefs.apps)),
         }
@@ -271,6 +271,7 @@ impl App {
         let mut cancel = false;
         let mut add = false;
         let mut remove = None;
+        let mut choose = None;
         egui::Modal::new(egui::Id::new("apps-box")).show(ctx, |ui| {
             ui.set_width(640.0);
             ui.heading("Open With: Apps");
@@ -287,13 +288,8 @@ impl App {
                     for (i, (a, (args, types))) in b.apps.iter_mut().zip(b.text.iter_mut()).enumerate() {
                         ui.add_sized([120.0, 22.0], egui::TextEdit::singleline(&mut a.name));
                         let shown = a.exe.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "Choose…".into());
-                        if ui.button(shown).on_hover_text(a.exe.display().to_string()).clicked()
-                            && let Some(p) = rfd::FileDialog::new().set_title("Choose an app").pick_file()
-                        {
-                            if a.name.is_empty() {
-                                a.name = app_name(&p);
-                            }
-                            a.exe = p;
+                        if ui.button(shown).on_hover_text(a.exe.display().to_string()).clicked() {
+                            choose = Some(i);
                         }
                         ui.add_sized([170.0, 22.0], egui::TextEdit::singleline(args).hint_text("{file}"));
                         ui.add_sized([120.0, 22.0], egui::TextEdit::singleline(types).hint_text("everything"));
@@ -319,17 +315,31 @@ impl App {
             b.apps.remove(i);
             b.text.remove(i);
         }
-        if add
-            && let Some(p) = rfd::FileDialog::new()
-                .set_title("Choose an app")
-                .pick_file()
-        {
-            b.apps.push(UserApp {
-                name: app_name(&p),
-                exe: p,
-                ..Default::default()
+        if add {
+            let d = super::dialogs::Dialog::new().set_title("Choose an app");
+            self.ask_path(d, super::dialogs::Pick::File, |this, p| {
+                if let Some(b) = &mut this.files.apps_box {
+                    b.apps.push(UserApp {
+                        name: app_name(&p),
+                        exe: p,
+                        ..Default::default()
+                    });
+                    b.text.push(("{file}".into(), String::new()));
+                }
             });
-            b.text.push(("{file}".into(), String::new()));
+            return;
+        }
+        if let Some(i) = choose {
+            let d = super::dialogs::Dialog::new().set_title("Choose an app");
+            self.ask_path(d, super::dialogs::Pick::File, move |this, p| {
+                if let Some(a) = this.files.apps_box.as_mut().and_then(|b| b.apps.get_mut(i)) {
+                    if a.name.is_empty() {
+                        a.name = app_name(&p);
+                    }
+                    a.exe = p;
+                }
+            });
+            return;
         }
         if cancel {
             self.files.apps_box = None;

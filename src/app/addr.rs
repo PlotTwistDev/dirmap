@@ -398,6 +398,24 @@ impl App {
         if bg.clicked() {
             self.start_path_edit();
         }
+        // Right-clicking the bar outside the crumbs: the folder you're in.
+        let mut edit = false;
+        bg.context_menu(|ui| {
+            if let Location::Dir(p) = &here {
+                if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
+                    menu = Some((FAction::CopyPath, p.clone()));
+                }
+                if cfg!(windows) && ui.add(egui::Button::new(style::mi("Copy Network (UNC) Path"))).clicked() {
+                    menu = Some((FAction::CopyUnc, p.clone()));
+                }
+            }
+            if ui.add(egui::Button::new(style::mi("Edit Path"))).clicked() {
+                edit = true;
+            }
+        });
+        if edit {
+            self.start_path_edit();
+        }
         bg.on_hover_text(format!(
             "Click to type a path ({}). Type > for commands, @ for favourites",
             if cfg!(target_os = "macos") { "⌘L" } else { "Ctrl+L, Alt+D or F4" }
