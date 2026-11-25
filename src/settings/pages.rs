@@ -250,10 +250,13 @@ fn rule_list(ui: &mut egui::Ui, text: &mut String, kind: RuleKind) -> bool {
         let r = kit::field(ui, &mut new, hint, (ui.available_width() - extra).max(140.0));
         add = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         add |= ui.add_enabled_ui(!new.trim().is_empty(), |ui| kit::button(ui, Kind::Secondary, Some(Icon::Plus), "Add")).inner.clicked();
-        if kind == RuleKind::Folder
-            && kit::button(ui, Kind::Secondary, Some(Icon::Folder), "Browse…").on_hover_text("Pick a folder to skip").clicked()
-            && let Some(f) = rfd::FileDialog::new().pick_folder()
-        {
+        let picked = ui.id().with("rule-browse");
+        if kind == RuleKind::Folder && kit::button(ui, Kind::Secondary, Some(Icon::Folder), "Browse…").on_hover_text("Pick a folder to skip").clicked() {
+            let mailbox = crate::asking::ask_into(crate::asking::Dialog::new(), crate::asking::Pick::Folder, ui.ctx());
+            ui.data_mut(|d| d.insert_temp(picked, mailbox));
+        }
+        if let Some(f) = ui.data(|d| d.get_temp::<crate::asking::Mailbox>(picked)).and_then(|m| m.lock().ok()?.take()) {
+            ui.data_mut(|d| d.remove::<crate::asking::Mailbox>(picked));
             new = f.display().to_string();
             add = true;
         }
@@ -720,7 +723,7 @@ pub fn cloud(ui: &mut egui::Ui, cx: &mut PageCx) {
     });
 
     kit::section(ui, Icon::Cloud, "Status", f.of("status"), |ui| {
-        kit::toggle_row(ui, "Status icons", Some("Show an icon after the name of cloud files: online only, partly downloaded, downloaded, always kept on this device, or unknown. Hover one to see what it means."), &mut d.cloud_icons);
+        kit::toggle_row(ui, "Status icons", Some("Show an icon after the name of cloud files: online only, partly downloaded, downloaded, always kept on this device, or unknown. Hover one to see what it means. On the treemap, tiles of files not on this computer get a cloud in the corner."), &mut d.cloud_icons);
         kit::divider(ui);
         kit::toggle_row(ui, "Fade online-only tiles", Some("At Size: Logical, draw the map tiles of online-only files faded (partly downloaded ones half as much), so the files actually on this computer stand out. At Size: On disk they take no space and don't appear."), &mut d.cloud_fade);
         kit::toggle_row(ui, "Storage breakdown", Some("Under the map, a bar splitting the scan into files not in the cloud, downloaded cloud files and data only in the cloud."), &mut d.cloud_breakdown);

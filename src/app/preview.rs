@@ -29,14 +29,32 @@ pub(super) enum Content {
         info: String,
         /// A picture the system made of a video or document (its size isn't the file's).
         poster: bool,
+        /// A drawing's source (SVG), shown instead when asked; its size is the drawing's own
+        /// and it can be shown larger than that.
+        source: Option<(String, bool)>,
+        /// More about it for the details (a photo's camera and exposure).
+        facts: Vec<(&'static str, String)>,
     },
     /// Sound: played with the controls in the preview, from this file (a fetched copy for one
     /// on a server).
-    Sound(PathBuf),
+    Sound {
+        play: PathBuf,
+        /// Tags, format and cover, from the file.
+        info: crate::soundinfo::SoundInfo,
+        /// The waveform, if the system could decode it.
+        peaks: Option<Arc<[f32]>>,
+        cover: Option<egui::TextureHandle>,
+    },
     Text {
         text: String,
         truncated: bool,
+        /// Syntax colours, for code.
+        colours: Option<Arc<crate::highlight::Colours>>,
     },
+    /// A spreadsheet's cells.
+    Sheet(Arc<crate::sheets::Book>),
+    /// A Word, PowerPoint or OpenDocument file, formatted.
+    Doc(Arc<Vec<crate::help::doc::Block>>),
     Binary,
     /// Nothing to show beyond the facts.
     None,
@@ -86,27 +104,45 @@ pub(super) enum Kind {
     /// Linear-light images, shown through an sRGB display transform.
     LinearImage,
     Text,
+    /// SVG: drawn, with the source a click away.
+    Drawing,
+    /// A font: a specimen.
+    Font,
+    /// Camera RAW: the camera's own preview inside it.
+    Raw,
+    /// Photoshop: the flattened picture.
+    Psd,
+    /// A spreadsheet: its cells.
+    Sheet,
+    /// Word, PowerPoint or OpenDocument: formatted.
+    Doc,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
 }
 
 pub(super) fn kind_of(name: &str) -> Kind {
-    let ext = crate::scan::ext_of(name).to_ascii_lowercase();
-    match ext.as_str() {
-        "png" | "jpg" | "jpeg" | "jpe" | "gif" | "webp" | "tif" | "tiff" | "bmp" | "tga" | "ico" | "qoi" | "pbm" | "pgm" | "ppm" | "pnm" => Kind::Image,
-        "exr" | "hdr" => Kind::LinearImage,
-        "txt" | "md" | "markdown" | "rst" | "log" | "csv" | "tsv" | "json" | "jsonl" | "xml" | "yaml" | "yml" | "toml" | "ini" | "cfg" | "conf" | "rs" | "py" | "js"
-        | "mjs" | "ts" | "tsx" | "jsx" | "c" | "h" | "cpp" | "hpp" | "cc" | "cs" | "java" | "kt" | "go" | "rb" | "php" | "swift" | "m" | "mm" | "sh" | "bash" | "zsh"
-        | "fish" | "ps1" | "psm1" | "bat" | "cmd" | "lua" | "sql" | "html" | "htm" | "css" | "scss" | "less" | "vue" | "svelte" | "glsl" | "hlsl" | "wgsl" | "osl"
-        | "vex" | "mel" | "nk" | "usda" | "obj" | "mtl" | "gitignore" | "dockerfile" | "makefile" | "cmake" | "gradle" | "properties" | "env" | "srt" | "vtt"
-        | "tex" | "bib" | "r" | "jl" | "dart" | "zig" | "nim" | "ex" | "exs" | "erl" | "hs" | "ml" | "clj" | "scala" | "pl" | "pm" | "tcl" | "diff" | "patch"
-        | "lock" | "svg" => Kind::Text,
-        "" if matches!(name.to_ascii_lowercase().as_str(), "readme" | "license" | "makefile" | "dockerfile" | "changelog" | "authors") => Kind::Text,
-        _ => match crate::media::media_of(name) {
-            Some(m) => Kind::Media(m),
-            None => Kind::Other,
-        },
+    crate::formats::by_name(name).map_or(Kind::Other, kind_for)
+}
+
+/// The kind of preview a format gets.
+pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
+    use crate::formats::Category as C;
+    use crate::media::Media;
+    match f.category {
+        C::Picture => Kind::Image,
+        C::LinearPicture => Kind::LinearImage,
+        C::Text => Kind::Text,
+        C::Drawing => Kind::Drawing,
+        C::Font => Kind::Font,
+        C::Raw => Kind::Raw,
+        C::Photoshop => Kind::Psd,
+        C::Spreadsheet => Kind::Sheet,
+        C::Video => Kind::Media(Media::Video),
+        C::Audio => Kind::Media(Media::Audio),
+        C::Pdf => Kind::Media(Media::Pdf),
+        C::SystemPicture => Kind::Media(Media::Picture),
+        C::Document => Kind::Doc,
     }
 }
 
@@ -159,41 +195,130 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                     }
                 }
                 let truncated = ix.items.len() > 2000;
-                Content::Text { text, truncated }
+                Content::Text { text, truncated, colours: None }
             }
             Err(e) => Content::Error(e),
         };
     }
-    // Word and OpenDocument text: the words in them.
-    if let Some(k @ (thumbs::TextKind::Docx | thumbs::TextKind::Odt)) = path.file_name().and_then(|n| thumbs::text_kind(&n.to_string_lossy())) {
-        return match thumbs::doc_text(path, k) {
-            Some(text) => {
-                let truncated = text.len() > TEXT_MAX;
-                let mut text = text;
-                text.truncate(text.floor_char_boundary(TEXT_MAX));
-                Content::Text { text, truncated }
-            }
-            None => Content::Error("Couldn't read the text in this document".into()),
-        };
-    }
     match kind {
         Kind::Image | Kind::LinearImage => load_image(path, kind == Kind::LinearImage, size),
-        Kind::Text => load_text(path),
-        Kind::Media(crate::media::Media::Audio) => Content::Sound(path.to_path_buf()),
+        Kind::Text => match load_text(path) {
+            Content::Text { text, truncated, .. } => coloured(path, text, truncated),
+            c => c,
+        },
+        Kind::Doc => load_doc(path),
+        Kind::Sheet => match crate::sheets::read(path, crate::sheets::ROWS, crate::sheets::COLS) {
+            Ok(b) => Content::Sheet(Arc::new(b)),
+            Err(e) => Content::Error(e),
+        },
+        Kind::Psd => match crate::psdview::picture(path, 0) {
+            Ok(p) => {
+                let img = image::DynamicImage::ImageRgba8(p.image);
+                let img = if img.width() > SHOW_MAX || img.height() > SHOW_MAX { img.thumbnail(SHOW_MAX, SHOW_MAX) } else { img };
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                Content::Image {
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba)),
+                    tex: None,
+                    size: p.size,
+                    info: if p.thumbnail_only { "Photoshop's small thumbnail (the document is too large to show in full)".into() } else { "The flattened picture".into() },
+                    poster: false,
+                    source: None,
+                    facts: Vec::new(),
+                }
+            }
+            Err(e) => Content::Error(e),
+        },
+        Kind::Raw => match crate::camraw::preview(path, 0) {
+            Ok(r) => {
+                let img = if r.image.width() > SHOW_MAX || r.image.height() > SHOW_MAX { r.image.thumbnail(SHOW_MAX, SHOW_MAX) } else { r.image };
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                Content::Image {
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba)),
+                    tex: None,
+                    size: [w, h],
+                    info: "The camera's preview".into(),
+                    poster: true,
+                    source: None,
+                    facts: r.facts,
+                }
+            }
+            Err(e) => Content::Error(e),
+        },
+        Kind::Font => match crate::fontview::specimen(path, 800) {
+            Ok(s) => Content::Image {
+                pixels: Some(egui::ColorImage::from_rgba_unmultiplied([s.width as usize, s.height as usize], &s.rgba)),
+                tex: None,
+                size: [s.width, s.height],
+                info: s.about.line(),
+                poster: true,
+                source: None,
+                facts: Vec::new(),
+            },
+            Err(e) => Content::Error(e),
+        },
+        Kind::Drawing => match crate::svg::render(path, SHOW_MAX.min(1600)) {
+            Ok(d) => {
+                let source = match load_text(path) {
+                    Content::Text { text, truncated, .. } => Some((text, truncated)),
+                    _ => None, // .svgz: compressed, no source to show
+                };
+                Content::Image {
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([d.width as usize, d.height as usize], &d.rgba)),
+                    tex: None,
+                    size: [d.natural[0].round().max(1.0) as u32, d.natural[1].round().max(1.0) as u32],
+                    info: "Vector drawing (sharp at any size)".into(),
+                    poster: false,
+                    source: source.or(Some((String::new(), false))),
+                    facts: Vec::new(),
+                }
+            }
+            // Not a drawing resvg can read: show the markup.
+            Err(_) => load_text(path),
+        },
+        Kind::Media(crate::media::Media::Audio) => Content::Sound {
+            play: path.to_path_buf(),
+            info: crate::soundinfo::read(path),
+            peaks: crate::wave::peaks(path, WAVE_BARS).ok().map(Into::into),
+            cover: None,
+        },
         Kind::Media(m) => match crate::media::thumbnail(path, 1024) {
             Ok((w, h, rgba)) => Content::Image {
                 pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
                 tex: None,
                 size: [w as u32, h as u32],
-                info: if m == crate::media::Media::Pdf { "The first page".into() } else { "A frame from the video".into() },
+                info: match m {
+                    crate::media::Media::Pdf => "The first page".into(),
+                    crate::media::Media::Picture => "Drawn by the system".into(),
+                    _ => "A frame from the video".into(),
+                },
                 poster: true,
+                source: None,
+                facts: Vec::new(),
             },
-            Err(_) => Content::Error(if m == crate::media::Media::Pdf { "No picture of this PDF: it couldn't be drawn (it may be damaged or password-protected, or the system can't draw PDFs)".into() } else { "No picture of this video: the system has no thumbnailer for it".into() }),
+            Err(_) => Content::Error(match m {
+                crate::media::Media::Pdf => "No picture of this PDF: it couldn't be drawn (it may be damaged or password-protected, or the system can't draw PDFs)".into(),
+                crate::media::Media::Picture => {
+                    if cfg!(windows) {
+                        "The system can't draw this picture. Windows needs the free HEIF and AV1 Video Extensions from the Microsoft Store for HEIC and AVIF.".into()
+                    } else if cfg!(target_os = "macos") {
+                        "The system couldn't draw this picture (it may be damaged).".into()
+                    } else {
+                        "No program here can draw this picture: install libheif's heif-thumbnailer (for HEIC) or ffmpeg (for AVIF).".into()
+                    }
+                }
+                _ => "No picture of this video: the system has no thumbnailer for it".into(),
+            }),
         },
         Kind::Other => {
-            // Unknown extension: show it as text if it looks like text.
+            // Unknown or missing extension: its first bytes may say what it is.
+            if let Some(k) = sniffed(path).filter(|k| *k != Kind::Other) {
+                return load(path, k, size);
+            }
+            // Otherwise show it as text if it looks like text.
             match load_text(path) {
-                Content::Text { text, truncated } if size <= TEXT_MAX as u64 * 4 => Content::Text { text, truncated },
+                Content::Text { text, truncated, .. } if size <= TEXT_MAX as u64 * 4 => coloured(path, text, truncated),
                 Content::Error(e) => Content::Error(e),
                 _ => Content::None,
             }
@@ -201,9 +326,17 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
     }
 }
 
+/// The kind a file's first bytes say it is, for a file whose name doesn't say.
+fn sniffed(path: &Path) -> Option<Kind> {
+    use std::io::Read;
+    let mut head = [0u8; 32];
+    let n = std::fs::File::open(path).ok()?.read(&mut head).ok()?;
+    crate::formats::sniff(&head[..n]).map(kind_for)
+}
+
 fn load_image(path: &Path, linear: bool, size: u64) -> Content {
     match decode_image(path, linear, size, SHOW_MAX) {
-        Ok((pixels, size, info)) => Content::Image { pixels: Some(pixels), tex: None, size, info, poster: false },
+        Ok((pixels, size, info)) => Content::Image { pixels: Some(pixels), tex: None, size, info, poster: false, source: None, facts: Vec::new() },
         Err(e) => Content::Error(e),
     }
 }
@@ -287,7 +420,14 @@ fn load_text(path: &Path) -> Content {
     let Some(text) = decode_text(&buf) else {
         return Content::Binary;
     };
-    Content::Text { text, truncated }
+    Content::Text { text, truncated, colours: None }
+}
+
+/// Text, with syntax colours if it's code (not Markdown, which has its own view).
+fn coloured(path: &Path, text: String, truncated: bool) -> Content {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let colours = if is_markdown(&name) { None } else { crate::highlight::colour(&name, &text).map(Arc::new) };
+    Content::Text { text, truncated, colours }
 }
 
 /// The text in `b`: UTF-8, or UTF-16 (what PowerShell and many Windows tools write), with or
@@ -548,6 +688,30 @@ impl App {
                 ui.label(info);
                 ui.end_row();
             }
+            if kind_of(&e.name) == Kind::Font && let Some(Content::Image { info, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+                ui.weak("Font");
+                ui.add(egui::Label::new(info.as_str()).wrap());
+                ui.end_row();
+            }
+            if let Some(Content::Image { facts, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+                for (k, v) in facts {
+                    ui.weak(*k);
+                    ui.add(egui::Label::new(v.as_str()).wrap());
+                    ui.end_row();
+                }
+            }
+            if let Some(Content::Sound { info, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+                for (k, v) in &info.facts {
+                    ui.weak(*k);
+                    ui.add(egui::Label::new(v.as_str()).wrap());
+                    ui.end_row();
+                }
+            }
+            if let Some(Content::Text { colours: Some(c), .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+                ui.weak("Language");
+                ui.label(&c.language);
+                ui.end_row();
+            }
             ui.weak("Where");
             ui.add(egui::Label::new(path.parent().map(|p| p.shown()).unwrap_or_default()).wrap());
             ui.end_row();
@@ -568,7 +732,7 @@ impl App {
     }
 
     /// The preview itself: an image, text, or a large icon.
-    pub(super) fn preview_body(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, size: Vec2) {
+    pub(super) fn preview_body(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
         let pal = style::pal(ui);
         if e.is_dir {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -626,8 +790,27 @@ impl App {
             return;
         };
         let mut new_view = None;
+        // A drawing: the picture, or its source.
+        if let Content::Image { source: Some((text, truncated)), .. } = c {
+            let src_id = egui::Id::new("preview-drawing-source");
+            let mut show_src = ui.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(src_id));
+            let has_text = !text.is_empty();
+            let (text, truncated) = (text.clone(), *truncated);
+            if has_text {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut show_src, false, "Drawing");
+                    ui.selectable_value(&mut show_src, true, "Source");
+                });
+                ui.data_mut(|d| d.insert_persisted(src_id, show_src));
+                size.y -= ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+            }
+            if has_text && show_src {
+                text_view(ui, path, &text, truncated, size, None);
+                return;
+            }
+        }
         match c {
-            Content::Image { pixels, tex, size: full, .. } => {
+            Content::Image { pixels, tex, size: full, source, .. } => {
                 if let Some(px) = pixels.take() {
                     *tex = Some(ctx.load_texture(format!("look:{}", path.display()), px, egui::TextureOptions::LINEAR));
                 }
@@ -635,7 +818,8 @@ impl App {
                 let (r, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
                 let ts = tex.size_vec2();
                 // Scale against the full image, so 1:1 means actual pixels even when shown smaller.
-                let fit = (r.width() / full[0] as f32).min(r.height() / full[1] as f32).min(1.0);
+                // A drawing can be shown larger than its own size: it was drawn big enough.
+                let fit = (r.width() / full[0] as f32).min(r.height() / full[1] as f32).min(if source.is_some() { 8.0 } else { 1.0 });
                 let scale = zoom.unwrap_or(fit);
                 let shown = vec2(full[0] as f32, full[1] as f32) * scale;
                 let img_rect = Rect::from_center_size(r.center() + pan, shown);
@@ -694,26 +878,63 @@ impl App {
                     }
                 }
             }
-            Content::Text { text, truncated } => {
+            Content::Text { text, truncated, colours } => {
                 let truncated = *truncated;
                 let text = text.clone();
+                let colours = colours.clone();
+                if is_markdown(&e.name) {
+                    markdown_view(ui, path, &text, truncated, size);
+                    return;
+                }
+                text_view(ui, path, &text, truncated, size, colours.as_deref());
+            }
+            Content::Sound { play, info, peaks, cover } => {
+                let play = play.clone();
+                let peaks = peaks.clone();
+                let secs = info.secs;
+                if cover.is_none() && let Some((w, h, rgba)) = info.cover.take() {
+                    *cover = Some(ctx.load_texture(format!("cover:{}", path.display()), egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba), egui::TextureOptions::LINEAR));
+                }
+                let cover = cover.clone();
+                let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+                // Cover (or the icon), then the waveform, then the controls, as a block in the middle.
+                let wide = (r.width() - 24.0).min(480.0);
+                let wave_h = if peaks.is_some() { 52.0 } else { 0.0 };
+                let art = (r.height() - 62.0 - wave_h - 36.0).clamp(80.0, wide.min(260.0));
+                let block = art + 12.0 + wave_h + 8.0 + 62.0;
+                let top = r.center().y - block / 2.0;
+                let art_rect = Rect::from_center_size(pos2(r.center().x, top + art / 2.0), vec2(art, art));
+                match &cover {
+                    Some(t) => {
+                        let ts = t.size_vec2();
+                        let f = (art / ts.x).min(art / ts.y);
+                        ui.painter().image(t.id(), Rect::from_center_size(art_rect.center(), ts * f), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                    }
+                    None => self.icons.paint_big(ui, Rect::from_center_size(art_rect.center(), vec2(80.0, 80.0)), false, e.ext(), tint),
+                }
+                let mut y = art_rect.bottom() + 12.0;
+                if let Some(w) = &peaks {
+                    let wr = Rect::from_center_size(pos2(r.center().x, y + wave_h / 2.0), vec2(wide, wave_h));
+                    waveform(ui, &mut self.files.look.player, w, path, wr, secs);
+                    y += wave_h + 8.0;
+                }
+                sound_controls(ui, &mut self.files.look.player, &play, path, Rect::from_center_size(pos2(r.center().x, y + 31.0), vec2(wide.min(360.0), 62.0)));
+            }
+            Content::Sheet(book) => {
+                let book = book.clone();
+                sheet_view(ui, path, &book, size);
+            }
+            Content::Doc(blocks) => {
+                let blocks = blocks.clone();
+                let pal = style::pal(ui);
                 egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
                     ui.set_min_size(size - vec2(16.0, 16.0));
                     ui.set_max_size(size - vec2(16.0, 16.0));
-                    egui::ScrollArea::both().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
-                        ui.add(egui::Label::new(egui::RichText::new(&text).monospace().size(12.0)).extend());
-                        if truncated {
-                            ui.weak("… (only the first 256 KB is shown)");
-                        }
+                    egui::ScrollArea::vertical().id_salt(("look-doc", path)).auto_shrink(false).show(ui, |ui| {
+                        ui.set_max_width(ui.available_width());
+                        doc_blocks(ui, &blocks);
                     });
                 });
-            }
-            Content::Sound(play) => {
-                let play = play.clone();
-                let (r, _) = ui.allocate_exact_size(size, Sense::hover());
-                let icon = Rect::from_center_size(r.center() - vec2(0.0, 30.0), vec2(80.0, 80.0));
-                self.icons.paint_big(ui, icon, false, e.ext(), tint);
-                sound_controls(ui, &mut self.files.look.player, &play, path, Rect::from_center_size(r.center() + vec2(0.0, 44.0), vec2((r.width() - 24.0).min(360.0), 28.0)));
             }
             Content::Binary | Content::None | Content::Error(_) => {
                 let note = match c {
@@ -723,7 +944,11 @@ impl App {
                 };
                 let (r, _) = ui.allocate_exact_size(size, Sense::hover());
                 self.icons.paint(ui, Rect::from_center_size(r.center() - vec2(0.0, 14.0), vec2(80.0, 80.0)), false, e.ext(), tint);
-                ui.painter().text(r.center() + vec2(0.0, 44.0), Align2::CENTER_CENTER, note, FontId::proportional(12.0), pal.weak);
+                // Wrapped to the pane: some notes say what to install.
+                let mut job = egui::text::LayoutJob::simple(note, FontId::proportional(12.0), pal.weak, (r.width() - 24.0).max(60.0));
+                job.halign = egui::Align::Center;
+                let g = ui.painter().layout_job(job);
+                ui.painter().galley(pos2(r.center().x, r.center().y + 36.0), g, pal.weak);
             }
         }
         if let Some((z, p)) = new_view {
@@ -808,16 +1033,249 @@ fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
     outside
 }
 
-/// Play or pause, how far through, and a bar to jump about (where the player can).
+fn is_markdown(name: &str) -> bool {
+    let ext = name.rsplit_once('.').map(|(_, x)| x.to_ascii_lowercase()).unwrap_or_default();
+    matches!(ext.as_str(), "md" | "markdown" | "mdown" | "mkd")
+}
+
+/// A Markdown file, formatted (as the Help Centre draws its pages) or as raw text, with a switch
+/// between the two that's remembered.
+/// Text in a scrolling well, wrapped, in syntax colours for code.
+fn text_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2, colours: Option<&crate::highlight::Colours>) {
+    let pal = style::pal(ui);
+    egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        ui.set_min_size(size - vec2(16.0, 16.0));
+        ui.set_max_size(size - vec2(16.0, 16.0));
+        egui::ScrollArea::vertical().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
+            match colours {
+                Some(c) => {
+                    let spans = if ui.visuals().dark_mode { &c.dark } else { &c.light };
+                    ui.add(egui::Label::new(coloured_job(text, spans, ui.visuals().text_color())).wrap());
+                }
+                None => {
+                    ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).wrap());
+                }
+            }
+            if truncated {
+                ui.weak("… (only the first 256 KB is shown)");
+            }
+        });
+    });
+}
+
+/// A workbook: a switch between its sheets, and the cells of the one picked, drawn only where
+/// they're on screen.
+fn sheet_view(ui: &mut egui::Ui, path: &Path, book: &crate::sheets::Book, size: Vec2) {
+    let pal = style::pal(ui);
+    let pick_id = egui::Id::new(("preview-sheet", path));
+    let mut pick = ui.data(|d| d.get_temp::<usize>(pick_id)).unwrap_or(0).min(book.sheets.len() - 1);
+    egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+        ui.set_min_size(size - vec2(12.0, 12.0));
+        ui.set_max_size(size - vec2(12.0, 12.0));
+        if book.sheets.len() > 1 {
+            egui::ScrollArea::horizontal().id_salt(("sheet-tabs", path)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for (i, s) in book.sheets.iter().enumerate() {
+                        ui.selectable_value(&mut pick, i, &s.name);
+                    }
+                });
+            });
+            ui.data_mut(|d| d.insert_temp(pick_id, pick));
+        }
+        let sheet = &book.sheets[pick];
+        let (h, w) = sheet.size;
+        let mut note = format!("{} rows × {} columns", group(h as u64), group(w as u64));
+        if h > sheet.rows.len() || w > crate::sheets::COLS {
+            note.push_str(&format!(" · the first {} rows and {} columns", sheet.rows.len(), w.min(crate::sheets::COLS)));
+        }
+        if book.total > book.sheets.len() {
+            note.push_str(&format!(" · {} of {} sheets", book.sheets.len(), book.total));
+        }
+        ui.label(egui::RichText::new(note).size(11.5).color(pal.weak));
+        let font = FontId::proportional(12.0);
+        let cw = ui.fonts_mut(|f| f.glyph_width(&font, '0'));
+        let cols = sheet.rows.iter().map(|r| r.len()).max().unwrap_or(0);
+        let widths: Vec<f32> = (0..cols).map(|c| (sheet.rows.iter().map(|r| r.get(c).map_or(0, |s| s.chars().count())).max().unwrap_or(0).clamp(3, 32) as f32 * cw + 12.0).max(44.0)).collect();
+        let num_w = (group(sheet.rows.len() as u64).len() as f32 * cw + 14.0).max(30.0);
+        let row_h = 20.0;
+        let total_w = num_w + widths.iter().sum::<f32>();
+        egui::ScrollArea::both().id_salt(("sheet", path, pick)).auto_shrink(false).show_rows(ui, row_h, sheet.rows.len() + 1, |ui, range| {
+            let (rect, _) = ui.allocate_exact_size(vec2(total_w, row_h * range.len() as f32), Sense::hover());
+            let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+            let line = Stroke::new(1.0, pal.weak.gamma_multiply(0.18));
+            for (k, i) in range.clone().enumerate() {
+                let y = rect.top() + k as f32 * row_h;
+                let head = i == 0;
+                if head {
+                    p.rect_filled(Rect::from_min_size(pos2(rect.left(), y), vec2(total_w, row_h)), 0.0, pal.weak.gamma_multiply(0.12));
+                }
+                let num = if head { String::new() } else { group(i as u64) };
+                p.text(pos2(rect.left() + num_w - 6.0, y + row_h / 2.0), Align2::RIGHT_CENTER, num, font.clone(), pal.weak);
+                let mut x = rect.left() + num_w;
+                for (c, cw) in widths.iter().enumerate() {
+                    let cell = Rect::from_min_size(pos2(x, y), vec2(*cw, row_h));
+                    let (text, colour) = if head { (crate::sheets::column(c), pal.weak) } else { (sheet.rows[i - 1].get(c).cloned().unwrap_or_default(), pal.text) };
+                    if !text.is_empty() {
+                        // Numbers to the right, like a spreadsheet.
+                        let numeric = !head && text.parse::<f64>().is_ok();
+                        let (at, align) = if head { (cell.center(), Align2::CENTER_CENTER) } else if numeric { (pos2(cell.right() - 6.0, cell.center().y), Align2::RIGHT_CENTER) } else { (pos2(cell.left() + 6.0, cell.center().y), Align2::LEFT_CENTER) };
+                        p.with_clip_rect(cell.intersect(p.clip_rect())).text(at, align, text.replace('\n', " "), font.clone(), colour);
+                    }
+                    p.line_segment([cell.left_top(), cell.left_bottom()], line);
+                    x += cw;
+                }
+                p.line_segment([pos2(rect.left(), y + row_h), pos2(rect.left() + total_w, y + row_h)], line);
+            }
+        });
+    });
+}
+
+/// Text laid out in its syntax colours; what the spans don't cover is in `plain`.
+fn coloured_job(text: &str, spans: &[crate::highlight::Span], plain: Color32) -> egui::text::LayoutJob {
+    let font = FontId::monospace(12.0);
+    let mut job = egui::text::LayoutJob::default();
+    let fmt = |color: Color32, italics: bool| egui::TextFormat { font_id: font.clone(), color, italics, ..Default::default() };
+    let mut at = 0;
+    for s in spans {
+        if s.start >= text.len() || !text.is_char_boundary(s.start) || !text.is_char_boundary(s.end.min(text.len())) {
+            break;
+        }
+        let end = s.end.min(text.len());
+        job.append(&text[s.start..end], 0.0, fmt(Color32::from_rgb(s.rgb[0], s.rgb[1], s.rgb[2]), s.italic));
+        at = end;
+    }
+    if at < text.len() {
+        job.append(&text[at..], 0.0, fmt(plain, false));
+    }
+    job
+}
+
+/// Blocks drawn with the Help Centre's renderer. Web links open in the browser; links to other
+/// files or headings do nothing, and pictures aren't fetched.
+fn doc_blocks(ui: &mut egui::Ui, blocks: &[crate::help::doc::Block]) {
+    use crate::help::{doc, render};
+    static NO_DOCS: std::sync::OnceLock<doc::Docs> = std::sync::OnceLock::new();
+    let mut images = HashMap::new();
+    let mut out = render::Out {
+        page: "",
+        docs: NO_DOCS.get_or_init(|| doc::Docs::from_sources(&[])),
+        images: &mut images,
+        nav: None,
+        request: None,
+        anchors: Vec::new(),
+    };
+    render::blocks(ui, &mut out, blocks);
+    if let Some(render::Nav::Url(u)) = out.nav.take()
+        && (u.contains("://") || u.starts_with("mailto:"))
+    {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(u));
+    }
+}
+
+/// A Word, PowerPoint or OpenDocument file: formatted, or the picture saved with it when its
+/// words can't be read.
+fn load_doc(path: &Path) -> Content {
+    let Some(kind) = path.file_name().and_then(|n| crate::officedoc::kind_of(&n.to_string_lossy())) else {
+        return Content::Binary;
+    };
+    match crate::officedoc::read(path, kind) {
+        Ok(b) => Content::Doc(Arc::new(b)),
+        Err(e) => match crate::officedoc::saved_thumbnail(path) {
+            Some(img) => {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                Content::Image {
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba)),
+                    tex: None,
+                    size: [w, h],
+                    info: "The picture saved with it".into(),
+                    poster: true,
+                    source: None,
+                    facts: Vec::new(),
+                }
+            }
+            None => Content::Error(e),
+        },
+    }
+}
+
+fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2) {
+    use crate::help::doc;
+    let pal = style::pal(ui);
+    let raw_id = egui::Id::new("preview-markdown-raw");
+    let mut raw = ui.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(raw_id));
+    egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        ui.set_min_size(size - vec2(16.0, 16.0));
+        ui.set_max_size(size - vec2(16.0, 16.0));
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut raw, false, "Formatted");
+            ui.selectable_value(&mut raw, true, "Raw");
+        });
+        ui.separator();
+        egui::ScrollArea::vertical().id_salt(("look-md", path, raw)).auto_shrink(false).show(ui, |ui| {
+            if raw {
+                ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).wrap());
+            } else {
+                // Parsed once per file shown, not every frame.
+                let key = egui::Id::new(("preview-markdown", path, text.len()));
+                let blocks = ui.data(|d| d.get_temp::<Arc<Vec<doc::Block>>>(key)).unwrap_or_else(|| {
+                    let b = Arc::new(doc::parse(text));
+                    ui.data_mut(|d| d.insert_temp(key, b.clone()));
+                    b
+                });
+                ui.set_max_width(ui.available_width());
+                doc_blocks(ui, &blocks);
+            }
+            if truncated {
+                ui.weak("… (only the first 256 KB is shown)");
+            }
+        });
+    });
+    ui.data_mut(|d| d.insert_persisted(raw_id, raw));
+}
+
+/// Play or pause on its own line (a fixed width, so it stays put as its label changes), and
+/// under it how far through, with a bar to jump about where the player can.
+/// Bars in the waveform shown in the preview.
+const WAVE_BARS: usize = 240;
+
+/// A sound's waveform: what has played in the accent colour, and a click jumps there.
+fn waveform(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, w: &[f32], path: &Path, r: Rect, secs: Option<f64>) {
+    let pal = style::pal(ui);
+    let st = player.as_ref().filter(|p| p.path == path).map(|p| p.state()).unwrap_or_default();
+    // The player's length, or the file's own when the player doesn't say (ffplay).
+    let done = match st.length.or(secs).filter(|l| *l > 0.0) {
+        Some(l) => (st.position / l).clamp(0.0, 1.0) as f32,
+        None => 0.0,
+    };
+    let seekable = player.as_ref().is_some_and(|p| p.path == path && p.can_seek()) && st.length.is_some_and(|l| l > 0.0);
+    let resp = ui.interact(r, ui.id().with(("wave", path)), if seekable { Sense::click() } else { Sense::hover() });
+    let p = ui.painter().with_clip_rect(r);
+    let bars = w.len().max(1);
+    let bw = r.width() / bars as f32;
+    let mid = r.center().y;
+    for (i, v) in w.iter().enumerate() {
+        let x = r.left() + i as f32 * bw;
+        let h = (v * r.height() * 0.5).max(0.75);
+        let c = if (i as f32 + 0.5) / bars as f32 <= done { pal.accent } else { pal.weak.gamma_multiply(0.6) };
+        p.rect_filled(Rect::from_min_max(pos2(x + bw * 0.15, mid - h), pos2(x + bw * 0.85, mid + h)), 0.5, c);
+    }
+    if seekable {
+        let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Click to jump there");
+        if resp.clicked() && let (Some(pos), Some(l), Some(pl)) = (resp.interact_pointer_pos(), st.length, player.as_ref()) {
+            pl.seek(((pos.x - r.left()) / r.width()).clamp(0.0, 1.0) as f64 * l);
+        }
+    }
+}
+
 fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, play: &Path, path: &Path, r: Rect) {
     let pal = style::pal(ui);
     let st = player.as_ref().map(|p| p.state()).unwrap_or_default();
-    // Just the button and the time when there's no bar to show: keep them centred.
-    let r = if st.length.is_some() { r } else { Rect::from_center_size(r.center(), vec2(130.0, r.height())) };
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let ui = &mut child;
+    let top = Rect::from_min_size(r.min, vec2(r.width(), 28.0));
+    let bottom = Rect::from_min_max(pos2(r.min.x, r.min.y + 34.0), r.max);
     let label = if st.playing { "⏸ Pause" } else { "▶ Play" };
-    if ui.button(label).on_hover_text("Play the sound here").clicked() {
+    let button = egui::Button::new(label).min_size(vec2(96.0, 26.0));
+    if ui.put(Rect::from_center_size(top.center(), vec2(96.0, 26.0)), button).on_hover_text("Play the sound here").clicked() {
         match player {
             Some(p) if st.playing => p.pause(),
             Some(p) => p.play(),
@@ -829,24 +1287,33 @@ fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, 
             }
         }
     }
+    let line = |ui: &mut egui::Ui, text: egui::RichText| {
+        ui.put(bottom, egui::Label::new(text).wrap());
+    };
     if let Some(e) = &st.error {
-        ui.label(egui::RichText::new(e).color(pal.weak).size(12.0));
+        line(ui, egui::RichText::new(e).color(pal.weak).size(12.0));
         return;
     }
     let time = match st.length {
         Some(l) => format!("{} / {}", crate::media::clock(st.position), crate::media::clock(l)),
         None => crate::media::clock(st.position),
     };
-    if let (Some(l), Some(p)) = (st.length.filter(|l| *l > 0.0), player.as_ref().filter(|p| p.can_seek())) {
-        let mut at = st.position.min(l);
-        let w = (ui.available_width() - 90.0).max(40.0);
-        ui.spacing_mut().slider_width = w;
-        let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
-        if s.drag_stopped() || (s.clicked() && !s.dragged()) {
-            p.seek(at);
+    let time = egui::RichText::new(time).monospace().size(12.0).color(pal.weak);
+    match (st.length.filter(|l| *l > 0.0), player.as_ref().filter(|p| p.can_seek())) {
+        (Some(l), Some(p)) => {
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bottom).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            let ui = &mut child;
+            let mut at = st.position.min(l);
+            ui.spacing_mut().slider_width = (ui.available_width() - 90.0).max(40.0);
+            let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
+            if s.drag_stopped() || (s.clicked() && !s.dragged()) {
+                p.seek(at);
+            }
+            ui.label(time);
         }
+        // No bar to show: just the time, centred under the button.
+        _ => line(ui, time),
     }
-    ui.label(egui::RichText::new(time).monospace().size(12.0).color(pal.weak));
     if st.playing {
         ui.ctx().request_repaint_after(Duration::from_millis(200));
     }
@@ -904,6 +1371,24 @@ mod tests {
         assert_eq!(kind_of("README"), Kind::Text);
         assert_eq!(kind_of("movie.mov"), Kind::Media(crate::media::Media::Video));
         assert_eq!(kind_of("data.xyz"), Kind::Other);
+        assert_eq!(kind_of("report.docx"), Kind::Doc);
+        assert_eq!(kind_of("Talk.PPTX"), Kind::Doc);
+        assert_eq!(kind_of("notes.odp"), Kind::Doc);
+        assert_eq!(kind_of("song.FLAC"), Kind::Media(crate::media::Media::Audio));
+        assert_eq!(kind_of("logo.svg"), Kind::Drawing);
+        assert_eq!(kind_of("Inter.otf"), Kind::Font);
+        assert_eq!(kind_of("IMG_0001.CR3"), Kind::Raw);
+        assert_eq!(kind_of("poster.psd"), Kind::Psd);
+        assert_eq!(kind_of("Budget.XLSX"), Kind::Sheet);
+        // A file with no extension is known by its first bytes.
+        let dir = std::env::temp_dir().join(format!("fs-sniff-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("download");
+        std::fs::write(&p, b"%PDF-1.7\n").unwrap();
+        assert_eq!(sniffed(&p), Some(Kind::Media(crate::media::Media::Pdf)));
+        std::fs::write(&p, b"just some words").unwrap();
+        assert_eq!(sniffed(&p), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -914,7 +1399,7 @@ mod tests {
         let t = d.join("big.txt");
         std::fs::write(&t, "x".repeat(TEXT_MAX + 10)).unwrap();
         match load(&t, Kind::Text, 0) {
-            Content::Text { text, truncated } => assert!(truncated && text.len() == TEXT_MAX),
+            Content::Text { text, truncated, .. } => assert!(truncated && text.len() == TEXT_MAX),
             _ => panic!("text"),
         }
         // Binary is recognised.
@@ -938,6 +1423,19 @@ mod tests {
             }
             _ => panic!("png"),
         }
+        // A drawing: drawn larger than its own size, with its source; broken markup is text.
+        let svg = d.join("icon.svg");
+        std::fs::write(&svg, r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="12"><rect width="24" height="12" fill="#00f"/></svg>"##).unwrap();
+        match load(&svg, Kind::Drawing, 100) {
+            Content::Image { size, pixels, source: Some((text, _)), .. } => {
+                assert_eq!(size, [24, 12]);
+                assert!(pixels.unwrap().size[0] > 24);
+                assert!(text.starts_with("<svg"));
+            }
+            _ => panic!("svg"),
+        }
+        std::fs::write(&svg, "<svg oops").unwrap();
+        assert!(matches!(load(&svg, Kind::Drawing, 9), Content::Text { .. }));
         let bad = d.join("bad.png");
         std::fs::write(&bad, b"\x89PNG\r\n\x1a\nnonsense").unwrap();
         assert!(matches!(load(&bad, Kind::Image, 20), Content::Error(_)));

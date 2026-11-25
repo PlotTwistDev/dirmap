@@ -38,6 +38,14 @@ tar = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "io-util"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs", "deflate64", "lzma", "xz", "bzip2", "ppmd"] }
+resvg = "0.50"
+syntect = { version = "5", default-features = false, features = ["parsing", "dump-load", "regex-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+ab_glyph = "0.2"
+ttf-parser = "0.25"
+lofty = "0.25.5"
+kamadak-exif = "0.6"
+calamine = { version = "0.38", features = ["dates"] }
 
 [features]
 default = []
@@ -58,10 +66,14 @@ raw-window-handle = "0.6"
 [target."cfg(unix)".dependencies]
 libc = "0.2.190"
 
+# Catches Objective-C exceptions from AVFoundation, which would otherwise abort the app.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", features = ["exception"] }
+
 # File and line numbers in crash.log backtraces (no effect on speed; kept in a .pdb on Windows).
 [profile.release]
 debug = "line-tables-only"
 
 # Puts the app icon (packaging/filescape.ico) into filescape.exe.
-[target.'cfg(windows)'.build-dependencies]
+[target."cfg(windows)".build-dependencies]
 winresource = "0.1"

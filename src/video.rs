@@ -482,7 +482,7 @@ mod imp {
     /// objc_msgSend cast to a method's signature.
     macro_rules! send {
         ($ret:ty; $obj:expr, $sel:expr $(, $arg:expr => $t:ty)*) => {{
-            let f: extern "C" fn(Id, Sel $(, $t)*) -> $ret = std::mem::transmute(objc_msgSend as *const ());
+            let f: extern "C-unwind" fn(Id, Sel $(, $t)*) -> $ret = std::mem::transmute(objc_msgSend as *const ());
             f($obj, sel($sel) $(, $arg)*)
         }};
     }
@@ -491,9 +491,9 @@ mod imp {
     /// Intel Macs; objc_msgSend handles it on Apple silicon.
     unsafe fn send_time(obj: Id, name: &str) -> CMTime {
         #[cfg(target_arch = "x86_64")]
-        let f: extern "C" fn(Id, Sel) -> CMTime = unsafe { std::mem::transmute(objc_msgSend_stret as *const ()) };
+        let f: extern "C-unwind" fn(Id, Sel) -> CMTime = unsafe { std::mem::transmute(objc_msgSend_stret as *const ()) };
         #[cfg(not(target_arch = "x86_64"))]
-        let f: extern "C" fn(Id, Sel) -> CMTime = unsafe { std::mem::transmute(objc_msgSend as *const ()) };
+        let f: extern "C-unwind" fn(Id, Sel) -> CMTime = unsafe { std::mem::transmute(objc_msgSend as *const ()) };
         f(obj, sel(name))
     }
 
@@ -517,7 +517,8 @@ mod imp {
             // retained) and release; the pixel buffer is locked while read.
             unsafe {
                 let pool = objc_autoreleasePoolPush();
-                let sb = send!(Id; self.output, "copyNextSampleBuffer");
+                // An exception (say, the reader failed) ends the video like its end would.
+                let sb = crate::macaudio::guard(|| Ok(send!(Id; self.output, "copyNextSampleBuffer"))).unwrap_or(std::ptr::null_mut());
                 let frame = (|| {
                     if sb.is_null() {
                         return None;
@@ -552,7 +553,7 @@ mod imp {
         fn drop(&mut self) {
             // SAFETY: both were retained in `open`.
             unsafe {
-                send!(Id; self.reader, "cancelReading");
+                let _ = crate::macaudio::guard(|| Ok(send!(Id; self.reader, "cancelReading")));
                 send!(Id; self.output, "release");
                 send!(Id; self.reader, "release");
             }
@@ -566,7 +567,7 @@ mod imp {
         // the autorelease pool is popped.
         unsafe {
             let pool = objc_autoreleasePoolPush();
-            let r = (|| {
+            let r = crate::macaudio::guard(|| {
                 let s = send!(Id; class("NSString"), "stringWithUTF8String:", cpath.as_ptr() => *const c_char);
                 let url = send!(Id; class("NSURL"), "fileURLWithPath:", s => Id);
                 let asset = send!(Id; class("AVURLAsset"), "URLAssetWithURL:options:", url => Id, std::ptr::null_mut() => Id);
@@ -618,7 +619,7 @@ mod imp {
                 let (w, h) = (size.width.abs().round() as u32, size.height.abs().round() as u32);
                 let info = Info { width: w, height: h, fps: if fps > 0.0 { fps } else { 30.0 }, duration: duration.is_finite().then_some(duration) };
                 Ok((Box::new(Av { reader, output, size: (w, h) }) as Box<dyn Decoder>, info))
-            })();
+            });
             objc_autoreleasePoolPop(pool);
             r
         }

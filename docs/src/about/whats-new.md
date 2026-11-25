@@ -25,6 +25,30 @@
   items). **Alt+P** shows or hides it. Videos play right in the preview panes, and on macOS
   sound now pauses at once and can jump to any point. Word and OpenDocument files now preview as text in both
   workspaces.
+- Markdown files preview formatted, with headings, lists, tables and links. **Raw** shows the
+  text as written, and the preview panes remember which one you picked.
+- Right-click any part of the path above the file list, or a tab, and choose **Copy Path**.
+- SVG drawings now preview as pictures, on map tiles, in icon views and in the preview panes,
+  sharp at any zoom, with **Source** to see the markup.
+- Code previews in syntax colours, for about 200 languages, and the details say which language.
+- Fonts preview as a specimen drawn in the font, with its family, style and glyph count; on
+  tiles and in icon views they show a large "Aa".
+- Sound previews show the album cover and the waveform, which fills in as it plays and jumps
+  where you click, and the details list the title, artist, album, length and format.
+- Camera RAW photos (CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 and more) preview on tiles, in icon
+  views and in the panes, from the preview the camera stores in the file, with the camera, lens
+  and exposure in the details.
+- HEIC (iPhone) and AVIF pictures preview through the system's own decoders.
+- Photoshop documents (PSD and PSB) preview from the flattened picture saved with them.
+- Spreadsheets (Excel and OpenDocument) preview as a table of their cells, sheet by sheet, and
+  their first rows show on map tiles. Formulas and macros are never run.
+- Word, PowerPoint and OpenDocument files preview formatted: headings, bold and italic, lists and
+  tables, and each slide's title and points. Icon views show the picture of the first page or
+  slide saved with them.
+- Files with a missing or wrong extension, such as a download saved as `file`, now preview by
+  what they really are when Filescape can tell from their first bytes.
+- **Help > About Filescape > Third-party licences** lists the open-source software Filescape is
+  built with and the full text of each licence.
 
 ### What system files and folders are
 

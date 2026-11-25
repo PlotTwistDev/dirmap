@@ -27,10 +27,11 @@ pub(super) fn stamp(size: u64, modified: i64) -> u64 {
     size.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ modified as u64
 }
 
-/// Whether a file of this name gets a thumbnail: images, and videos, PDFs and sound (album
-/// covers) where the system can make a picture of them.
+/// Whether a file of this name gets a thumbnail: images, drawings, fonts, Office documents (the
+/// picture saved with them), and videos, PDFs and sound (album covers) where the system can make
+/// a picture of them.
 pub(super) fn wants_thumb(name: &str) -> bool {
-    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Media(_))
+    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Media(_))
 }
 
 struct Job {
@@ -287,7 +288,7 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
     }
     let local = if crate::fsys::remote::is_remote(&job.path) {
         // On a server: only pictures, fetched when they're small enough (never for the map).
-        if !config.local_only && matches!(kind, Kind::Image | Kind::LinearImage) && job.size <= REMOTE_MAX { crate::fsys::remote::fetch(&job.path, REMOTE_MAX).ok()? } else { return None }
+        if !config.local_only && matches!(kind, Kind::Image | Kind::LinearImage | Kind::Drawing) && job.size <= REMOTE_MAX { crate::fsys::remote::fetch(&job.path, REMOTE_MAX).ok()? } else { return None }
     } else if config.local_only && !is_local(&job.path) {
         return None;
     } else {
@@ -297,6 +298,25 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
     match kind {
         Kind::Media(_) => crate::media::thumbnail(&local, max).ok().map(|(w, h, rgba)| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba))),
         Kind::Image | Kind::LinearImage => preview::decode_image(&local, kind == Kind::LinearImage, job.size, max).ok().map(|r| Decoded::Image(r.0)),
+        Kind::Psd => crate::psdview::picture(&local, max).ok().map(|p| {
+            let img = image::DynamicImage::ImageRgba8(p.image);
+            let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };
+            let rgba = img.to_rgba8();
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
+        }),
+        Kind::Raw => crate::camraw::preview(&local, max).ok().map(|r| {
+            let img = if r.image.width() > max || r.image.height() > max { r.image.thumbnail(max, max) } else { r.image };
+            let rgba = img.to_rgba8();
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
+        }),
+        Kind::Font => crate::fontview::specimen(&local, max.min(512)).ok().map(|s| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([s.width as usize, s.height as usize], &s.rgba))),
+        Kind::Drawing => crate::svg::render(&local, max).ok().map(|d| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([d.width as usize, d.height as usize], &d.rgba))),
+        // The picture Office and LibreOffice save of the first page or slide.
+        Kind::Doc => crate::officedoc::saved_thumbnail(&local).map(|img| {
+            let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };
+            let rgba = img.to_rgba8();
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
+        }),
         _ => None,
     }
 }
@@ -313,16 +333,20 @@ pub(super) enum TextKind {
     /// Word (.docx), or OpenDocument text (.odt): the text from inside the zip.
     Docx,
     Odt,
+    /// A spreadsheet: its first rows.
+    Sheet,
+    /// PowerPoint or OpenDocument slides: their titles and points.
+    Slides,
 }
 
 pub(super) fn text_kind(name: &str) -> Option<TextKind> {
-    let ext = crate::scan::ext_of(name).to_ascii_lowercase();
-    match ext.as_str() {
-        "docx" | "docm" | "dotx" => Some(TextKind::Docx),
-        "odt" | "ott" => Some(TextKind::Odt),
-        // SVG is drawn as text in previews, but as a tile its markup isn't worth reading.
-        "svg" => None,
-        _ => (preview::kind_of(name) == Kind::Text).then_some(TextKind::Plain),
+    let f = crate::formats::by_name(name)?;
+    match f.id {
+        "docx" => Some(TextKind::Docx),
+        "sheet" => Some(TextKind::Sheet),
+        "odt" => Some(TextKind::Odt),
+        "pptx" | "odp" => Some(TextKind::Slides),
+        _ => (f.category == crate::formats::Category::Text).then_some(TextKind::Plain),
     }
 }
 
@@ -336,6 +360,11 @@ fn snippet(path: &Path, kind: TextKind) -> Option<String> {
             preview::decode_text(&buf)?
         }
         TextKind::Docx | TextKind::Odt => doc_text(path, kind)?,
+        TextKind::Sheet => crate::sheets::snippet(&crate::sheets::read(path, 40, 12).ok()?),
+        TextKind::Slides => {
+            let k = crate::officedoc::kind_of(&path.file_name()?.to_string_lossy())?;
+            crate::officedoc::plain_text(&crate::officedoc::read(path, k).ok()?)
+        }
     };
     let mut out = String::new();
     for line in raw.lines().take(SNIPPET_LINES) {

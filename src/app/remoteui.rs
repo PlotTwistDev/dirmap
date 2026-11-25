@@ -1157,39 +1157,35 @@ impl App {
                                 ui.close();
                             }
                             if ui.button("Import from a File…").on_hover_text("A FileZilla sitemanager.xml, or a WinSCP.ini (WinSCP: Tools > Export/Backup Configuration)").clicked() {
-                                if let Some(f) = rfd::FileDialog::new().add_filter("Site files", &["xml", "ini"]).pick_file() {
-                                    got = Some(si::from_file(&f));
-                                }
+                                let d = super::dialogs::Dialog::new().add_filter("Site files", &["xml", "ini"]);
+                                super::dialogs::ask(&mut self.asking, d, super::dialogs::Pick::File, |app, f| {
+                                    let r = super::siteimport::from_file(&f);
+                                    if let Some(m) = app.files.rws.manager.as_mut() {
+                                        took_import(&mut app.files.prefs.sites, m, r);
+                                    }
+                                });
                                 ui.close();
                             }
                             ui.separator();
                             if ui.button("Export for FileZilla…").on_hover_text("All sites, without passwords, as a sitemanager.xml that FileZilla, WinSCP and Cyberduck can import").clicked() {
                                 let (xml, left_out) = si::to_filezilla(&sites);
-                                if let Some(f) = rfd::FileDialog::new().set_file_name("filescape-sites.xml").add_filter("FileZilla site file", &["xml"]).save_file() {
+                                let count = sites.len() - left_out.len();
+                                let d = super::dialogs::Dialog::new().set_file_name("filescape-sites.xml").add_filter("FileZilla site file", &["xml"]);
+                                super::dialogs::ask(&mut self.asking, d, super::dialogs::Pick::Save, move |app, f| {
+                                    let Some(m) = app.files.rws.manager.as_mut() else { return };
                                     match std::fs::write(&f, xml) {
                                         Ok(()) => {
                                             let extra = if left_out.is_empty() { String::new() } else { format!(" Left out (FileZilla has no WebDAV): {}.", left_out.join(", ")) };
-                                            m.tested = Some(Ok(format!("Exported {} sites to {}, without passwords.{extra}", sites.len() - left_out.len(), f.display())));
+                                            m.tested = Some(Ok(format!("Exported {count} sites to {}, without passwords.{extra}", f.display())));
                                             m.error = None;
                                         }
                                         Err(e) => m.error = Some(format!("Couldn't write {}: {e}", f.display())),
                                     }
-                                }
+                                });
                                 ui.close();
                             }
                             if let Some(r) = got {
-                                match r {
-                                    Ok(found) => {
-                                        let n = si::merge(sites, found.sites);
-                                        let mut msg = format!("Imported {n} site{}. Passwords aren't brought across: you're asked on the first connection, and Remember keeps them in the keychain.", if n == 1 { "" } else { "s" });
-                                        if !found.skipped.is_empty() {
-                                            msg.push_str(&format!(" Left out: {}.", found.skipped.join("; ")));
-                                        }
-                                        m.tested = Some(Ok(msg));
-                                        m.error = None;
-                                    }
-                                    Err(e) => m.error = Some(e),
-                                }
+                                took_import(sites, m, r);
                             }
                         });
                     });
@@ -1246,13 +1242,15 @@ impl App {
                                 ui.add(egui::TextEdit::singleline(&mut f.key).hint_text("SSH agent, then ~/.ssh keys, then password").desired_width(220.0));
                                 if ui.button("Key…").on_hover_text("Choose a private key file").clicked() {
                                     let start = crate::fsys::places::home().map(|h| h.join(".ssh"));
-                                    let mut d = rfd::FileDialog::new().set_title("Choose an SSH key file");
+                                    let mut d = super::dialogs::Dialog::new().set_title("Choose an SSH key file");
                                     if let Some(s) = start.filter(|s| s.is_dir()) {
                                         d = d.set_directory(s);
                                     }
-                                    if let Some(k) = d.pick_file() {
-                                        f.key = k.display().to_string();
-                                    }
+                                    super::dialogs::ask(&mut self.asking, d, super::dialogs::Pick::File, |app, k| {
+                                        if let Some(m) = app.files.rws.manager.as_mut() {
+                                            m.form.key = k.display().to_string();
+                                        }
+                                    });
                                 }
                             });
                             ui.end_row();
@@ -1263,10 +1261,13 @@ impl App {
                         ui.label("Local folder");
                         ui.horizontal(|ui| {
                             ui.add(egui::TextEdit::singleline(&mut m.local_dir).hint_text("(optional) shown beside it").desired_width(220.0));
-                            if ui.button("Choose…").clicked()
-                                && let Some(d) = rfd::FileDialog::new().set_title("Local folder to show beside this site").pick_folder()
-                            {
-                                m.local_dir = d.display().to_string();
+                            if ui.button("Choose…").clicked() {
+                                let d = super::dialogs::Dialog::new().set_title("Local folder to show beside this site");
+                                super::dialogs::ask(&mut self.asking, d, super::dialogs::Pick::Folder, |app, d| {
+                                    if let Some(m) = app.files.rws.manager.as_mut() {
+                                        m.local_dir = d.display().to_string();
+                                    }
+                                });
                             }
                         });
                         ui.end_row();
@@ -1462,6 +1463,23 @@ impl App {
 
 fn kind_is_insecure(f: &ConnectBox) -> bool {
     f.kind.is_some_and(Scheme::insecure)
+}
+
+
+/// Add imported sites, and say what happened in the site manager.
+fn took_import(sites: &mut Vec<SavedSite>, m: &mut SiteManager, r: Result<super::siteimport::Found, String>) {
+    match r {
+        Ok(found) => {
+            let n = super::siteimport::merge(sites, found.sites);
+            let mut msg = format!("Imported {n} site{}. Passwords aren't brought across: you're asked on the first connection, and Remember keeps them in the keychain.", if n == 1 { "" } else { "s" });
+            if !found.skipped.is_empty() {
+                msg.push_str(&format!(" Left out: {}.", found.skipped.join("; ")));
+            }
+            m.tested = Some(Ok(msg));
+            m.error = None;
+        }
+        Err(e) => m.error = Some(e),
+    }
 }
 
 #[cfg(test)]

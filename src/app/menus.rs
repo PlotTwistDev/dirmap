@@ -468,9 +468,8 @@ impl App {
             }
             TreeAction::MoveTo => {
                 let start = disk.parent().map(Path::to_path_buf).unwrap_or_default();
-                if let Some(dest) = rfd::FileDialog::new().set_title("Move to folder").set_directory(start).pick_folder() {
-                    self.transfer(vec![disk], dest, false);
-                }
+                let d = super::dialogs::Dialog::new().set_title("Move to folder").set_directory(start);
+                self.ask_path(d, super::dialogs::Pick::Folder, move |app, dest| app.transfer(vec![disk], dest, false));
                 Ok(())
             }
         };

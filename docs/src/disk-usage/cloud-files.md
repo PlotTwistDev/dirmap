@@ -71,6 +71,10 @@ At **Size: Logical** with no Stored filter, the map draws online-only files fade
 downloaded ones half as much, so the files actually on this computer stand out. A note after the
 storage breakdown says so. **Fade online-only tiles** in Settings turns this off.
 
+Treemap tiles big enough for a name also get a small cloud in the top right corner when the file
+is online only, or a half-filled cloud when it's partly downloaded, whatever the Size setting.
+**Status icons** in Settings turns these off with the other cloud icons.
+
 The Storage Analysis list then also shows the other size (**Logical** next to **On disk**, or the
 other way round) and a **Stored** column. **Stored column** in Settings turns them off.
 

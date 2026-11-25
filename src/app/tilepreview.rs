@@ -220,12 +220,8 @@ impl App {
                     let row = size * 1.3;
                     let rows = ((inner.height() - 22.0) / row).max(1.0) as usize;
                     let cols = ((inner.width() - 10.0) / (size * 0.6)).max(4.0) as usize;
-                    let mut shown_text = String::new();
-                    for line in text.lines().take(rows) {
-                        shown_text.extend(line.chars().take(cols));
-                        shown_text.push('\n');
-                    }
-                    p.text(inner.min + vec2(6.0, 5.0), Align2::LEFT_TOP, shown_text.trim_end(), font, Color32::from_rgb(214, 218, 224).gamma_multiply(alpha));
+                    let shown_text = wrap(&text, cols, rows);
+                    p.text(inner.min + vec2(6.0, 5.0), Align2::LEFT_TOP, shown_text, font, Color32::from_rgb(214, 218, 224).gamma_multiply(alpha));
                 }
             }
             // The name on a dark strip along the bottom.
@@ -394,6 +390,30 @@ impl App {
                 ui.label(info);
                 ui.end_row();
             }
+            if preview::kind_of(&e.name) == preview::Kind::Font && let Some(Content::Image { info, .. }) = self.files.look.cached(&path) {
+                ui.weak("Font");
+                ui.add(egui::Label::new(info.as_str()).wrap());
+                ui.end_row();
+            }
+            if let Some(Content::Image { facts, .. }) = self.files.look.cached(&path) {
+                for (k, v) in facts {
+                    ui.weak(*k);
+                    ui.add(egui::Label::new(v.as_str()).wrap());
+                    ui.end_row();
+                }
+            }
+            if let Some(Content::Sound { info, .. }) = self.files.look.cached(&path) {
+                for (k, v) in &info.facts {
+                    ui.weak(*k);
+                    ui.add(egui::Label::new(v.as_str()).wrap());
+                    ui.end_row();
+                }
+            }
+            if let Some(Content::Text { colours: Some(c), .. }) = self.files.look.cached(&path) {
+                ui.weak("Language");
+                ui.label(&c.language);
+                ui.end_row();
+            }
             ui.weak("Where");
             ui.add(egui::Label::new(path.parent().map(|p| p.shown()).unwrap_or_default()).wrap());
             ui.end_row();
@@ -438,6 +458,31 @@ impl App {
     }
 }
 
+
+/// The first `rows` lines of `text` wrapped to `cols` characters, breaking at the last space
+/// that fits (mid-word when there's none).
+fn wrap(text: &str, cols: usize, rows: usize) -> String {
+    let cols = cols.max(1);
+    let mut out: Vec<String> = Vec::new();
+    'all: for line in text.lines() {
+        let mut rest: Vec<char> = line.trim_end().chars().map(|c| if c == '\t' { ' ' } else { c }).collect();
+        loop {
+            if out.len() == rows {
+                break 'all;
+            }
+            if rest.len() <= cols {
+                out.push(rest.iter().collect());
+                break;
+            }
+            let cut = rest[..=cols].iter().rposition(|c| *c == ' ').filter(|&k| k > 0).unwrap_or(cols);
+            out.push(rest[..cut].iter().collect::<String>().trim_end().to_string());
+            let next = if rest.get(cut) == Some(&' ') { cut + 1 } else { cut };
+            rest.drain(..next);
+        }
+    }
+    out.join("\n").trim_end().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,6 +508,13 @@ mod tests {
             n.flags = scan::store::CLOUD | f;
             assert!(!readable_here(&n));
         }
+    }
+
+    #[test]
+    fn text_wraps_to_the_tile() {
+        let w = wrap("one two three four five\nshort\nabcdefghijkl", 9, 10);
+        assert_eq!(w, "one two\nthree\nfour five\nshort\nabcdefghi\njkl");
+        assert_eq!(wrap("a b c d e f g h", 3, 2), "a b\nc d");
     }
 
     #[test]

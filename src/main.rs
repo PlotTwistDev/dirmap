@@ -13,17 +13,22 @@
 // No console window behind the GUI on Windows; --cli attaches to the calling terminal instead.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod asking;
 mod actions;
 mod app;
 mod camera;
+mod camraw;
 mod categories;
 mod cloud;
 mod cloudops;
 mod drives;
 mod dupes;
 mod elevate;
+mod fontview;
+mod formats;
 mod fsys;
 mod help;
+mod highlight;
 mod icons;
 mod known;
 mod kit;
@@ -31,15 +36,20 @@ mod licence;
 mod models;
 mod mapview;
 mod netdrives;
+mod officedoc;
 mod pattern;
 mod player;
+mod psdview;
 mod settings;
+mod sheets;
 mod shellmenu;
 mod subset;
 mod scan;
 mod sequences;
 mod snapshot;
+mod soundinfo;
 mod sunburst;
+mod svg;
 mod templates;
 mod tilegpu;
 mod video;

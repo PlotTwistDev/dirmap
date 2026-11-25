@@ -464,13 +464,19 @@ the next. The selection stays as it is.
 | Kind | What you see |
 |---|---|
 | Images | PNG, JPEG, GIF, WebP, TIFF, BMP, TGA, ICO, QOI, PNM, and HDR and OpenEXR (shown with a standard display curve). Transparent areas show a checkerboard. |
-| Text | Text and source files, the first 256 KB, in UTF-8 or UTF-16 (as PowerShell and many Windows tools write). |
+| Photoshop | PSD and PSB documents: the flattened picture Photoshop saves with them (8, 16 and 32 bits; RGB, greyscale, CMYK and indexed), or their small thumbnail if it was saved without **Maximize Compatibility**. Layers aren't shown separately. |
+| HEIC and AVIF | iPhone photos (HEIC) and AVIF pictures, drawn by the system: built into macOS; on Windows with the free HEIF and AV1 Video Extensions from the Microsoft Store; on Linux with libheif's `heif-thumbnailer` or ffmpeg. |
+| Camera RAW | CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2, PEF, SRW and other RAW photos: the JPEG preview the camera stored in the file, turned the way the camera was held, and in the details the camera, lens, exposure and when it was taken. The RAW data itself isn't developed. |
+| Drawings | SVG and SVGZ, drawn sharp at any zoom. **Source** shows the markup. Only what's in the file is drawn: pictures it links to elsewhere are left out. |
+| Text | Text and source files, the first 256 KB, in UTF-8 or UTF-16 (as PowerShell and many Windows tools write). Code is shown in syntax colours, for about 200 languages and file types (Rust, Python, JavaScript, C and C++, shell scripts, JSON, YAML, Dockerfiles…), and the details name the language. |
+| Fonts | TrueType and OpenType fonts (.ttf, .otf and collections): the alphabet, numbers and sample sentences drawn in the font, with its family, style and number of glyphs. A font without Latin letters shows the characters it has. |
 | Videos | A frame from the video, made by the system (see below), with a play button: it plays right there, with a bar to jump about; click the picture to pause. **Open** plays it in Quick Look on macOS or your usual player elsewhere. It stops when you move to another file. |
-| Word and OpenDocument | The text of .docx and .odt documents. |
+| Spreadsheets | Excel (.xlsx, .xlsm, .xlsb, .xls) and OpenDocument (.ods) workbooks: the cells of each sheet, with a switch between sheets, the first 500 rows and 40 columns. The values are those the file was last saved with: formulas aren't worked out and macros never run. |
+| Word, PowerPoint and OpenDocument | Word (.docx) and OpenDocument (.odt) documents formatted: headings, bold and italic, lists and tables. PowerPoint (.pptx) and OpenDocument (.odp) presentations as each slide's title and points. Pictures and layout aren't shown, and macros never run. In Icons view, the picture of the first page or slide that Office or LibreOffice saved with the file, when there is one. Older .doc and .ppt files aren't read. |
 | PDFs | The first page, made by the system. |
-| Sound | MP3, WAV, FLAC, M4A, AAC, OGG and others: **▶ Play** plays it here, **⏸ Pause** pauses it, and on Windows and macOS the bar under it jumps to any point. It stops when you move to another file. |
+| Sound | MP3, WAV, FLAC, M4A, AAC, OGG and others: the album cover if the file has one, the waveform, and **▶ Play** / **⏸ Pause**. The waveform fills in as it plays, and on Windows and macOS clicking it (or the bar under the button) jumps to that point. The details show the title, artist, album, year, genre, length and format (sample rate, bit depth, channels, bit rate). It stops when you move to another file. |
 | Archives | What's inside: every file and folder, with sizes. |
-| Other files | The file's details, and **Open**. |
+| Other files | The file's details, and **Open**. A file with a missing or unknown extension that is really a picture, video, sound or PDF (judged by its first bytes) is previewed as one. |
 
 Pictures of videos and PDFs, and sound, come from your system, so they work for whatever it
 supports:
