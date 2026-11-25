@@ -45,6 +45,24 @@ pub fn thumbnail(path: &Path, max: u32) -> Result<Picture, String> {
     imp::thumbnail(path, max)
 }
 
+/// Play a video in the system's quick viewer: Quick Look on macOS (a floating player that
+/// closes with Space or Escape), the default video app elsewhere.
+pub fn play_video(path: &Path) -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        std::process::Command::new("/usr/bin/qlmanage")
+            .arg("-p")
+            .arg(path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    } else {
+        crate::actions::open(path)
+    }
+}
+
 // ---- the player ----
 
 /// How the player is doing, for the UI.

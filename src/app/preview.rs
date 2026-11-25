@@ -647,7 +647,23 @@ impl App {
                 let lr = Rect::from_min_size(r.left_bottom() + vec2(6.0, -g.size().y - 10.0), g.size() + vec2(10.0, 4.0));
                 ui.painter().rect_filled(lr, 3.0, Color32::from_black_alpha(150));
                 ui.painter().galley(lr.min + vec2(5.0, 2.0), g, Color32::WHITE);
-                resp.on_hover_text("Scroll to zoom, drag to move, double-click for actual pixels or fit");
+                // A video's frame: a play button over it.
+                let video = crate::media::media_of(&e.name) == Some(crate::media::Media::Video) && !crate::fsys::remote::is_remote(path) && !crate::fsys::archive::inside(path);
+                if !video {
+                    resp.on_hover_text("Scroll to zoom, drag to move, double-click for actual pixels or fit");
+                } else {
+                    let br = Rect::from_center_size(r.center(), vec2(56.0, 56.0));
+                    let b = ui.interact(br, ui.id().with(("play-video", path)), Sense::click());
+                    let p = ui.painter();
+                    p.circle_filled(br.center(), 28.0, Color32::from_black_alpha(if b.hovered() { 200 } else { 150 }));
+                    let c = br.center() + vec2(3.0, 0.0);
+                    p.add(egui::Shape::convex_polygon(vec![c + vec2(-9.0, -13.0), c + vec2(13.0, 0.0), c + vec2(-9.0, 13.0)], Color32::WHITE, Stroke::NONE));
+                    let tip = if cfg!(target_os = "macos") { "Play in Quick Look (Space or Esc closes it)" } else { "Play in your video app" };
+                    if b.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
+                        let v = path.to_path_buf();
+                        self.files.spawn(move || crate::media::play_video(&v));
+                    }
+                }
             }
             Content::Text { text, truncated } => {
                 let truncated = *truncated;
