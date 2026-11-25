@@ -16,6 +16,7 @@ use super::*;
 use crate::fsys::listing::Entry;
 use eframe::egui::Vec2;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::time::Instant;
 
 /// Tiles start to show a preview at this size (points) and show it fully at `FULL`.
@@ -39,7 +40,22 @@ pub(super) struct TilePreviews {
     /// A two-tone check, repeated behind pictures so transparent parts show as transparent
     /// rather than taking the tile's colour.
     checker: Option<egui::TextureHandle>,
+    /// The video tile under the pointer, playing silently on the tile.
+    hover_video: Option<HoverVideo>,
+    /// A video tile the pointer has just come to rest on, and since when.
+    hover_wait: Option<(PathBuf, Instant)>,
 }
+
+struct HoverVideo {
+    path: PathBuf,
+    video: crate::video::Video,
+    tex: Option<egui::TextureHandle>,
+    serial: u64,
+}
+
+/// How long the pointer rests on a video tile before it plays (so sweeping across the map
+/// doesn't start one after another).
+const HOVER_PLAY_AFTER: f32 = 0.35;
 
 impl Default for TilePreviews {
     fn default() -> Self {
@@ -48,6 +64,8 @@ impl Default for TilePreviews {
             sharp: Thumbs::with(Config { max: SHARP, local_only: true, text: false, budget: 160 << 20 }),
             born: HashMap::new(),
             checker: None,
+            hover_video: None,
+            hover_wait: None,
         }
     }
 }
@@ -65,6 +83,7 @@ pub(super) fn readable_here(n: &Node) -> bool {
 enum Got {
     Tex(egui::TextureId, Vec2),
     Text(Arc<str>),
+    Wave(Arc<[f32]>),
 }
 
 fn smooth(a: f32, b: f32, x: f32) -> f32 {
@@ -75,14 +94,18 @@ fn smooth(a: f32, b: f32, x: f32) -> f32 {
 impl App {
     /// Draw previews on the file tiles big enough for one. Returns the tiles (paths from the
     /// folder on show) that got one, so their names are drawn on the preview's caption instead.
-    pub(super) fn draw_tile_previews(&mut self, painter: &egui::Painter, tree: &Node, root: &[u32], bounds: Rect) -> HashSet<Vec<u32>> {
+    /// A video tile under the pointer (`hover`, a path from the folder on show) plays silently.
+    pub(super) fn draw_tile_previews(&mut self, painter: &egui::Painter, tree: &Node, root: &[u32], bounds: Rect, hover: Option<&[u32]>) -> HashSet<Vec<u32>> {
         let mut shown = HashSet::new();
         let ctx = painter.ctx().clone();
         self.tile_prev.small.poll(&ctx);
         self.tile_prev.sharp.poll(&ctx);
         if !self.settings.tile_previews || self.map.in_transition() {
+            self.tile_prev.hover_video = None;
+            self.tile_prev.hover_wait = None;
             return shown;
         }
+        let mut hover_seen = false;
         let Some(zroot) = tree.at(root) else { return shown };
         let mut tiles: Vec<(Rect, Vec<u32>, f32)> = self
             .map
@@ -112,8 +135,10 @@ impl App {
                 let pick = |p: &Pic| match p {
                     Pic::Tex(t) => Got::Tex(t.id(), t.size_vec2()),
                     Pic::Text(s) => Got::Text(s.clone()),
+                    Pic::Wave(w) => Got::Wave(w.clone()),
                 };
-                let sharp = if big && thumbs::text_kind(&n.name).is_none() { tp.sharp.pic(&path, stamp, n.logical).map(pick) } else { None };
+                let sound = crate::media::media_of(&n.name) == Some(crate::media::Media::Audio);
+                let sharp = if big && !sound && thumbs::text_kind(&n.name).is_none() { tp.sharp.pic(&path, stamp, n.logical).map(pick) } else { None };
                 match sharp {
                     Some(g) => Some(g),
                     None => tp.small.pic(&path, stamp, n.logical).map(pick),
@@ -121,7 +146,7 @@ impl App {
             };
             let Some(got) = got else { continue };
             let born = *tp.born.entry(path.clone()).or_insert(now);
-            seen.insert(path);
+            seen.insert(path.clone());
             let fade_in = (now.duration_since(born).as_secs_f32() / FADE_IN).min(1.0);
             fading |= fade_in < 1.0;
             let alpha = a * fade_in * smooth(MIN.x, FULL.x, r.width()) * smooth(MIN.y, FULL.y, r.height());
@@ -137,6 +162,14 @@ impl App {
             }
             let p = painter.with_clip_rect(clip);
             let pdf = crate::media::media_of(&n.name) == Some(crate::media::Media::Pdf);
+            // The video under the pointer plays on its tile, silently, round and round.
+            let mut got = got;
+            if hover == Some(&rel[..]) && alpha > 0.9 && crate::media::media_of(&n.name) == Some(crate::media::Media::Video) && crate::video::supported() {
+                hover_seen = true;
+                if let Some(frame) = self.hover_video_frame(&ctx, &path, now) {
+                    got = frame;
+                }
+            }
             match got {
                 Got::Tex(id, size) if pdf => {
                     // A page: all of it, on a dark backdrop.
@@ -161,6 +194,23 @@ impl App {
                     let (fx, fy) = (inner.width() / (size.x * s), inner.height() / (size.y * s));
                     let uv = Rect::from_center_size(pos2(0.5, 0.5), vec2(fx, fy));
                     p.image(id, inner, uv, Color32::WHITE.gamma_multiply(alpha));
+                }
+                Got::Wave(w) => {
+                    // A sound: its waveform in the tile's colour, on a dark version of it.
+                    let c = self.node_color(n, &abs);
+                    p.rect_filled(inner, 2.0, style::blend(Color32::from_rgb(14, 15, 18), c, 0.22).gamma_multiply(alpha));
+                    let strip = if inner.height() >= 60.0 { 22.0 } else { 0.0 };
+                    let area = Rect::from_min_max(inner.min + vec2(6.0, 6.0), pos2(inner.max.x - 6.0, inner.max.y - 6.0 - strip));
+                    let bars = ((area.width() / 3.0) as usize).clamp(8, w.len().max(8));
+                    let bw = area.width() / bars as f32;
+                    let mid = area.center().y;
+                    let ink = style::blend(c, Color32::WHITE, 0.15).gamma_multiply(alpha);
+                    for i in 0..bars {
+                        let v = w[i * w.len() / bars];
+                        let h = (v * area.height() * 0.5).max(0.75);
+                        let x = area.left() + i as f32 * bw;
+                        p.rect_filled(Rect::from_min_max(pos2(x + bw * 0.15, mid - h), pos2(x + bw * 0.85, mid + h)), 1.0, ink);
+                    }
                 }
                 Got::Text(text) => {
                     // A page of text, as much as fits; the type grows as the tile does.
@@ -191,6 +241,10 @@ impl App {
             }
         }
         let tp = &mut self.tile_prev;
+        if !hover_seen {
+            tp.hover_video = None;
+            tp.hover_wait = None;
+        }
         tp.born.retain(|p, _| seen.contains(p));
         tp.small.flush();
         tp.sharp.flush();
@@ -198,6 +252,45 @@ impl App {
             ctx.request_repaint();
         }
         shown
+    }
+
+    /// The newest picture of the video playing under the pointer, starting it once the pointer
+    /// has rested there a moment.
+    fn hover_video_frame(&mut self, ctx: &egui::Context, path: &Path, now: Instant) -> Option<Got> {
+        let tp = &mut self.tile_prev;
+        if tp.hover_video.as_ref().is_some_and(|h| h.path != path) {
+            tp.hover_video = None;
+        }
+        if tp.hover_video.is_none() {
+            match &tp.hover_wait {
+                Some((p, since)) if p == path => {
+                    if now.duration_since(*since).as_secs_f32() < HOVER_PLAY_AFTER {
+                        ctx.request_repaint_after(std::time::Duration::from_millis(60));
+                        return None;
+                    }
+                }
+                _ => {
+                    tp.hover_wait = Some((path.to_path_buf(), now));
+                    ctx.request_repaint_after(std::time::Duration::from_millis(60));
+                    return None;
+                }
+            }
+            let c = ctx.clone();
+            let video = crate::video::Video::start(path, false, move || c.request_repaint());
+            tp.hover_video = Some(HoverVideo { path: path.to_path_buf(), video, tex: None, serial: 0 });
+        }
+        let h = tp.hover_video.as_mut()?;
+        if h.video.state().ended {
+            h.video.play();
+        }
+        if let Some(f) = h.video.take_frame(&mut h.serial) {
+            let img = egui::ColorImage::from_rgba_unmultiplied(f.size, &f.rgba);
+            match &mut h.tex {
+                Some(t) => t.set(img, egui::TextureOptions::LINEAR),
+                None => h.tex = Some(ctx.load_texture("tile-video", img, egui::TextureOptions::LINEAR)),
+            }
+        }
+        h.tex.as_ref().map(|t| Got::Tex(t.id(), t.size_vec2()))
     }
 
     // ---------- the Storage Analysis preview pane ----------

@@ -60,7 +60,8 @@ by: Age** or **Change** only the totals line is shown, since the colours then me
 ## Previews on tiles
 
 As you zoom in, a file's rectangle that grows big enough shows what's in the file instead of a
-plain colour: a picture fills it, a video shows a frame, a PDF shows its first page, and text
+plain colour: a picture fills it, a video shows a frame (rest the pointer on it and it plays,
+silently, until you move away), a sound shows its waveform, a PDF shows its first page, and text
 files, code and Word or OpenDocument documents show their first lines. The file's name and size
 move to a dark strip along the bottom, and a thin edge of the type colour stays round it.
 Transparent parts of pictures show a grey check pattern, not the tile's colour. Bigger

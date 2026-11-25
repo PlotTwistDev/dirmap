@@ -2433,7 +2433,7 @@ impl App {
 
         let modern = self.view().tile_style == TileStyle::Modern;
         // Zoomed-in tiles big enough show what's in the file; their names go on the preview.
-        let previewed = self.draw_tile_previews(&painter, &tree, &root, bounds);
+        let previewed = self.draw_tile_previews(&painter, &tree, &root, bounds, frame.hover.as_ref().map(|h| &h.0[..]));
         // Modern: name and size written straight on the tile, as on the website.
         if self.view().show_labels && modern {
             let labels: Vec<(Rect, Vec<u32>, f32)> = self

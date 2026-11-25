@@ -5,12 +5,14 @@
 ### See what's in files on the map
 
 - Zoom in on the treemap and tiles big enough show what's in the file: pictures, video frames,
-  a PDF's first page, and the first lines of text, code and Word or OpenDocument documents.
+  a PDF's first page, a sound's waveform, and the first lines of text, code and Word or
+  OpenDocument documents. Rest the pointer on a video tile and it plays there, silently.
   They load in the background and never download cloud files. See
   [Previews on tiles](../views/treemap.md#previews-on-tiles).
 - Storage Analysis has a preview pane beside the map: click a tile to see its preview and details
   (bytes, size on disk, share of the analysis, how a cloud file is stored, and a folder's largest
-  items). **Alt+P** shows or hides it. Word and OpenDocument files now preview as text in both
+  items). **Alt+P** shows or hides it. Videos play right in the preview panes, and on macOS
+  sound now pauses at once and can jump to any point. Word and OpenDocument files now preview as text in both
   workspaces.
 
 ### What system files and folders are

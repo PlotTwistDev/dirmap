@@ -733,7 +733,7 @@ impl App {
         if start_video {
             if crate::video::supported() {
                 let ctx = ui.ctx().clone();
-                let video = crate::video::Video::start(path, move || ctx.request_repaint());
+                let video = crate::video::Video::start(path, true, move || ctx.request_repaint());
                 self.files.look.video = Some(VideoView { video, tex: None, serial: 0 });
             } else {
                 let v = path.to_path_buf();

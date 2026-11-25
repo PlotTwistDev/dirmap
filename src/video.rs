@@ -80,8 +80,9 @@ pub struct Video {
 }
 
 impl Video {
-    /// Open a video and start playing it. `repaint` is called whenever a new frame is due.
-    pub fn start(path: &Path, repaint: impl Fn() + Send + 'static) -> Video {
+    /// Open a video and start playing it, with its sound or silently. `repaint` is called
+    /// whenever a new frame is due.
+    pub fn start(path: &Path, sound: bool, repaint: impl Fn() + Send + 'static) -> Video {
         let (tx, rx) = mpsc::channel();
         let shared = Arc::new(Mutex::new(Shared::default()));
         let (p, s) = (path.to_path_buf(), shared.clone());
@@ -89,7 +90,7 @@ impl Video {
         let _ = tx.send(Cmd::Play);
         // The sound: the system's player reads the same file (not on Windows yet, where the
         // only player at hand would open a window of its own).
-        let sound = (!cfg!(windows)).then(|| crate::media::Player::start(path));
+        let sound = (sound && !cfg!(windows)).then(|| crate::media::Player::start(path));
         Video { tx, shared, sound, path: path.to_path_buf() }
     }
 

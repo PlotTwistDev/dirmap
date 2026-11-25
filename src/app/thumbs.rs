@@ -4,7 +4,7 @@
 //! recently drawn going first. The UI thread never reads a file.
 //!
 //! The treemap's tile previews use the same machinery with their own caches (bigger pictures,
-//! local files only, and text snippets as well as pictures): see `tilepreview.rs`.
+//! local files only, text snippets and sound waveforms as well as pictures): see `tilepreview.rs`.
 
 use super::preview::{self, Kind};
 use eframe::egui::{self, TextureHandle};
@@ -43,12 +43,18 @@ struct Job {
 pub(super) enum Pic {
     Tex(TextureHandle),
     Text(Arc<str>),
+    /// A sound's loudness along it (see `crate::wave`).
+    Wave(Arc<[f32]>),
 }
 
 enum Decoded {
     Image(egui::ColorImage),
     Text(String),
+    Wave(Vec<f32>),
 }
+
+/// Stretches in a sound's waveform.
+const WAVE_BARS: usize = 240;
 
 /// How a cache decodes: the Icons view's default, or the treemap's.
 #[derive(Clone, Copy)]
@@ -189,6 +195,11 @@ impl Thumbs {
                     self.bytes += bytes;
                     Slot::Ready { pic: Pic::Text(t.into()), stamp, bytes, used: Cell::new(self.frame) }
                 }
+                Some(Decoded::Wave(w)) => {
+                    let bytes = w.len() * 4;
+                    self.bytes += bytes;
+                    Slot::Ready { pic: Pic::Wave(w.into()), stamp, bytes, used: Cell::new(self.frame) }
+                }
                 None => Slot::Failed(stamp),
             };
             if let Some(Slot::Ready { bytes, .. }) = self.cache.insert(path, slot) {
@@ -261,6 +272,13 @@ impl Thumbs {
 fn decode(job: &Job, config: Config) -> Option<Decoded> {
     let name = job.path.to_string_lossy();
     let kind = preview::kind_of(&name);
+    // The map: a sound's waveform rather than a cover or an icon.
+    if config.text && kind == Kind::Media(crate::media::Media::Audio) {
+        if config.local_only && !is_local(&job.path) {
+            return None;
+        }
+        return crate::wave::peaks(&job.path, WAVE_BARS).ok().map(Decoded::Wave);
+    }
     if config.text && let Some(doc) = text_kind(&job.path.file_name()?.to_string_lossy()) {
         if config.local_only && !is_local(&job.path) {
             return None;
