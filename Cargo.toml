@@ -38,6 +38,7 @@ tar = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "io-util"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs", "deflate64", "lzma", "xz", "bzip2", "ppmd"] }
+resvg = "0.50"
 
 [features]
 default = []
@@ -67,5 +68,5 @@ objc2 = { version = "0.6", features = ["exception"] }
 debug = "line-tables-only"
 
 # Puts the app icon (packaging/filescape.ico) into filescape.exe.
-[target.'cfg(windows)'.build-dependencies]
+[target."cfg(windows)".build-dependencies]
 winresource = "0.1"

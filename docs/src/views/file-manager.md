@@ -463,13 +463,14 @@ the next. The selection stays as it is.
 | Kind | What you see |
 |---|---|
 | Images | PNG, JPEG, GIF, WebP, TIFF, BMP, TGA, ICO, QOI, PNM, and HDR and OpenEXR (shown with a standard display curve). Transparent areas show a checkerboard. |
+| Drawings | SVG and SVGZ, drawn sharp at any zoom. **Source** shows the markup. Only what's in the file is drawn: pictures it links to elsewhere are left out. |
 | Text | Text and source files, the first 256 KB, in UTF-8 or UTF-16 (as PowerShell and many Windows tools write). |
 | Videos | A frame from the video, made by the system (see below), with a play button: it plays right there, with a bar to jump about; click the picture to pause. **Open** plays it in Quick Look on macOS or your usual player elsewhere. It stops when you move to another file. |
 | Word and OpenDocument | The text of .docx and .odt documents. |
 | PDFs | The first page, made by the system. |
 | Sound | MP3, WAV, FLAC, M4A, AAC, OGG and others: **▶ Play** plays it here, **⏸ Pause** pauses it, and on Windows and macOS the bar under it jumps to any point. It stops when you move to another file. |
 | Archives | What's inside: every file and folder, with sizes. |
-| Other files | The file's details, and **Open**. |
+| Other files | The file's details, and **Open**. A file with a missing or unknown extension that is really a picture, video, sound or PDF (judged by its first bytes) is previewed as one. |
 
 Pictures of videos and PDFs, and sound, come from your system, so they work for whatever it
 supports:

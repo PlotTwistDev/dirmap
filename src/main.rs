@@ -41,6 +41,7 @@ mod scan;
 mod sequences;
 mod snapshot;
 mod sunburst;
+mod svg;
 mod templates;
 mod tilegpu;
 mod video;

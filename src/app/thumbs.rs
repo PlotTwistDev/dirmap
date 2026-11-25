@@ -30,7 +30,7 @@ pub(super) fn stamp(size: u64, modified: i64) -> u64 {
 /// Whether a file of this name gets a thumbnail: images, and videos, PDFs and sound (album
 /// covers) where the system can make a picture of them.
 pub(super) fn wants_thumb(name: &str) -> bool {
-    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Media(_))
+    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Media(_))
 }
 
 struct Job {
@@ -287,7 +287,7 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
     }
     let local = if crate::fsys::remote::is_remote(&job.path) {
         // On a server: only pictures, fetched when they're small enough (never for the map).
-        if !config.local_only && matches!(kind, Kind::Image | Kind::LinearImage) && job.size <= REMOTE_MAX { crate::fsys::remote::fetch(&job.path, REMOTE_MAX).ok()? } else { return None }
+        if !config.local_only && matches!(kind, Kind::Image | Kind::LinearImage | Kind::Drawing) && job.size <= REMOTE_MAX { crate::fsys::remote::fetch(&job.path, REMOTE_MAX).ok()? } else { return None }
     } else if config.local_only && !is_local(&job.path) {
         return None;
     } else {
@@ -297,6 +297,7 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
     match kind {
         Kind::Media(_) => crate::media::thumbnail(&local, max).ok().map(|(w, h, rgba)| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba))),
         Kind::Image | Kind::LinearImage => preview::decode_image(&local, kind == Kind::LinearImage, job.size, max).ok().map(|r| Decoded::Image(r.0)),
+        Kind::Drawing => crate::svg::render(&local, max).ok().map(|d| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([d.width as usize, d.height as usize], &d.rgba))),
         _ => None,
     }
 }
@@ -320,8 +321,6 @@ pub(super) fn text_kind(name: &str) -> Option<TextKind> {
     match f.id {
         "docx" => Some(TextKind::Docx),
         "odt" => Some(TextKind::Odt),
-        // SVG is drawn as text in previews, but as a tile its markup isn't worth reading.
-        "svg" => None,
         _ => (f.category == crate::formats::Category::Text).then_some(TextKind::Plain),
     }
 }
