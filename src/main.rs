@@ -35,6 +35,7 @@ mod known;
 mod kit;
 mod licence;
 mod gguf;
+mod health;
 mod inspect;
 mod models;
 mod mapview;
