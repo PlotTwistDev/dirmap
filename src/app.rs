@@ -2449,16 +2449,23 @@ impl App {
         let modern = self.view().tile_style == TileStyle::Modern;
         // Zoomed-in tiles big enough show what's in the file; their names go on the preview.
         let previewed = self.draw_tile_previews(&painter, &tree, &root, bounds, frame.hover.as_ref().map(|h| &h.0[..]));
+        // Tiles with room for a name (asked for once a frame: it moves the names' fading on).
+        let cloud_marks = self.view().cloud_icons && tree.flags & scan::store::NOT_LOCAL != 0;
+        // Room kept clear of names in the top right corner for the cloud mark.
+        let marked = |r: Rect, n: &Node| cloud_marks && !n.is_dir && n.flags & scan::store::NOT_LOCAL != 0 && r.width() >= 30.0 && r.height() >= 20.0;
+        let name_clip = |r: Rect, n: &Node, inset: f32| {
+            let c = r.shrink(inset);
+            if marked(r, n) { Rect::from_min_max(c.min, pos2((r.right() - 24.0).max(c.left()), c.bottom())) } else { c }
+        };
+        let all_labels: Vec<(Rect, Vec<u32>, f32)> = if self.view().show_labels || cloud_marks {
+            self.map.labels(bounds).into_iter().take(2500).map(|(r, l, a)| (r, l.path.clone(), a)).collect()
+        } else {
+            Vec::new()
+        };
         // Modern: name and size written straight on the tile, as on the website.
         if self.view().show_labels && modern {
-            let labels: Vec<(Rect, Vec<u32>, f32)> = self
-                .map
-                .labels(bounds)
-                .into_iter()
-                .filter(|(r, l, _)| r.width() >= 80.0 && r.height() >= 22.0 && !previewed.contains(&l.path))
-                .take(2500)
-                .map(|(r, l, a)| (r, l.path.clone(), a))
-                .collect();
+            let labels: Vec<(Rect, Vec<u32>, f32)> =
+                all_labels.iter().filter(|(r, path, _)| r.width() >= 80.0 && r.height() >= 22.0 && !previewed.contains(path)).cloned().collect();
             let name_font = FontId::monospace(12.0);
             let size_font = FontId::monospace(11.0);
             for (r, path, a) in labels {
@@ -2469,7 +2476,7 @@ impl App {
                 let c = self.node_color(n, &abs);
                 let lum = (0.2126 * c.r() as f32 + 0.7152 * c.g() as f32 + 0.0722 * c.b() as f32) / 255.0;
                 let ink = if lum > 0.42 { Color32::from_rgb(10, 10, 12) } else { Color32::WHITE };
-                let p = painter.with_clip_rect(r.shrink(2.0).intersect(painter.clip_rect()));
+                let p = painter.with_clip_rect(name_clip(r, n, 2.0).intersect(painter.clip_rect()));
                 let at = r.min + vec2(6.0, 6.0);
                 p.text(at, Align2::LEFT_TOP, &*n.name, name_font.clone(), ink.gamma_multiply(0.86 * a));
                 if r.height() >= 36.0 {
@@ -2485,15 +2492,14 @@ impl App {
 
         // File names on tiles with room for them, fading in with size.
         if self.view().show_labels && !modern {
-            let labels = self.map.labels(bounds);
-            for (r, l, a) in labels.into_iter().take(2500) {
-                if previewed.contains(&l.path) {
+            for &(r, ref path, a) in &all_labels {
+                if previewed.contains(path) {
                     continue;
                 }
-                let Some(n) = zroot.at(&l.path) else { continue };
+                let Some(n) = zroot.at(path) else { continue };
                 // Bigger tiles get bigger names, so zooming in helps.
                 let font = FontId::proportional((r.width().min(r.height() * 2.0) / 10.0).clamp(11.0, 17.0));
-                let p = painter.with_clip_rect(r.shrink(1.0).intersect(painter.clip_rect()));
+                let p = painter.with_clip_rect(name_clip(r, n, 1.0).intersect(painter.clip_rect()));
                 let at = r.min + vec2(3.0, 2.0);
                 // White text on a dark chip reads on any tile, however it's coloured or lit.
                 let name = p.layout_no_wrap(n.name.to_string(), font.clone(), Color32::WHITE);
@@ -2507,6 +2513,23 @@ impl App {
                 if let Some(g) = size {
                     p.galley_with_override_text_color(at + vec2(0.0, name.size().y), g, Color32::from_white_alpha(215).gamma_multiply(sa));
                 }
+            }
+        }
+
+        // A cloud in the top right corner of files that aren't (all) on this computer, as in the
+        // lists: online only, or partly downloaded (half-filled cloud).
+        if cloud_marks {
+            for &(r, ref path, a) in &all_labels {
+                if previewed.contains(path) {
+                    continue;
+                }
+                let Some(n) = zroot.at(path).filter(|n| marked(r, n)) else { continue };
+                let icon = if n.flags & scan::store::ONLINE_ONLY != 0 { crate::kit::icons::Icon::Cloud } else { crate::kit::icons::Icon::CloudHalf };
+                let at = Rect::from_min_size(pos2(r.right() - 22.0, r.top() + 4.0), vec2(18.0, 18.0));
+                let p = painter.with_clip_rect(r.shrink(1.0).intersect(painter.clip_rect()));
+                // On a dark disc so it reads on any tile colour, like the names' chips.
+                p.circle_filled(at.center(), 9.5, Color32::from_black_alpha((130.0 * a) as u8));
+                crate::kit::icons::paint(&p, at.shrink(2.5), icon, Color32::from_white_alpha(235).gamma_multiply(a));
             }
         }
 
