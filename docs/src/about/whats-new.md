@@ -2,6 +2,19 @@
 
 ## Next version
 
+### What system files and folders are
+
+- Filescape explains the files and folders you didn't make and whose names say little:
+  `pagefile.sys`, `hiberfil.sys`, `WinSxS`, `System Volume Information`, `.Spotlight-V100`, the
+  sleep image, `/proc`, the systemd journal, snap and Flatpak, and about 170 more on Windows,
+  macOS, Linux and removable drives. It says what each one is, whether it's safe to delete, and
+  how to make it smaller safely. The guide is built in and works offline.
+- An info icon after the name in the file manager, the Storage Analysis list and the tree (hover
+  it), a *What is this?* box in the preview pane, a note in the status bar over the map, and
+  **What Is This?** in the right-click menus. See
+  [What system files and folders are](../disk-usage/system-files.md).
+- Free in every edition.
+
 ### Freeing up cloud space
 
 - **Free Up Space** and **Always Keep on This Device** (Windows), or **Remove Download** and

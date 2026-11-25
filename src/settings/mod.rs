@@ -67,6 +67,9 @@ pub struct Settings {
     pub size_metric: crate::scan::Metric,
     /// Status icons for cloud files (online only, downloaded, pinned…) in the lists and tree.
     pub cloud_icons: bool,
+    /// The info badge after the names of system files and folders Filescape can explain
+    /// (pagefile.sys, WinSxS, .Spotlight-V100, /proc…), with what they are and whether to delete them.
+    pub system_notes: bool,
     /// The bar under the map that splits the scan into local files, downloaded cloud files and
     /// data only in the cloud.
     pub cloud_breakdown: bool,
@@ -151,6 +154,7 @@ impl Default for Settings {
             live_tree: true,
             size_metric: crate::scan::Metric::Disk,
             cloud_icons: true,
+            system_notes: true,
             cloud_breakdown: true,
             cloud_column: true,
             cloud_confirm: true,
@@ -235,8 +239,8 @@ impl Settings {
         let def = Settings::default();
         match page {
             Tab::General => {
-                (self.theme, self.units, self.stripes, self.live_tree, self.check_updates, self.ui_scale) =
-                    (def.theme, def.units, def.stripes, def.live_tree, def.check_updates, def.ui_scale);
+                (self.theme, self.units, self.stripes, self.live_tree, self.check_updates, self.ui_scale, self.system_notes) =
+                    (def.theme, def.units, def.stripes, def.live_tree, def.check_updates, def.ui_scale, def.system_notes);
             }
             Tab::Filtering => {
                 self.exclude_folders = def.exclude_folders;

@@ -16,6 +16,7 @@ pub const SIZES: &str = "disk-usage/sizes.md";
 pub const PERCENTAGES: &str = "disk-usage/sizes.md#percentages";
 pub const SIZE_METRIC: &str = "disk-usage/sizes.md#size-on-disk-and-logical-size";
 pub const CLOUD_FILES: &str = "disk-usage/cloud-files.md";
+pub const SYSTEM_FILES: &str = "disk-usage/system-files.md";
 pub const FILE_TYPES: &str = "disk-usage/file-types.md#the-file-types-list";
 pub const UNREADABLE: &str = "disk-usage/hidden-and-unreadable.md#unreadable-folders-and-files";
 pub const TREEMAP: &str = "views/treemap.md";
@@ -61,7 +62,7 @@ pub const ABOUT: &str = "about/about.md";
 /// Every constant above, for the tests.
 #[cfg(test)]
 pub const ALL: &[&str] = &[
-    HOME, QUICK_START, INTERFACE, TOOLBAR, SCANNING, WHILE_SCANNING, RESULTS, SIZES, PERCENTAGES, SIZE_METRIC, CLOUD_FILES, FILE_TYPES, UNREADABLE,
+    HOME, QUICK_START, INTERFACE, TOOLBAR, SCANNING, WHILE_SCANNING, RESULTS, SIZES, PERCENTAGES, SIZE_METRIC, CLOUD_FILES, SYSTEM_FILES, FILE_TYPES, UNREADABLE,
     TREEMAP, MAP_SUMMARY, TREEMAP_NAV, ZOOM_TO_SELECTION, BACK_FORWARD, SUNBURST, TREE, BROWSER, FILE_MANAGER, WORKSPACES, ANALYSIS_DOCK, COLOR_MODES, FILTERING, HIGHLIGHT_OR_ONLY,
     CATEGORIES, SYNTAX, EXAMPLES, SEQUENCES, PRESETS, SCAN_FILTERS, HISTOGRAM, DUPLICATES, DUPLICATES_HOW, SNAPSHOTS,
     FILE_OPERATIONS, SETTINGS, SETTINGS_GENERAL, SETTINGS_FILTERING, SETTINGS_FOLDER_LIST, SETTINGS_TREEMAP,

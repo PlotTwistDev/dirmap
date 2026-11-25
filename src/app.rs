@@ -51,6 +51,7 @@ mod thumbs;
 mod views;
 mod summary;
 mod cloud;
+mod explain;
 pub(crate) mod style;
 use files::Workspace;
 
@@ -196,6 +197,8 @@ struct LineView<'a> {
     dim: bool,
     /// Leave room at the end of the name for a cloud status icon.
     badge: bool,
+    /// And for the info badge of a system file or folder.
+    sys: bool,
 }
 
 const ROW_H: f32 = 20.0;
@@ -331,6 +334,8 @@ pub struct App {
     diff_metric: Metric,
     /// "This would download files from the cloud": asked before doing it.
     cloud_ask: Option<cloud::CloudAsk>,
+    /// The "What Is This?" window for a system file or folder.
+    explaining: Option<explain::Explaining>,
 }
 
 impl App {
@@ -435,6 +440,7 @@ impl App {
             metric,
             diff_metric: metric,
             cloud_ask: None,
+            explaining: None,
             needs_full_disk_access: false,
             renderer: if let Some(rs) = &cc.wgpu_render_state {
                 match rs.adapter.get_info().backend {
@@ -758,6 +764,10 @@ impl App {
             (false, _) => fmt_time(n.modified),
         };
         let mut s = format!("{}  ·  {}  ·  {}", full.display(), sizes_text(n, self.metric), what);
+        if let Some(note) = explain::status_note(&full).filter(|_| self.settings.system_notes) {
+            s.push_str("  ·  ");
+            s.push_str(&note);
+        }
         if let Some(d) = self.diff.as_deref().and_then(|(d, _)| d.at(&self.full_of(abs))) {
             let now = n.size_by(self.diff_metric);
             if d.old == snapshot::NEW {
@@ -1128,7 +1138,7 @@ impl App {
         let color = if line.dim { custom::dim(line.color) } else { line.color };
         self.icons.paint(ui, icon, line.is_dir, scan::ext_of(line.name), color);
         x += 21.0;
-        let name_clip = Rect::from_min_max(pos2(x, rect.top()), pos2(rect.left() + name_w - if line.badge { 26.0 } else { 6.0 }, rect.bottom()));
+        let name_clip = Rect::from_min_max(pos2(x, rect.top()), pos2(rect.left() + name_w - 6.0 - 20.0 * (line.badge as u8 + line.sys as u8) as f32, rect.bottom()));
         let np = p.with_clip_rect(name_clip.intersect(p.clip_rect()));
         let galley = np.layout_no_wrap(line.name.to_string(), font.clone(), text_color);
         let text_w = galley.size().x;
@@ -1187,6 +1197,8 @@ impl App {
         }
         let rows = self.rows.take().unwrap();
         let cloud_icons = self.view().cloud_icons;
+        let sys_notes = self.settings.system_notes;
+        let mut explain_pick = None;
         let stored = |n: &Node| if n.is_dir { scan::Stored::of_folder(n.flags) } else { scan::Stored::of(n.flags) };
 
         // Only the rows inside the viewport are laid out, so huge folders stay fast.
@@ -1224,13 +1236,24 @@ impl App {
                         dim_filter.as_ref().is_some_and(|f| !f.matches(n))
                     },
                     badge: cloud_icons && stored(n) != scan::Stored::Local,
+                    sys: false,
                 };
+                let full = self.full_path(&row.path);
+                let sys = if sys_notes { crate::known::explain(&full) } else { None };
+                let line = LineView { sys: sys.is_some(), ..line };
                 let selected = self.selected.as_deref() == Some(&row.path[..]);
                 let arrow = self.paint_line(ui, rect, &line, selected, resp.hovered(), (range.start + k) % 2 == 1);
                 if line.badge {
                     let at = Rect::from_center_size(pos2(rect.left() + self.columns(rect.width())[0].2 - 14.0, rect.center().y), vec2(14.0, 14.0));
                     let tip = || cloud::stored_tip(stored(n), browser::storage_state(n), Some(&self.full_path(&row.path)));
                     cloud::paint_stored(ui, at, stored(n), ui.id().with(("tcloud", &row.path)), tip);
+                }
+                if let Some(kn) = sys {
+                    let shift = if line.badge { 34.0 } else { 14.0 };
+                    let at = Rect::from_center_size(pos2(rect.left() + self.columns(rect.width())[0].2 - shift, rect.center().y), vec2(14.0, 14.0));
+                    if explain::paint_badge(ui, at, kn, ui.id().with(("tsys", &row.path))) {
+                        explain_pick = Some(full.clone());
+                    }
                 }
                 let on_arrow = resp.interact_pointer_pos().is_some_and(|p| arrow.expand2(vec2(4.0, 0.0)).contains(p));
                 if n.is_dir && ((resp.clicked() && on_arrow) || resp.double_clicked()) {
@@ -1249,6 +1272,7 @@ impl App {
                     count: 1,
                     can_paste: false,
                     cloud: cloud::manageable(n),
+                    known: crate::known::about(&full).is_some(),
                 };
                 resp.context_menu(|ui| {
                     if let Some(a) = Self::tree_menu(ui, &info) {
@@ -1258,6 +1282,9 @@ impl App {
             }
         });
         self.rows = Some(rows);
+        if let Some(p) = explain_pick {
+            self.explain_path(p);
+        }
         if let Some(p) = toggled {
             if !self.expanded.remove(&p) {
                 self.expanded.insert(p);
@@ -1385,6 +1412,7 @@ impl App {
                             color: Color32::GRAY,
                             dim: false,
                             badge: false,
+                            sys: false,
                         };
                         self.paint_line(ui, rect, &line, false, resp.hovered(), stripe);
                         if resp.clicked() {
@@ -1405,6 +1433,7 @@ impl App {
                             color: ext_color(&scan::ext_of(name).to_lowercase(), usize::MAX, self.view().tile_style),
                             dim: false,
                             badge: false,
+                            sys: false,
                         };
                         self.paint_line(ui, rect, &line, false, resp.hovered(), stripe);
                     }
@@ -2749,6 +2778,7 @@ impl eframe::App for App {
         self.licence.tick(&ctx);
         self.licence.update_tick(&ctx, self.settings.check_updates);
         self.cloud_ask_ui(&ctx);
+        self.explain_window(&ctx);
         self.licence.prompt(&ctx);
         if std::mem::take(&mut self.licence.ui.open_settings) {
             self.dialog.open_licensing(&self.settings);
