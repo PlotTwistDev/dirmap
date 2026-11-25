@@ -55,10 +55,35 @@ pub(super) enum Content {
     Sheet(Arc<crate::sheets::Book>),
     /// A Word, PowerPoint or OpenDocument file, formatted.
     Doc(Arc<Vec<crate::help::doc::Block>>),
+    /// A PDF: every page, drawn as it comes into view.
+    Pdf(Arc<PdfShown>),
     Binary,
     /// Nothing to show beyond the facts.
     None,
     Error(String),
+}
+
+impl Content {
+    /// More about the file for the details (a photo's camera, a PDF's title and pages).
+    pub(super) fn facts(&self) -> &[(&'static str, String)] {
+        match self {
+            Content::Image { facts, .. } => facts,
+            Content::Pdf(p) => &p.doc.facts,
+            _ => &[],
+        }
+    }
+}
+
+/// A PDF being shown, with its pages as they're drawn.
+pub(super) struct PdfShown {
+    doc: crate::pdfview::Doc,
+    pages: std::sync::Mutex<HashMap<usize, PageSlot>>,
+}
+
+enum PageSlot {
+    Drawing,
+    Ready { width: u32, pixels: Option<egui::ColorImage>, tex: Option<egui::TextureHandle> },
+    Failed,
 }
 
 /// What Quick Look and the preview pane are showing.
@@ -282,6 +307,22 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             info: crate::soundinfo::read(path),
             peaks: crate::wave::peaks(path, WAVE_BARS).ok().map(Into::into),
             cover: None,
+        },
+        // Every page, drawn here; the system's picture of the first page when it can't be.
+        Kind::Media(crate::media::Media::Pdf) => match crate::pdfview::open(path) {
+            Ok(doc) => Content::Pdf(Arc::new(PdfShown { doc, pages: Default::default() })),
+            Err(e) => match crate::media::thumbnail(path, 1024) {
+                Ok((w, h, rgba)) => Content::Image {
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
+                    tex: None,
+                    size: [w as u32, h as u32],
+                    info: "The first page, drawn by the system".into(),
+                    poster: true,
+                    source: None,
+                    facts: Vec::new(),
+                },
+                Err(_) => Content::Error(e),
+            },
         },
         Kind::Media(m) => match crate::media::thumbnail(path, 1024) {
             Ok((w, h, rgba)) => Content::Image {
@@ -693,7 +734,7 @@ impl App {
                 ui.add(egui::Label::new(info.as_str()).wrap());
                 ui.end_row();
             }
-            if let Some(Content::Image { facts, .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+            if let Some(facts) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| c.2.facts()) {
                 for (k, v) in facts {
                     ui.weak(*k);
                     ui.add(egui::Label::new(v.as_str()).wrap());
@@ -924,6 +965,10 @@ impl App {
                 let book = book.clone();
                 sheet_view(ui, path, &book, size);
             }
+            Content::Pdf(shown) => {
+                let shown = shown.clone();
+                pdf_view(ui, path, &shown, size);
+            }
             Content::Doc(blocks) => {
                 let blocks = blocks.clone();
                 let pal = style::pal(ui);
@@ -1148,6 +1193,95 @@ fn coloured_job(text: &str, spans: &[crate::highlight::Span], plain: Color32) ->
         job.append(&text[at..], 0.0, fmt(plain, false));
     }
     job
+}
+
+/// Every page of a PDF in a column to scroll through. Pages are drawn on worker threads as they
+/// come into view, at the width shown, and let go of again once well out of view.
+fn pdf_view(ui: &mut egui::Ui, path: &Path, shown: &Arc<PdfShown>, size: Vec2) {
+    const GAP: f32 = 10.0;
+    let pal = style::pal(ui);
+    let ppp = ui.ctx().pixels_per_point();
+    let n = shown.doc.sizes.len();
+    egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        ui.set_min_size(size - vec2(16.0, 16.0));
+        ui.set_max_size(size - vec2(16.0, 16.0));
+        let width = ui.available_width() - 4.0;
+        let heights: Vec<f32> = shown.doc.sizes.iter().map(|[w, h]| width * h / w).collect();
+        let total = heights.iter().sum::<f32>() + GAP * n.saturating_sub(1) as f32;
+        let out = egui::ScrollArea::vertical().id_salt(("look-pdf", path)).auto_shrink(false).show_viewport(ui, |ui, view| {
+            let (r, _) = ui.allocate_exact_size(vec2(width, total), Sense::hover());
+            let want = ((width * ppp).round() as u32).clamp(64, 2400);
+            let near = view.expand2(vec2(0.0, view.height()));
+            let keep = view.expand2(vec2(0.0, view.height() * 3.0));
+            let mut pages = shown.pages.lock().unwrap();
+            let mut started = 0;
+            let mut current = 0;
+            let mut y = 0.0;
+            for (i, h) in heights.iter().enumerate() {
+                let local = Rect::from_min_size(pos2(0.0, y), vec2(width, *h));
+                let pr = Rect::from_min_size(r.min + vec2(0.0, y), vec2(width, *h));
+                y += h + GAP;
+                if local.center().y <= view.center().y || i == 0 {
+                    current = i;
+                }
+                if !local.intersects(keep) {
+                    if matches!(pages.get(&i), Some(PageSlot::Ready { .. } | PageSlot::Failed)) {
+                        pages.remove(&i);
+                    }
+                    continue;
+                }
+                // Drawn again when the pane has grown or shrunk a lot since.
+                let stale = match pages.get(&i) {
+                    None => true,
+                    Some(PageSlot::Ready { width: w, .. }) => (*w as f32 - want as f32).abs() > want as f32 * 0.3,
+                    _ => false,
+                };
+                if stale && local.intersects(near) && started < 4 {
+                    started += 1;
+                    pages.insert(i, PageSlot::Drawing);
+                    let s = shown.clone();
+                    let ctx = ui.ctx().clone();
+                    std::thread::spawn(move || {
+                        let slot = match s.doc.page(i, want) {
+                            Ok((w, h, rgba)) => PageSlot::Ready { width: want, pixels: Some(egui::ColorImage::from_rgba_premultiplied([w, h], &rgba)), tex: None },
+                            Err(_) => PageSlot::Failed,
+                        };
+                        s.pages.lock().unwrap().insert(i, slot);
+                        ctx.request_repaint();
+                    });
+                }
+                if !local.intersects(view) {
+                    continue;
+                }
+                let p = ui.painter();
+                p.rect_filled(pr, 0.0, Color32::WHITE);
+                match pages.get_mut(&i) {
+                    Some(PageSlot::Ready { pixels, tex, .. }) => {
+                        if let Some(px) = pixels.take() {
+                            *tex = Some(ui.ctx().load_texture(format!("pdf:{}:{i}", path.display()), px, egui::TextureOptions::LINEAR));
+                        }
+                        if let Some(t) = tex {
+                            p.image(t.id(), pr, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                        }
+                    }
+                    Some(PageSlot::Failed) => {
+                        p.text(pr.center(), egui::Align2::CENTER_CENTER, "This page couldn't be drawn", FontId::proportional(12.0), Color32::GRAY);
+                    }
+                    _ => {
+                        ui.put(Rect::from_center_size(pr.center(), vec2(20.0, 20.0)), egui::Spinner::new().color(Color32::GRAY));
+                    }
+                }
+            }
+            current
+        });
+        // Which page is in the middle of the view, over the bottom left corner.
+        let label = format!("Page {} of {}", out.inner + 1, group(n as u64));
+        let g = ui.painter().layout_no_wrap(label, FontId::proportional(11.0), Color32::WHITE);
+        let r = out.inner_rect;
+        let lr = Rect::from_min_size(r.left_bottom() + vec2(6.0, -g.size().y - 10.0), g.size() + vec2(10.0, 4.0));
+        ui.painter().rect_filled(lr, 3.0, Color32::from_black_alpha(150));
+        ui.painter().galley(lr.min + vec2(5.0, 2.0), g, Color32::WHITE);
+    });
 }
 
 /// Blocks drawn with the Help Centre's renderer. Web links open in the browser; links to other

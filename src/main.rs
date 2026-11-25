@@ -36,6 +36,7 @@ mod licence;
 mod mapview;
 mod netdrives;
 mod officedoc;
+mod pdfview;
 mod pattern;
 mod player;
 mod psdview;

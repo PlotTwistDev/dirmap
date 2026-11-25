@@ -45,6 +45,12 @@ pub type Picture = (usize, usize, Vec<u8>);
 /// A picture of the file from the system (a video's poster frame, a PDF's first page, an
 /// album cover), no larger than `max` across.
 pub fn thumbnail(path: &Path, max: u32) -> Result<Picture, String> {
+    // PDFs are drawn here, the same on every system; the system's picture when they can't be.
+    if media_of(&path.to_string_lossy()) == Some(Media::Pdf)
+        && let Ok(p) = crate::pdfview::first_page(path, max)
+    {
+        return Ok(p);
+    }
     imp::thumbnail(path, max)
 }
 

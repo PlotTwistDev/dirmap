@@ -472,13 +472,13 @@ the next. The selection stays as it is.
 | Videos | A frame from the video, made by the system (see below), with a play button: it plays right there, with a bar to jump about; click the picture to pause. **Open** plays it in Quick Look on macOS or your usual player elsewhere. It stops when you move to another file. |
 | Spreadsheets | Excel (.xlsx, .xlsm, .xlsb, .xls) and OpenDocument (.ods) workbooks: the cells of each sheet, with a switch between sheets, the first 500 rows and 40 columns. The values are those the file was last saved with: formulas aren't worked out and macros never run. |
 | Word, PowerPoint and OpenDocument | Word (.docx) and OpenDocument (.odt) documents formatted: headings, bold and italic, lists and tables. PowerPoint (.pptx) and OpenDocument (.odp) presentations as each slide's title and points. Pictures and layout aren't shown, and macros never run. In Icons view, the picture of the first page or slide that Office or LibreOffice saved with the file, when there is one. Older .doc and .ppt files aren't read. |
-| PDFs | The first page, made by the system. |
+| PDFs | Every page, to scroll through, with the title, author, page count and paper size in the details. Pages are drawn by Filescape as they come into view. A PDF it can't draw (password-protected or damaged) shows the system's picture of its first page instead, where there is one. |
 | Sound | MP3, WAV, FLAC, M4A, AAC, OGG and others: the album cover if the file has one, the waveform, and **▶ Play** / **⏸ Pause**. The waveform fills in as it plays, and on Windows and macOS clicking it (or the bar under the button) jumps to that point. The details show the title, artist, album, year, genre, length and format (sample rate, bit depth, channels, bit rate). It stops when you move to another file. |
 | Archives | What's inside: every file and folder, with sizes. |
 | Other files | The file's details, and **Open**. A file with a missing or unknown extension that is really a picture, video, sound or PDF (judged by its first bytes) is previewed as one. |
 
-Pictures of videos and PDFs, and sound, come from your system, so they work for whatever it
-supports:
+Pictures of videos (and of PDFs Filescape can't draw itself), and sound, come from your system,
+so they work for whatever it supports:
 
 - **Windows:** the same thumbnails as File Explorer for videos, Windows' own PDF renderer for
   PDFs (or a PDF app's thumbnails, when one provides them), video through Media Foundation
