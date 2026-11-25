@@ -3,6 +3,8 @@
 //!   dirmap [PATH]                      open the GUI (and scan PATH if given)
 //!   dirmap --cli PATH [--top N]        print a text report instead
 //!   --logical                          (with --cli) rank by logical size instead of size on disk
+//!   --cloud-only                       (with --cli) rank by data only in the cloud
+//!   --cloud-mounts                     also walk mounted cloud drives (rclone, FUSE) inside PATH
 //!   --all-fs                           descend into other mounted filesystems
 //!   --save-snapshot FILE               (with --cli) also save the scan for later comparison
 //!   --compare FILE                     open the GUI comparing against a saved snapshot
@@ -14,6 +16,7 @@ mod actions;
 mod app;
 mod camera;
 mod categories;
+mod cloud;
 mod drives;
 mod dupes;
 mod elevate;
@@ -62,13 +65,15 @@ fn main() -> eframe::Result {
             "--cli" => cli = true,
             "--all-fs" => opts.one_file_system = false,
             "--logical" => opts.metric = scan::Metric::Logical,
+            "--cloud-only" => opts.metric = scan::Metric::CloudOnly,
+            "--cloud-mounts" => opts.cloud_mounts = true,
             "--top" => top = args.next().and_then(|s| s.parse().ok()).unwrap_or(top),
             "--save-snapshot" => save_snapshot = args.next().map(PathBuf::from),
             "--compare" => compare = args.next().map(PathBuf::from),
             // Added when Filescape restarts itself as administrator; stops it trying twice.
             elevate::ELEVATED_FLAG => restarted = true,
             "-h" | "--help" => {
-                println!("usage: filescape [--cli [--top N] [--logical] [--save-snapshot FILE]] [--compare FILE] [--all-fs] [PATH]");
+                println!("usage: filescape [--cli [--top N] [--logical | --cloud-only] [--save-snapshot FILE]] [--cloud-mounts] [--compare FILE] [--all-fs] [PATH]");
                 return Ok(());
             }
             _ => path = Some(PathBuf::from(a)),
@@ -157,12 +162,20 @@ fn report(root: &std::path::Path, opts: scan::Options, top: usize, save_snapshot
         progress.errors.load(Ordering::Relaxed)
     );
     let cloud = scan::cloud_tally(&tree);
-    if cloud.online_only > 0 || cloud.partial > 0 {
+    if cloud.any() || cloud.online_only > 0 {
+        let roots = crate::cloud::roots();
+        let mut names: Vec<&str> = crate::cloud::root_of(&roots, root).into_iter().chain(crate::cloud::roots_below(&roots, root)).map(|r| r.provider.name()).collect();
+        names.sort_unstable();
+        names.dedup();
         println!(
-            "Cloud: {} online-only files ({} in the cloud), {} partly downloaded",
+            "Cloud{}: {} files, {} downloaded, {} online-only ({} only in the cloud), {} partly downloaded, {} unknown",
+            if names.is_empty() { String::new() } else { format!(" ({})", names.join(", ")) },
+            cloud.cloud_files,
+            cloud.downloaded,
             cloud.online_only,
             scan::human(cloud.online_bytes),
-            cloud.partial
+            cloud.partial,
+            cloud.unknown
         );
     }
     println!("Sizes below: {} (bytes are {})", opts.metric.label().to_lowercase(), scan::human(tree.size));

@@ -1239,7 +1239,8 @@ fn reread(path: &Path, opts: &Options) -> Option<Node> {
         Some(scan::scan(path, opts, &Progress::default(), &scan::new_live(path)))
     } else if md.is_file() {
         let modified = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0);
-        let (alloc, flags) = scan::on_disk(&md, || path.to_path_buf(), scan::cluster_of(path));
+        let (alloc, mut flags) = scan::on_disk(&md, || path.to_path_buf(), scan::cluster_of(path));
+        flags |= crate::cloud::root_of(&crate::cloud::known(), path).map_or(0, |r| r.bits());
         Some(Node::file(scan::root_name(path), md.len(), alloc, flags, modified, opts.metric))
     } else {
         None

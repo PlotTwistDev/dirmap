@@ -37,7 +37,7 @@ impl Entry {
 
     /// The file's size by the metric chosen in the app (see `scan::metric`).
     pub fn shown_size(&self) -> u64 {
-        crate::scan::metric().pick(self.size, self.alloc)
+        crate::scan::metric().pick(self.size, self.alloc, self.flags)
     }
 
     /// Reading this file would download it from the cloud.
@@ -367,10 +367,15 @@ fn search(
 pub fn entry(e: &fs::DirEntry) -> Option<Entry> {
     let md = e.metadata().ok()?;
     let name: Box<str> = e.file_name().to_string_lossy().into();
-    let is_link = md.file_type().is_symlink() || is_reparse(&md);
+    // Links and junctions only. Cloud placeholders (OneDrive, Dropbox…) are reparse points too,
+    // but the standard library tells them apart by their reparse tag and calls them files.
+    let is_link = md.file_type().is_symlink();
     let is_dir = if md.file_type().is_symlink() { fs::metadata(e.path()).is_ok_and(|t| t.is_dir()) } else { md.is_dir() };
     // Metadata only, as the scan does: listing a cloud folder never downloads its files.
-    let (alloc, flags) = if md.is_file() { crate::scan::on_disk(&md, || e.path(), cluster_for(e)) } else { (0, 0) };
+    let (alloc, mut flags) = if md.is_file() { crate::scan::on_disk(&md, || e.path(), cluster_for(e)) } else { (0, 0) };
+    if md.is_file() {
+        flags |= cloud_for(e);
+    }
     Some(Entry {
         hidden: crate::scan::is_hidden(&name, &md),
         size: if md.is_file() { md.len() } else { 0 },
@@ -404,20 +409,23 @@ fn cluster_for(_e: &fs::DirEntry) -> u64 {
     512
 }
 
+/// `scan::store` bits for files in the cloud folder this entry is in, worked out once per folder.
+fn cloud_for(e: &fs::DirEntry) -> u8 {
+    use std::cell::RefCell;
+    thread_local!(static LAST: RefCell<(PathBuf, u8)> = RefCell::new((PathBuf::new(), 0)));
+    let path = e.path();
+    let dir = path.parent().unwrap_or(&path);
+    LAST.with_borrow_mut(|(d, bits)| {
+        if d.as_path() != dir {
+            *bits = crate::cloud::root_of(&crate::cloud::roots(), dir).map_or(0, |r| r.bits());
+            *d = dir.to_path_buf();
+        }
+        *bits
+    })
+}
+
 fn secs(t: std::io::Result<std::time::SystemTime>) -> i64 {
     t.ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0)
-}
-
-#[cfg(windows)]
-fn is_reparse(md: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    const REPARSE_POINT: u32 = 0x400;
-    md.file_attributes() & REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_reparse(_md: &fs::Metadata) -> bool {
-    false
 }
 
 /// A short, plain explanation of why a folder couldn't be read.

@@ -5,7 +5,7 @@ Windows, run `filescape.exe`; elsewhere `filescape` (or the full path to it).
 
 ```text
 Filescape [PATH]                                  open Filescape and scan PATH
-filescape --cli [--top N] [--logical] [--save-snapshot FILE] [--all-fs] PATH
+filescape --cli [--top N] [--logical | --cloud-only] [--save-snapshot FILE] [--all-fs] [--cloud-mounts] PATH
                                                print a text report instead of opening a window
 filescape --compare FILE [PATH]                   open Filescape comparing with a saved snapshot
 filescape --help                                  show the usage line
@@ -19,6 +19,8 @@ filescape --help                                  show the usage line
 | `--cli` | Don't open a window: scan, print a report and exit. |
 | `--top N` | With `--cli`: how many rows to print in each part of the report (default 15). |
 | `--logical` | With `--cli`: rank and total by logical size instead of size on disk. See [Size on disk and logical size](../disk-usage/sizes.md#size-on-disk-and-logical-size). |
+| `--cloud-only` | With `--cli`: rank and total by data that is in the cloud and not on this computer. See [Cloud files](../disk-usage/cloud-files.md). |
+| `--cloud-mounts` | Also walk into cloud drives mounted inside the folder (rclone, FUSE), which are left out by default. See [Mounted cloud drives](../disk-usage/cloud-files.md#mounted-cloud-drives). |
 | `--save-snapshot FILE` | With `--cli`: also save the scan as a snapshot file for comparing later. |
 | `--compare FILE` | Open the window with this snapshot loaded, so the scan is compared with it. See [Comparing with a snapshot](../analysis/snapshots.md). |
 | `--all-fs` | Include other drives mounted inside the scanned folder (Linux and macOS), for this run only. Overrides **Stay on the scanned drive**. |
@@ -42,9 +44,10 @@ By extension:
 ```
 
 The first line gives the total size on disk and logical size, number of files and folders, how
-long the scan took and how many items couldn't be read. When the folder holds cloud files that
-are only online, a `Cloud:` line says how many and how much isn't downloaded. The rest of the
-report uses sizes on disk, or logical sizes with `--logical`. **Largest entries** lists what is directly inside the scanned folder,
+long the scan took and how many items couldn't be read. When the folder holds cloud files, a
+`Cloud:` line names the services and says how many files are downloaded, online only (and how much
+isn't downloaded), partly downloaded or unknown. The rest of the report uses sizes on disk, or
+logical sizes with `--logical`. **Largest entries** lists what is directly inside the scanned folder,
 largest first, with folders marked `/`. **By extension** lists the extensions using the most
 space. The scan exclusions from the Settings window are not applied on the command line.
 

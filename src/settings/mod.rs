@@ -65,6 +65,19 @@ pub struct Settings {
     /// The size Storage Analysis opens with: on disk (default) or logical. The switch above the
     /// map changes it.
     pub size_metric: crate::scan::Metric,
+    /// Status icons for cloud files (online only, downloaded, pinned…) in the lists and tree.
+    pub cloud_icons: bool,
+    /// The bar under the map that splits the scan into local files, downloaded cloud files and
+    /// data only in the cloud.
+    pub cloud_breakdown: bool,
+    /// The Stored column in the Storage Analysis list, when the scan has cloud files.
+    pub cloud_column: bool,
+    /// Ask before anything Filescape does would download cloud files (previews, players,
+    /// comparisons). Off downloads without asking.
+    pub cloud_confirm: bool,
+    /// Walk into mounted cloud drives (rclone, FUSE, Google Drive's G: drive) found inside a
+    /// scanned folder. A mounted drive that is itself the scanned folder is always scanned.
+    pub cloud_mounts: bool,
     /// Ask filescape.app for the newest version at launch and show a notice when there's a newer
     /// one. Nothing about the user or the computer is sent.
     pub check_updates: bool,
@@ -137,6 +150,11 @@ impl Default for Settings {
             stripes: true,
             live_tree: true,
             size_metric: crate::scan::Metric::Disk,
+            cloud_icons: true,
+            cloud_breakdown: true,
+            cloud_column: true,
+            cloud_confirm: true,
+            cloud_mounts: false,
             check_updates: true,
             ui_scale: 1.0,
             exclude_folders: String::new(),
@@ -258,6 +276,10 @@ impl Settings {
             Tab::Advanced => {
                 (self.one_file_system, self.skip_hidden, self.threads, self.admin) = (def.one_file_system, def.skip_hidden, def.threads, def.admin);
             }
+            Tab::Cloud => {
+                (self.size_metric, self.cloud_icons, self.cloud_breakdown, self.cloud_column, self.cloud_confirm, self.cloud_mounts) =
+                    (def.size_metric, def.cloud_icons, def.cloud_breakdown, def.cloud_column, def.cloud_confirm, def.cloud_mounts);
+            }
             Tab::Licensing => {}
         }
     }
@@ -271,12 +293,13 @@ pub enum Tab {
     Filtering,
     FolderList,
     Treemap,
+    Cloud,
     Advanced,
     Licensing,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [Tab::General, Tab::Filtering, Tab::FolderList, Tab::Treemap, Tab::Advanced, Tab::Licensing];
+    pub const ALL: [Tab; 7] = [Tab::General, Tab::Filtering, Tab::FolderList, Tab::Treemap, Tab::Cloud, Tab::Advanced, Tab::Licensing];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -284,6 +307,7 @@ impl Tab {
             Tab::Filtering => "Filtering",
             Tab::FolderList => "Folder list",
             Tab::Treemap => "Treemap",
+            Tab::Cloud => "Cloud storage",
             Tab::Advanced => "Advanced",
             Tab::Licensing => "Licensing",
         }
@@ -295,6 +319,7 @@ impl Tab {
             Tab::Filtering => Icon::Filter,
             Tab::FolderList => Icon::List,
             Tab::Treemap => Icon::Grid,
+            Tab::Cloud => Icon::Cloud,
             Tab::Advanced => Icon::Sliders,
             Tab::Licensing => Icon::Key,
         }
@@ -306,6 +331,7 @@ impl Tab {
             Tab::Filtering => "Choose what scans skip and what they count. These rules apply from the next scan.",
             Tab::FolderList => "Choose the columns of the folder list in Storage Analysis.",
             Tab::Treemap => "How the treemap looks and moves. Every change previews live in the main window.",
+            Tab::Cloud => "How sizes are counted for cloud files, how their state is shown, and keeping them in the cloud.",
             Tab::Advanced => "Scanner behaviour, performance, permissions and diagnostics.",
             Tab::Licensing => "Your Filescape licence, its activation on this computer, and buying one.",
         }
@@ -447,6 +473,7 @@ impl Dialog {
             Tab::Filtering => topics::SETTINGS_FILTERING,
             Tab::FolderList => topics::SETTINGS_FOLDER_LIST,
             Tab::Treemap => topics::SETTINGS_TREEMAP,
+            Tab::Cloud => topics::SETTINGS_CLOUD,
             Tab::Advanced => topics::SETTINGS_ADVANCED,
             Tab::Licensing => topics::LICENSING,
         }
@@ -586,6 +613,7 @@ impl Dialog {
                                 Tab::Filtering => pages::filtering(ui, &mut cx),
                                 Tab::FolderList => pages::folder_list(ui, &mut cx),
                                 Tab::Treemap => pages::treemap(ui, &mut cx),
+                                Tab::Cloud => pages::cloud(ui, &mut cx),
                                 Tab::Advanced => pages::advanced(ui, &mut cx),
                                 Tab::Licensing => licence.panel(ui, &|id| cx.focus(id)),
                             }

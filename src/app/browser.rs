@@ -60,6 +60,10 @@ enum Col {
     Kind,
     Items,
     Modified,
+    /// The size the switch isn't showing (logical next to on disk, or the other way round).
+    Other,
+    /// Where the data is: online only, downloaded… (scans with cloud files).
+    Stored,
 }
 
 impl Col {
@@ -71,14 +75,30 @@ impl Col {
             Col::Kind => Some(SortKey::Kind),
             Col::Items => Some(SortKey::Items),
             Col::Modified => Some(SortKey::Modified),
+            Col::Other | Col::Stored => None,
+        }
+    }
+
+    fn tip(self) -> &'static str {
+        match self {
+            Col::Share => "Share of this folder's size",
+            Col::Other => "The other size: logical when the switch shows size on disk, size on disk otherwise",
+            Col::Stored => "Where the data is: online only, partly downloaded, downloaded, always kept here, or unknown",
+            _ => "Click to sort; again to reverse",
         }
     }
 
     fn title(self) -> &'static str {
         match self {
             Col::Name => "Name",
-            Col::Size if scan::metric() == scan::Metric::Disk => "On disk",
-            Col::Size => "Size",
+            Col::Size => match scan::metric() {
+                scan::Metric::Disk => "On disk",
+                scan::Metric::Logical => "Size",
+                scan::Metric::CloudOnly => "Cloud only",
+            },
+            Col::Other if scan::metric() == scan::Metric::Disk => "Logical",
+            Col::Other => "On disk",
+            Col::Stored => "Stored",
             Col::Share => "% of folder",
             Col::Kind => "Kind",
             Col::Items => "Items",
@@ -203,17 +223,33 @@ pub(super) fn kind_of(n: &Node) -> String {
 /// What an item is, from its name: "Folder", "PNG image", "File".
 /// Where an item's data is, in words, when it's in the cloud ("Online only", "3 of 40 files only
 /// in the cloud"); None for ordinary local items.
+/// A file's or folder's storage state, for its status icon.
+pub(super) fn stored_of(n: &Node) -> scan::Stored {
+    if n.is_dir { scan::Stored::of_folder(n.flags) } else { scan::Stored::of(n.flags) }
+}
+
 pub(super) fn storage_state(n: &Node) -> Option<String> {
-    use scan::store;
-    if n.flags & store::NOT_LOCAL == 0 {
+    use scan::{Stored, store};
+    if n.flags & (store::NOT_LOCAL | store::CLOUD) == 0 {
         return None;
     }
     if !n.is_dir {
-        return Some(if n.flags & store::ONLINE_ONLY != 0 { "Online only (opening it downloads it)".into() } else { "Partly downloaded".into() });
+        return Some(match Stored::of(n.flags) {
+            Stored::OnlineOnly => "Online only (opening it downloads it)".into(),
+            s => s.label().into(),
+        });
     }
     let t = scan::cloud_tally(n);
     let away = t.online_only + t.partial;
-    Some(format!("{} of {} files only in the cloud ({} not downloaded)", group(away), group(n.files), scan::human(t.online_bytes)))
+    let mut s = if away > 0 {
+        format!("{} of {} files only in the cloud ({} not downloaded)", group(away), group(n.files), scan::human(t.online_bytes))
+    } else {
+        format!("{} cloud files, all downloaded", group(t.cloud_files))
+    };
+    if t.unknown > 0 {
+        s.push_str(&format!("; {} on a mounted drive (stored here: unknown)", group(t.unknown)));
+    }
+    Some(s)
 }
 
 pub(super) fn kind_for(name: &str, is_dir: bool) -> String {
@@ -594,7 +630,7 @@ impl App {
         if self.shown.is_some() || !self.filter.active() {
             return false;
         }
-        if n.is_dir { hits.as_ref().is_some_and(|h| h.at(path).is_none()) } else { !self.filter.matches(&n.name, n.size) }
+        if n.is_dir { hits.as_ref().is_some_and(|h| h.at(path).is_none()) } else { !self.filter.matches(n) }
     }
 
     fn icon_tint(&self, n: &Node, path: &[u32]) -> Color32 {
@@ -1429,10 +1465,14 @@ impl App {
 
     // ---------- List ----------
 
-    fn list_columns(width: f32) -> Vec<(Col, f32)> {
+    fn list_columns(width: f32, cloud: bool) -> Vec<(Col, f32)> {
         let mut cols = vec![(Col::Size, 84.0), (Col::Share, 112.0), (Col::Kind, 130.0), (Col::Items, 72.0), (Col::Modified, 132.0)];
+        if cloud {
+            cols.insert(1, (Col::Other, 84.0));
+            cols.insert(2, (Col::Stored, 128.0));
+        }
         // Narrow windows lose the less important columns first.
-        for drop in [Col::Items, Col::Kind, Col::Share, Col::Modified] {
+        for drop in [Col::Items, Col::Kind, Col::Other, Col::Share, Col::Stored, Col::Modified] {
             if width - cols.iter().map(|c| c.1).sum::<f32>() >= 220.0 {
                 break;
             }
@@ -1447,7 +1487,8 @@ impl App {
         let folder_path = self.browser.folder.clone();
         let Some(folder) = tree.at(&folder_path) else { return };
         let width = ui.available_width();
-        let cols = Self::list_columns(width);
+        let cloud_cols = self.view().cloud_column && tree.flags & (scan::store::CLOUD | scan::store::NOT_LOCAL) != 0;
+        let cols = Self::list_columns(width, cloud_cols);
 
         // Headings.
         let (hdr, _) = ui.allocate_exact_size(vec2(width, ROW), Sense::hover());
@@ -1462,11 +1503,11 @@ impl App {
             let arrow = if !on { "" } else if self.browser.reversed != self.browser.sort.natural_desc() { " ⏷" } else { " ⏶" };
             let color = if resp.hovered() || on { ui.visuals().strong_text_color() } else { ui.visuals().text_color() };
             let (at, align) = match col {
-                Col::Name | Col::Kind | Col::Share => (pos2(cell.left() + 8.0, cell.center().y), Align2::LEFT_CENTER),
+                Col::Name | Col::Kind | Col::Share | Col::Stored => (pos2(cell.left() + 8.0, cell.center().y), Align2::LEFT_CENTER),
                 _ => (pos2(cell.right() - 8.0, cell.center().y), Align2::RIGHT_CENTER),
             };
             ui.painter().text(at, align, format!("{}{arrow}", col.title()), FontId::proportional(13.0), color);
-            if resp.on_hover_text(if col.sort().is_some() { "Click to sort; again to reverse" } else { "Share of this folder's size" }).clicked() {
+            if resp.on_hover_text(col.tip()).clicked() {
                 picks.sort = col.sort();
             }
         }
@@ -1477,6 +1518,7 @@ impl App {
         }
         let hits = self.current_hits();
         let sel_row = self.selected_in(&folder_path).and_then(|s| order.iter().position(|&o| o == s));
+        let cloud_icons = self.view().cloud_icons;
         let mut area = egui::ScrollArea::vertical().id_salt(("blist", &folder_path)).auto_shrink(false);
         if let Some(r) = sel_row.filter(|_| self.browser.scroll_to_sel) {
             area = area.vertical_scroll_offset(keep_in_view(self.browser.view, r as f32 * ROW, ROW));
@@ -1522,7 +1564,15 @@ impl App {
                         Col::Name => {
                             let icon = Rect::from_min_size(pos2(cell.left() + 8.0, cy - 8.0), vec2(16.0, 16.0));
                             self.icons.paint(ui, icon, n.is_dir, n.ext(), tint);
-                            let clip = Rect::from_min_max(pos2(cell.left() + 30.0, rect.top()), pos2(cell.right() - 6.0, rect.bottom()));
+                            let st = stored_of(n);
+                            let mut end = cell.right() - 6.0;
+                            if cloud_icons && st != scan::Stored::Local {
+                                let at = Rect::from_center_size(pos2(cell.right() - 14.0, cy), vec2(14.0, 14.0));
+                                let tip = || cloud::stored_tip(st, storage_state(n), Some(&self.full_path(&path)));
+                                cloud::paint_stored(ui, at, st, ui.id().with(("bcloud", &path)), tip);
+                                end -= 20.0;
+                            }
+                            let clip = Rect::from_min_max(pos2(cell.left() + 30.0, rect.top()), pos2(end, rect.bottom()));
                             let np = p.with_clip_rect(clip.intersect(p.clip_rect()));
                             np.text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &*n.name, font.clone(), tc);
                         }
@@ -1551,6 +1601,23 @@ impl App {
                             if n.modified > 0 {
                                 p.text(right, Align2::RIGHT_CENTER, fmt_time(n.modified), font.clone(), weak);
                             }
+                        }
+                        Col::Other => {
+                            let other = if scan::metric() == scan::Metric::Disk { scan::Metric::Logical } else { scan::Metric::Disk };
+                            let t = if n.flags & scan::store::NO_ALLOC != 0 { "—".into() } else { scan::human(n.size_by(other)) };
+                            p.text(right, Align2::RIGHT_CENTER, t, font.clone(), weak);
+                        }
+                        Col::Stored => {
+                            let st = stored_of(n);
+                            let t = match st {
+                                scan::Stored::Local => "—",
+                                scan::Stored::OnlineOnly if n.is_dir => "Some online only",
+                                scan::Stored::Downloaded if n.is_dir => "All downloaded",
+                                scan::Stored::Unknown if n.is_dir => "Some unknown",
+                                s => s.label(),
+                            };
+                            let clip = cell.shrink2(vec2(6.0, 0.0));
+                            p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(cell.left() + 8.0, cy), Align2::LEFT_CENTER, t, font.clone(), weak);
                         }
                     }
                 }

@@ -2,6 +2,26 @@
 
 ## Next version
 
+### Cloud storage awareness
+
+- Filescape recognises cloud folders and drives: Google Drive, OneDrive, SharePoint, iCloud
+  Drive, Dropbox, Box, Nextcloud, ownCloud, pCloud, MEGA, Synology Drive, and drives mounted with
+  rclone or other FUSE tools. Nothing is installed and no provider is contacted: Filescape looks
+  where these services keep their folders. See [Cloud files](../disk-usage/cloud-files.md).
+- A status icon after the name of each cloud file says whether it's **online only**, **partly
+  downloaded**, **downloaded**, **always kept on this device** or **unknown**; hover it for what
+  that means and which service it belongs to. Shown in the file manager, the Storage Analysis
+  list and the tree.
+- A **storage breakdown** under the map splits a scan into files not in the cloud, downloaded
+  cloud files and data only in the cloud, with the share that is on this computer.
+- A third size, **Cloud only**, on the **Size** switch maps where the data that isn't on this
+  computer is.
+- **Stored** filter chips show only online-only, downloaded, pinned or local files (Professional),
+  and the Storage Analysis list gains **Stored** and other-size columns for cloud scans.
+- A new **Cloud storage** page in Settings, with the default size, the icons and breakdown, asking
+  before downloads, and whether to walk into mounted cloud drives (off by default).
+- On Windows, OneDrive and other cloud placeholders no longer show as links in the file manager.
+
 ### Size on disk, and cloud files that stay in the cloud
 
 - Filescape now reads two sizes for every file: its **size on disk** (what it really takes on

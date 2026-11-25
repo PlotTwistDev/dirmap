@@ -266,7 +266,7 @@ impl App {
         let filter = self.filter.clone();
         let (f, c) = (filter.clone(), cancel.clone());
         std::thread::spawn(move || {
-            let keep = |n: &Node| f.matches(&n.name, n.size);
+            let keep = |n: &Node| f.matches(n);
             let done = if want_tree {
                 subset::subset(&tree, &keep, &c).map(|(node, back)| {
                     let exts = scan::ext_stats(&node);

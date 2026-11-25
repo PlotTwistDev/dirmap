@@ -48,6 +48,9 @@ fn describe(f: &ViewFilter) -> String {
     if let Some(c) = &f.custom {
         parts.push(format!("\"{}\"", c.source()));
     }
+    if f.stored != 0 {
+        parts.push(super::cloud::stored_names(f.stored));
+    }
     parts.join(" · ")
 }
 
@@ -93,7 +96,9 @@ impl App {
                 scan::human(sum.bytes)
             };
             // Which size this is, and the other one when they differ (cloud files, compression).
-            if let Some(t) = self.tree.as_ref().filter(|t| t.flags & scan::store::NO_ALLOC == 0) {
+            if self.metric == scan::Metric::CloudOnly {
+                size.push_str(" only in the cloud");
+            } else if let Some(t) = self.tree.as_ref().filter(|t| t.flags & scan::store::NO_ALLOC == 0) {
                 let other = if self.metric == scan::Metric::Disk { scan::Metric::Logical } else { scan::Metric::Disk };
                 let (a, b) = (scan::human(t.size), scan::human(t.size_by(other)));
                 size.push_str(if self.metric == scan::Metric::Disk { " on disk" } else { " logical" });

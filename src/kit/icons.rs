@@ -40,6 +40,16 @@ pub enum Icon {
     External,
     Copy,
     Columns,
+    /// Online only: a cloud outline.
+    Cloud,
+    /// Downloaded: a tick in a circle.
+    CircleCheck,
+    /// Always kept on this device: a filled circle with the tick cut out.
+    Pinned,
+    /// Partly downloaded: a cloud with its lower part filled.
+    CloudHalf,
+    /// Local copy unknown: a cloud with a question mark.
+    CloudQuestion,
 }
 
 /// Draw `icon` filling `rect` (best square), in `color`.
@@ -241,7 +251,47 @@ pub fn paint(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             line((6.0, 2.5), (6.0, 13.5));
             line((10.5, 2.5), (10.5, 13.5));
         }
+        Icon::Cloud | Icon::CloudHalf | Icon::CloudQuestion => {
+            if icon == Icon::CloudHalf {
+                p.add(Shape::convex_polygon(
+                    [(3.2, 10.6), (12.8, 10.6), (14.3, 11.4), (12.3, 12.9), (3.7, 12.9), (1.8, 11.6)].iter().map(|&(x, y)| at(x, y)).collect(),
+                    color,
+                    Stroke::NONE,
+                ));
+            }
+            poly(&cloud_outline(), true);
+            if icon == Icon::CloudQuestion {
+                arc((8.0, 8.2), 1.3, PI * 1.0, PI * 2.4);
+                line((8.0 + 1.3 * (PI * 2.4).cos(), 8.2 + 1.3 * (PI * 2.4).sin()), (8.0, 10.1));
+                dot((8.0, 11.5), 0.6);
+            }
+        }
+        Icon::CircleCheck => {
+            circle((8.0, 8.0), 5.8);
+            poly(&[(5.2, 8.2), (7.2, 10.2), (10.9, 6.0)], false);
+        }
+        Icon::Pinned => {
+            p.circle_filled(at(8.0, 8.0), 6.5 * u, color);
+            let cut = Stroke::new((1.6 * u).max(1.0), Color32::WHITE);
+            let v: Vec<Pos2> = [(5.0, 8.2), (7.2, 10.4), (11.1, 5.9)].iter().map(|&(x, y)| at(x, y)).collect();
+            p.add(Shape::line(v, cut));
+        }
     }
+}
+
+/// A cloud on the 16-unit grid: three bumps over a flat base.
+fn cloud_outline() -> Vec<(f32, f32)> {
+    let mut pts = vec![(4.0, 13.0)];
+    let bump = |pts: &mut Vec<(f32, f32)>, c: (f32, f32), r: f32, a0: f32, a1: f32| {
+        for i in 0..=8 {
+            let a = (a0 + (a1 - a0) * i as f32 / 8.0).to_radians();
+            pts.push((c.0 + r * a.cos(), c.1 + r * a.sin()));
+        }
+    };
+    bump(&mut pts, (12.0, 10.4), 2.6, 90.0, -95.0);
+    bump(&mut pts, (8.0, 7.9), 3.7, -20.0, -175.0);
+    bump(&mut pts, (4.0, 10.5), 2.5, -110.0, -270.0);
+    pts
 }
 
 /// Allocate an icon-sized space in the layout and draw `icon` there.

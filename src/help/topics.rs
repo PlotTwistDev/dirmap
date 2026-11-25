@@ -49,6 +49,7 @@ pub const SETTINGS_FILTERING: &str = "settings/reference.md#filtering";
 pub const SETTINGS_FOLDER_LIST: &str = "settings/reference.md#folder-list";
 pub const SETTINGS_TREEMAP: &str = "settings/reference.md#treemap";
 pub const SETTINGS_ADVANCED: &str = "settings/reference.md#advanced";
+pub const SETTINGS_CLOUD: &str = "settings/reference.md#cloud-storage";
 pub const ADMINISTRATOR: &str = "settings/administrator.md";
 pub const LICENSING: &str = "settings/licensing.md";
 pub const KEYBOARD: &str = "reference/keyboard.md";
@@ -64,5 +65,5 @@ pub const ALL: &[&str] = &[
     TREEMAP, MAP_SUMMARY, TREEMAP_NAV, ZOOM_TO_SELECTION, BACK_FORWARD, SUNBURST, TREE, BROWSER, FILE_MANAGER, WORKSPACES, ANALYSIS_DOCK, COLOR_MODES, FILTERING, HIGHLIGHT_OR_ONLY,
     CATEGORIES, SYNTAX, EXAMPLES, SEQUENCES, PRESETS, SCAN_FILTERS, HISTOGRAM, DUPLICATES, DUPLICATES_HOW, SNAPSHOTS,
     FILE_OPERATIONS, SETTINGS, SETTINGS_GENERAL, SETTINGS_FILTERING, SETTINGS_FOLDER_LIST, SETTINGS_TREEMAP,
-    SETTINGS_ADVANCED, ADMINISTRATOR, LICENSING, KEYBOARD, MOUSE, TROUBLESHOOTING, WHATS_NEW, ABOUT,
+    SETTINGS_ADVANCED, SETTINGS_CLOUD, ADMINISTRATOR, LICENSING, KEYBOARD, MOUSE, TROUBLESHOOTING, WHATS_NEW, ABOUT,
 ];

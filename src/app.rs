@@ -88,17 +88,22 @@ struct ViewFilter {
     kinds: u16,
     /// The Custom pattern, compiled; None when the box is empty.
     custom: Option<Arc<crate::pattern::Filter>>,
+    /// Bitmask of `scan::Stored::bit()`: where the data is (online only, downloaded…); 0 = all.
+    stored: u8,
 }
 
 impl ViewFilter {
     fn active(&self) -> bool {
-        self.larger > 0 || self.smaller > 0 || self.kinds != 0 || self.custom.is_some()
+        self.larger > 0 || self.smaller > 0 || self.kinds != 0 || self.custom.is_some() || self.stored != 0
     }
 
-    fn matches(&self, name: &str, size: u64) -> bool {
+    /// Whether a file passes. Folders are judged by the files inside them.
+    fn matches(&self, n: &Node) -> bool {
+        let (name, size) = (&*n.name, n.size);
         (self.larger == 0 || size >= self.larger)
             && (self.smaller == 0 || size < self.smaller)
             && (self.kinds == 0 || self.kinds & categories::of(name).bit() != 0)
+            && (self.stored == 0 || self.stored & scan::Stored::of(n.flags).bit() != 0)
             && self.custom.as_ref().is_none_or(|f| f.matches(name))
     }
 }
@@ -189,6 +194,8 @@ struct LineView<'a> {
     color: Color32,
     /// Doesn't match the filter (Highlight mode): drawn faintly.
     dim: bool,
+    /// Leave room at the end of the name for a cloud status icon.
+    badge: bool,
 }
 
 const ROW_H: f32 = 20.0;
@@ -296,6 +303,8 @@ pub struct App {
     dup_done: bool,
     /// Files the duplicate search left out because they're only in the cloud: (files, bytes).
     dup_skipped: (u64, u64),
+    /// The storage breakdown of the current tree, worked out once per tree: (tree pointer, tally).
+    cloud_sum: Option<(usize, scan::CloudTally)>,
     /// Show the "run as administrator?" question (first start without admin rights).
     admin_prompt: bool,
     /// Set when a restart as administrator didn't happen, to say so.
@@ -327,6 +336,7 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext, path: Option<PathBuf>, force_all_fs: bool, compare: Option<PathBuf>) -> Self {
         style::install(&cc.egui_ctx);
+        crate::cloud::warm(false); // find cloud folders off the UI thread
         let mut settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, "settings")).unwrap_or_default();
         settings.admin = elevate::load_mode();
         let admin_prompt = elevate::can_elevate() && !elevate::is_elevated() && settings.admin == AdminMode::Ask;
@@ -414,6 +424,7 @@ impl App {
             dupes_only: false,
             dup_done: false,
             dup_skipped: (0, 0),
+            cloud_sum: None,
             admin_prompt,
             admin_declined: false,
             ops: Default::default(),
@@ -495,6 +506,7 @@ impl App {
             min_modified: if s.max_age_days > 0 { now - s.max_age_days as i64 * 86_400 } else { 0 },
             threads: s.threads,
             metric: self.metric,
+            cloud_mounts: s.cloud_mounts,
         }
     }
 
@@ -689,6 +701,12 @@ impl App {
         ui.selectable_value(&mut m, Metric::Logical, "Logical").on_hover_text(
             "Each file's full size, wherever its data is: what Explorer calls \"Size\". Cloud files that are only online count in full.",
         );
+        let has_cloud = self.tree.as_ref().is_some_and(|t| t.flags & scan::store::NOT_LOCAL != 0);
+        if has_cloud || m == Metric::CloudOnly {
+            ui.selectable_value(&mut m, Metric::CloudOnly, "Cloud only").on_hover_text(
+                "Only data that is in the cloud and not on this computer: the part of each online-only or partly downloaded file that isn't here. Everything else counts as nothing, so the map shows where your cloud-only data is.",
+            );
+        }
         if m != self.metric {
             self.set_metric(m);
         }
@@ -698,7 +716,7 @@ impl App {
         // A snapshot from an earlier version has no sizes on disk: compare logical sizes instead.
         self.diff_metric = match &self.snapshot {
             Some(s) if !snapshot::has_alloc(&s.tree) => Metric::Logical,
-            _ => self.metric,
+            _ => self.metric.for_diff(),
         };
         self.diff = match (&self.tree, &self.snapshot) {
             (Some(t), Some(s)) => Some(Arc::new(snapshot::diff(t, &s.tree, self.diff_metric))),
@@ -1019,6 +1037,7 @@ impl App {
             let tip = match *title {
                 "Name" => "File or folder name",
                 "Size" if self.metric == Metric::Disk => "Space everything inside takes on this computer's drive (cloud files that are only online take none)",
+                "Size" if self.metric == Metric::CloudOnly => "Data inside that is in the cloud and not on this computer",
                 "Size" => "Total logical size of everything inside: the files' own sizes, wherever their data is",
                 "% of parent" => "Share of the folder this item is in",
                 "Files" => "How many files are inside, counting subfolders",
@@ -1030,7 +1049,11 @@ impl App {
             } else {
                 ""
             };
-            let shown = if *title == "Size" && self.metric == Metric::Disk { "On disk" } else { title };
+            let shown = match (*title, self.metric) {
+                ("Size", Metric::Disk) => "On disk",
+                ("Size", Metric::CloudOnly) => "Cloud only",
+                _ => title,
+            };
             let text = format!("{shown}{arrow}");
             let color = if resp.hovered() && sortable { ui.visuals().strong_text_color() } else { ui.visuals().text_color() };
             let (pos, align) = if i == 0 {
@@ -1093,7 +1116,7 @@ impl App {
         let color = if line.dim { custom::dim(line.color) } else { line.color };
         self.icons.paint(ui, icon, line.is_dir, scan::ext_of(line.name), color);
         x += 21.0;
-        let name_clip = Rect::from_min_max(pos2(x, rect.top()), pos2(rect.left() + name_w - 6.0, rect.bottom()));
+        let name_clip = Rect::from_min_max(pos2(x, rect.top()), pos2(rect.left() + name_w - if line.badge { 26.0 } else { 6.0 }, rect.bottom()));
         let np = p.with_clip_rect(name_clip.intersect(p.clip_rect()));
         let galley = np.layout_no_wrap(line.name.to_string(), font.clone(), text_color);
         let text_w = galley.size().x;
@@ -1151,6 +1174,8 @@ impl App {
             self.rows = Some(self.flatten(&tree));
         }
         let rows = self.rows.take().unwrap();
+        let cloud_icons = self.view().cloud_icons;
+        let stored = |n: &Node| if n.is_dir { scan::Stored::of_folder(n.flags) } else { scan::Stored::of(n.flags) };
 
         // Only the rows inside the viewport are laid out, so huge folders stay fast.
         let mut area = egui::ScrollArea::vertical().auto_shrink(false);
@@ -1184,11 +1209,17 @@ impl App {
                     dim: if n.is_dir {
                         hits.as_ref().is_some_and(|h| h.at(&row.path).is_none())
                     } else {
-                        dim_filter.as_ref().is_some_and(|f| !f.matches(&n.name, n.size))
+                        dim_filter.as_ref().is_some_and(|f| !f.matches(n))
                     },
+                    badge: cloud_icons && stored(n) != scan::Stored::Local,
                 };
                 let selected = self.selected.as_deref() == Some(&row.path[..]);
                 let arrow = self.paint_line(ui, rect, &line, selected, resp.hovered(), (range.start + k) % 2 == 1);
+                if line.badge {
+                    let at = Rect::from_center_size(pos2(rect.left() + self.columns(rect.width())[0].2 - 14.0, rect.center().y), vec2(14.0, 14.0));
+                    let tip = || cloud::stored_tip(stored(n), browser::storage_state(n), Some(&self.full_path(&row.path)));
+                    cloud::paint_stored(ui, at, stored(n), ui.id().with(("tcloud", &row.path)), tip);
+                }
                 let on_arrow = resp.interact_pointer_pos().is_some_and(|p| arrow.expand2(vec2(4.0, 0.0)).contains(p));
                 if n.is_dir && ((resp.clicked() && on_arrow) || resp.double_clicked()) {
                     toggled = Some(row.path.clone());
@@ -1283,12 +1314,12 @@ impl App {
             let k = d.kids.lock().unwrap();
             let mut idx: Vec<usize> = (0..k.files.len()).collect();
             if idx.len() > MAX_FILES {
-                let of = |f: &scan::LiveFile| m.pick(f.size, f.alloc);
+                let of = |f: &scan::LiveFile| m.live().pick(f.size, f.alloc, f.flags);
                 idx.select_nth_unstable_by(MAX_FILES, |&a, &b| of(&k.files[b]).cmp(&of(&k.files[a])));
                 idx.truncate(MAX_FILES);
             }
             let files: Vec<(Box<str>, u64, i64)> =
-                idx.iter().map(|&i| (k.files[i].name.clone(), m.pick(k.files[i].size, k.files[i].alloc), k.files[i].modified)).collect();
+                idx.iter().map(|&i| (k.files[i].name.clone(), m.live().pick(k.files[i].size, k.files[i].alloc, k.files[i].flags), k.files[i].modified)).collect();
             (k.dirs.clone(), files, k.files.len())
         };
         let key = Arc::as_ptr(d) as usize;
@@ -1340,6 +1371,7 @@ impl App {
                             busy: !dir.done.load(Ordering::Acquire),
                             color: Color32::GRAY,
                             dim: false,
+                            badge: false,
                         };
                         self.paint_line(ui, rect, &line, false, resp.hovered(), stripe);
                         if resp.clicked() {
@@ -1359,6 +1391,7 @@ impl App {
                             busy: false,
                             color: ext_color(&scan::ext_of(name).to_lowercase(), usize::MAX, self.view().tile_style),
                             dim: false,
+                            badge: false,
                         };
                         self.paint_line(ui, rect, &line, false, resp.hovered(), stripe);
                     }
@@ -1932,7 +1965,7 @@ impl App {
                 }
             } else if self.dupes_only && !self.dup_set.contains(&full) {
                 c = Color32::from_gray(45);
-            } else if self.filter.active() && !self.filter.matches(&n.name, n.size) {
+            } else if self.filter.active() && !self.filter.matches(n) {
                 // Hidden, as on the treemap.
                 c = Color32::from_gray(45);
             } else if let Some(h) = &self.highlight_ext {
@@ -2119,7 +2152,7 @@ impl App {
             };
             // Highlight mode: what doesn't match is hidden (left as empty background), so the
             // matches stand out in their places.
-            if filtering && !filter.matches(&n.name, n.size) {
+            if filtering && !filter.matches(n) {
                 return None;
             }
             let fill = match &highlight {
@@ -2563,6 +2596,7 @@ impl App {
             self.custom_button(ui);
         });
         self.custom_row(ui);
+        self.stored_filter_row(ui);
         ui.horizontal_wrapped(|ui| {
             // Without a licence the limits can only be cleared, not set; the lock opens the prompt.
             let sizes = self.licence.allows(crate::licence::Feature::Filters) || self.filter.larger > 0 || self.filter.smaller > 0;
@@ -2712,8 +2746,13 @@ impl eframe::App for App {
                 elevate::save_mode(self.dialog.draft.admin);
                 self.admin_prompt = false;
             }
+            let metric = self.dialog.draft.size_metric;
+            if self.dialog.draft.cloud_mounts != self.settings.cloud_mounts {
+                crate::cloud::warm(true); // look for mounted drives again before the next scan
+            }
             self.settings = self.dialog.draft.clone();
             self.rows = None;
+            self.set_metric(metric);
         }
         if let Some(t) = self.dialog.help_request.take() {
             self.help.show_topic(t);
@@ -2983,6 +3022,7 @@ impl eframe::App for App {
         let r = egui::Panel::bottom("summary").show(ui, |ui| {
             ui.add_space(3.0);
             self.summary_bar(ui);
+            self.cloud_bar(ui);
             ui.add_space(3.0);
         });
         self.help_regions.push((r.response.rect, topics::MAP_SUMMARY));
@@ -3033,7 +3073,7 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
                 let text = format!("about {:.0}%  ({} of {})", frac * 100.0, scan::human(alloc), scan::human(total));
                 egui::ProgressBar::new(frac).text(text)
             }
-            None => egui::ProgressBar::new(0.0).animate(true).text(scan::human(job.metric.pick(bytes, alloc))),
+            None => egui::ProgressBar::new(0.0).animate(true).text(scan::human(job.metric.live().pick(bytes, alloc, 0))),
         }
     };
     let rate = if secs > 0.5 { files as f32 / secs } else { 0.0 };
@@ -3237,6 +3277,11 @@ fn size_edit(ui: &mut egui::Ui, v: &mut u64) -> bool {
 /// "1.2 MB on disk (33.2 GB logical) · online only".
 pub(crate) fn sizes_text(n: &Node, m: Metric) -> String {
     use scan::store;
+    if m == Metric::CloudOnly {
+        let mut s = format!("{} only in the cloud", scan::human(n.size_by(m)));
+        s.push_str(&format!(" ({} logical, {} on disk)", scan::human(n.logical), scan::human(n.alloc)));
+        return s;
+    }
     let (shown, other) = (n.size_by(m), n.size_by(if m == Metric::Disk { Metric::Logical } else { Metric::Disk }));
     let mut s = scan::human(shown);
     if n.flags & store::NO_ALLOC != 0 {
@@ -3246,7 +3291,7 @@ pub(crate) fn sizes_text(n: &Node, m: Metric) -> String {
     } else if scan::human(shown) != scan::human(other) {
         s = match m {
             Metric::Disk => format!("{s} on disk ({} logical)", scan::human(other)),
-            Metric::Logical => format!("{s} ({} on disk)", scan::human(other)),
+            _ => format!("{s} ({} on disk)", scan::human(other)),
         };
     } else if m == Metric::Disk {
         s.push_str(" on disk");
@@ -3336,27 +3381,45 @@ mod filter_tests {
         Some(Arc::new(Filter::compile(p, Options::default()).unwrap()))
     }
 
+    fn file(name: &str, size: u64) -> Node {
+        Node::plain(name.into(), size, 0)
+    }
+
+    #[test]
+    fn filters_by_where_the_data_is() {
+        use scan::{Stored, store};
+        let f = ViewFilter { stored: Stored::OnlineOnly.bit() | Stored::Partial.bit(), ..Default::default() };
+        assert!(f.active());
+        let with = |flags: u8| Node { flags, ..file("a.mov", 10) };
+        assert!(f.matches(&with(store::ONLINE_ONLY | store::CLOUD)));
+        assert!(f.matches(&with(store::PARTIAL | store::CLOUD)));
+        assert!(!f.matches(&with(store::CLOUD)), "downloaded");
+        assert!(!f.matches(&with(0)), "not in the cloud");
+        let local = ViewFilter { stored: Stored::Local.bit(), ..Default::default() };
+        assert!(local.matches(&with(0)) && !local.matches(&with(store::CLOUD)));
+    }
+
     #[test]
     fn categories_still_work_alone() {
         let f = ViewFilter { kinds: Category::Images.bit(), ..Default::default() };
         assert!(f.active());
-        assert!(f.matches("a.PNG", 10));
-        assert!(!f.matches("a.mp3", 10));
+        assert!(f.matches(&file("a.PNG", 10)));
+        assert!(!f.matches(&file("a.mp3", 10)));
         assert!(!ViewFilter::default().active());
-        assert!(ViewFilter::default().matches("anything", 0));
+        assert!(ViewFilter::default().matches(&file("anything", 0)));
     }
 
     #[test]
     fn custom_combines_with_categories_and_sizes() {
         let f = ViewFilter { custom: custom("*beauty*"), ..Default::default() };
         assert!(f.active());
-        assert!(f.matches("sh010_beauty.1001.exr", 1));
-        assert!(!f.matches("sh010_depth.1001.exr", 1));
+        assert!(f.matches(&file("sh010_beauty.1001.exr", 1)));
+        assert!(!f.matches(&file("sh010_depth.1001.exr", 1)));
         // Every part has to agree.
         let f = ViewFilter { custom: custom("*beauty*"), kinds: Category::Audio.bit(), larger: 100, ..Default::default() };
-        assert!(!f.matches("sh010_beauty.1001.exr", 1000), "not audio");
-        assert!(f.matches("beauty.wav", 1000));
-        assert!(!f.matches("beauty.wav", 10), "too small");
+        assert!(!f.matches(&file("sh010_beauty.1001.exr", 1000)), "not audio");
+        assert!(f.matches(&file("beauty.wav", 1000)));
+        assert!(!f.matches(&file("beauty.wav", 10)), "too small");
         // Equal patterns give equal filters (so results are reused), different ones don't.
         assert!(ViewFilter { custom: custom("*.exr"), ..Default::default() } == ViewFilter { custom: custom("*.exr"), ..Default::default() });
         assert!(ViewFilter { custom: custom("*.exr"), ..Default::default() } != ViewFilter { custom: custom("*.png"), ..Default::default() });
