@@ -523,13 +523,15 @@ impl App {
         });
         if browse_key {
             let start = crate::fsys::places::home().map(|h| h.join(".ssh"));
-            let mut d = rfd::FileDialog::new().set_title("Choose an SSH key file");
+            let mut d = super::dialogs::Dialog::new().set_title("Choose an SSH key file");
             if let Some(s) = start.filter(|s| s.is_dir()) {
                 d = d.set_directory(s);
             }
-            if let Some(f) = d.pick_file() {
-                c.key = f.display().to_string();
-            }
+            super::dialogs::ask(&mut self.asking, d, super::dialogs::Pick::File, |app, f| {
+                if let Some(c) = app.files.connect.as_mut() {
+                    c.key = f.display().to_string();
+                }
+            });
         }
         if cancel {
             self.files.connect = None;
