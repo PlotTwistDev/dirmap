@@ -2409,7 +2409,11 @@ impl App {
                     FSort::Size => (pos2(cell.right() - 10.0, cell.center().y), Align2::RIGHT_CENTER),
                     _ => (pos2(cell.left() + if col == FSort::Name { 10.0 } else { 8.0 }, cell.center().y), Align2::LEFT_CENTER),
                 };
-                let title = if col == FSort::Size && scan::metric() == scan::Metric::Disk { "On disk" } else { col.title() };
+                let title = match (col, scan::metric()) {
+                    (FSort::Size, scan::Metric::Disk) => "On disk",
+                    (FSort::Size, scan::Metric::CloudOnly) => "Cloud only",
+                    _ => col.title(),
+                };
                 let g = ui2.painter().layout_no_wrap(title.to_string(), font, color);
                 let tr = align.anchor_size(at, g.size());
                 ui2.painter().galley(tr.min, g, color);
@@ -2508,6 +2512,7 @@ impl App {
             }
             let heads = &t.groups;
             let chevrons = view == FView::Columns;
+            let cloud_icons = self.view().cloud_icons;
             ui2.spacing_mut().item_spacing.y = 0.0;
             let vis = ui2.visuals().clone();
             let (sel_bg, sel_fg) = if focused { (pal.sel, pal.strong) } else { (pal.sel_dim, pal.strong) };
@@ -2590,12 +2595,19 @@ impl App {
                                 if e.is_link {
                                     p.text(icon.left_bottom() + vec2(-3.0, 2.0), Align2::LEFT_BOTTOM, "↪", FontId::proportional(10.0), vis.strong_text_color());
                                 }
-                                let end = if chevrons && e.is_dir {
+                                let mut end = if chevrons && e.is_dir {
                                     views::chevron(&p, pos2(cell.right() - 11.0, cy), if selected { sel_fg } else { pal.weak });
                                     cell.right() - 18.0
                                 } else {
                                     cell.right() - 6.0
                                 };
+                                let st = scan::Stored::of(e.flags);
+                                if cloud_icons && !e.is_dir && st != scan::Stored::Local {
+                                    let at = Rect::from_center_size(pos2(end - 8.0, cy), vec2(14.0, 14.0));
+                                    let tip = || cloud::stored_tip(st, None, Some(dir));
+                                    cloud::paint_stored(ui, at, st, ui.id().with(("fcloud", &*e.name)), tip);
+                                    end -= 20.0;
+                                }
                                 let clip = Rect::from_min_max(pos2(cell.left() + 33.0, rect.top()), pos2(end, rect.bottom()));
                                 let name = seq.map_or(&*e.name, |s| s.label.as_str());
                                 let g = p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, name, font.clone(), tc);

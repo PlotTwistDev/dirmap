@@ -557,7 +557,7 @@ impl App {
         }
         let (zoom, pan) = (self.files.look.zoom, self.files.look.pan);
         // Reading a file that's only in the cloud downloads it: only when asked to.
-        if e.not_local() && !self.files.look.download_ok.contains(path) {
+        if e.not_local() && self.settings.cloud_confirm && !self.files.look.download_ok.contains(path) {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r.shrink(12.0)).layout(egui::Layout::top_down(egui::Align::Center)));
             child.add_space((r.height() / 2.0 - 60.0).max(0.0));

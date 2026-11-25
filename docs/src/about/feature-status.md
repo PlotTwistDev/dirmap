@@ -39,7 +39,7 @@ version.
 | Duplicate verification | Matches use a 64-bit hash of the whole contents, not a byte-by-byte comparison. There's no "delete all but one" action; copies are deleted one at a time. |
 | Sunburst navigation | No Back/Forward history (the treemap and the file manager have it). |
 | File manager | Copy and Cut work only inside Filescape (the paths go to the clipboard as text), and files can't be dragged to or from other apps. Changes made by other apps show after a Refresh. Real Finder icons on macOS aren't used yet (drawn icons instead). |
-| Size accuracy | File sizes only. Hard links are counted once per name; compressed, sparse and cloud-only files show their full size. See [How sizes are calculated](../disk-usage/sizes.md). |
+| Size accuracy | Sizes on disk and logical sizes for every file. On Windows, hard links are counted once per name. Files on mounted cloud drives (rclone, FUSE, Google Drive's `G:` drive) show what the drive reports, marked **Unknown**. Pinned cloud files are recognised on Windows only. Freeing up space or keeping files offline from Filescape isn't available yet. See [How sizes are calculated](../disk-usage/sizes.md) and [Cloud files](../disk-usage/cloud-files.md). |
 | Licensing | Filescape Professional is sold at filescape.app; serials activate online or with offline request files. Licences for organisations (seat pools, deployment) are planned. |
 | Administrator mode | A restart button on Windows only; on Linux use `sudo`, on macOS Full Disk Access. |
 

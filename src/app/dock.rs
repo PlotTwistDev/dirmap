@@ -566,6 +566,9 @@ impl App {
         if let Some(f) = &self.filter.custom {
             parts.push(format!("Custom: {}", f.source().trim()));
         }
+        if self.filter.stored != 0 {
+            parts.push(super::cloud::stored_names(self.filter.stored));
+        }
         if self.filter.larger > 0 {
             parts.push(format!("larger than {}", scan::human(self.filter.larger)));
         }

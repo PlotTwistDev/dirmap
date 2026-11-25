@@ -695,6 +695,58 @@ impl Profile {
     }
 }
 
+pub fn cloud(ui: &mut egui::Ui, cx: &mut PageCx) {
+    use crate::scan::Metric;
+    let f = cx.focuser();
+    let help = &mut *cx.help;
+    let d = &mut *cx.d;
+    kit::section(ui, Icon::Ruler, "Sizes", f.of("sizes"), |ui| {
+        kit::stacked(ui, "Size shown", Some("What Storage Analysis sizes, sorts and totals by. The Size switch above the map changes it too."), |ui| {
+            kit::segmented(ui, &mut d.size_metric, &[(Metric::Disk, "On disk"), (Metric::Logical, "Logical"), (Metric::CloudOnly, "Only in the cloud")], true);
+            ui.add_space(8.0);
+            kit::note(ui, match d.size_metric {
+                Metric::Disk => "Space files take on this computer, as du and Explorer's \"Size on disk\" count it. Cloud files that are only online take none. Recommended.",
+                Metric::Logical => "Each file's full size, wherever its data is. Cloud files count in full even when none of them is on this computer.",
+                Metric::CloudOnly => "Only data that's in the cloud and not on this computer, to see where it is. Everything else counts as nothing.",
+            });
+        });
+        kit::divider(ui);
+        kit::toggle_row(ui, "Stored column", Some("In the Storage Analysis list, add the other size and where each item's data is, when the scan has cloud files."), &mut d.cloud_column);
+    });
+
+    kit::section(ui, Icon::Cloud, "Status", f.of("status"), |ui| {
+        kit::toggle_row(ui, "Status icons", Some("Show an icon after the name of cloud files: online only, partly downloaded, downloaded, always kept on this device, or unknown. Hover one to see what it means."), &mut d.cloud_icons);
+        kit::divider(ui);
+        kit::toggle_row(ui, "Storage breakdown", Some("Under the map, a bar splitting the scan into files not in the cloud, downloaded cloud files and data only in the cloud."), &mut d.cloud_breakdown);
+    });
+
+    kit::section(ui, Icon::Shield, "Keeping files in the cloud", f.of("downloads"), |ui| {
+        kit::toggle_row(ui, "Ask before downloading", Some("Scans, folder listings, thumbnails and duplicate searches never read online-only files. When you ask for something that has to (a preview, playing a sequence, comparing contents), Filescape says how much it would download and asks first."), &mut d.cloud_confirm);
+        if !d.cloud_confirm {
+            kit::callout(ui, Tone::Warn, "Previews and players will download online-only files without asking. Scans and thumbnails still never do.");
+            ui.add_space(8.0);
+        }
+        kit::divider(ui);
+        kit::toggle_row(ui, "Scan mounted cloud drives", Some("Walk into cloud drives mounted inside a scanned folder (rclone, other FUSE drives, Google Drive's G: drive on Windows). Off by default: reading one asks the service about every folder in it, and how much is stored here can't be told. Scanning the drive itself always works."), &mut d.cloud_mounts);
+    });
+
+    kit::section(ui, Icon::Folder, "Cloud folders on this computer", f.of("found"), |ui| {
+        let roots = crate::cloud::known();
+        if roots.is_empty() {
+            kit::note(ui, "None found. Filescape looks in the places cloud services use (on macOS ~/Library/CloudStorage and iCloud Drive; on Windows the sync roots Windows keeps and OneDrive's folders; on Linux the mount table and the usual folders in your home folder).");
+        } else {
+            for r in roots.iter() {
+                kit::row(ui, r.provider.name(), Some(&format!("{} · {}", r.path.display(), r.kind.describe())), |_| {});
+            }
+        }
+        ui.add_space(8.0);
+        if ui.link("How Filescape tells where cloud files are").clicked() {
+            *help = Some(crate::help::topics::CLOUD_FILES);
+        }
+        ui.add_space(8.0);
+    });
+}
+
 pub fn advanced(ui: &mut egui::Ui, cx: &mut PageCx) {
     let f = cx.focuser();
     let env = cx.env;

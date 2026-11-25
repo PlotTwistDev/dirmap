@@ -38,13 +38,18 @@ pub enum Metric {
     Disk,
     /// The files' own sizes, wherever the data is (what Explorer calls "Size").
     Logical,
+    /// Data that is in the cloud but not on this computer: the part of each online-only or
+    /// partly downloaded file that isn't here. Zero for everything else.
+    CloudOnly,
 }
 
 impl Metric {
-    pub fn pick(self, logical: u64, alloc: u64) -> u64 {
+    /// A file's size under this metric, from its two sizes and [`store`] bits.
+    pub fn pick(self, logical: u64, alloc: u64, flags: u8) -> u64 {
         match self {
             Metric::Disk => alloc,
             Metric::Logical => logical,
+            Metric::CloudOnly => cloud_only(logical, alloc, flags),
         }
     }
 
@@ -53,8 +58,25 @@ impl Metric {
         match self {
             Metric::Disk => "Size on disk",
             Metric::Logical => "Logical size",
+            Metric::CloudOnly => "Only in the cloud",
         }
     }
+
+    /// What a scan still running can show: it keeps running totals of the two sizes only, so
+    /// "only in the cloud" shows logical sizes until the scan is done.
+    pub fn live(self) -> Metric {
+        if self == Metric::CloudOnly { Metric::Logical } else { self }
+    }
+
+    /// The metric to compare against a snapshot with: "only in the cloud" compares logical sizes.
+    pub fn for_diff(self) -> Metric {
+        self.live()
+    }
+}
+
+/// Bytes of a file that are in the cloud and not on this computer.
+pub fn cloud_only(logical: u64, alloc: u64, flags: u8) -> u64 {
+    if flags & store::NOT_LOCAL != 0 { logical.saturating_sub(alloc) } else { 0 }
 }
 
 /// Storage state bits in [`Node::flags`] and `fsys::listing::Entry::flags`.
@@ -69,6 +91,15 @@ pub mod store {
     /// No size-on-disk information at all: a server scan or a snapshot saved by an older
     /// version. `alloc` is a copy of `logical` here.
     pub const NO_ALLOC: u8 = 8;
+    /// In a folder that belongs to a cloud storage service (see `crate::cloud`), or a file
+    /// that says it is a cloud file. With neither `ONLINE_ONLY` nor `PARTIAL`, its data is here.
+    pub const CLOUD: u8 = 16;
+    /// The user asked for this cloud file to be kept on this computer ("Always keep on this
+    /// device"), as Windows reports it.
+    pub const PINNED: u8 = 32;
+    /// On a mounted cloud drive (FUSE, rclone, Google Drive's G: drive) that doesn't say how
+    /// much of a file is cached here: its size on disk is what the drive reports, not known.
+    pub const MOUNT: u8 = 64;
     /// Reading this file's contents would download it.
     pub const NOT_LOCAL: u8 = ONLINE_ONLY | PARTIAL;
 }
@@ -78,7 +109,11 @@ static METRIC: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0)
 /// The metric chosen in the app, for code that shows sizes but doesn't hold a tree (file lists).
 /// Trees are converted explicitly with [`set_metric`].
 pub fn metric() -> Metric {
-    if METRIC.load(Ordering::Relaxed) == 1 { Metric::Logical } else { Metric::Disk }
+    match METRIC.load(Ordering::Relaxed) {
+        1 => Metric::Logical,
+        2 => Metric::CloudOnly,
+        _ => Metric::Disk,
+    }
 }
 
 pub fn set_shown_metric(m: Metric) {
@@ -88,7 +123,7 @@ pub fn set_shown_metric(m: Metric) {
 impl Node {
     /// A file with both its sizes; `size` follows `m`.
     pub fn file(name: Box<str>, logical: u64, alloc: u64, flags: u8, modified: i64, m: Metric) -> Node {
-        Node { name, size: m.pick(logical, alloc), logical, alloc, files: 1, modified, is_dir: false, flags, children: Vec::new() }
+        Node { name, size: m.pick(logical, alloc, flags), logical, alloc, files: 1, modified, is_dir: false, flags, children: Vec::new() }
     }
 
     /// A file whose size on disk isn't known (servers, old snapshots, tests): both sizes are `size`.
@@ -119,9 +154,14 @@ impl Node {
         (self.size, self.logical, self.alloc, self.files, self.modified, self.flags) = (size, logical, alloc, files, modified, flags);
     }
 
-    /// The size under `m`, whatever the tree is sorted by.
+    /// The size under `m`, whatever the tree is sorted by. Instant for the first two metrics;
+    /// "only in the cloud" walks the folders that hold cloud files.
     pub fn size_by(&self, m: Metric) -> u64 {
-        m.pick(self.logical, self.alloc)
+        if m == Metric::CloudOnly && self.is_dir {
+            if self.flags & store::NOT_LOCAL == 0 { 0 } else { self.children.iter().map(|c| c.size_by(m)).sum() }
+        } else {
+            m.pick(self.logical, self.alloc, self.flags)
+        }
     }
 
     /// Extension for files, e.g. "rs". Empty if none.
@@ -149,7 +189,7 @@ pub fn sort_children(children: &mut [Node]) {
 /// a few hundred milliseconds for millions of files.
 pub fn set_metric(n: &mut Node, m: Metric) {
     if !n.is_dir {
-        n.size = m.pick(n.logical, n.alloc);
+        n.size = m.pick(n.logical, n.alloc, n.flags);
         return;
     }
     if n.children.iter().filter(|c| c.is_dir).nth(1).is_some() {
@@ -218,9 +258,9 @@ pub struct LiveFile {
 impl LiveDir {
     /// Bytes found below so far, by `m`.
     pub fn size_by(&self, m: Metric) -> u64 {
-        match m {
+        match m.live() {
             Metric::Disk => self.alloc.load(Ordering::Relaxed),
-            Metric::Logical => self.size.load(Ordering::Relaxed),
+            _ => self.size.load(Ordering::Relaxed),
         }
     }
 }
@@ -255,6 +295,10 @@ pub struct Options {
     pub threads: usize,
     /// What the finished tree is sorted and totalled by.
     pub metric: Metric,
+    /// Walk into mounted cloud drives (rclone, FUSE, Google Drive's G: drive) found inside the
+    /// scanned folder. Off by default: listing one asks the provider about every folder in it.
+    /// A mounted drive that is itself the scanned folder is always walked.
+    pub cloud_mounts: bool,
 }
 
 impl Options {
@@ -332,8 +376,14 @@ impl Chain<'_> {
 
 /// Scan `root`, filling in `live` as it goes, and return the finished tree.
 pub fn scan(root: &Path, opts: &Options, progress: &Progress, live: &LiveDir) -> Node {
-    let fs = SameFs::of(root);
-    let run = || scan_dir(root.to_path_buf(), live, None, opts, &fs, progress);
+    scan_in(root, opts, progress, live, &crate::cloud::roots())
+}
+
+/// [`scan`], with the cloud folders given rather than found.
+pub fn scan_in(root: &Path, opts: &Options, progress: &Progress, live: &LiveDir, clouds: &[crate::cloud::Root]) -> Node {
+    let mut fs = SameFs::of(root);
+    let base = fs.find_cloud(root, clouds, opts);
+    let run = || scan_dir(root.to_path_buf(), live, None, opts, &fs, progress, base);
     match (opts.threads > 0).then(|| rayon::ThreadPoolBuilder::new().num_threads(opts.threads).build()) {
         Some(Ok(pool)) => pool.install(run),
         _ => run(),
@@ -408,11 +458,12 @@ pub fn new_live(root: &Path) -> Arc<LiveDir> {
 }
 
 enum Entry {
-    Dir(PathBuf, Box<str>),
+    Dir(PathBuf, Box<str>, u8),
     File(LiveFile),
 }
 
-fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, sfs: &SameFs, p: &Progress) {
+/// `cloud`: the `store` bits every file in this folder gets from the cloud folder it's in.
+fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, sfs: &SameFs, p: &Progress, cloud: u8) {
     if p.cancel.load(Ordering::Relaxed) {
         dir.done.store(true, Ordering::Release);
         return;
@@ -458,7 +509,15 @@ fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, sf
                 if sfs.skip.as_deref() == Some(child.as_path()) || opts.folder_excluded(&child) {
                     return None;
                 }
-                Some(Entry::Dir(child, name))
+                let mut bits = cloud;
+                if !sfs.clouds.is_empty() {
+                    match sfs.clouds.get(&crate::cloud::norm(&child)) {
+                        Some(None) => return None, // a mounted cloud drive the user didn't ask to walk
+                        Some(Some(b)) => bits = *b,
+                        None => {}
+                    }
+                }
+                Some(Entry::Dir(child, name, bits))
             } else if md.is_file() {
                 let size = md.len();
                 let modified = mtime(&md);
@@ -466,7 +525,8 @@ fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, sf
                     return None;
                 }
                 // Metadata only: nothing here opens the file, so cloud files stay in the cloud.
-                let (mut alloc, flags) = on_disk(&md, || e.path(), sfs.cluster);
+                let (mut alloc, mut flags) = on_disk(&md, || e.path(), sfs.cluster);
+                flags |= cloud;
                 if sfs.linked_again(&md) {
                     alloc = 0; // another name for a file already counted: the disk holds it once
                 }
@@ -481,7 +541,7 @@ fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, sf
     let mut files = Vec::new();
     for e in found {
         match e {
-            Entry::Dir(path, name) => subdirs.push((path, Arc::new(LiveDir::new(name)))),
+            Entry::Dir(path, name, bits) => subdirs.push((path, Arc::new(LiveDir::new(name)), bits)),
             Entry::File(f) => files.push(f),
         }
     }
@@ -495,13 +555,13 @@ fn scan_dir(path: PathBuf, dir: &LiveDir, up: Option<&Chain>, opts: &Options, sf
     {
         let mut k = dir.kids.lock().unwrap();
         k.files = files;
-        k.dirs = subdirs.iter().map(|(_, d)| d.clone()).collect();
+        k.dirs = subdirs.iter().map(|(_, d, _)| d.clone()).collect();
     }
     let chain = Chain { dir, up };
     chain.add(bytes, alloc, count, newest);
 
-    subdirs.into_par_iter().for_each(|(path, d)| {
-        scan_dir(path, &d, Some(&chain), opts, sfs, p);
+    subdirs.into_par_iter().for_each(|(path, d, bits)| {
+        scan_dir(path, &d, Some(&chain), opts, sfs, p, bits);
     });
     dir.done.store(true, Ordering::Release);
 }
@@ -551,7 +611,7 @@ pub fn on_disk(md: &fs::Metadata, _path: impl FnOnce() -> PathBuf, _cluster: u64
         // contents are only in the cloud. Reading it would download it.
         const SF_DATALESS: u32 = 0x4000_0000;
         if std::os::macos::fs::MetadataExt::st_flags(md) & SF_DATALESS != 0 {
-            flags |= store::ONLINE_ONLY;
+            flags |= store::ONLINE_ONLY | store::CLOUD;
         }
     }
     (alloc, flags)
@@ -565,17 +625,22 @@ pub fn on_disk(md: &fs::Metadata, path: impl FnOnce() -> PathBuf, cluster: u64) 
     const OFFLINE: u32 = 0x1000;
     const RECALL_ON_OPEN: u32 = 0x4_0000;
     const RECALL_ON_DATA_ACCESS: u32 = 0x40_0000;
+    const PINNED: u32 = 0x8_0000;
+    const UNPINNED: u32 = 0x10_0000;
     let a = md.file_attributes();
     let len = md.len();
     let round = |n: u64| n.div_ceil(cluster.max(1)) * cluster.max(1);
     // Cloud Files placeholders (OneDrive, Dropbox, Box, iCloud for Windows…) say whether their
     // data is here in the attributes the folder listing already returned.
     let cloud = a & (OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS) != 0;
+    // Pinned ("Always keep on this device") and unpinned ("Free up space") mark cloud files
+    // whatever their state.
+    let kept = if a & PINNED != 0 { store::CLOUD | store::PINNED } else if a & UNPINNED != 0 || cloud { store::CLOUD } else { 0 };
     if a & RECALL_ON_OPEN != 0 {
-        return (0, store::ONLINE_ONLY); // not even opened for its size: that alone fetches it
+        return (0, store::ONLINE_ONLY | kept | store::CLOUD); // not even opened for its size: that alone fetches it
     }
     if !cloud && a & (SPARSE | COMPRESSED) == 0 {
-        return (round(len), 0);
+        return (round(len), kept);
     }
     // GetCompressedFileSizeW opens for attributes only, which doesn't download anything.
     match win::compressed_size(&path()) {
@@ -586,10 +651,10 @@ pub fn on_disk(md: &fs::Metadata, path: impl FnOnce() -> PathBuf, cluster: u64) 
                 (true, n) if n < len => store::PARTIAL,
                 _ => 0,
             };
-            (round(n), flags)
+            (round(n), flags | kept)
         }
-        None if cloud => (0, store::ONLINE_ONLY | store::ESTIMATED),
-        None => (round(len), store::ESTIMATED),
+        None if cloud => (0, store::ONLINE_ONLY | store::ESTIMATED | kept),
+        None => (round(len), store::ESTIMATED | kept),
     }
 }
 
@@ -668,9 +733,21 @@ struct SameFs {
     /// Files with more than one name (hard links) already counted, by (device, inode).
     #[cfg_attr(not(unix), allow(dead_code))]
     links: Mutex<std::collections::HashSet<(u64, u64)>>,
+    /// Cloud folders inside the scanned one, by `cloud::norm` path: the `store` bits for what's
+    /// in them, or `None` for a mounted cloud drive not to walk into.
+    clouds: std::collections::HashMap<String, Option<u8>>,
 }
 
 impl SameFs {
+    /// Note the cloud folders at and below `root`; returns the bits for files in `root` itself.
+    fn find_cloud(&mut self, root: &Path, roots: &[crate::cloud::Root], opts: &Options) -> u8 {
+        for r in crate::cloud::roots_below(roots, root) {
+            let walk = r.kind != crate::cloud::Kind::Mount || opts.cloud_mounts;
+            self.clouds.insert(crate::cloud::norm(&r.path), walk.then(|| r.bits()));
+        }
+        crate::cloud::root_of(roots, root).map_or(0, |r| r.bits())
+    }
+
     /// True for the second and later names of a hard-linked file, whose space is already counted.
     #[cfg(unix)]
     fn linked_again(&self, md: &fs::Metadata) -> bool {
@@ -685,7 +762,7 @@ impl SameFs {
 
     fn of(root: &Path) -> Self {
         #[allow(unused_mut)]
-        let mut s = SameFs { devs: device_of(root).into_iter().collect(), skip: None, cluster: cluster_of(root), links: Default::default() };
+        let mut s = SameFs { devs: device_of(root).into_iter().collect(), skip: None, cluster: cluster_of(root), links: Default::default(), clouds: Default::default() };
         // On macOS the read-only system volume (/) and the data volume (/System/Volumes/Data)
         // are joined by firmlinks: /Users, /Applications and so on really live on the data
         // volume. Count both as the startup drive, and don't walk the data volume a second time
@@ -721,32 +798,147 @@ fn dev_of_md(_md: &fs::Metadata) -> Option<u64> {
     None
 }
 
-/// How many cloud files a tree holds that aren't (fully) on this computer.
-#[derive(Default, Debug, PartialEq)]
+/// Where a file's data is, as shown by the status icons, filters and the Stored column.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Stored {
+    /// Not in a cloud folder.
+    Local,
+    /// A cloud file whose data is all on this computer.
+    Downloaded,
+    /// Downloaded and set to stay on this computer.
+    Pinned,
+    /// A cloud file with part of its data here.
+    Partial,
+    /// A cloud file with none of its data here.
+    OnlineOnly,
+    /// A cloud file whose local copy can't be told: on a mounted cloud drive, or its size on
+    /// disk couldn't be read.
+    Unknown,
+}
+
+impl Stored {
+    pub const ALL: [Stored; 6] = [Stored::OnlineOnly, Stored::Partial, Stored::Downloaded, Stored::Pinned, Stored::Unknown, Stored::Local];
+
+    /// Its bit in a set of states (filters).
+    pub fn bit(self) -> u8 {
+        1 << self as u8
+    }
+
+    /// A file's state from its `store` bits.
+    pub fn of(flags: u8) -> Stored {
+        if flags & store::ONLINE_ONLY != 0 {
+            Stored::OnlineOnly
+        } else if flags & store::PARTIAL != 0 {
+            Stored::Partial
+        } else if flags & store::CLOUD == 0 {
+            Stored::Local
+        } else if flags & (store::MOUNT | store::ESTIMATED) != 0 {
+            Stored::Unknown
+        } else if flags & store::PINNED != 0 {
+            Stored::Pinned
+        } else {
+            Stored::Downloaded
+        }
+    }
+
+    /// For a folder, whose bits are everything found inside it: the state that matters most.
+    pub fn of_folder(flags: u8) -> Stored {
+        if flags & store::CLOUD == 0 {
+            Stored::Local
+        } else if flags & store::NOT_LOCAL != 0 {
+            Stored::OnlineOnly
+        } else if flags & store::MOUNT != 0 {
+            Stored::Unknown
+        } else {
+            Stored::Downloaded
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Stored::Local => "Not in the cloud",
+            Stored::Downloaded => "Downloaded",
+            Stored::Pinned => "Always kept on this device",
+            Stored::Partial => "Partly downloaded",
+            Stored::OnlineOnly => "Online only",
+            Stored::Unknown => "Unknown",
+        }
+    }
+
+    /// One sentence for tooltips.
+    pub fn explain(self) -> &'static str {
+        match self {
+            Stored::Local => "An ordinary file on this computer, not in a cloud folder.",
+            Stored::Downloaded => "In the cloud, with a full copy on this computer. A cloud app that keeps files on demand may free it up again when space runs low.",
+            Stored::Pinned => "In the cloud, and set to always stay on this computer.",
+            Stored::Partial => "In the cloud, with only part of it on this computer. Opening it downloads the rest.",
+            Stored::OnlineOnly => "Only in the cloud: it takes no space here, and opening it downloads it.",
+            Stored::Unknown => "In the cloud, but the drive it's on doesn't say how much of it is stored on this computer.",
+        }
+    }
+}
+
+/// What a tree holds, by where the data is: the storage breakdown under the map.
+#[derive(Default, Debug, PartialEq, Clone, Copy)]
 pub struct CloudTally {
     pub online_only: u64,
     pub partial: u64,
-    /// Logical bytes of the online-only and partly downloaded files: what opening them all
-    /// could download.
+    /// Bytes of the online-only and partly downloaded files that aren't here: what opening
+    /// them all would download.
     pub online_bytes: u64,
+    /// Files in cloud folders, and their logical and on-disk sizes.
+    pub cloud_files: u64,
+    pub cloud_logical: u64,
+    pub cloud_alloc: u64,
+    /// Fully downloaded cloud files (pinned ones included) and their size.
+    pub downloaded: u64,
+    pub downloaded_bytes: u64,
+    pub pinned: u64,
+    pub pinned_bytes: u64,
+    /// Cloud files whose local copy is unknown (mounted drives), and their logical size.
+    pub unknown: u64,
+    pub unknown_bytes: u64,
 }
 
+impl CloudTally {
+    pub fn any(&self) -> bool {
+        self.cloud_files > 0
+    }
+}
+
+/// Count `n` by where its data is. Only walks folders that hold cloud files.
 pub fn cloud_tally(n: &Node) -> CloudTally {
     let mut t = CloudTally::default();
     fn walk(n: &Node, t: &mut CloudTally) {
-        if n.flags & store::NOT_LOCAL == 0 {
+        if n.flags & (store::NOT_LOCAL | store::CLOUD) == 0 {
             return; // nothing below: skip the whole folder
         }
         if n.is_dir {
             n.children.iter().for_each(|c| walk(c, t));
-        } else {
-            if n.flags & store::ONLINE_ONLY != 0 {
-                t.online_only += 1;
-            } else {
-                t.partial += 1;
-            }
-            t.online_bytes += n.logical.saturating_sub(n.alloc);
+            return;
         }
+        t.cloud_files += 1;
+        t.cloud_logical += n.logical;
+        t.cloud_alloc += n.alloc;
+        match Stored::of(n.flags | store::CLOUD) {
+            Stored::OnlineOnly => t.online_only += 1,
+            Stored::Partial => t.partial += 1,
+            Stored::Unknown => {
+                t.unknown += 1;
+                t.unknown_bytes += n.logical;
+            }
+            Stored::Pinned => {
+                t.pinned += 1;
+                t.pinned_bytes += n.logical;
+                t.downloaded += 1;
+                t.downloaded_bytes += n.logical;
+            }
+            _ => {
+                t.downloaded += 1;
+                t.downloaded_bytes += n.logical;
+            }
+        }
+        t.online_bytes += cloud_only(n.logical, n.alloc, n.flags);
     }
     walk(n, &mut t);
     t
@@ -897,6 +1089,51 @@ mod tests {
     }
 
     #[test]
+    fn marks_files_in_cloud_folders_and_skips_mounted_drives() {
+        use crate::cloud::{Kind, Provider, Root};
+        let d = temp("clouds");
+        for sub in ["Synced", "Mount", "Plain"] {
+            fs::create_dir_all(d.join(sub)).unwrap();
+            fs::write(d.join(sub).join("f.txt"), b"hello").unwrap();
+        }
+        let roots = vec![
+            Root { path: d.join("Synced"), provider: Provider::Dropbox, kind: Kind::Synced },
+            Root { path: d.join("Mount"), provider: Provider::Rclone, kind: Kind::Mount },
+        ];
+        let run = |opts: &Options, at: &Path| scan_in(at, opts, &Progress::default(), &new_live(at), &roots);
+        let t = run(&Options::default(), &d);
+        let get = |t: &Node, name: &str| t.children.iter().find(|c| &*c.name == name).map(|c| c.children[0].flags);
+        assert_eq!(get(&t, "Synced"), Some(store::CLOUD));
+        assert_eq!(get(&t, "Plain"), Some(0));
+        assert_eq!(get(&t, "Mount"), None, "mounted cloud drives are left out by default");
+        let t = run(&Options { cloud_mounts: true, ..Default::default() }, &d);
+        assert_eq!(get(&t, "Mount"), Some(store::CLOUD | store::MOUNT));
+        assert_eq!(Stored::of(store::CLOUD | store::MOUNT), Stored::Unknown);
+        // Scanning the mounted drive itself always works.
+        let t = run(&Options::default(), &d.join("Mount"));
+        fs::remove_dir_all(&d).ok();
+        assert_eq!(t.children[0].flags, store::CLOUD | store::MOUNT);
+    }
+
+    #[test]
+    fn cloud_only_counts_what_is_not_here() {
+        let m = Metric::CloudOnly;
+        let away = Node::file("a".into(), 900, 0, store::ONLINE_ONLY | store::CLOUD, 0, m);
+        let part = Node::file("p".into(), 500, 200, store::PARTIAL | store::CLOUD, 0, m);
+        let here = Node::file("h".into(), 300, 4096, store::CLOUD | store::PINNED, 0, m);
+        let sparse = Node::file("s".into(), 1000, 0, 0, 0, m); // a local sparse file isn't in the cloud
+        let root = Node::folder("r".into(), vec![Node::folder("d".into(), vec![away, part]), here, sparse]);
+        assert_eq!(root.size, 1200);
+        assert_eq!(root.size_by(Metric::CloudOnly), 1200);
+        assert_eq!(root.children[0].children[1].size_by(Metric::CloudOnly), 300);
+        let t = cloud_tally(&root);
+        assert_eq!((t.cloud_files, t.online_only, t.partial, t.downloaded, t.pinned, t.online_bytes), (3, 1, 1, 1, 1, 1200));
+        assert_eq!(Stored::of(store::CLOUD | store::PINNED), Stored::Pinned);
+        assert_eq!(Stored::of_folder(root.flags), Stored::OnlineOnly);
+        assert_eq!(Metric::CloudOnly.for_diff(), Metric::Logical);
+    }
+
+    #[test]
     fn folders_total_and_flag_what_is_inside() {
         let m = Metric::Disk;
         let cloud = Node::file("c.mov".into(), 900, 0, store::ONLINE_ONLY, 5, m);
@@ -906,7 +1143,8 @@ mod tests {
         assert_eq!((root.logical, root.alloc, root.size, root.files, root.modified), (1000, 4096, 4096, 2, 9));
         assert_eq!(root.flags & store::ONLINE_ONLY, store::ONLINE_ONLY);
         assert_eq!(&*root.children[0].name, "l.txt");
-        assert_eq!(cloud_tally(&root), CloudTally { online_only: 1, partial: 0, online_bytes: 900 });
+        let t = cloud_tally(&root);
+        assert_eq!((t.online_only, t.partial, t.online_bytes, t.cloud_files), (1, 0, 900, 1));
         set_metric(&mut root, Metric::Logical);
         assert_eq!((root.size, &*root.children[0].name), (1000, "sub"));
         // Unknown sizes on disk are marked, never silently zero.

@@ -21,6 +21,10 @@ and open folders stay where they are. Filescape remembers the choice for next ti
   online take (almost) no space here, so they no longer crowd the map.
 - **Logical** answers "how much data is here?", wherever it's stored. Use it to see how big a
   cloud folder is in the cloud, or to compare with sizes other apps show.
+- **Cloud only** appears when the scan has files that are online only or partly downloaded. It
+  counts only the data that is in the cloud and not on this computer, so the map shows where that
+  data is. While a scan is still running, the live view shows logical sizes in its place, and a
+  snapshot comparison compares logical sizes.
 
 Hovering a tile or selecting an item shows both sizes when they differ, for example
 `1.9 MB on disk (33.2 GB logical) · some files only in the cloud`. The file manager's **Size**

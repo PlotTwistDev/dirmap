@@ -38,7 +38,7 @@ settings changed. Rescan**, and the Filtering page says **Rescan needed**.
 | **Interface size** <!-- setting:ui_scale --> | 100% | Makes all text and controls bigger or smaller: 80% to 150%. **Ctrl +** and **Ctrl −** (**⌘** on macOS) do the same anywhere in Filescape, and **Ctrl 0** goes back to 100%; the size you end up with is remembered. |
 | **Striped rows** <!-- setting:stripes --> | On | Shades every other row in the file manager and the side panel lists. Also on the Folder list page. |
 | **Size units** <!-- setting:units --> | Binary | **Binary** (1 KB = 1,024 bytes, like Explorer) or **Decimal** (1 kB = 1,000 bytes, like drive makers and macOS). An example underneath shows how a file's size would read. Also changes how typed sizes are read. See [Units](../disk-usage/sizes.md#units-binary-and-decimal). |
-| **Size shown** <!-- setting:size_metric --> | On disk | **On disk** or **Logical**. Set with the **Size** switch above the map, not in this window; Filescape remembers your last choice. See [Size on disk and logical size](../disk-usage/sizes.md#size-on-disk-and-logical-size). |
+| **Size shown** <!-- setting:size_metric --> | On disk | **On disk**, **Logical** or **Only in the cloud**. Set with the **Size** switch above the map or on the [Cloud storage](#cloud-storage) page; Filescape remembers your last choice. See [Size on disk and logical size](../disk-usage/sizes.md#size-on-disk-and-logical-size). |
 | **Live scan results** <!-- setting:live_tree --> | On | Shows a tree of folders filling in during a scan. Off shows only the progress bar. |
 | **Check automatically** <!-- setting:check_updates --> | On | At each launch, asks filescape.app for the newest version number and shows a notice when there's a newer one, saying whether your licence covers it. Nothing about you or the computer is sent. See [Updates](licensing.md#updates). |
 
@@ -107,6 +107,22 @@ too. See [Lighting and visual effects](../views/visual-effects.md).
 
 Every slider shows its value, which you can drag or click to type, and a **↺** button that puts
 that one setting back to its default appears once it's changed.
+
+## Cloud storage
+
+How cloud files are counted and shown. See [Cloud files](../disk-usage/cloud-files.md).
+
+| Setting | Default | Effect |
+|---|---|---|
+| **Stored column** <!-- setting:cloud_column --> | On | When a scan has cloud files, the Storage Analysis list adds the other size (**Logical** next to **On disk**, or the other way round) and a **Stored** column saying where each item's data is. |
+| **Status icons** <!-- setting:cloud_icons --> | On | Shows an icon after the name of cloud files in the file manager, the Storage Analysis list and the tree: online only, partly downloaded, downloaded, always kept on this device, or unknown. Hover one to see what it means. |
+| **Storage breakdown** <!-- setting:cloud_breakdown --> | On | The bar under the map that splits a scan with cloud files into files not in the cloud, downloaded cloud files and data only in the cloud. |
+| **Ask before downloading** <!-- setting:cloud_confirm --> | On | When something you ask for has to read online-only files (a preview, playing a sequence), Filescape says how much it would download and asks first. Off downloads without asking. Scans, listings, thumbnails and duplicate searches never read them either way. |
+| **Scan mounted cloud drives** <!-- setting:cloud_mounts --> | Off | **Needs a rescan.** Walks into cloud drives mounted inside a scanned folder (rclone, other FUSE drives, Google Drive's `G:` drive on Windows). Off, they're left out, as reading one asks the service about every folder in it. Scanning the drive itself always works. |
+
+**Size shown** is on this page too, with a third choice, **Only in the cloud**. The **Cloud
+folders on this computer** section lists the cloud folders and drives Filescape found, with the
+service and how it keeps files here.
 
 ## Advanced
 
