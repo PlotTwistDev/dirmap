@@ -704,8 +704,8 @@ impl App {
                 egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
                     ui.set_min_size(size - vec2(16.0, 16.0));
                     ui.set_max_size(size - vec2(16.0, 16.0));
-                    egui::ScrollArea::both().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
-                        ui.add(egui::Label::new(egui::RichText::new(&text).monospace().size(12.0)).extend());
+                    egui::ScrollArea::vertical().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
+                        ui.add(egui::Label::new(egui::RichText::new(&text).monospace().size(12.0)).wrap());
                         if truncated {
                             ui.weak("… (only the first 256 KB is shown)");
                         }
@@ -833,9 +833,9 @@ fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, si
             ui.selectable_value(&mut raw, true, "Raw");
         });
         ui.separator();
-        egui::ScrollArea::both().id_salt(("look-md", path, raw)).auto_shrink(false).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt(("look-md", path, raw)).auto_shrink(false).show(ui, |ui| {
             if raw {
-                ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).extend());
+                ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).wrap());
             } else {
                 // Parsed once per file shown, not every frame.
                 let key = egui::Id::new(("preview-markdown", path, text.len()));
