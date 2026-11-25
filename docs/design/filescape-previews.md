@@ -185,4 +185,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Review and roadmap (this doc) | #43 | Merged |
 | Format registry and file signatures | #44 | Merged |
 | Third-party licence notices in About | #45 | Merged |
-| SVG drawings (resvg) | | In review |
+| SVG drawings (resvg) | #46 | Merged |
+| Syntax colouring (syntect + two-face) | | In review |
