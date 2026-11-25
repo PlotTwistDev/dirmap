@@ -7,7 +7,18 @@ use eframe::egui::{self, RichText};
 /// The notices, as generated (with plain line ends, however the file was checked out).
 fn text() -> &'static str {
     static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    TEXT.get_or_init(|| include_str!("../../packaging/third-party-licences.txt").replace("\r\n", "\n"))
+    TEXT.get_or_init(|| {
+        let mut t = include_str!("../../packaging/third-party-licences.txt").replace("\r\n", "\n");
+        // The grammars and colour themes used for code previews carry licences of their own.
+        let rule = "=".repeat(72);
+        let ack = two_face::acknowledgement::listing();
+        for (what, list) in [("syntax grammar", ack.for_syntaxes()), ("colour theme", ack.for_themes())] {
+            for l in list {
+                t.push_str(&format!("{rule}\nUsed by: the code previews' {what} {}\n{rule}\n{}\n\n", l.rel_path.display(), l.text.replace("\r\n", "\n").trim_end()));
+            }
+        }
+        t
+    })
 }
 
 /// Lines are cut to this many characters for display, so every row is one line high.
@@ -120,6 +131,7 @@ mod tests {
         let some = rows(text, "eframe");
         // A Windows checkout may have CRLF line ends, which the sections are split without.
         assert!(!text.contains('\r'));
+        assert!(text.contains("syntax grammar"), "the grammars' licences are listed");
         assert!(some.len() < all.len() && some.iter().any(|r| r.starts_with("eframe ")));
         assert!(some.iter().any(|r| r.starts_with("Used by:") && r.contains("eframe")));
         assert!(all.iter().all(|r| r.chars().count() <= COLS + 8));
