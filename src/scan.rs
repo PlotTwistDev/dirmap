@@ -855,7 +855,7 @@ impl Stored {
     pub const ALL: [Stored; 6] = [Stored::OnlineOnly, Stored::Partial, Stored::Downloaded, Stored::Pinned, Stored::Unknown, Stored::Local];
 
     /// Its bit in a set of states (filters).
-    pub fn bit(self) -> u8 {
+    pub const fn bit(self) -> u8 {
         1 << self as u8
     }
 
