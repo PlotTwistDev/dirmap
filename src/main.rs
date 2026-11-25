@@ -41,6 +41,7 @@ mod snapshot;
 mod sunburst;
 mod templates;
 mod tilegpu;
+mod video;
 mod transfer;
 mod media;
 mod treemap;

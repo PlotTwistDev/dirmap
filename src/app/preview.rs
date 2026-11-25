@@ -61,6 +61,15 @@ pub(super) struct Look {
     pub player: Option<crate::media::Player>,
     /// Cloud files the user agreed to download to preview (others aren't read: see `preview_body`).
     pub download_ok: std::collections::HashSet<PathBuf>,
+    /// A video playing in the preview.
+    pub video: Option<VideoView>,
+}
+
+/// A video playing in a preview, and its picture.
+pub(super) struct VideoView {
+    pub video: crate::video::Video,
+    tex: Option<egui::TextureHandle>,
+    serial: u64,
 }
 
 impl Look {
@@ -572,6 +581,9 @@ impl App {
         if self.files.look.player.as_ref().is_some_and(|p| p.path != path) {
             self.files.look.player = None;
         }
+        if self.files.look.video.as_ref().is_some_and(|v| v.video.path != path) {
+            self.files.look.video = None;
+        }
         if self.files.look.view_of.as_deref() != Some(path) {
             self.files.look.view_of = Some(path.to_path_buf());
             self.files.look.zoom = None;
@@ -596,6 +608,18 @@ impl App {
             }
             return;
         }
+        if let Some(v) = self.files.look.video.as_mut() {
+            let open_outside = video_view(ui, v, size);
+            if open_outside {
+                if let Some(v) = &self.files.look.video {
+                    v.video.pause();
+                }
+                let v = path.to_path_buf();
+                self.files.spawn(move || crate::media::play_video(&v));
+            }
+            return;
+        }
+        let mut start_video = false;
         let Some(c) = self.files.look.get(&ctx, path, e) else {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             ui.put(Rect::from_center_size(r.center(), vec2(24.0, 24.0)), egui::Spinner::new());
@@ -658,10 +682,15 @@ impl App {
                     p.circle_filled(br.center(), 28.0, Color32::from_black_alpha(if b.hovered() { 200 } else { 150 }));
                     let c = br.center() + vec2(3.0, 0.0);
                     p.add(egui::Shape::convex_polygon(vec![c + vec2(-9.0, -13.0), c + vec2(13.0, 0.0), c + vec2(-9.0, 13.0)], Color32::WHITE, Stroke::NONE));
-                    let tip = if cfg!(target_os = "macos") { "Play in Quick Look (Space or Esc closes it)" } else { "Play in your video app" };
+                    let tip = if crate::video::supported() {
+                        "Play it here"
+                    } else if cfg!(target_os = "macos") {
+                        "Play in Quick Look (Space or Esc closes it)"
+                    } else {
+                        "Play in your video app (playing here needs ffmpeg)"
+                    };
                     if b.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
-                        let v = path.to_path_buf();
-                        self.files.spawn(move || crate::media::play_video(&v));
+                        start_video = true;
                     }
                 }
             }
@@ -701,7 +730,82 @@ impl App {
             self.files.look.zoom = z;
             self.files.look.pan = p;
         }
+        if start_video {
+            if crate::video::supported() {
+                let ctx = ui.ctx().clone();
+                let video = crate::video::Video::start(path, move || ctx.request_repaint());
+                self.files.look.video = Some(VideoView { video, tex: None, serial: 0 });
+            } else {
+                let v = path.to_path_buf();
+                self.files.spawn(move || crate::media::play_video(&v));
+            }
+        }
     }
+}
+
+/// A playing video: the picture (click to play or pause) and the controls under it. Returns
+/// whether it was asked to open in the system's player.
+fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
+    let pal = style::pal(ui);
+    if let Some(f) = v.video.take_frame(&mut v.serial) {
+        let img = egui::ColorImage::from_rgba_unmultiplied(f.size, &f.rgba);
+        match &mut v.tex {
+            Some(t) => t.set(img, egui::TextureOptions::LINEAR),
+            None => v.tex = Some(ui.ctx().load_texture("preview-video", img, egui::TextureOptions::LINEAR)),
+        }
+    }
+    let st = v.video.state();
+    let (r, resp) = ui.allocate_exact_size(size, Sense::click());
+    let pic = Rect::from_min_max(r.min, pos2(r.max.x, (r.max.y - 34.0).max(r.min.y + 20.0)));
+    let p = ui.painter().with_clip_rect(pic.intersect(ui.clip_rect()));
+    p.rect_filled(pic, style::RADIUS, Color32::BLACK);
+    match &v.tex {
+        Some(t) => {
+            let ts = t.size_vec2();
+            let s = (pic.width() / ts.x).min(pic.height() / ts.y);
+            p.image(t.id(), Rect::from_center_size(pic.center(), ts * s), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        None if st.error.is_none() => {
+            ui.put(Rect::from_center_size(pic.center(), vec2(24.0, 24.0)), egui::Spinner::new());
+        }
+        None => {}
+    }
+    if let Some(e) = &st.error {
+        p.text(pic.center(), Align2::CENTER_CENTER, e, FontId::proportional(12.0), Color32::from_gray(200));
+    }
+    let toggle = |v: &VideoView, st: &crate::video::State| if st.playing { v.video.pause() } else { v.video.play() };
+    if resp.clicked() && resp.interact_pointer_pos().is_some_and(|q| pic.contains(q)) {
+        toggle(v, &st);
+    }
+    let bar = Rect::from_min_max(pos2(r.min.x, pic.max.y + 4.0), r.max);
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let ui = &mut child;
+    if ui.button(if st.playing { "⏸" } else { "▶" }).on_hover_text(if st.playing { "Pause" } else { "Play" }).clicked() {
+        toggle(v, &st);
+    }
+    let mut outside = false;
+    let time = match st.info.and_then(|i| i.duration) {
+        Some(l) => format!("{} / {}", crate::media::clock(st.position), crate::media::clock(l)),
+        None => crate::media::clock(st.position),
+    };
+    let tw = 140.0;
+    if let Some(l) = st.info.and_then(|i| i.duration).filter(|l| *l > 0.0) {
+        let mut at = st.position.min(l);
+        ui.spacing_mut().slider_width = (ui.available_width() - tw - 34.0).max(40.0);
+        let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
+        if s.drag_stopped() || (s.clicked() && !s.dragged()) {
+            v.video.seek(at);
+        }
+    }
+    ui.label(egui::RichText::new(time).monospace().size(12.0).color(pal.weak));
+    let tip = if cfg!(target_os = "macos") { "Open in Quick Look" } else { "Open in your video app" };
+    if ui.small_button("Open").on_hover_text(tip).clicked() {
+        outside = true;
+    }
+    if st.playing {
+        ui.ctx().request_repaint_after(Duration::from_millis(250));
+    }
+    outside
 }
 
 /// Play or pause, how far through, and a bar to jump about (where the player can).
