@@ -390,6 +390,11 @@ impl App {
                 ui.label(info);
                 ui.end_row();
             }
+            if let Some(Content::Text { colours: Some(c), .. }) = self.files.look.cached(&path) {
+                ui.weak("Language");
+                ui.label(&c.language);
+                ui.end_row();
+            }
             ui.weak("Where");
             ui.add(egui::Label::new(path.parent().map(|p| p.shown()).unwrap_or_default()).wrap());
             ui.end_row();

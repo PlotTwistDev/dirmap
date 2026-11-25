@@ -39,6 +39,8 @@ pub(super) enum Content {
     Text {
         text: String,
         truncated: bool,
+        /// Syntax colours, for code.
+        colours: Option<Arc<crate::highlight::Colours>>,
     },
     Binary,
     /// Nothing to show beyond the facts.
@@ -166,7 +168,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                     }
                 }
                 let truncated = ix.items.len() > 2000;
-                Content::Text { text, truncated }
+                Content::Text { text, truncated, colours: None }
             }
             Err(e) => Content::Error(e),
         };
@@ -178,18 +180,21 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                 let truncated = text.len() > TEXT_MAX;
                 let mut text = text;
                 text.truncate(text.floor_char_boundary(TEXT_MAX));
-                Content::Text { text, truncated }
+                Content::Text { text, truncated, colours: None }
             }
             None => Content::Error("Couldn't read the text in this document".into()),
         };
     }
     match kind {
         Kind::Image | Kind::LinearImage => load_image(path, kind == Kind::LinearImage, size),
-        Kind::Text => load_text(path),
+        Kind::Text => match load_text(path) {
+            Content::Text { text, truncated, .. } => coloured(path, text, truncated),
+            c => c,
+        },
         Kind::Drawing => match crate::svg::render(path, SHOW_MAX.min(1600)) {
             Ok(d) => {
                 let source = match load_text(path) {
-                    Content::Text { text, truncated } => Some((text, truncated)),
+                    Content::Text { text, truncated, .. } => Some((text, truncated)),
                     _ => None, // .svgz: compressed, no source to show
                 };
                 Content::Image {
@@ -223,7 +228,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             }
             // Otherwise show it as text if it looks like text.
             match load_text(path) {
-                Content::Text { text, truncated } if size <= TEXT_MAX as u64 * 4 => Content::Text { text, truncated },
+                Content::Text { text, truncated, .. } if size <= TEXT_MAX as u64 * 4 => coloured(path, text, truncated),
                 Content::Error(e) => Content::Error(e),
                 _ => Content::None,
             }
@@ -325,7 +330,14 @@ fn load_text(path: &Path) -> Content {
     let Some(text) = decode_text(&buf) else {
         return Content::Binary;
     };
-    Content::Text { text, truncated }
+    Content::Text { text, truncated, colours: None }
+}
+
+/// Text, with syntax colours if it's code (not Markdown, which has its own view).
+fn coloured(path: &Path, text: String, truncated: bool) -> Content {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let colours = if is_markdown(&name) { None } else { crate::highlight::colour(&name, &text).map(Arc::new) };
+    Content::Text { text, truncated, colours }
 }
 
 /// The text in `b`: UTF-8, or UTF-16 (what PowerShell and many Windows tools write), with or
@@ -586,6 +598,11 @@ impl App {
                 ui.label(info);
                 ui.end_row();
             }
+            if let Some(Content::Text { colours: Some(c), .. }) = self.files.look.cache.iter().find(|c| c.0 == path).map(|c| &c.2) {
+                ui.weak("Language");
+                ui.label(&c.language);
+                ui.end_row();
+            }
             ui.weak("Where");
             ui.add(egui::Label::new(path.parent().map(|p| p.shown()).unwrap_or_default()).wrap());
             ui.end_row();
@@ -679,7 +696,7 @@ impl App {
                 size.y -= ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
             }
             if has_text && show_src {
-                text_view(ui, path, &text, truncated, size);
+                text_view(ui, path, &text, truncated, size, None);
                 return;
             }
         }
@@ -752,14 +769,15 @@ impl App {
                     }
                 }
             }
-            Content::Text { text, truncated } => {
+            Content::Text { text, truncated, colours } => {
                 let truncated = *truncated;
                 let text = text.clone();
+                let colours = colours.clone();
                 if is_markdown(&e.name) {
                     markdown_view(ui, path, &text, truncated, size);
                     return;
                 }
-                text_view(ui, path, &text, truncated, size);
+                text_view(ui, path, &text, truncated, size, colours.as_deref());
             }
             Content::Sound(play) => {
                 let play = play.clone();
@@ -868,19 +886,47 @@ fn is_markdown(name: &str) -> bool {
 
 /// A Markdown file, formatted (as the Help Centre draws its pages) or as raw text, with a switch
 /// between the two that's remembered.
-/// Text in a scrolling well, wrapped.
-fn text_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2) {
+/// Text in a scrolling well, wrapped, in syntax colours for code.
+fn text_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2, colours: Option<&crate::highlight::Colours>) {
     let pal = style::pal(ui);
     egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
         ui.set_min_size(size - vec2(16.0, 16.0));
         ui.set_max_size(size - vec2(16.0, 16.0));
         egui::ScrollArea::vertical().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
-            ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).wrap());
+            match colours {
+                Some(c) => {
+                    let spans = if ui.visuals().dark_mode { &c.dark } else { &c.light };
+                    ui.add(egui::Label::new(coloured_job(text, spans, ui.visuals().text_color())).wrap());
+                }
+                None => {
+                    ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).wrap());
+                }
+            }
             if truncated {
                 ui.weak("… (only the first 256 KB is shown)");
             }
         });
     });
+}
+
+/// Text laid out in its syntax colours; what the spans don't cover is in `plain`.
+fn coloured_job(text: &str, spans: &[crate::highlight::Span], plain: Color32) -> egui::text::LayoutJob {
+    let font = FontId::monospace(12.0);
+    let mut job = egui::text::LayoutJob::default();
+    let fmt = |color: Color32, italics: bool| egui::TextFormat { font_id: font.clone(), color, italics, ..Default::default() };
+    let mut at = 0;
+    for s in spans {
+        if s.start >= text.len() || !text.is_char_boundary(s.start) || !text.is_char_boundary(s.end.min(text.len())) {
+            break;
+        }
+        let end = s.end.min(text.len());
+        job.append(&text[s.start..end], 0.0, fmt(Color32::from_rgb(s.rgb[0], s.rgb[1], s.rgb[2]), s.italic));
+        at = end;
+    }
+    if at < text.len() {
+        job.append(&text[at..], 0.0, fmt(plain, false));
+    }
+    job
 }
 
 fn markdown_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: Vec2) {
@@ -1061,7 +1107,7 @@ mod tests {
         let t = d.join("big.txt");
         std::fs::write(&t, "x".repeat(TEXT_MAX + 10)).unwrap();
         match load(&t, Kind::Text, 0) {
-            Content::Text { text, truncated } => assert!(truncated && text.len() == TEXT_MAX),
+            Content::Text { text, truncated, .. } => assert!(truncated && text.len() == TEXT_MAX),
             _ => panic!("text"),
         }
         // Binary is recognised.
