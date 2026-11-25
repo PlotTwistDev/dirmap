@@ -119,7 +119,10 @@ where
 pub struct Hits {
     pub files: u64,
     pub bytes: u64,
-    /// Highest child index that is a match or holds one (meaningless when `files` is 0).
+    /// Matches that take up any space (0-byte ones have no area on the maps).
+    pub sized: u64,
+    /// Highest child index that is a match taking up space or holds one (meaningless when
+    /// `sized` is 0).
     pub last: u32,
     /// (child index, its hits) for child folders holding matches, by index.
     pub dirs: Vec<(u32, Hits)>,
@@ -137,9 +140,10 @@ impl Hits {
         (h.files > 0).then_some(h)
     }
 
-    /// Does any child from index `from` on match or hold a match?
+    /// Does any child from index `from` on match, or hold a match, that has some size (so could
+    /// be drawn when zoomed in)? 0-byte matches never get an area, so they aren't marked.
     pub fn any_from(&self, from: usize) -> bool {
-        self.files > 0 && self.last as usize >= from
+        self.sized > 0 && self.last as usize >= from
     }
 
     /// The extension with the most matching bytes.
@@ -181,7 +185,10 @@ where
         if !c.is_dir && keep(c) {
             h.files += 1;
             h.bytes += c.size;
-            h.last = h.last.max(i as u32);
+            if c.size > 0 {
+                h.sized += 1;
+                h.last = h.last.max(i as u32);
+            }
             tally(exts, c.ext(), c.size);
         }
     }
@@ -204,7 +211,10 @@ where
         if sub.files > 0 {
             h.files += sub.files;
             h.bytes += sub.bytes;
-            h.last = h.last.max(i);
+            if sub.sized > 0 {
+                h.sized += sub.sized;
+                h.last = h.last.max(i);
+            }
             h.dirs.push((i, sub));
         }
     }
@@ -399,7 +409,7 @@ mod tests {
                     None => assert_eq!(direct.0, 0),
                 }
                 for from in 0..=n.children.len() {
-                    let any = n.children[from..].iter().any(|c| count(c, &|c: &Node| keep(c), &never).unwrap().0 > 0);
+                    let any = n.children[from..].iter().any(|c| count(c, &|c: &Node| keep(c), &never).unwrap().1 > 0);
                     assert_eq!(h.at(path).is_some_and(|x| x.any_from(from)), any);
                 }
                 for (i, c) in n.children.iter().enumerate().filter(|(_, c)| c.is_dir) {

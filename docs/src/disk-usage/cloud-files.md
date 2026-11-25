@@ -67,6 +67,10 @@ they show at their full size. Files that are on the computer but small (most dow
 files, for example) may be too small to draw at the whole-disk view; they're marked with small
 squares until you zoom in.
 
+At **Size: Logical** with no Stored filter, the map draws online-only files faded, and partly
+downloaded ones half as much, so the files actually on this computer stand out. A note after the
+storage breakdown says so. **Fade online-only tiles** in Settings turns this off.
+
 The Storage Analysis list then also shows the other size (**Logical** next to **On disk**, or the
 other way round) and a **Stored** column. **Stored column** in Settings turns them off.
 
