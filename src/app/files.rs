@@ -1595,7 +1595,9 @@ impl App {
         self.dock_poll(&ctx);
         self.remote_frame(&ctx);
         self.connect_window(&ctx);
-        self.quick_look(&ctx);
+        if !self.files.look.from_map {
+            self.quick_look(&ctx);
+        }
         self.sequence_player(&ctx);
         self.compare_window(&ctx);
         self.mark_edit_window(&ctx);
@@ -3768,6 +3770,7 @@ impl App {
             FAction::QuickLook => {
                 if self.files.cursor_entry().is_some_and(|e| !e.is_dir) {
                     self.files.look.open = true;
+                    self.files.look.from_map = false;
                 } else if let Some(p) = paths.into_iter().next().filter(|p| self.listed_dir(p)) {
                     self.files.go(Location::Dir(p));
                 }

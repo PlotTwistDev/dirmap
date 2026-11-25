@@ -83,7 +83,9 @@ pub(super) struct PdfShown {
 
 enum PageSlot {
     Drawing,
-    Ready { width: u32, pixels: Option<egui::ColorImage>, tex: Option<egui::TextureHandle> },
+    /// Drawn this many pixels across; `again` while it's drawn again at a new size (it's shown
+    /// as it was until then).
+    Ready { width: u32, pixels: Option<egui::ColorImage>, tex: Option<egui::TextureHandle>, again: bool },
     Failed,
 }
 
@@ -92,6 +94,10 @@ enum PageSlot {
 pub(super) struct Look {
     /// Quick Look is open.
     pub open: bool,
+    /// Quick Look shows the tile picked in Storage Analysis, not the File Manager's cursor.
+    pub from_map: bool,
+    /// Quick Look fills the window.
+    pub full: bool,
     /// Recently decoded files: (path, modified, content).
     cache: VecDeque<(PathBuf, i64, Content)>,
     /// Being read: (path, modified, result).
@@ -554,12 +560,16 @@ impl Look {
 impl App {
     /// The item a preview shows: the cursor's item in the focused pane.
     fn look_target(&self) -> Option<(PathBuf, Entry)> {
+        if self.files.look.from_map {
+            return self.map_target().filter(|(_, e)| !e.is_dir);
+        }
         let e = self.files.cursor_entry()?;
         Some((self.files.here().dir()?.join(&*e.name), e))
     }
 
-    /// Quick Look: a floating preview of the item under the cursor. Arrow keys move through the
-    /// list behind it; Space or Escape close it.
+    /// Quick Look: a floating preview of the item under the cursor (or the tile picked in Storage
+    /// Analysis). Arrow keys move through the list behind it; Space or Escape close it, F fills
+    /// the window with it.
     pub(super) fn quick_look(&mut self, ctx: &egui::Context) {
         if !self.files.look.open {
             return;
@@ -568,23 +578,31 @@ impl App {
             self.files.look.open = false;
             return;
         };
-        let close = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) || i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+        let typing = ctx.egui_wants_keyboard_input();
+        let close = !typing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) || i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
         if close {
             self.files.look.open = false;
+            self.files.look.full = false;
             return;
+        }
+        if !typing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
+            self.files.look.full = !self.files.look.full;
         }
         let screen = ctx.content_rect();
         let size = vec2((screen.width() * 0.72).max(420.0), (screen.height() * 0.78).max(320.0));
+        let full = self.files.look.full;
         let mut open = true;
-        egui::Window::new(egui::RichText::new(format!("{}", e.name)).strong())
-            .id(egui::Id::new("quick-look"))
+        let mut win = egui::Window::new(egui::RichText::new(format!("{}", e.name)).strong())
+            // A window of its own when full, so it comes back to its old size and place.
+            .id(egui::Id::new(("quick-look", full)))
             .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size(size)
-            .pivot(Align2::CENTER_CENTER)
-            .default_pos(screen.center())
-            .show(ctx, |ui| {
+            .collapsible(false);
+        win = if full {
+            win.fixed_rect(screen.shrink(8.0)).resizable(false)
+        } else {
+            win.resizable(true).default_size(size).pivot(Align2::CENTER_CENTER).default_pos(screen.center())
+        };
+        win.show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.weak(facts_line(&e));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -592,7 +610,12 @@ impl App {
                             let p = path.clone();
                             self.files.spawn(move || crate::actions::open(&p));
                         }
-                        ui.weak(if cfg!(target_os = "macos") { "⏶⏷ next · Space closes" } else { "⏶⏷ next · Space or Esc closes" });
+                        let (icon, tip) = if full { ("Window", "Back to a window (F)") } else { ("Full screen", "Fill the window (F)") };
+                        if ui.button(icon).on_hover_text(tip).clicked() {
+                            self.files.look.full = !full;
+                        }
+                        let next = if self.files.look.from_map { "" } else { "⏶⏷ next · " };
+                        ui.weak(if cfg!(target_os = "macos") { format!("{next}Space closes") } else { format!("{next}Space or Esc closes") });
                     });
                 });
                 ui.separator();
@@ -601,6 +624,7 @@ impl App {
             });
         if !open {
             self.files.look.open = false;
+            self.files.look.full = false;
         }
     }
 
@@ -769,6 +793,7 @@ impl App {
             }
             if !e.is_dir && ui.button("Quick Look").on_hover_text("Space").clicked() {
                 self.files.look.open = true;
+                self.files.look.from_map = false;
             }
         });
     }
@@ -1234,17 +1259,22 @@ fn pdf_view(ui: &mut egui::Ui, path: &Path, shown: &Arc<PdfShown>, size: Vec2) {
                 // Drawn again when the pane has grown or shrunk a lot since.
                 let stale = match pages.get(&i) {
                     None => true,
-                    Some(PageSlot::Ready { width: w, .. }) => (*w as f32 - want as f32).abs() > want as f32 * 0.3,
+                    Some(PageSlot::Ready { width: w, again: false, .. }) => (*w as f32 - want as f32).abs() > want as f32 * 0.3,
                     _ => false,
                 };
                 if stale && local.intersects(near) && started < 4 {
                     started += 1;
-                    pages.insert(i, PageSlot::Drawing);
+                    match pages.get_mut(&i) {
+                        Some(PageSlot::Ready { again, .. }) => *again = true,
+                        _ => {
+                            pages.insert(i, PageSlot::Drawing);
+                        }
+                    }
                     let s = shown.clone();
                     let ctx = ui.ctx().clone();
                     std::thread::spawn(move || {
                         let slot = match s.doc.page(i, want) {
-                            Ok((w, h, rgba)) => PageSlot::Ready { width: want, pixels: Some(egui::ColorImage::from_rgba_premultiplied([w, h], &rgba)), tex: None },
+                            Ok((w, h, rgba)) => PageSlot::Ready { width: want, pixels: Some(egui::ColorImage::from_rgba_premultiplied([w, h], &rgba)), tex: None, again: false },
                             Err(_) => PageSlot::Failed,
                         };
                         s.pages.lock().unwrap().insert(i, slot);

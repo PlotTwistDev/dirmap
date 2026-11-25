@@ -86,6 +86,12 @@ click one to select it. **Open** opens the item and **Show in folder** (**Show i
 shows it in your file manager. Hide or show the pane with **Preview pane** in the filter bar or
 **Alt+P** (**⌥P** on macOS).
 
+### Quick Look on the map
+
+Click a file's tile and press **Space** (or **Quick Look** in the preview pane) for a large
+preview over the map, the same as in the File Manager. Click another tile and it follows.
+**Full screen** (or **F**) fills the window with it, and **Space** or **Escape** closes it.
+
 ## Very small files
 
 A drive can have millions of files too small to draw even as a single pixel. Filescape draws

@@ -3116,6 +3116,11 @@ impl eframe::App for App {
             return;
         }
 
+        // Quick Look for the picked tile (Space), drawn over the map.
+        self.map_quick_look_key(&ctx);
+        if self.files.look.from_map {
+            self.quick_look(&ctx);
+        }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::P)) {
             self.files.prefs.map_preview = !self.files.prefs.map_preview;
         }
