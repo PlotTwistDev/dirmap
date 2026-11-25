@@ -51,6 +51,7 @@ mod thumbs;
 mod views;
 mod summary;
 mod cloud;
+mod models;
 pub(crate) mod style;
 use files::Workspace;
 
@@ -271,6 +272,7 @@ pub struct App {
     shown: Option<Shown>,
     filter_job: Option<FilterJob>,
     seq: SeqState,
+    models: models::ModelsState,
     /// Path and size of the treemap tile under the mouse, for the status bar.
     hover_status: Option<String>,
     wheel: f32,
@@ -402,6 +404,7 @@ impl App {
             shown: None,
             filter_job: None,
             seq: SeqState::default(),
+            models: Default::default(),
             hover_status: None,
             wheel: 0.0,
             color_mode: ColorMode::Type,
@@ -2865,6 +2868,7 @@ impl eframe::App for App {
         }
         self.drive_filter(&ctx);
         self.poll_sequences(&ctx);
+        self.poll_models(&ctx);
 
         self.licence.banner(ui);
         self.licence.update_notice(ui);
@@ -2872,12 +2876,18 @@ impl eframe::App for App {
             ui.add_space(2.0);
             if analysis {
                 self.toolbar(ui);
+            } else if self.files.prefs.workspace == Workspace::Models {
+                self.models_toolbar(ui);
             } else {
                 self.files_toolbar(ui);
             }
             ui.add_space(2.0);
         });
         self.help_regions.push((r.response.rect, if analysis { topics::TOOLBAR } else { topics::FILE_MANAGER }));
+        if self.files.prefs.workspace == Workspace::Models {
+            self.models_workspace(ui);
+            return;
+        }
         if !analysis {
             self.files_workspace(ui);
             return;

@@ -19,6 +19,7 @@ In the main window, unless the cursor is in a text box.
 | **Ctrl+1** | **⌘1** | Switch to the Files workspace. |
 | **Ctrl+2** | **⌘2** | Switch to the Remote workspace (this computer beside a server). |
 | **Ctrl+3** | **⌘3** | Switch to the Storage Analysis workspace. |
+| **Ctrl+4** | **⌘4** | Switch to the AI Models workspace. |
 | **Ctrl+F** | **⌘F** | Files: put the cursor in the Filter box. Storage Analysis: open the Custom filter. |
 
 ### Files workspace

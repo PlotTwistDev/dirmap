@@ -1,11 +1,15 @@
 # Understanding the interface
 
-Filescape has two workspaces, switched with the buttons at the left of the toolbar:
+Filescape has four workspaces, switched with the buttons at the left of the toolbar:
 
 - **🗀 Files** (**Ctrl+1**) is a file manager for browsing your drives and folders without a
   scan. It's where Filescape starts. See [The Files workspace](../views/file-manager.md).
+- **🖧 Remote** (**Ctrl+2**) puts this computer beside a server. See
+  [The Remote workspace](../views/remote.md).
 - **▦ Storage Analysis** (**Ctrl+3**) is the scan with its treemap, described on the rest of this
   page.
+- **✨ AI Models** (**Ctrl+4**) lists the AI models on this computer. See
+  [The AI Models workspace](../views/ai-models.md).
 
 ![Storage Analysis, with its parts](../images/main-window.png)
 

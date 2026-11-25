@@ -282,7 +282,7 @@ pub(super) fn use_desk(files: &mut Files, ws: Workspace) {
     let want = match ws {
         Workspace::Files => DeskKind::Files,
         Workspace::Remote => DeskKind::Remote,
-        Workspace::Analysis => return,
+        Workspace::Analysis | Workspace::Models => return,
     };
     if files.rws.active == want {
         return;
