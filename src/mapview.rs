@@ -1319,6 +1319,33 @@ fn build_set(req: &Req) -> Option<TileSet> {
                 // markers below; the patch itself is left as background (blended slivers of it
                 // peeking between other tiles only add noise).
                 if let Some(c) = hidden(l.node, &abs, l.hidden_from) {
+                    // Mostly matches (a filter most files pass): draw the patch in their blended
+                    // colour, as without a filter. Leaving it as background with a few markers
+                    // would show big black holes where nearly everything matches. A patch too
+                    // small to see also gets a marker, like a tiny match, unless a match is
+                    // drawn big enough to see in the same square. (The leaf is the whole folder;
+                    // the patch is what its drawn children leave, roughly the hidden children's
+                    // share of it.)
+                    let drawn: u64 = l.node.children[..l.hidden_from.min(l.node.children.len())].iter().map(|c| c.size).sum();
+                    let left = l.node.size.saturating_sub(drawn) as f64 / l.node.size.max(1) as f64;
+                    let patch_pt = l.rect.w() * l.rect.h() * left * pt_per_unit * pt_per_unit;
+                    let mut budget = 48;
+                    if let Some((fill, share)) = blend_share(l.node, l.hidden_from, &mut abs, &*req.paint.colorize, 0, &mut budget)
+                        && share >= MOSTLY
+                    {
+                        let [s0, s1, s2, s3] = l.surface;
+                        let grad = [(2.0 * s0 / ppu) as f32, (2.0 * s0 * ox + s2) as f32, (2.0 * s1 / ppu) as f32, (2.0 * s1 * oy + s3) as f32];
+                        inst.push(Instance { rect, grad, color: fill.to_array(), flags: tilegpu::PATCH });
+                        if req.raster {
+                            let flat = req.paint.look.soft;
+                            let color = if flat { fill.gamma_multiply(0.8) } else { fill };
+                            raster.push(RasterTile { rect: l.rect, surface: l.surface, color: Color32::from_rgb(color.r(), color.g(), color.b()), flat });
+                        }
+                        if patch_pt >= 4.0 * MIN_TILE_PT * MIN_TILE_PT {
+                            spots.cover(&l.rect);
+                            return true;
+                        }
+                    }
                     mark.get_or_insert(c);
                     if l.rect.w().max(l.rect.h()) < cell {
                         spots.add(l.rect.center());
@@ -1468,13 +1495,24 @@ fn walk_spots(
     }
 }
 
+/// Share of a too-small-to-draw patch that must match the filter for it to be drawn in colour
+/// rather than left as background with markers.
+const MOSTLY: f64 = 0.5;
+
 /// Size-weighted average colour of a folder's children from index `from` on, looking at the
 /// largest few at each level (`budget` limits the total work). `abs` is the folder's path from
 /// the scan root; it's restored before returning. None if nothing in there has a colour (all
 /// filtered out).
 fn blend_of(node: &Node, from: usize, abs: &mut Vec<u32>, colorize: &(dyn Fn(&Node, &[u32]) -> Option<(Color32, Color32)> + Send + Sync), depth: u32, budget: &mut i32) -> Option<Color32> {
+    blend_share(node, from, abs, colorize, depth, budget).map(|b| b.0)
+}
+
+/// `blend_of`, plus the share (0–1, by size, of what was looked at) that has a colour, i.e.
+/// passes the filter.
+fn blend_share(node: &Node, from: usize, abs: &mut Vec<u32>, colorize: &(dyn Fn(&Node, &[u32]) -> Option<(Color32, Color32)> + Send + Sync), depth: u32, budget: &mut i32) -> Option<(Color32, f64)> {
     let mut acc = [0.0f64; 3];
     let mut weight = 0.0;
+    let mut total = 0.0;
     for (i, c) in node.children.iter().enumerate().skip(from).take(8) {
         if *budget <= 0 || c.size == 0 {
             break;
@@ -1482,20 +1520,22 @@ fn blend_of(node: &Node, from: usize, abs: &mut Vec<u32>, colorize: &(dyn Fn(&No
         *budget -= 1;
         abs.push(i as u32);
         let col = if c.is_dir {
-            if depth < 4 { blend_of(c, 0, abs, colorize, depth + 1, budget) } else { None }
+            if depth < 4 { blend_share(c, 0, abs, colorize, depth + 1, budget) } else { None }
         } else {
-            colorize(c, abs).map(|p| p.0)
+            colorize(c, abs).map(|p| (p.0, 1.0))
         };
         abs.pop();
-        if let Some(col) = col {
-            let w = c.size as f64;
+        let size = c.size as f64;
+        total += size;
+        if let Some((col, share)) = col {
+            let w = size * share;
             acc[0] += col.r() as f64 * w;
             acc[1] += col.g() as f64 * w;
             acc[2] += col.b() as f64 * w;
             weight += w;
         }
     }
-    (weight > 0.0).then(|| Color32::from_rgb((acc[0] / weight) as u8, (acc[1] / weight) as u8, (acc[2] / weight) as u8))
+    (weight > 0.0).then(|| (Color32::from_rgb((acc[0] / weight) as u8, (acc[1] / weight) as u8, (acc[2] / weight) as u8), weight / total))
 }
 
 /// CPU fallback: render tiles into an image covering `cover` (the original per-pixel cushion
@@ -1605,6 +1645,33 @@ mod tests {
         }
         let first_dot = set.instances.iter().position(|i| i.color == mark.to_array()).unwrap();
         assert!(set.instances[first_dot..].iter().all(|i| i.color == mark.to_array()));
+    }
+
+    #[test]
+    fn filter_most_files_pass_leaves_no_black_holes() {
+        // A filter nearly everything passes (like Stored: Not in the cloud on a local disk):
+        // folders of files too small to draw are filled in their colour as without a filter,
+        // not left as background with a few markers.
+        let tree = Arc::new(treemap::synthetic(50_000, 4));
+        let world = DRect { x0: 0.0, y0: 0.0, x1: 400.0, y1: 300.0 };
+        let mark = Color32::from_rgb(250, 10, 10);
+        let tile = Color32::from_rgb(10, 250, 10);
+        let patches = |filtering: bool| {
+            let mut r = req(&tree, world, world, 1.0);
+            r.paint.colorize = Arc::new(move |_: &Node, _: &[u32]| Some((tile, tile)));
+            if filtering {
+                r.paint.hidden = Some(Arc::new(move |_: &Node, _: &[u32], _: usize| Some(mark)));
+            }
+            let set = build_set(&r).unwrap();
+            let area = |i: &&Instance| (i.rect[2] - i.rect[0]) as f64 * (i.rect[3] - i.rect[1]) as f64;
+            let patch: f64 = set.instances.iter().filter(|i| i.flags == tilegpu::PATCH).map(|i| area(&i)).sum();
+            (patch, set.instances.iter().filter(|i| i.color == mark.to_array()).count())
+        };
+        let (plain, _) = patches(false);
+        let (filtered, marks) = patches(true);
+        assert!(plain > 0.0);
+        assert!(filtered >= plain * 0.9, "patches {filtered} vs {plain} unfiltered");
+        assert!(marks < 50, "{marks} markers where everything matches");
     }
 
     #[test]
@@ -1952,4 +2019,5 @@ mod bench {
         println!("  Mouse move (hit test, lighting is on the GPU): first {:.2} ms, then {:.1} µs average", cold, ms(t) * 1000.0 / moves as f64);
     }
 }
+
 
