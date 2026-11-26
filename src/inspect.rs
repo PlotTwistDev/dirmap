@@ -746,7 +746,7 @@ mod tests {
 
     fn model(format: Format, source: Source, paths: &[PathBuf]) -> Model {
         let files = paths.iter().map(|p| File { path: p.clone(), size: std::fs::metadata(p).map(|m| m.len()).unwrap_or(0), not_local: false }).collect();
-        Model { name: "test".into(), source, format, info: Info::default(), files, size: 0, copies: vec![], extra: 0, orphan: false }
+        Model { name: "test".into(), source, format, info: Info::default(), files, size: 0, copies: vec![], extra: 0, same_as: Vec::new(), orphan: false }
     }
 
     struct Tmp(PathBuf);

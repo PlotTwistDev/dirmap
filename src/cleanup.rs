@@ -55,6 +55,12 @@ pub struct Item {
     pub bytes: u64,
     /// Every path is inside this folder; [`remove`] refuses anything else.
     pub within: PathBuf,
+    /// For copies: the file each path is the same as, which is kept.
+    pub keep: Vec<PathBuf>,
+    /// Can be removed (a copy an app keeps can't: the app would lose it).
+    pub can_trash: bool,
+    /// Can be shared with what it's a copy of: one file on disk, under both names (hard links).
+    pub can_share: bool,
 }
 
 /// A download written to in the last few minutes may still be going: it's left alone.
@@ -217,6 +223,9 @@ fn ollama_items(store: &Path, out: &mut Vec<Item>) {
             let title = info.as_ref().and_then(|i| i.name.clone()).unwrap_or_else(|| short_digest(&name));
             out.push(Item {
                 kind: Kind::Unused,
+                keep: Vec::new(),
+                can_trash: true,
+                can_share: false,
                 title,
                 detail: format!("An Ollama download no model uses any more, left by a removed model or a stopped download ({}).", ago(&path)),
                 app: "Ollama",
@@ -233,6 +242,9 @@ fn ollama_items(store: &Path, out: &mut Vec<Item>) {
         paths.sort();
         out.push(Item {
             kind: Kind::Partial,
+            keep: Vec::new(),
+            can_trash: true,
+            can_share: false,
             title: short_digest(&digest),
             detail: format!("Part of an Ollama download that didn't finish ({}). Pulling the model again starts it afresh.", ago(&paths[0])),
             app: "Ollama",
@@ -273,6 +285,9 @@ pub fn plan(m: &Model) -> Result<Item, String> {
             let tags = gone.len();
             Ok(Item {
                 kind: Kind::Model,
+                keep: Vec::new(),
+                can_trash: true,
+                can_share: false,
                 title,
                 detail: format!(
                     "Removes it from Ollama ({tags} name{}), as \u{201C}ollama rm\u{201D} would. Files other models share are kept.",
@@ -298,6 +313,9 @@ pub fn plan(m: &Model) -> Result<Item, String> {
             }
             Ok(Item {
                 kind: Kind::Model,
+                keep: Vec::new(),
+                can_trash: true,
+                can_share: false,
                 title,
                 detail: "Removes its files from the Hugging Face cache, and the links to them. It downloads again if a program asks for it.".into(),
                 app: "Hugging Face",
@@ -310,6 +328,9 @@ pub fn plan(m: &Model) -> Result<Item, String> {
             let within = common_parent(m.files.iter().map(|f| f.path.as_path())).ok_or("These files have no common folder.")?;
             Ok(Item {
                 kind: Kind::Model,
+                keep: Vec::new(),
+                can_trash: true,
+                can_share: false,
                 title,
                 detail: match m.source {
                     Source::LmStudio => "Removes its files from LM Studio's models folder. LM Studio no longer lists it.".into(),
@@ -355,6 +376,9 @@ fn hf_items(repo: &Path, out: &mut Vec<Item>) {
     if !partial.is_empty() {
         out.push(Item {
             kind: Kind::Partial,
+            keep: Vec::new(),
+            can_trash: true,
+            can_share: false,
             title: name.clone(),
             detail: format!("Hugging Face files that didn't finish downloading ({}). They download again when needed.", ago(&partial[0])),
             app: "Hugging Face",
@@ -424,6 +448,9 @@ fn hf_items(repo: &Path, out: &mut Vec<Item>) {
     let n = old.len();
     out.push(Item {
         kind: Kind::OldVersion,
+        keep: Vec::new(),
+        can_trash: true,
+        can_share: false,
         title: name,
         detail: if n > 0 {
             format!(
@@ -462,6 +489,9 @@ fn partial_files(root: &Path, dir: &Path, depth: u32, out: &mut Vec<Item>) {
             let p = e.path();
             out.push(Item {
                 kind: Kind::Partial,
+                keep: Vec::new(),
+                can_trash: true,
+                can_share: false,
                 title: name.clone(),
                 detail: format!("A model download that didn't finish ({}).", ago(&p)),
                 app: "Folder",
@@ -473,24 +503,125 @@ fn partial_files(root: &Path, dir: &Path, depth: u32, out: &mut Vec<Item>) {
     }
 }
 
-/// Loose models (in Downloads or another folder) whose every file is the same as another model's.
+/// Models whose files are copies of another model's. A loose copy (in Downloads, say) can be
+/// removed; any copy on the same drive as the one kept can be shared with it as one file.
 fn copies(models: &[Model], out: &mut Vec<Item>) {
     for m in models {
-        if m.source != Source::Folder || m.orphan || m.extra == 0 || m.extra < m.size {
+        if m.orphan || m.same_as.is_empty() {
             continue;
         }
-        let Some(other) = m.copies.iter().filter_map(|&i| models.get(i)).next() else { continue };
-        let Some(within) = common_parent(m.files.iter().map(|f| f.path.as_path())) else { continue };
+        let pairs: Vec<(&crate::models::File, &PathBuf)> = m.same_as.iter().filter_map(|(fi, k)| m.files.get(*fi).map(|f| (f, k))).collect();
+        let can_trash = m.source == Source::Folder && m.extra >= m.size;
+        let can_share = pairs.iter().all(|(f, k)| same_drive(&f.path, k));
+        if !can_trash && !can_share {
+            continue;
+        }
+        let Some(within) = common_parent(pairs.iter().map(|(f, _)| f.path.as_path())) else { continue };
+        let other = m.copies.iter().filter_map(|&i| models.get(i)).next();
+        let bytes: u64 = pairs.iter().map(|(f, _)| f.size).sum();
+        let whole = bytes >= m.size;
         out.push(Item {
             kind: Kind::Copy,
             title: m.name.clone(),
-            detail: format!("The same, byte for byte, as {} in {}.", other.name, other.source.label()),
-            app: "Folder",
-            bytes: m.size,
-            paths: m.files.iter().map(|f| f.path.clone()).collect(),
+            detail: match other {
+                Some(o) => format!(
+                    "{} the same, byte for byte, as {} in {}.",
+                    if whole { "All of it is" } else { "Part of it is" },
+                    o.name,
+                    o.source.label()
+                ),
+                None => "The same, byte for byte, as another model's files.".into(),
+            },
+            app: m.source.label(),
+            bytes,
+            paths: pairs.iter().map(|(f, _)| f.path.clone()).collect(),
+            keep: pairs.iter().map(|(_, k)| (*k).clone()).collect(),
+            can_trash,
+            can_share,
             within,
         });
     }
+}
+
+/// Identifies a file on its drive: two names with the same id are one file (hard links).
+#[cfg(unix)]
+pub fn file_id(p: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let m = std::fs::metadata(p).ok()?;
+    Some((m.dev(), m.ino()))
+}
+
+#[cfg(windows)]
+pub fn file_id(p: &Path) -> Option<(u64, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+    let f = std::fs::File::open(p).ok()?;
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: a handle open for the call, and a structure to fill.
+    let ok = unsafe { GetFileInformationByHandle(f.as_raw_handle() as _, &mut info) } != 0;
+    ok.then(|| (info.dwVolumeSerialNumber as u64, ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64))
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn file_id(_: &Path) -> Option<(u64, u64)> {
+    None
+}
+
+/// Both on one drive, so one can be a hard link to the other.
+fn same_drive(a: &Path, b: &Path) -> bool {
+    matches!((file_id(a), file_id(b)), (Some(x), Some(y)) if x.0 == y.0 && x != y)
+}
+
+fn same_contents(a: &Path, b: &Path) -> std::io::Result<bool> {
+    use std::io::Read;
+    let (mut fa, mut fb) = (std::fs::File::open(a)?, std::fs::File::open(b)?);
+    if fa.metadata()?.len() != fb.metadata()?.len() {
+        return Ok(false);
+    }
+    let (mut ba, mut bb) = (vec![0u8; 1 << 20], vec![0u8; 1 << 20]);
+    loop {
+        let n = fa.read(&mut ba)?;
+        if n == 0 {
+            return Ok(true);
+        }
+        fb.read_exact(&mut bb[..n])?;
+        if ba[..n] != bb[..n] {
+            return Ok(false);
+        }
+    }
+}
+
+/// Makes each copy a second name of the file it's the same as (a hard link), checking first that
+/// they're still identical. Both names keep working; the space of the copy is freed at once.
+pub fn share(item: &Item) -> Vec<Removed> {
+    let within = std::fs::canonicalize(&item.within).unwrap_or(item.within.clone());
+    item.paths
+        .iter()
+        .zip(&item.keep)
+        .map(|(copy, keep)| {
+            let result = (|| -> Result<(), String> {
+                let real = copy.parent().and_then(|d| std::fs::canonicalize(d).ok()).map(|d| d.join(copy.file_name().unwrap_or_default()));
+                if real.is_none_or(|r| !r.starts_with(&within)) {
+                    return Err("It isn't where it was listed, so it was left alone.".into());
+                }
+                if file_id(copy).is_some() && file_id(copy) == file_id(keep) {
+                    return Ok(());
+                }
+                if !same_contents(copy, keep).map_err(|e| e.to_string())? {
+                    return Err("The two files are no longer the same, so both were kept.".into());
+                }
+                let name = copy.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let tmp = copy.with_file_name(format!(".{name}.filescape-link"));
+                let _ = std::fs::remove_file(&tmp);
+                std::fs::hard_link(keep, &tmp).map_err(|e| format!("This drive can't share files ({e})."))?;
+                std::fs::rename(&tmp, copy).map_err(|e| {
+                    let _ = std::fs::remove_file(&tmp);
+                    format!("The copy couldn't be replaced (is a program using it?): {e}")
+                })
+            })();
+            Removed { path: copy.clone(), result }
+        })
+        .collect()
 }
 
 // ---------- removing ----------
@@ -610,6 +741,7 @@ mod tests {
             size: 100,
             copies: vec![],
             extra: 0,
+            same_as: vec![],
             orphan: false,
         };
         let p = plan(&m).unwrap();
@@ -655,6 +787,42 @@ mod tests {
     }
 
     #[test]
+    fn sharing_copies_as_one_file() {
+        let d = tempdir("share");
+        let keep = d.path().join("app/model.gguf");
+        let copy = d.path().join("Downloads/model.gguf");
+        write(&keep, 5000);
+        write(&copy, 5000);
+        assert!(same_drive(&copy, &keep));
+        let item = Item {
+            kind: Kind::Copy,
+            title: "m".into(),
+            detail: String::new(),
+            app: "Folder",
+            paths: vec![copy.clone()],
+            bytes: 5000,
+            within: d.path().join("Downloads"),
+            keep: vec![keep.clone()],
+            can_trash: true,
+            can_share: true,
+        };
+        let r = share(&item);
+        assert!(r[0].result.is_ok(), "{r:?}");
+        assert_eq!(file_id(&copy), file_id(&keep));
+        assert_eq!(fs::read(&copy).unwrap().len(), 5000);
+        // Already one file: nothing to do, and no longer "the same drive, another file".
+        assert!(!same_drive(&copy, &keep));
+        assert!(share(&item)[0].result.is_ok());
+        // Files that differ now are both kept.
+        let other = d.path().join("Downloads/other.gguf");
+        write(&other, 5000);
+        fs::write(&other, vec![8u8; 5000]).unwrap();
+        let item2 = Item { paths: vec![other.clone()], ..item };
+        assert!(share(&item2)[0].result.is_err());
+        assert_ne!(file_id(&other), file_id(&keep));
+    }
+
+    #[test]
     fn partial_names() {
         assert!(is_partial_model("Qwen3-8B.Q4_K_M.gguf.crdownload"));
         assert!(is_partial_model("model.safetensors.part"));
@@ -670,7 +838,7 @@ mod tests {
         let outside = d.path().join("out/y.gguf");
         write(&inside, 10);
         write(&outside, 10);
-        let item = Item { kind: Kind::Copy, title: "x".into(), detail: String::new(), app: "Folder", paths: vec![inside.clone(), outside.clone()], bytes: 20, within: d.path().join("in") };
+        let item = Item { kind: Kind::Copy, keep: vec![], can_trash: true, can_share: false, title: "x".into(), detail: String::new(), app: "Folder", paths: vec![inside.clone(), outside.clone()], bytes: 20, within: d.path().join("in") };
         let r = remove(&item, false);
         assert!(r[0].result.is_ok() && r[1].result.is_err());
         assert!(!inside.exists() && outside.exists());

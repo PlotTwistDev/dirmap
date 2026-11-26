@@ -15,8 +15,9 @@
 ### The AI Models workspace
 
 - **🖴 Storage** shows how much space AI models take, by app, and finds what can be freed: Ollama
-  downloads no model uses, unfinished downloads, older Hugging Face versions and loose copies.
-  Each item lists what it removes, with one confirmation. Right-click a model and choose **Move
+  downloads no model uses, unfinished downloads, older Hugging Face versions and copies. Copies on
+  the same drive can be shared as one file (a hard link), so every app keeps working. Each item
+  lists what it changes, with one confirmation. Right-click a model and choose **Move
   to Trash…** to remove it properly: for Ollama, as `ollama rm` would. See
   [Freeing space](../views/ai-models.md#freeing-space).
 

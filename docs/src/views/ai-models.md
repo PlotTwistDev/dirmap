@@ -214,14 +214,22 @@ Hugging Face and other folders), and what can be freed:
 - **Older Hugging Face versions**: Hugging Face keeps every version of a model a program
   downloaded. Programs use the current one (the one its `refs` point to); the older ones, and
   files no version uses, can go.
-- **Extra copies**: a loose model file (in Downloads, say) that's byte-for-byte the same as one an
-  app or another folder keeps. The other copy stays.
+- **Extra copies**: model files that are byte-for-byte the same as files another model keeps, such
+  as the same GGUF file in LM Studio and in Downloads.
 
 Each item says why it can go. **Move to Trash…** shows every file, folder and link it removes, and
 asks once. Choose **Move to Trash** to be able to put it back (the space comes back when the Trash
 is emptied), or **Delete for good** to get the space back straight away. Removing one item at a
 time is free; ticking several and pressing **Remove N items…** is part of managing models in bulk,
 in Filescape Professional.
+
+**Share as one file…** (for copies on the same drive) keeps both names but only one file on disk,
+so every app keeps finding its model and the space is freed straight away. Filescape compares the
+two files once more first, then makes the copy a second name of the file it's the same as (a
+*hard link*). Removing either name later keeps the other. A loose copy can also be moved to the
+Trash; a copy an app keeps can only be shared, since removing it would take the model from that
+app. Copies on different drives can't be shared. Sharing several at once is Professional, like
+removing several.
 
 Filescape only calls something unused when the app's own records say so. If Ollama's list of
 models or Hugging Face's version records can't be read, nothing in that folder is offered.
