@@ -17,6 +17,7 @@ mod asking;
 mod actions;
 mod app;
 mod archtree;
+mod cadview;
 mod camera;
 mod camraw;
 mod categories;

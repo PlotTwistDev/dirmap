@@ -177,6 +177,8 @@ pub(super) enum Kind {
     Midi,
     /// GeoJSON, GPX or KML: the shapes drawn.
     Map,
+    /// DXF drawn; DWG, STEP and IGES described.
+    Cad,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -206,6 +208,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Document => Kind::Doc,
         C::Midi => Kind::Midi,
         C::Map => Kind::Map,
+        C::Cad => Kind::Cad,
         C::Database => Kind::Database,
         C::Model => Kind::Model,
     }
@@ -324,6 +327,26 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                     facts: song.facts,
                 }
             }
+            Err(e) => Content::Error(e),
+        },
+        Kind::Cad if crate::cadview::is_dxf(path) => match crate::cadview::read_dxf(path) {
+            Ok(d) => {
+                let (w, h) = d.fit(1400);
+                Content::Image {
+                    look: None,
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &d.draw(w, h))),
+                    tex: None,
+                    size: [w, h],
+                    info: "Drawn from the file's lines and curves; text isn't drawn".into(),
+                    poster: true,
+                    source: None,
+                    facts: d.facts,
+                }
+            }
+            Err(e) => Content::Error(e),
+        },
+        Kind::Cad => match crate::cadview::read_info(path) {
+            Ok(i) => Content::Doc { blocks: Arc::new(i.blocks), facts: i.facts },
             Err(e) => Content::Error(e),
         },
         Kind::Map => match crate::geoview::read(path) {

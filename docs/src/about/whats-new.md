@@ -88,6 +88,10 @@
   height, time and average speed; GeoJSON with its features and properties; and KML and KMZ
   (Google Earth) with their placemarks. No map is drawn behind them, since that would mean
   fetching it from the internet.
+- DXF drawings preview as the drawing itself (lines, curves, circles and blocks, in their
+  colours), with the AutoCAD version, units, layers and overall size. DWG, STEP and IGES files
+  show what they say about themselves: the program that made them, the units, the author and the
+  parts.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the

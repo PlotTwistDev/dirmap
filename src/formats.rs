@@ -48,6 +48,8 @@ pub enum Category {
     Model,
     /// Maps (GeoJSON, GPX, KML): their shapes drawn here, with no map tiles fetched.
     Map,
+    /// CAD: DXF drawn here; DWG, STEP and IGES described from what they say about themselves.
+    Cad,
 }
 
 /// One format.
@@ -85,6 +87,7 @@ impl Format {
             "vcard" => ("A contact card, or a list of contacts", "Filescape"),
             "ical" => ("An event's time, place and details, or a list of events and to-dos", "Filescape"),
             "jxl" => ("The picture; channels one by one", "jxl-oxide"),
+            "dxf" => ("The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size", "Filescape"),
             "heif" => ("The picture", "The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg)"),
             _ => match self.category {
                 Category::Picture => ("The picture; channels one by one", "image"),
@@ -100,6 +103,7 @@ impl Format {
                 Category::Midi => ("A piano roll, with tempo and instruments", "midly"),
                 Category::Database => ("Each table's columns and first rows, read-only", "SQLite (rusqlite)"),
                 Category::Model => ("A shaded model to turn about", "Filescape (gltf for glTF)"),
+                Category::Cad => ("What the file says: the program that made it, units, author and parts (not drawn)", "Filescape"),
                 Category::Map => ("The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks", "Filescape"),
                 Category::Text | Category::Spreadsheet | Category::Document => ("A preview", "Filescape"),
             },
@@ -180,6 +184,8 @@ pub static FORMATS: &[Format] = &[
     Format { id: "csv", name: "CSV or TSV table", category: Category::Spreadsheet, exts: &["csv", "tsv", "tab"] },
     Format { id: "sqlite", name: "SQLite database", category: Category::Database, exts: &["sqlite", "sqlite3", "db", "db3", "s3db", "sl3"] },
     Format { id: "model3d", name: "3D model", category: Category::Model, exts: &["stl", "obj", "ply", "gltf", "glb", "3mf"] },
+    Format { id: "dxf", name: "DXF drawing", category: Category::Cad, exts: &["dxf"] },
+    Format { id: "cad", name: "CAD model (DWG, STEP, IGES)", category: Category::Cad, exts: &["dwg", "step", "stp", "p21", "iges", "igs"] },
     Format { id: "map", name: "Map data (GeoJSON, GPX, KML)", category: Category::Map, exts: &["geojson", "gpx", "kml", "kmz"] },
     Format { id: "midi", name: "MIDI music", category: Category::Midi, exts: &["mid", "midi", "kar"] },
     Format { id: "pdf", name: "PDF document", category: Category::Pdf, exts: &["pdf"] },
@@ -248,6 +254,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "ical"
     } else if at(0, b"Return-Path: ") || at(0, b"Received: ") || at(0, b"MIME-Version: ") {
         "mail"
+    } else if at(0, b"ISO-10303-21;") {
+        "cad"
     } else if at(0, b"%PDF-") {
         "pdf"
     } else if at(4, b"ftyp") {

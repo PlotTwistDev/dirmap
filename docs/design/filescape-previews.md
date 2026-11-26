@@ -211,4 +211,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Supported formats directory | #74 | Merged |
 | **Phase 3** | | |
 | Email, contacts and calendars (eml, mbox, vcf, ics) | #75 | Merged |
-| Maps: GeoJSON, GPX, KML/KMZ | | In review |
+| Maps: GeoJSON, GPX, KML/KMZ | #76 | Merged |
+| CAD: DXF drawn; DWG, STEP, IGES details | | In review |
