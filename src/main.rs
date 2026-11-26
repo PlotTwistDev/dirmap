@@ -31,7 +31,6 @@ mod fsys;
 mod help;
 mod highlight;
 mod icons;
-mod imagelook;
 mod known;
 mod kit;
 mod licence;

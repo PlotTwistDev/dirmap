@@ -1815,7 +1815,6 @@ dependencies = [
  "lebe",
  "miniz_oxide 0.8.9",
  "multiversion",
- "rayon-core",
  "smallvec",
  "zune-inflate",
 ]
@@ -1917,7 +1916,6 @@ dependencies = [
  "csv",
  "data-encoding",
  "eframe",
- "exr",
  "filescape-licence",
  "flate2",
  "half",

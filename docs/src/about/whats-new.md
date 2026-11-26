@@ -69,8 +69,6 @@
 - JPEG XL pictures (.jxl) preview everywhere pictures do.
 - SQLite databases preview as their tables, read-only, and CSV and TSV files as a table with
   their column names.
-- Pictures can be looked at channel by channel, HDR and OpenEXR pictures have an exposure
-  slider, and multilayer OpenEXR files show each layer (render pass).
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
   details.
 - Quick Look works in Storage Analysis too: click a tile and press **Space**. **Full screen** (or
