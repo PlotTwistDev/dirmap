@@ -18,15 +18,15 @@ can't.
 ## Filtering by size
 
 **Click a bar** to show only files in that size range on the map; it sets **Larger than** and
-**Smaller than** in the filter bar for you. Click the same bar again to turn it off.
+**Smaller than** above the map for you. Click the same bar again to turn it off.
 
 ## What it covers
 
 - The folder shown on the map (follow the breadcrumbs), not the whole scan, unless you're at
   the top.
-- Only the kinds of files chosen under **Show:**, if any. The Custom filter and size limits
+- Only the kinds of files chosen under **File types** in the Filters panel, if any. The Custom filter and size limits
   don't affect it.
-- In **Show matches only** mode, only the matching files.
+- In **Only matches** mode, only the matching files.
 
 ## Related topics
 

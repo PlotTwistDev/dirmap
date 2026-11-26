@@ -8,7 +8,7 @@ good: you can look around and navigate by hand. The rest is **Filescape Professi
 
 | Free | Filescape Professional |
 |---|---|
-| The Files workspace: browsing, tabs, the address bar, the filter box, the preview, opening files, copy, move, rename, delete and New | Filtering by type or size: the **Show:** buttons and the Files **Show** menu, **Larger than** and **Smaller than**, picking a range on the size chart, and highlighting a file type on the map |
+| The Files workspace: browsing, tabs, the address bar, the filter box, the preview, opening files, copy, move, rename, delete and New | Filtering by type or size: the **File types** buttons in the **Filters** panel and the Files **Show** menu, **Larger than** and **Smaller than**, picking a range on the size chart, and highlighting a file type on the map |
 | Scanning, the treemap, the sunburst, the directory tree and the File types list | The **Custom** filter, filter presets and recent filters |
 | Scan exclusions | Finding numbered sequences, and the sequence player |
 | Cloud files: sizes on disk, status icons, the storage breakdown, never downloading without asking, and freeing up or keeping one file at a time | Cloud management: the **Stored** filter, the **Reclaimable** view, and freeing up or keeping folders and several items at once |

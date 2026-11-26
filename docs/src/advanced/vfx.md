@@ -19,7 +19,7 @@ render frames, simulation caches, textures and plates. Filescape has several fea
    ```
 
 5. **Compare over time.** Save a snapshot after each delivery, then compare to see which shots
-   grew. With **Color by: Change**, newly written renders show red.
+   grew. With **Colour: Change**, newly written renders show red.
 
 ## Useful patterns
 
@@ -41,7 +41,7 @@ All of these are checked against Filescape's matcher. See [Custom filter syntax]
 - **Oversized frames:** filter to a sequence and add **Larger than** to find frames much bigger
   than the rest, often a sign of a bad render setting (wrong compression, extra AOVs).
 - **Empty or tiny frames:** **Smaller than** `1 KB` with `*.exr` finds frames that failed to write.
-- **Stale versions:** **Color by: Age** shows old versions untouched for months.
+- **Stale versions:** **Colour: Age** shows old versions untouched for months.
 
 ## Duplicates on project storage
 

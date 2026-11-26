@@ -21,7 +21,7 @@
 - Sort by **Last change** to see which folders have changed recently.
 - The **Sunburst** view (**View: Sunburst**) shows how space splits between folders at several
   levels at once: big segments in the inner rings are big folders.
-- **Color by: Age** and look for large blue areas: big folders nobody has changed in years.
+- **Colour: Age** and look for large blue areas: big folders nobody has changed in years.
 
 ## Related topics
 

@@ -9,7 +9,7 @@ unless you ask.
 
 ## What Filescape shows
 
-With the **Size** switch above the map on **On disk** (the default), online-only files count as
+With the **Size** menu above the map on **On disk** (the default), online-only files count as
 the little space they really take, so a cloud folder shows what it uses on this computer. For
 example, a Google Drive folder holding 33.2 GB of books that are online only shows as a couple
 of megabytes, the same figure `du -sh` gives in Terminal.
@@ -56,7 +56,7 @@ to show only those files on the map (Professional); click it again to show every
 
 ### Stored filter and columns
 
-With cloud files in the scan, the filter bar gets a **Stored** row: **Online only**, **Partly
+With cloud files in the scan, the Filters panel gets a **Stored** section: **Online only**, **Partly
 downloaded**, **Downloaded**, **Always kept on this device**, **Unknown** and **Not in the cloud**.
 Pick one or more to show only those files; it combines with the type, size and Custom filters.
 Like the other filters, choosing is part of Filescape Professional.
@@ -138,7 +138,7 @@ freeing up would mean deleting), mounted cloud drives or Linux, which have no su
 
 ### Reclaimable space
 
-The **Reclaimable** size on the **Size** switch shows where freeing up would give space back: the
+The **Reclaimable** size on the **Size** menu shows where freeing up would give space back: the
 size on disk of downloaded cloud files, without pinned ones. The storage breakdown says how much
 that is in total; click the figure to switch to the view. Select what you want to free up there,
 with **Stored** filters if you like, and right-click.

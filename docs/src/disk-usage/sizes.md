@@ -10,7 +10,7 @@ files, which is why scanning is fast and why it never downloads cloud files):
 
 ## Size on disk and logical size
 
-The **Size** switch above the map (**On disk** / **Logical**) picks which of the two the map,
+The **Size** menu above the map (**On disk** / **Logical**) picks which of the two the map,
 the sunburst, the folder list, the File types list, the size histogram, the summary under the
 map, the **Larger than** and **Smaller than** filters, percentages and the status bar use.
 Switching is instant and doesn't rescan: both sizes were read by the scan. Your zoom, selection
@@ -71,7 +71,7 @@ contains it, both by the size the switch shows. So a folder at 40% holds 40% of 
 item (what you scanned) is 100%.
 
 The **%** column in the File types list is a share of the whole scan (or of the matching files
-in **Show matches only**). The filter count, for example "1,204 files match · 82.1 GB (12.4% of
+in **Only matches**). The filter count, for example "1,204 files match · 82.1 GB (12.4% of
 the scan)", is also a share of the whole scan.
 
 ## File counts

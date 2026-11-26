@@ -1,6 +1,6 @@
 # Colour modes
 
-**Color by:** in the filter bar chooses what the colours on the treemap and sunburst mean. It
+**Colour** above the map chooses what the colours on the treemap and sunburst mean. It
 doesn't change the layout, only the colours.
 
 ## Type
@@ -22,7 +22,7 @@ Colours each file by how long ago it was last modified, from hot to cold:
 | Teal | about three years ago |
 | Blue | ten or more years ago |
 
-Colours blend smoothly between these points. A legend appears under the filter bar. Use it to
+Colours blend smoothly between these points. A legend appears under the toolbar above the map. Use it to
 find old files nobody has touched for years, or to see what a program has been writing to today.
 
 ## Change

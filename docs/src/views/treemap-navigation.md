@@ -43,19 +43,19 @@ it.
 
 ## Zooming to the selection
 
-**Zoom to selection** in the toolbar brings the selected file or folder into view, as large as
+**Zoom to selection** (⌖) in the toolbar brings the selected file or folder into view, as large as
 fits. If it's in a different folder from the one on screen, Filescape moves there first. Use it after
 selecting something in the file manager, the Duplicates or Sequences tab, or a **Find all** list.
 
 ## Returning to the parent folder
 
-**Right-click** the map, or press **Zoom out** in the toolbar, to go up one level:
+**Right-click** the map, or press **↑** in the toolbar, to go up one level:
 
 - If you're zoomed in, it zooms out to the folder around what you're looking at.
 - If the whole folder is already in view, it goes to the folder above, shrinking back into its
   place.
 
-**⟲ Whole map** (or **Home**) returns to the complete scan.
+**Whole map** (⌂) (or **Home**) returns to the complete scan.
 
 ## Back and Forward
 

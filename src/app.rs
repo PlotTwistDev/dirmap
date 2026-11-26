@@ -59,6 +59,7 @@ mod lab;
 mod storage;
 mod explain;
 mod livescan;
+mod viz;
 pub(crate) mod style;
 use files::Workspace;
 
@@ -98,11 +99,15 @@ struct ViewFilter {
     custom: Option<Arc<crate::pattern::Filter>>,
     /// Bitmask of `scan::Stored::bit()`: where the data is (online only, downloaded…); 0 = all.
     stored: u8,
+    /// Only files changed at or after this time (seconds since the epoch; 0 = off).
+    newer: i64,
+    /// Only files last changed before this time (0 = off).
+    older: i64,
 }
 
 impl ViewFilter {
     fn active(&self) -> bool {
-        self.larger > 0 || self.smaller > 0 || self.kinds != 0 || self.custom.is_some() || self.stored != 0
+        self.larger > 0 || self.smaller > 0 || self.kinds != 0 || self.custom.is_some() || self.stored != 0 || self.newer != 0 || self.older != 0
     }
 
     /// Whether a file passes. Folders are judged by the files inside them.
@@ -112,6 +117,8 @@ impl ViewFilter {
             && (self.smaller == 0 || size < self.smaller)
             && (self.kinds == 0 || self.kinds & categories::of(name).bit() != 0)
             && (self.stored == 0 || self.stored & scan::Stored::of(n.flags).bit() != 0)
+            && (self.newer == 0 || n.modified >= self.newer)
+            && (self.older == 0 || n.modified < self.older)
             && self.custom.as_ref().is_none_or(|f| f.matches(name))
     }
 }
@@ -282,6 +289,8 @@ pub struct App {
     hits: Option<(ViewFilter, Arc<crate::subset::Hits>)>,
     /// The Custom filter's input, history and presets.
     custom: CustomUi,
+    /// The Storage Analysis toolbar and Filters panel.
+    viz: viz::VizUi,
     /// In "Show matches only": the filtered tree the maps and folder list show instead of `tree`.
     /// Paths in `zoom`, `selected` and `expanded` are paths in this tree while it's set.
     shown: Option<Shown>,
@@ -359,6 +368,12 @@ impl App {
         crate::cloud::warm(false); // find cloud folders off the UI thread
         let mut settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, "settings")).unwrap_or_default();
         settings.admin = elevate::load_mode();
+        // DIRMAP_THEME=light|dark picks the theme for this run (screenshots of both themes).
+        match std::env::var("DIRMAP_THEME").as_deref() {
+            Ok("light") => settings.theme = settings::Theme::Light,
+            Ok("dark") => settings.theme = settings::Theme::Dark,
+            _ => {}
+        }
         let admin_prompt = elevate::can_elevate() && !elevate::is_elevated() && settings.admin == AdminMode::Ask;
         let mut files_prefs: files::FilesPrefs = cc.storage.and_then(|s| eframe::get_value(s, "files")).unwrap_or_default();
         // Asked to scan something (a path, a snapshot to compare, a test tree): start in Storage
@@ -418,6 +433,7 @@ impl App {
             filter: ViewFilter::default(),
             filter_stats: None,
             hits: None,
+            viz: viz::VizUi::default(),
             custom: CustomUi {
                 prefs: cc.storage.and_then(|s| eframe::get_value(s, "custom_filter")).unwrap_or_default(),
                 ..Default::default()
@@ -904,70 +920,22 @@ impl App {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             self.workspace_switch(ui);
-            if ui.button("🖴 Drives…").clicked() {
-                self.show_drives = !self.show_drives;
-                if self.show_drives {
-                    self.refresh_drives();
-                }
+            // Before the first scan the folder box is right here; after it, it's behind the
+            // breadcrumb so the toolbar can say where you are.
+            if self.tree.is_none() && self.job.is_none() {
+                self.scan_controls(ui, 380.0);
+            } else {
+                self.analysis_nav(ui);
             }
-            let edit = ui.add(egui::TextEdit::singleline(&mut self.path_input).desired_width(380.0).hint_text("Folder to scan"));
-            if ui.button("Browse…").clicked() {
-                let d = dialogs::Dialog::new().set_directory(self.path_input.trim());
-                self.ask_path(d, dialogs::Pick::Folder, |app, dir| {
-                    app.path_input = dir.shown();
-                    app.start_scan();
-                });
-            }
-            let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.button("⟳ Scan").clicked() || enter {
-                self.start_scan();
-            }
-            ui.separator();
-            ui.add_enabled_ui(self.tree.is_some() && self.job.is_none(), |ui| {
-                let feel = self.feel();
-                let treemap = self.map_kind == MapKind::Treemap;
-                let back = ui.add_enabled(treemap && self.map.can_go_back(), egui::Button::new("◀")).on_hover_text("Back (Alt+Left, or the mouse's back button)");
-                if back.clicked() {
-                    self.map.back(&feel);
-                }
-                let fwd = ui.add_enabled(treemap && self.map.can_go_forward(), egui::Button::new("▶")).on_hover_text("Forward (Alt+Right)");
-                if fwd.clicked() {
-                    self.map.forward(&feel);
-                }
-                let zoom_sel = ui.add_enabled(self.selected.is_some(), egui::Button::new("Zoom to selection"));
-                if zoom_sel.on_hover_text("Bring the selected file or folder into view").clicked() {
-                    if let (Some(sel), Some(tree)) = (self.selected.clone(), self.shown_tree()) {
-                        if treemap {
-                            self.map.frame_path(&tree, &sel, &feel);
-                        } else {
-                            let mut z = sel;
-                            if !tree.at(&z).is_some_and(|n| n.is_dir) {
-                                z.pop();
-                            }
-                            self.zoom = z;
-                        }
-                    }
-                }
-                if ui.button("Zoom out").on_hover_text("Up one level (right-click on the map)").clicked() {
-                    if let (true, Some(tree)) = (treemap, self.shown_tree()) {
-                        self.map.zoom_out(&tree, &feel);
-                    } else {
-                        self.zoom.pop();
-                    }
-                }
-                if ui.button("⟲ Whole map").on_hover_text("Back to the whole scan (Home)").clicked() {
-                    if treemap {
-                        self.map.reset(&feel);
-                    } else {
-                        self.zoom.clear();
-                    }
-                }
-            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("⚙ Settings").on_hover_text("Appearance, scan filters, treemap look and more").clicked() {
                     self.dialog.open(&self.settings);
                 }
                 self.help_menu(ui);
+                if self.tree.is_some() && self.job.is_none() && crate::kit::icon_button(ui, crate::kit::Icon::Refresh, "Scan this folder again").clicked() {
+                    self.path_input = self.scanned_path.shown();
+                    self.start_scan();
+                }
             });
         });
     }
@@ -2604,138 +2572,6 @@ impl App {
         Some(resp)
     }
 
-    /// Breadcrumbs for the zoomed folder, plus the "show only" filters for the treemap.
-    fn filter_bar(&mut self, ui: &mut egui::Ui) {
-        let Some(tree) = self.shown_tree() else { return };
-        let total = self.tree.as_ref().map_or(0, |t| t.size);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            let mut go = None;
-            if ui.small_button(format!("🏠 {}", tree.name)).clicked() {
-                go = Some(0);
-            }
-            let mut n: &Node = &tree;
-            for (k, &i) in self.zoom.iter().enumerate() {
-                n = &n.children[i as usize];
-                ui.weak("›");
-                if ui.small_button(&*n.name).clicked() {
-                    go = Some(k + 1);
-                }
-            }
-            if let Some(k) = go {
-                self.zoom.truncate(k);
-            }
-            ui.add_space(12.0);
-            // The hint goes first when the window is too narrow for it and the switches.
-            if ui.available_width() > 960.0 {
-                ui.weak("Wheel to zoom, drag to pan, right-click to zoom out.");
-            }
-            if help::link_button(ui, "Moving around the map") {
-                self.help.show_topic(match self.map_kind {
-                    MapKind::Treemap => topics::TREEMAP_NAV,
-                    MapKind::Sunburst => topics::SUNBURST,
-                });
-            }
-            ui.separator();
-            if ui.add(egui::Label::new("Size:").sense(Sense::click())).on_hover_text("Which size the map, lists and totals use. Switching doesn't rescan. Click for more.").clicked() {
-                self.help.show_topic(topics::SIZE_METRIC);
-            }
-            self.metric_switch(ui);
-            ui.separator();
-            ui.label("View:");
-            ui.selectable_value(&mut self.map_kind, MapKind::Treemap, "Treemap")
-                .on_hover_text("Rectangles sized by space used; zoom and pan freely");
-            ui.selectable_value(&mut self.map_kind, MapKind::Sunburst, "Sunburst")
-                .on_hover_text("Rings: the centre is the folder, each ring one level deeper");
-            ui.separator();
-            ui.label("Color by:");
-            let before = self.color_mode;
-            ui.selectable_value(&mut self.color_mode, ColorMode::Type, "Type").on_hover_text("A colour per file type, as in the File types list");
-            ui.selectable_value(&mut self.color_mode, ColorMode::Age, "Age").on_hover_text("How long since each file last changed");
-            let has_diff = self.diff.is_some();
-            ui.add_enabled_ui(has_diff, |ui| {
-                ui.selectable_value(&mut self.color_mode, ColorMode::Change, "Change").on_disabled_hover_text(
-                    "Compare with a saved snapshot first (Changes tab on the right)",
-                );
-            });
-            if self.color_mode != before {
-                self.paint_gen += 1;
-            }
-        });
-        // What the colors mean, for the modes that aren't self-explanatory.
-        let legend: Vec<(Color32, &str)> = match self.color_mode {
-            ColorMode::Type => Vec::new(),
-            ColorMode::Age => AGE_STOPS.iter().map(|(_, c, t)| (Color32::from_rgb(c[0], c[1], c[2]), *t)).collect(),
-            ColorMode::Change => vec![
-                (change_color(snapshot::NEW, 1), "new"),
-                (change_color(1, 3), "grew"),
-                (change_color(3, 1), "shrank"),
-                (change_color(1, 1), "unchanged"),
-            ],
-        };
-        if !legend.is_empty() {
-            ui.horizontal_wrapped(|ui| {
-                ui.weak(if self.color_mode == ColorMode::Age { "Last changed:" } else { "Since the snapshot:" });
-                for (c, t) in legend {
-                    let (r, _) = ui.allocate_exact_size(vec2(14.0, 10.0), Sense::hover());
-                    ui.painter().rect_filled(r, 2.0, c);
-                    ui.label(t);
-                    ui.add_space(6.0);
-                }
-            });
-        }
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Show:");
-            if ui.selectable_label(self.filter.kinds == 0, "All").clicked() {
-                self.filter.kinds = 0;
-            }
-            for c in Category::ALL {
-                let on = self.filter.kinds & c.bit() != 0;
-                if ui.selectable_label(on, c.label()).on_hover_text(c.tooltip()).clicked() && (on || self.premium(crate::licence::Feature::Filters)) {
-                    self.filter.kinds ^= c.bit();
-                }
-            }
-            self.custom_button(ui);
-        });
-        self.custom_row(ui);
-        self.stored_filter_row(ui);
-        ui.horizontal_wrapped(|ui| {
-            // Without a licence the limits can only be cleared, not set; the lock opens the prompt.
-            let sizes = self.licence.allows(crate::licence::Feature::Filters) || self.filter.larger > 0 || self.filter.smaller > 0;
-            ui.add_enabled_ui(sizes, |ui| {
-                ui.label("Larger than");
-                size_edit(ui, &mut self.filter.larger);
-                ui.label("Smaller than");
-                size_edit(ui, &mut self.filter.smaller);
-            });
-            if !sizes && ui.small_button("🔒 Pro").on_hover_text("Filtering by type or size is part of Filescape Professional").clicked() {
-                self.premium(crate::licence::Feature::Filters);
-            }
-            if (self.filter.active() || self.custom.error.is_some()) && ui.button("Clear filters").clicked() {
-                self.filter = ViewFilter::default();
-                self.clear_custom();
-            }
-            if self.filter.active() {
-                self.filter_summary(ui, total);
-            }
-            ui.separator();
-            let mut labels = self.settings.show_labels;
-            if ui.checkbox(&mut labels, "File names on tiles").changed() {
-                self.settings.show_labels = labels;
-                self.dialog.draft.show_labels = labels;
-            }
-            let mut previews = self.settings.tile_previews;
-            if ui.checkbox(&mut previews, "Previews").on_hover_text("Zoomed-in tiles show what's in the file: pictures, PDF pages, text").changed() {
-                self.settings.tile_previews = previews;
-                self.dialog.draft.tile_previews = previews;
-            }
-            let mut pane = self.files.prefs.map_preview;
-            if ui.checkbox(&mut pane, "Preview pane").on_hover_text("The clicked tile's preview and details, beside the map (Alt+P)").changed() {
-                self.files.prefs.map_preview = pane;
-            }
-        });
-    }
-
     // ---------- scan screen ----------
 
     fn scan_screen(&mut self, ui: &mut egui::Ui) {
@@ -3158,10 +2994,15 @@ impl eframe::App for App {
         self.help_regions.push((r.response.rect, if self.browser.layout() == browser::Layout::Tree { topics::TREE } else { topics::BROWSER }));
         // Its own panel, so it gets the theme's background (readable in light and dark themes).
         let r = egui::Panel::top("filters").show(ui, |ui| {
-            ui.add_space(2.0);
-            self.filter_bar(ui);
-            ui.add_space(2.0);
+            ui.add_space(4.0);
+            self.viz_toolbar(ui);
+            if self.chips_showing() {
+                ui.add_space(4.0);
+                self.chips_row(ui);
+            }
+            ui.add_space(4.0);
         });
+        self.filters_panel(&ctx);
         let custom_focused = ctx.memory(|m| m.has_focus(egui::Id::new("custom-filter-input")));
         self.help_regions.push((r.response.rect, if custom_focused { topics::SYNTAX } else { topics::FILTERING }));
         // Under the map: the folder, its size and the biggest types, following the filters.
@@ -3572,6 +3413,17 @@ mod filter_tests {
         assert!(!f.matches(&with(0)), "not in the cloud");
         let local = ViewFilter { stored: Stored::Local.bit(), ..Default::default() };
         assert!(local.matches(&with(0)) && !local.matches(&with(store::CLOUD)));
+    }
+
+    #[test]
+    fn filters_by_when_files_last_changed() {
+        let at = |t: i64| Node { modified: t, ..file("a.txt", 1) };
+        let recent = ViewFilter { newer: 1_000, ..Default::default() };
+        assert!(recent.active());
+        assert!(recent.matches(&at(1_000)) && recent.matches(&at(5_000)));
+        assert!(!recent.matches(&at(999)));
+        let old = ViewFilter { older: 1_000, ..Default::default() };
+        assert!(old.matches(&at(999)) && !old.matches(&at(1_000)));
     }
 
     #[test]
