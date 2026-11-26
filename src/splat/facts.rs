@@ -111,7 +111,7 @@ pub fn describe(scene: &mut Scene, path: &Path) {
             let per = file_len as f64 / scene.total as f64;
             f.push(("Bytes per splat", format!("{per:.1}")));
             let ply = scene.total as u64 * ply_bytes_per_splat(scene.sh_degree);
-            if !scene.format.starts_with("PLY") && ply > file_len {
+            if !scene.format.starts_with("PLY") && ply as f64 > file_len as f64 * 1.5 {
                 f.push(("As a standard PLY", format!("about {} ({:.0} times bigger, calculated)", human(ply), ply as f64 / file_len as f64)));
             }
         }
