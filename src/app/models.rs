@@ -91,20 +91,6 @@ struct WeightFinding {
     stats: Result<crate::weights::Stats, String>,
 }
 
-struct WeightScan {
-    done: Arc<std::sync::atomic::AtomicU64>,
-    total: u64,
-    cancel: Arc<AtomicBool>,
-    rx: mpsc::Receiver<Vec<WeightFinding>>,
-}
-
-/// What checking every tensor's numbers found: one entry per tensor read.
-#[derive(Clone)]
-struct WeightFinding {
-    tensor: usize,
-    stats: Result<crate::weights::Stats, String>,
-}
-
 struct Verify {
     read: Arc<std::sync::atomic::AtomicU64>,
     total: u64,
