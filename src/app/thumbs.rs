@@ -145,6 +145,17 @@ impl Thumbs {
         }
     }
 
+    /// The thumbnail for this version of a file if it's ready, without asking for it.
+    pub(super) fn ready(&self, path: &Path, stamp: u64) -> Option<&Pic> {
+        match self.cache.get(path) {
+            Some(Slot::Ready { pic, stamp: s, used, .. }) if *s == stamp => {
+                used.set(self.frame);
+                Some(pic)
+            }
+            _ => None,
+        }
+    }
+
     /// The short label of a ready thumbnail of a splat scene ("SPZ · 1.2M splats").
     pub(super) fn badge(&self, path: &Path) -> Option<Arc<str>> {
         match self.cache.get(path) {

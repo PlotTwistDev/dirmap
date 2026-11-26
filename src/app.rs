@@ -58,6 +58,7 @@ mod ask;
 mod lab;
 mod storage;
 mod explain;
+mod livescan;
 pub(crate) mod style;
 use files::Workspace;
 
@@ -227,6 +228,8 @@ pub struct App {
     /// Filters in effect for the tree on screen, to tell when a rescan is needed.
     scanned_with: Option<Settings>,
     job: Option<Job>,
+    /// Watches the analysis on screen for changes made after the scan (see `livescan`).
+    live: Option<livescan::LiveScan>,
     live_open: HashSet<usize>,
     /// Last order shown for each live folder's subfolders, reused while the mouse is over the
     /// list so rows don't jump around as sizes change.
@@ -382,6 +385,7 @@ impl App {
             scanned_path: PathBuf::new(),
             scanned_with: None,
             job: None,
+            live: None,
             live_open: HashSet::new(),
             live_order: HashMap::new(),
             tree: None,
@@ -2931,6 +2935,9 @@ impl eframe::App for App {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
         }
+
+        // Changes made since the scan (a download landing, a file deleted elsewhere).
+        self.live_poll(&ctx);
 
         // A snapshot finished loading, or a duplicate search finished.
         if let Some(rx) = &self.snap_rx {

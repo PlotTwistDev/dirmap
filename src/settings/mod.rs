@@ -62,6 +62,9 @@ pub struct Settings {
     pub units: SizeUnits,
     pub stripes: bool,
     pub live_tree: bool,
+    /// Keep Storage Analysis up to date as files are added, changed or removed after the scan
+    /// (downloads, deletes in other apps), without scanning again.
+    pub watch_changes: bool,
     /// The size Storage Analysis opens with: on disk (default) or logical. The switch above the
     /// map changes it.
     pub size_metric: crate::scan::Metric,
@@ -169,6 +172,7 @@ impl Default for Settings {
             units: SizeUnits::Binary,
             stripes: true,
             live_tree: true,
+            watch_changes: true,
             size_metric: crate::scan::Metric::Disk,
             cloud_icons: true,
             system_notes: true,
@@ -263,8 +267,8 @@ impl Settings {
         let def = Settings::default();
         match page {
             Tab::General => {
-                (self.theme, self.units, self.stripes, self.live_tree, self.check_updates, self.ui_scale, self.system_notes) =
-                    (def.theme, def.units, def.stripes, def.live_tree, def.check_updates, def.ui_scale, def.system_notes);
+                (self.theme, self.units, self.stripes, self.live_tree, self.watch_changes, self.check_updates, self.ui_scale, self.system_notes) =
+                    (def.theme, def.units, def.stripes, def.live_tree, def.watch_changes, def.check_updates, def.ui_scale, def.system_notes);
             }
             Tab::Filtering => {
                 self.exclude_folders = def.exclude_folders;

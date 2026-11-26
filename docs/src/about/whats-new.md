@@ -2,6 +2,14 @@
 
 ## Next version
 
+### Storage Analysis keeps up with changes
+
+- Files added, changed or removed after a scan now show in Storage Analysis by themselves: a
+  download appears in the map a second or so after it finishes, and a file deleted in another
+  app disappears. Downloads still being written (.crdownload, .part, Safari's .download) are left
+  out until they're done. Turn it off under **Settings > General > Keep up with changes**. See
+  [Changes after the scan](../getting-started/scanning.md#changes-after-the-scan).
+
 ### Gaussian splat scenes
 
 - **SPZ** files (every version) and **PLY** splat scenes now preview in Files and Storage
@@ -179,6 +187,9 @@
   JPEG-LS or lossless JPEG now show their picture.
 - Logic Pro projects preview with Logic's picture of the project window, tempo, key and
   sound files.
+- **Steadier tile previews.** Previews on the Storage Analysis map no longer blink off and
+  fade back in as you pan and zoom: a tile keeps its preview while the map sharpens, and sound
+  waveforms hold their shape as tiles grow.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
