@@ -31,7 +31,7 @@ pub(super) fn stamp(size: u64, modified: i64) -> u64 {
 /// picture saved with them), and videos, PDFs and sound (album covers) where the system can make
 /// a picture of them.
 pub(super) fn wants_thumb(name: &str) -> bool {
-    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Midi | Kind::Media(_))
+    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Midi | Kind::Model | Kind::Media(_))
 }
 
 struct Job {
@@ -309,6 +309,10 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
             let img = if r.image.width() > max || r.image.height() > max { r.image.thumbnail(max, max) } else { r.image };
             let rgba = img.to_rgba8();
             Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
+        }),
+        Kind::Model => crate::model3d::read(&local).ok().map(|m| {
+            let n = max.min(512) as usize;
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &m.draw(n, n, crate::model3d::Angle::default(), 1)))
         }),
         Kind::Midi => crate::midiview::read(&local).ok().map(|song| {
             let (w, h) = (max, (max * 2 / 3).max(1));

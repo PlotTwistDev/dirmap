@@ -61,6 +61,8 @@ pub(super) enum Content {
     Pdf(Arc<PdfShown>),
     /// An archive: what's in it, as a tree with sizes.
     Archive(Arc<crate::archtree::Tree>),
+    /// A 3D model, drawn from the angle it's turned to.
+    Model { mesh: Arc<crate::model3d::Mesh>, tex: Option<egui::TextureHandle>, drawn: Option<(crate::model3d::Angle, [usize; 2], usize)> },
     Binary,
     /// Nothing to show beyond the facts.
     None,
@@ -76,6 +78,7 @@ impl Content {
             Content::Doc { facts, .. } => facts,
             Content::Sheet(b) => &b.facts,
             Content::Archive(t) => &t.facts,
+            Content::Model { mesh, .. } => &mesh.facts,
             _ => &[],
         }
     }
@@ -166,6 +169,8 @@ pub(super) enum Kind {
     Sheet,
     /// A SQLite database: its tables.
     Database,
+    /// A 3D model: drawn, to turn about.
+    Model,
     /// Word, PowerPoint or OpenDocument: formatted.
     Doc,
     /// MIDI: a piano roll.
@@ -199,6 +204,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Document => Kind::Doc,
         C::Midi => Kind::Midi,
         C::Database => Kind::Database,
+        C::Model => Kind::Model,
     }
 }
 
@@ -252,6 +258,12 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
         Kind::Doc => load_doc(path),
         Kind::Sheet => match crate::sheets::read(path, crate::sheets::ROWS, crate::sheets::COLS) {
             Ok(b) => Content::Sheet(Arc::new(b)),
+            Err(e) => Content::Error(e),
+        },
+        Kind::Model => match crate::model3d::read(path) {
+            Ok(mesh) => Content::Model { mesh: Arc::new(mesh), tex: None, drawn: None },
+            // A Windows object file (.obj) and the like: shown as any other file.
+            Err(e) if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("obj")) && e.contains("object file") => Content::Binary,
             Err(e) => Content::Error(e),
         },
         Kind::Database => match crate::tables::read_sqlite(path, crate::sheets::ROWS, crate::sheets::COLS) {
@@ -1247,6 +1259,7 @@ impl App {
                 let tree = tree.clone();
                 archive_view(ui, path, &tree, size);
             }
+            Content::Model { mesh, tex, drawn } => model_view(ui, path, mesh, tex, drawn, size),
             Content::Doc { blocks, .. } => {
                 let blocks = blocks.clone();
                 let pal = style::pal(ui);
@@ -1561,6 +1574,47 @@ fn archive_view(ui: &mut egui::Ui, path: &Path, tree: &crate::archtree::Tree, si
         open.insert(i);
     }
     ui.data_mut(|d| d.insert_temp(open_id, open));
+}
+
+/// A 3D model: drag to turn it, double-click to put it back.
+fn model_view(ui: &mut egui::Ui, path: &Path, mesh: &crate::model3d::Mesh, tex: &mut Option<egui::TextureHandle>, drawn: &mut Option<(crate::model3d::Angle, [usize; 2], usize)>, size: Vec2) {
+    use crate::model3d::Angle;
+    let pal = style::pal(ui);
+    let angle_id = egui::Id::new(("model-angle", path));
+    let mut angle: Angle = ui.data(|d| d.get_temp(angle_id)).unwrap_or_default();
+    let (r, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    let turning = resp.dragged();
+    if turning {
+        let d = resp.drag_delta();
+        angle.yaw += d.x * 0.01;
+        angle.pitch = (angle.pitch + d.y * 0.01).clamp(-1.5, 1.5);
+    }
+    if resp.double_clicked() {
+        angle = Angle::default();
+    }
+    ui.data_mut(|d| d.insert_temp(angle_id, angle));
+    let ppp = ui.ctx().pixels_per_point();
+    let px = [((r.width() * ppp) as usize).clamp(16, 1600), ((r.height() * ppp) as usize).clamp(16, 1600)];
+    // While it's turning, fewer triangles in big models so it keeps up.
+    let step = if turning { (mesh.tris.len() / 150_000).max(1) } else { 1 };
+    if *drawn != Some((angle, px, step)) || tex.is_none() {
+        let rgba = mesh.draw(px[0], px[1], angle, step);
+        let img = egui::ColorImage::from_rgba_unmultiplied(px, &rgba);
+        match tex {
+            Some(t) => t.set(img, egui::TextureOptions::LINEAR),
+            None => *tex = Some(ui.ctx().load_texture(format!("model:{}", path.display()), img, egui::TextureOptions::LINEAR)),
+        }
+        *drawn = Some((angle, px, step));
+        if step > 1 {
+            ui.ctx().request_repaint(); // draw it whole once it stops
+        }
+    }
+    let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
+    p.rect_filled(r, style::RADIUS, pal.well);
+    if let Some(t) = tex {
+        p.image(t.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text("Drag to turn it, double-click to put it back");
 }
 
 /// Text laid out in its syntax colours; what the spans don't cover is in `plain`.

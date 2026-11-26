@@ -44,6 +44,8 @@ pub enum Category {
     Midi,
     /// SQLite databases: their tables, read-only.
     Database,
+    /// 3D models, drawn here to turn about.
+    Model,
 }
 
 /// One format.
@@ -105,7 +107,7 @@ pub static FORMATS: &[Format] = &[
             "txt", "rst", "log", "json", "jsonl", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "rs", "py", "js", "mjs", "ts",
             "tsx", "jsx", "c", "h", "cpp", "hpp", "cc", "cs", "java", "kt", "go", "rb", "php", "swift", "m", "mm", "sh", "bash", "zsh", "fish", "ps1",
             "psm1", "bat", "cmd", "lua", "sql", "html", "htm", "css", "scss", "less", "vue", "svelte", "glsl", "hlsl", "wgsl", "osl", "vex", "mel",
-            "nk", "usda", "obj", "mtl", "gitignore", "dockerfile", "makefile", "cmake", "gradle", "properties", "env", "srt", "vtt", "tex", "bib",
+            "nk", "usda", "mtl", "gitignore", "dockerfile", "makefile", "cmake", "gradle", "properties", "env", "srt", "vtt", "tex", "bib",
             "r", "jl", "dart", "zig", "nim", "ex", "exs", "erl", "hs", "ml", "clj", "scala", "pl", "pm", "tcl", "diff", "patch", "lock",
         ],
     },
@@ -123,6 +125,7 @@ pub static FORMATS: &[Format] = &[
     },
     Format { id: "csv", name: "CSV or TSV table", category: Category::Spreadsheet, exts: &["csv", "tsv", "tab"] },
     Format { id: "sqlite", name: "SQLite database", category: Category::Database, exts: &["sqlite", "sqlite3", "db", "db3", "s3db", "sl3"] },
+    Format { id: "model3d", name: "3D model", category: Category::Model, exts: &["stl", "obj", "ply", "gltf", "glb", "3mf"] },
     Format { id: "midi", name: "MIDI music", category: Category::Midi, exts: &["mid", "midi", "kar"] },
     Format { id: "pdf", name: "PDF document", category: Category::Pdf, exts: &["pdf"] },
     Format { id: "docx", name: "Word document", category: Category::Document, exts: &["docx", "docm", "dotx"] },
@@ -176,6 +179,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "psd"
     } else if at(0, crate::tables::SQLITE_MAGIC) {
         "sqlite"
+    } else if at(0, b"glTF") {
+        "model3d"
     } else if at(0, b"MThd") {
         "midi"
     } else if at(0, b"%PDF-") {

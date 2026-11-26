@@ -205,4 +205,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | SQLite (rusqlite) and CSV tables | #68 | Merged |
 | Archive tree with sizes and ratios | #69 | Merged |
 | Image channels, HDR exposure, multilayer EXR | #70 | Merged |
-| Video filmstrips and representative frames | | In review |
+| Video filmstrips and representative frames | #71 | Merged |
+| 3D model viewer (STL, OBJ, PLY, glTF, 3MF) | | In review |

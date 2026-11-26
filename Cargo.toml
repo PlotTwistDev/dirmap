@@ -52,6 +52,7 @@ midly = "0.5"
 rusqlite = { version = "0.43.0", features = ["bundled", "hooks"] }
 csv = "1.4.0"
 exr = "1.74"
+gltf = { version = "1.4", default-features = false, features = ["import", "utils"] }
 
 [features]
 default = []
