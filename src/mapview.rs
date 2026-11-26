@@ -198,6 +198,23 @@ impl Scene {
         let main = if covered { detail } else { base.or(detail) };
         (out, main)
     }
+
+    /// The tile sets to take names from for `view`: the one whose detail level is on screen, then
+    /// the others still held. Panning past the sharp set's edge, or zooming far enough to need a
+    /// new one, shows the coarse base until the new set is made, and the base has no names for
+    /// tiles that were too small when it was laid out; taking them from the sharp set as well
+    /// keeps those tiles named (and their previews on screen) instead of blinking off and on.
+    fn label_sets(&self, view: &DRect, key: u64) -> Vec<&TileSet> {
+        let mut out: Vec<&TileSet> = self.layers(view, key).1.into_iter().collect();
+        let base = self.base.as_ref();
+        let fresh = |s: &&TileSet| s.world == self.world && (s.paint_key == key || base.is_none_or(|b| b.paint_key != key));
+        for s in [self.detail.as_ref(), base].into_iter().flatten().filter(fresh) {
+            if !out.iter().any(|o| std::ptr::eq(*o, s)) {
+                out.push(s);
+            }
+        }
+        out
+    }
 }
 
 /// Drill animation between a folder and one of its subfolders. The shallow scene's camera moves
@@ -986,13 +1003,15 @@ impl MapView {
         }
         let view = self.camera.view();
         let key = self.paint.as_ref().map(|p| p.key).unwrap_or(0);
-        let Some(set) = scene.layers(&view, key).1 else { return out };
-        let sv = set_view(set, &scene.world, &view);
+        let sets = scene.label_sets(&view, key);
         let fade = self.label_fade;
         let alphas = &mut self.label_alpha;
         let mut seen = std::collections::HashSet::new();
-        for l in &set.labels {
-            let r = rect_on_screen(&sv, bounds, &l.rect);
+        for (set, l) in sets.iter().flat_map(|set| set.labels.iter().map(move |l| (*set, l))) {
+            if seen.contains(&l.path) {
+                continue;
+            }
+            let r = rect_on_screen(&set_view(set, &scene.world, &view), bounds, &l.rect);
             if !r.intersects(bounds) {
                 continue;
             }
