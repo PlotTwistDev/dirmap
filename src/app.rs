@@ -2825,6 +2825,7 @@ impl eframe::App for App {
             self.applied_scale = Some(self.settings.ui_scale);
         }
         scan::set_decimal_units(self.view().units == settings::SizeUnits::Decimal);
+        self.settings.apply_previews();
         scan::set_shown_metric(self.metric);
 
         self.help_keys(&ctx);

@@ -127,6 +127,24 @@ How cloud files are counted and shown. See [Cloud files](../disk-usage/cloud-fil
 folders on this computer** section lists the cloud folders and drives Filescape found, with the
 service and how it keeps files here.
 
+
+## Previews & thumbnails
+
+How much work goes into previews and thumbnails, and what's kept on disk. See
+[Quick Look and the preview pane](../views/file-manager.md#quick-look-and-the-preview-pane).
+
+**Presets** sets everything below at once: **Light** keeps nothing on disk and makes only the
+pictures that are quick to make; **Balanced** (the default) shows everything and keeps up to
+512 MB of thumbnails; **Everything** keeps up to 2 GB. Changing a setting by hand shows the mix as
+your own.
+
+| Setting | Default | Effect |
+|---|---|---|
+| **Keep thumbnails on disk** <!-- setting:thumb_cache --> | On | Keeps the pictures made for Icons view and map tiles in the system's cache folder (`~/Library/Caches/Filescape` on macOS, `%LOCALAPPDATA%\Filescape\Cache` on Windows, `~/.cache/filescape` on Linux), so folders show their pictures at once next time, without reading the files again. A changed file gets a new picture. **Clear** removes them all. |
+| **Thumbnail cache size** <!-- setting:thumb_cache_mb --> | 512 MB | The most the kept thumbnails may take. When it's full, the least recently seen go first. |
+| **Filmstrip** <!-- setting:video_strip --> | On | Frames from across a video under its preview; click one to play from there. |
+| **Better video pictures** <!-- setting:video_better_poster --> | On | When a video's first frame is black or a fade, shows the most telling of a few frames from across it instead. |
+| **3D and MIDI pictures** <!-- setting:rich_thumbs --> | On | Draws 3D models and MIDI files for Icons view and map tiles. The preview pane always shows them. |
 ## Advanced
 
 | Setting | Default | Effect |

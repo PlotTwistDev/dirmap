@@ -31,7 +31,11 @@ pub(super) fn stamp(size: u64, modified: i64) -> u64 {
 /// picture saved with them), and videos, PDFs and sound (album covers) where the system can make
 /// a picture of them.
 pub(super) fn wants_thumb(name: &str) -> bool {
-    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Midi | Kind::Model | Kind::Media(_))
+    match preview::kind_of(name) {
+        Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Media(_) => true,
+        Kind::Midi | Kind::Model => crate::thumbcache::rich(),
+        _ => false,
+    }
 }
 
 struct Job {
@@ -286,6 +290,20 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
         }
         return snippet(&job.path, doc).map(Decoded::Text);
     }
+    // Made before (in this run or an earlier one): from the disk cache, without reading the file.
+    if let Some((w, h, rgba)) = crate::thumbcache::get(&job.path, job.stamp, config.max) {
+        return Some(Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)));
+    }
+    let made = picture(job, config, kind, &name)?;
+    if let Decoded::Image(img) = &made {
+        let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+        crate::thumbcache::put(&job.path, job.stamp, config.max, img.size[0], img.size[1], &rgba);
+    }
+    Some(made)
+}
+
+/// Make a thumbnail picture from the file.
+fn picture(job: &Job, config: Config, kind: Kind, name: &str) -> Option<Decoded> {
     let local = if crate::fsys::remote::is_remote(&job.path) {
         // On a server: only pictures, fetched when they're small enough (never for the map).
         if !config.local_only && matches!(kind, Kind::Image | Kind::LinearImage | Kind::Drawing) && job.size <= REMOTE_MAX { crate::fsys::remote::fetch(&job.path, REMOTE_MAX).ok()? } else { return None }
