@@ -202,6 +202,12 @@ impl App {
         ui.horizontal(|ui| {
             style::roomy(ui);
             self.workspace_switch(ui);
+            ui.add_space(6.0);
+            let mut ask = self.ask.open;
+            kit::segmented(ui, &mut ask, &[(false, "Library"), (true, "💬 Ask AI")], false)
+                .on_hover_text("Library: the models on this computer. Ask AI: chat with one of them, run by Filescape on this computer.");
+            self.ask.open = ask;
+            ui.add_space(6.0);
             let busy = self.models.job.is_some();
             if ui.add_enabled(!busy, egui::Button::new("⟳ Look again")).on_hover_text("Look for models again in every place on the left").clicked() {
                 self.start_models();
@@ -224,6 +230,10 @@ impl App {
     pub(super) fn models_workspace(&mut self, ui: &mut egui::Ui) {
         if self.models.list.is_none() && self.models.job.is_none() && self.models.places.is_empty() {
             self.start_models();
+        }
+        if self.ask.open {
+            self.ask_workspace(ui);
+            return;
         }
         let pal = style::pal(ui);
         let side = egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 8, right: 6, top: 8, bottom: 6 });
@@ -499,14 +509,21 @@ impl App {
         }
         ui.add_space(10.0);
         let mut look = false;
+        let mut ask = false;
         ui.horizontal(|ui| {
             look = ui.button("🔍 Inspect").on_hover_text("See what's inside this model: its architecture, tensors and metadata").clicked();
+            if m.runnable() && ui.button("💬 Ask AI").on_hover_text("Chat with this model, run by Filescape on this computer").clicked() {
+                ask = true;
+            }
             if ui.button("Show in Files").clicked() {
                 open = m.files.first().map(|f| f.path.clone());
             }
         });
         if look && let Some(i) = self.models.chosen {
             self.inspect_model(i, m);
+        }
+        if ask {
+            self.ask_about_model(m);
         }
         self.models.list = Some(list);
         if pick.is_some() {

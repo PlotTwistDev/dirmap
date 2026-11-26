@@ -54,6 +54,7 @@ mod views;
 mod summary;
 mod cloud;
 mod models;
+mod ask;
 mod explain;
 pub(crate) mod style;
 use files::Workspace;
@@ -282,6 +283,7 @@ pub struct App {
     filter_job: Option<FilterJob>,
     seq: SeqState,
     models: models::ModelsState,
+    ask: ask::AskState,
     /// Path and size of the treemap tile under the mouse, for the status bar.
     hover_status: Option<String>,
     wheel: f32,
@@ -418,6 +420,7 @@ impl App {
             filter_job: None,
             seq: SeqState::default(),
             models: Default::default(),
+            ask: Default::default(),
             hover_status: None,
             wheel: 0.0,
             color_mode: ColorMode::Type,
@@ -2958,6 +2961,7 @@ impl eframe::App for App {
         self.drive_filter(&ctx);
         self.poll_sequences(&ctx);
         self.poll_models(&ctx);
+        self.poll_ask(&ctx);
 
         self.licence.banner(ui);
         self.licence.update_notice(ui);
