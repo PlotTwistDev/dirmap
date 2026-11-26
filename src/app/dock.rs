@@ -342,7 +342,7 @@ impl App {
         let pal = style::pal(ui);
         let rect = ui.max_rect();
         // A click in the dock takes the keys from the list (so Home, + and - reach the map).
-        if ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| rect.contains(p))) {
+        if super::pressed_in(ui, rect) {
             self.files.focused = false;
         }
         ui.spacing_mut().item_spacing = vec2(4.0, 0.0);

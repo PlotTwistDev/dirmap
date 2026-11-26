@@ -336,7 +336,7 @@ impl App {
     /// Tree shortcuts act on the selection, from anywhere except a text box.
     pub(super) fn tree_shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, Modifiers as M};
-        if self.tree.is_none() || self.job.is_some() || self.ops.modal() || ctx.text_edit_focused() {
+        if self.tree.is_none() || self.job.is_some() || self.blocked() || ctx.text_edit_focused() {
             return;
         }
         let Some(sel) = self.selected.clone() else { return };

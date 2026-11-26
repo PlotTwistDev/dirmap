@@ -562,6 +562,12 @@ impl App {
     }
 
     /// The file manager takes the keyboard: it was clicked last and isn't showing the tree.
+    /// A dialog that owns the keyboard is up (Settings, or a confirmation, rename or batch
+    /// box), so the shortcuts of the panes behind it stay quiet.
+    pub(super) fn blocked(&self) -> bool {
+        self.ops.modal() || self.dialog.open
+    }
+
     pub(super) fn browser_has_keys(&self) -> bool {
         self.browser.focused && self.browser.layout() != Layout::Tree
     }
@@ -935,8 +941,7 @@ impl App {
         let rect = ui.max_rect();
         self.browser.rect = Some(rect);
         // Which part of the window has the keyboard: the one clicked last.
-        let pressed = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
-        if let Some(p) = pressed {
+        if let Some(p) = super::pressed_at(ui) {
             if rect.contains(p) {
                 self.browser.focused = true;
             } else if self.browser.map_rect.is_some_and(|r| r.contains(p)) {
@@ -1259,7 +1264,7 @@ impl App {
     /// type-to-select.
     fn browser_keys(&mut self, ctx: &egui::Context, tree: &Arc<Node>, order: &[u32], pointer_in: bool, picks: &mut Picks) {
         use egui::{Key, Modifiers as M};
-        if self.ops.modal() || ctx.egui_wants_keyboard_input() {
+        if self.blocked() || ctx.egui_wants_keyboard_input() {
             return;
         }
         let help_hovered = self.help.hovered;

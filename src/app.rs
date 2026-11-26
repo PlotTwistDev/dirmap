@@ -2363,10 +2363,10 @@ impl App {
         let help_hovered = self.help.hovered;
         // The keys go to the map unless the file manager was clicked last; the side buttons go to
         // whichever is under the pointer.
-        let keys = !typing && if self.map_in_dock { resp.hovered() } else { !self.browser_has_keys() };
+        let keys = !typing && !self.dialog.open && if self.map_in_dock { resp.hovered() } else { !self.browser_has_keys() };
         let fm = if self.map_in_dock { None } else { self.browser.rect };
         let (wheel, pinch, back, forward, home, plus, minus) = ui.input(|i| {
-            let side = !help_hovered && !i.pointer.hover_pos().is_some_and(|p| fm.is_some_and(|r| r.contains(p)));
+            let side = !help_hovered && !self.dialog.open && !i.pointer.hover_pos().is_some_and(|p| fm.is_some_and(|r| r.contains(p)));
             let mut wheel = 0.0f64;
             for e in &i.raw.events {
                 if let egui::Event::MouseWheel { delta, unit, modifiers, .. } = e {
@@ -3110,6 +3110,19 @@ impl eframe::App for App {
 /// Live progress for a running scan: counts, an estimated percentage for whole drives, and
 /// the folder being read right now, so a long scan never looks frozen. Compact when the live
 /// tree is shown below it.
+/// A mouse button went down inside `rect` on this `ui`'s own layer this frame. A press on a
+/// window or popup drawn over `rect` (Settings, Help, a menu) doesn't count: it belongs to that.
+pub(crate) fn pressed_in(ui: &egui::Ui, rect: egui::Rect) -> bool {
+    let at = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
+    at.is_some_and(|p| rect.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id()))
+}
+
+/// A press anywhere on this `ui`'s own layer this frame, as [`pressed_in`]: where it was.
+pub(crate) fn pressed_at(ui: &egui::Ui) -> Option<egui::Pos2> {
+    let at = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
+    at.filter(|p| ui.ctx().layer_id_at(*p) == Some(ui.layer_id()))
+}
+
 fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
     let p = &job.progress;
     let files = p.files.load(Ordering::Relaxed);
