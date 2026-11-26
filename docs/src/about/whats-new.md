@@ -75,6 +75,8 @@
   slider, and multilayer OpenEXR files show each layer (render pass).
 - Videos have a filmstrip under the picture (click a frame to play from there), and a video that
   starts black or with a title card is shown by a more telling frame.
+- 3D models (STL, OBJ, PLY, glTF/GLB and 3MF) preview as a shaded model to turn about, and show
+  in Icons view.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
   details.
 - Quick Look works in Storage Analysis too: click a tile and press **Space**. **Full screen** (or

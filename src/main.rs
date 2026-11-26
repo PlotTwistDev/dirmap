@@ -46,6 +46,7 @@ mod inspect;
 mod midiview;
 mod models;
 mod mapview;
+mod model3d;
 mod netdrives;
 mod officedoc;
 mod pdfview;
