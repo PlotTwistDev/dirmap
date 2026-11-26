@@ -60,6 +60,7 @@ mod midiview;
 mod models;
 mod mapview;
 mod model3d;
+mod splat;
 mod netdrives;
 mod officedoc;
 mod packages;
