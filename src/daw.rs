@@ -172,16 +172,11 @@ impl Project {
         if !self.plugins.is_empty() {
             facts.push(("Plugins", group(self.plugins.len())));
         }
-        // Sound files: where they'd be, relative ones beside the project.
-        let found = |s: &str| -> bool {
-            let p = PathBuf::from(s.replace('\\', "/"));
-            if p.is_absolute() || s.contains(":\\") { p.exists() } else { dir.is_some_and(|d| d.join(&p).exists()) }
-        };
-        let missing: Vec<bool> = self.samples.iter().take(LIST_MAX).map(|s| !found(s)).collect();
+        // Sound files: where they'd be, relative ones beside the project, checked without
+        // opening them.
+        let refs = crate::projrefs::check("Sound files", self.samples.iter().cloned(), dir);
         if !self.samples.is_empty() {
-            let gone = missing.iter().filter(|m| **m).count();
-            let v = if gone > 0 { format!("{} ({} not on this computer)", group(self.samples.len()), group(gone)) } else { group(self.samples.len()) };
-            facts.push(("Sound files", v));
+            facts.push(("Sound files", refs.fact()));
         }
         facts.extend(self.extra.iter().cloned());
         let mut blocks = vec![Block::Heading { level: 1, spans: plain(&self.title), id: String::new() }];
@@ -202,22 +197,7 @@ impl Project {
             let items = self.plugins.iter().take(LIST_MAX).map(|p| vec![Block::Para(plain(p))]).collect();
             blocks.push(Block::List { start: None, items });
         }
-        if !self.samples.is_empty() {
-            blocks.push(Block::Heading { level: 2, spans: plain("Sound files"), id: String::new() });
-            let items = self
-                .samples
-                .iter()
-                .zip(&missing)
-                .map(|(s, gone)| {
-                    let mut spans = plain(s);
-                    if *gone {
-                        spans.push(Span { text: "  (not found)".into(), italic: true, ..Default::default() });
-                    }
-                    vec![Block::Para(spans)]
-                })
-                .collect();
-            blocks.push(Block::List { start: None, items });
-        }
+        blocks.extend(refs.blocks());
         (blocks, facts)
     }
 }
@@ -518,7 +498,7 @@ mod tests {
         assert_eq!(fact(&facts, "Tracks"), Some("3"));
         assert_eq!(fact(&facts, "Clips"), Some("3"));
         assert_eq!(fact(&facts, "Plugins"), Some("1"));
-        assert_eq!(fact(&facts, "Sound files"), Some("1 (1 not on this computer)"));
+        assert_eq!(fact(&facts, "Sound files"), Some("1 (1 not found)"));
         let text = crate::officedoc::plain_text(&blocks);
         assert!(text.contains("Vocals  Audio") && text.contains("Bass  MIDI"), "{text}");
     }
@@ -580,7 +560,7 @@ mod tests {
         let (_, facts) = cubase(&b).unwrap().render(None);
         assert_eq!(fact(&facts, "App"), Some("Cubase"));
         assert_eq!(fact(&facts, "Saved with"), Some("Cubase 13.0.30"));
-        assert_eq!(fact(&facts, "Sound files"), Some("1 (1 not on this computer)"));
+        assert_eq!(fact(&facts, "Sound files"), Some("1 (1 not found)"));
     }
 
     #[test]
@@ -609,7 +589,7 @@ mod tests {
         assert_eq!(f("Time signature"), Some("6/8"));
         assert_eq!(f("Key"), Some("C major"));
         assert_eq!(f("Tracks"), Some("3"));
-        assert_eq!(f("Sound files"), Some("2 (1 not on this computer)"));
+        assert_eq!(f("Sound files"), Some("2 (1 not found), 4 B"));
         assert!(logic_window(&pkg).is_none());
         let _ = std::fs::remove_dir_all(pkg.parent().unwrap());
     }

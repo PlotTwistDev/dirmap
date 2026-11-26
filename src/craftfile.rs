@@ -63,6 +63,25 @@ impl Craft {
         }
     }
 
+    /// What the file is, for the Kind column: "FilmCraft project".
+    pub fn kind(self) -> &'static str {
+        match self {
+            Craft::PhotoCraft => "PhotoCraft picture",
+            Craft::VectorCraft => "VectorCraft drawing",
+            Craft::EffectCraft => "EffectCraft project",
+            Craft::EffectTemplate => "EffectCraft template",
+            Craft::FigCraft => "FigCraft design",
+            Craft::DesignCraft => "DesignCraft layout",
+            Craft::TextureCraft => "TextureCraft project",
+            Craft::DeckCraft => "DeckCraft presentation",
+            Craft::AniCraft => "AniCraft animation",
+            Craft::MaterialCraft => "MaterialCraft material",
+            Craft::FilmCraft => "FilmCraft project",
+            Craft::SoundCraft => "SoundCraft session",
+            Craft::SoundBundle => "SoundCraft bundle",
+        }
+    }
+
     /// What, if anything, makes the app save a picture inside the file, for the note shown when
     /// there's none.
     fn no_picture(self) -> &'static str {
@@ -110,14 +129,21 @@ mod newest {
 
 pub fn read(path: &Path) -> Result<Saved, String> {
     let craft = path.file_name().and_then(|n| of(&n.to_string_lossy())).ok_or("Not a Craft Apps file")?;
-    if path.is_dir() {
+    if path.is_dir() && craft != Craft::PhotoCraft {
         return Err(format!("A {} bundle (a folder); open it to see inside", craft.name()));
     }
-    let mut out = Saved { picture: None, facts: vec![("App", craft.name().to_string())], note: None };
+    let mut out = Saved { picture: None, facts: vec![("App", craft.name().to_string())], note: None, refs: None };
+    let base = path.parent();
     match craft {
         Craft::PhotoCraft => photo(path, &mut out)?,
         Craft::VectorCraft => vector(&whole(path)?, &mut out)?,
-        Craft::EffectCraft => effect(&whole(path)?, &mut out)?,
+        Craft::EffectCraft => {
+            let b = whole(path)?;
+            effect(&b, &mut out)?;
+            if let Ok(d) = json(&b) {
+                uses(&mut out, "Footage", effect_files(&d), base);
+            }
+        }
         Craft::EffectTemplate => {
             let mut zip = zip_open(path).ok_or("Not an EffectCraft template")?;
             out.picture = zip_bytes(&mut zip, "poster.png", PIC_MAX).and_then(|b| decode(&b));
@@ -131,15 +157,26 @@ pub fn read(path: &Path) -> Result<Saved, String> {
         Craft::DeckCraft => deck(path, &mut out)?,
         Craft::AniCraft => ani(&json(&whole(path)?)?, &mut out)?,
         Craft::MaterialCraft => material(path, &mut out)?,
-        Craft::FilmCraft => film(&json(&whole(path)?)?, &mut out)?,
-        Craft::SoundCraft => sound(&json(&whole(path)?)?, &mut out)?,
+        Craft::FilmCraft => {
+            let d = json(&whole(path)?)?;
+            film(&d, &mut out)?;
+            uses(&mut out, "Media files", film_files(&d), base);
+        }
+        Craft::SoundCraft => {
+            let d = json(&whole(path)?)?;
+            sound(&d, &mut out)?;
+            uses(&mut out, "Sound and video files", sound_files(&d, true), base);
+        }
         Craft::SoundBundle => {
             let mut zip = zip_open(path).ok_or("Not a SoundCraft bundle")?;
             let name = entries(&zip).into_iter().find(|n| n.ends_with(".scraft") && !n.contains('/'));
             let session = name.and_then(|n| zip_bytes(&mut zip, &n, JSON_MAX)).ok_or("Not a SoundCraft bundle")?;
             let audio = entries(&zip).into_iter().filter(|n| !n.ends_with(".scraft") && !n.ends_with('/')).count();
-            sound(&json(&session)?, &mut out)?;
+            let d = json(&session)?;
+            sound(&d, &mut out)?;
             out.facts.push(("Sound files inside", audio.to_string()));
+            // Its sound files are inside; the movies it uses never are.
+            uses(&mut out, "Video files", sound_files(&d, false), base);
         }
     }
     if let Some(p) = &out.picture {
@@ -294,8 +331,20 @@ fn layers_fact(out: &mut Saved, layers: &[craft_doc::Layer]) {
 /// manifest and the saved pictures are taken out of it, into a small ZIP that craft-doc reads,
 /// so a large document is never held in memory.
 fn photo(path: &Path, out: &mut Saved) -> Result<(), String> {
-    let mut zip = zip_open(path).ok_or("Not a PhotoCraft document")?;
-    let manifest = zip_bytes(&mut zip, "manifest.json", JSON_MAX).ok_or("Not a PhotoCraft document")?;
+    // A PhotoCraft document is a ZIP, or the same files in a folder (a bundle). Only the
+    // manifest and the saved pictures are copied, never the tiles, which can be gigabytes.
+    let mut get: Box<dyn FnMut(&str, usize) -> Option<Vec<u8>>> = if path.is_dir() {
+        let dir = path.to_path_buf();
+        Box::new(move |name: &str, max: usize| {
+            let f = dir.join(name);
+            let md = std::fs::symlink_metadata(&f).ok()?;
+            (md.is_file() && md.len() <= max as u64).then(|| std::fs::read(&f).ok()).flatten()
+        })
+    } else {
+        let mut zip = zip_open(path).ok_or("Not a PhotoCraft document")?;
+        Box::new(move |name: &str, max: usize| zip_bytes(&mut zip, name, max))
+    };
+    let manifest = get("manifest.json", JSON_MAX).ok_or("Not a PhotoCraft document")?;
     let mut small = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let mut add = |name: &str, data: &[u8]| -> Option<()> {
@@ -305,7 +354,7 @@ fn photo(path: &Path, out: &mut Saved) -> Result<(), String> {
     };
     add("manifest.json", &manifest).ok_or("Couldn't read it")?;
     for name in ["composite/full.png", "composite/preview.png", "thumb.png"] {
-        if let Some(b) = zip_bytes(&mut zip, name, PIC_MAX) {
+        if let Some(b) = get(name, PIC_MAX) {
             add(name, &b).ok_or("Couldn't read it")?;
         }
     }
@@ -741,11 +790,66 @@ fn sound(d: &Value, out: &mut Saved) -> Result<(), String> {
     if let Some(r) = rate.filter(|_| end > 0.0) {
         out.facts.push(("Length", seconds(end / r)));
     }
-    let sources = d.get("sources").and_then(Value::as_array).map_or(0, Vec::len);
-    if sources > 0 {
-        out.facts.push(("Sound files used", sources.to_string()));
-    }
     Ok(())
+}
+
+/// Checks the files a project uses (see `projrefs`), when it names any, and says how many in the
+/// details. A project from a newer version than Filescape knows isn't read for them.
+fn uses(out: &mut Saved, what: &'static str, named: Vec<String>, base: Option<&Path>) {
+    if named.is_empty() || out.facts.iter().any(|(k, v)| *k == "Format" && v.contains("newer")) {
+        return;
+    }
+    let refs = crate::projrefs::check(what, named, base);
+    out.facts.push((what, refs.fact()));
+    out.refs = Some(refs);
+}
+
+/// FilmCraft: each media item's file and its proxy (`items.*.kind.Media.{media,proxy}.File.path`).
+fn film_files(d: &Value) -> Vec<String> {
+    let project = if d.get("project").is_some() { &d["project"] } else { d };
+    let items = project.get("items").and_then(Value::as_object).map(|o| o.values().collect::<Vec<_>>()).unwrap_or_default();
+    items
+        .iter()
+        .filter_map(|i| i.get("kind")?.get("Media"))
+        .flat_map(|m| ["media", "proxy"].map(|k| m.get(k).and_then(|r| r.get("File")).and_then(|f| f.get("path").unwrap_or(f).as_str())))
+        .flatten()
+        .map(str::to_string)
+        .collect()
+}
+
+/// SoundCraft: the sound files (relative to the session's folder, or absolute when referenced)
+/// that have been saved, and the movies video tracks use.
+fn sound_files(d: &Value, audio: bool) -> Vec<String> {
+    let list = |k: &str| d.get(k).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default().to_vec();
+    let mut out = Vec::new();
+    if audio {
+        out.extend(
+            list("sources")
+                .iter()
+                .filter(|s| s.get("unsaved").and_then(Value::as_bool) != Some(true))
+                .filter_map(|s| s.get("path").and_then(Value::as_str).map(str::to_string)),
+        );
+    }
+    out.extend(list("videos").iter().filter_map(|v| v.get("path").and_then(Value::as_str).map(str::to_string)));
+    out
+}
+
+/// EffectCraft: footage items' files and their proxies (`items.*.kind` tagged `"type": "Footage"`, its `path`;
+/// `items.*.proxy.footage.path`).
+fn effect_files(d: &Value) -> Vec<String> {
+    let items = d.get("items").or_else(|| d.get("project").and_then(|p| p.get("items")));
+    let items = items.and_then(Value::as_object).map(|o| o.values().collect::<Vec<_>>()).unwrap_or_default();
+    let mut out = Vec::new();
+    for i in items {
+        let kind = i.get("kind");
+        if let Some(p) = kind.filter(|k| k.get("type").and_then(Value::as_str) == Some("Footage")).and_then(|f| f.get("path")).and_then(Value::as_str) {
+            out.push(p.to_string());
+        }
+        if let Some(p) = i.get("proxy").and_then(|x| x.get("footage")).and_then(|f| f.get("path")).and_then(Value::as_str) {
+            out.push(p.to_string());
+        }
+    }
+    out
 }
 
 /// The names of the entries in a ZIP (any that can't be read are left out).
@@ -839,6 +943,24 @@ mod tests {
         let s = read(&p).unwrap();
         assert!(fact(&s, "Format").unwrap().contains("newer PhotoCraft"));
         assert!(fact(&s, "Size").is_none());
+        // The same document saved as a bundle (a folder): read from the folder's own files.
+        let zipped = pcraft(1);
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(zipped)).unwrap();
+        let (_d, p) = file("placeholder", b"");
+        let bundle = p.parent().unwrap().join("Bundle.pcraft");
+        for i in 0..z.len() {
+            let mut e = z.by_index(i).unwrap();
+            if e.is_dir() {
+                continue;
+            }
+            let out = bundle.join(e.name().unwrap().to_string());
+            std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+            std::io::copy(&mut e, &mut std::fs::File::create(&out).unwrap()).unwrap();
+        }
+        let s = read(&bundle).unwrap();
+        assert_eq!(s.picture.as_ref().map(|i| (i.width(), i.height())), Some((64, 48)));
+        assert_eq!(fact(&s, "Layers"), Some("3 layers (1 hidden)"));
+        assert!(crate::packages::is_package(&bundle, "Bundle.pcraft"));
     }
 
     fn vectorcraft(members: &str) -> String {
@@ -891,6 +1013,9 @@ mod tests {
         let (_d, p) = file("Promo.ecproj", ECPROJ.as_bytes());
         let s = read(&p).unwrap();
         assert_eq!(fact(&s, "Composition"), Some("Main: 1920 × 1080, 23.976 fps, 0:05, 1 layer"));
+        let r = s.refs.as_ref().expect("footage checked");
+        assert_eq!(r.items.iter().map(|i| i.named.as_str()).collect::<Vec<_>>(), ["clip.mov"]);
+        assert_eq!(r.items[0].path, p.parent().unwrap().join("clip.mov"));
         let (_d, p) = file("Lower third.ectemplate", &zip(&[("manifest.json", b"{}"), ("project.ecproj", ECPROJ.as_bytes()), ("poster.png", &png(48, 27))]));
         let s = read(&p).unwrap();
         assert_eq!(s.picture.as_ref().map(|i| i.width()), Some(48));
@@ -982,7 +1107,7 @@ mod tests {
     #[test]
     fn filmcraft() {
         let d = r#"{"format":"filmcraft.project","schema_version":17,"generator":"FilmCraft 0.12.0","project":{"name":"Trailer","items":{
-            "5":{"id":5,"name":"Ocean.mp4","kind":{"Media":{"media":{"File":"/v/Ocean.mp4"}}}},
+            "5":{"id":5,"name":"Ocean.mp4","kind":{"Media":{"media":{"File":{"path":"Footage/Ocean.mp4"}},"proxy":{"File":{"path":"/nowhere/Ocean proxy.mov"}}}}},
             "21":{"id":21,"name":"Assembly","kind":{"Sequence":{"settings":{"width":1920,"height":1080,"frame_rate":{"num":24000,"den":1001}},
               "video_tracks":[{"id":15,"items":[{"id":29,"item":5,"start":0,"duration":1270080000000}]}],
               "audio_tracks":[{"id":18,"items":[{"id":30,"item":5,"start":254016000000,"duration":1270080000000}]},{"id":19,"items":[]}]}}}}}}"#;
@@ -991,6 +1116,16 @@ mod tests {
         assert_eq!(fact(&s, "Format"), Some("version 17"));
         assert_eq!(fact(&s, "Media"), Some("1 clip"));
         assert_eq!(fact(&s, "Sequence"), Some("Assembly: 1920 × 1080, 23.976 fps, 0:06; 1 video track and 2 audio tracks"));
+        // Its media: relative to the project's folder, checked without being opened.
+        std::fs::create_dir_all(p.parent().unwrap().join("Footage")).unwrap();
+        std::fs::write(p.parent().unwrap().join("Footage/Ocean.mp4"), [0u8; 2048]).unwrap();
+        let s = read(&p).unwrap();
+        let r = s.refs.as_ref().unwrap();
+        assert_eq!(r.items.len(), 2);
+        assert_eq!(r.count(crate::projrefs::State::Missing), 1);
+        assert_eq!(r.total, 2048);
+        assert_eq!(fact(&s, "Media"), Some("1 clip"));
+        assert!(fact(&s, "Media files").unwrap().starts_with("2 (1 not found)"));
         let (_d, p) = file("Next.fcproj", d.replace(":17,", ":18,").as_bytes());
         assert!(fact(&read(&p).unwrap(), "Format").unwrap().contains("newer FilmCraft"));
     }
@@ -1010,6 +1145,10 @@ mod tests {
         assert_eq!(fact(&s, "Time signature"), Some("3/4"));
         assert_eq!(fact(&s, "Tracks"), Some("2 tracks (1 audio, 1 MIDI)"));
         assert_eq!(fact(&s, "Length"), Some("0:11"));
+        let r = s.refs.as_ref().unwrap();
+        assert_eq!(r.items.len(), 1);
+        assert_eq!(r.items[0].path, p.parent().unwrap().join("Audio Files/take.wav"));
+        assert_eq!(r.count(crate::projrefs::State::Missing), 1);
         let (_d, p) = file("Demo.scraftz", &zip(&[("Demo.scraft", SCRAFT.as_bytes()), ("Audio Files/take.wav", b"RIFF")]));
         let s = read(&p).unwrap();
         assert_eq!(fact(&s, "Sound files inside"), Some("1"));

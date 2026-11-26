@@ -13,6 +13,7 @@
 // No console window behind the GUI on Windows; --cli attaches to the calling terminal instead.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod aepfile;
 mod asking;
 mod actions;
 mod app;
@@ -39,6 +40,7 @@ mod imagelook;
 mod known;
 mod kit;
 mod licence;
+mod lightcraft;
 mod geoview;
 mod gguf;
 mod fit;
@@ -60,9 +62,11 @@ mod mapview;
 mod model3d;
 mod netdrives;
 mod officedoc;
+mod packages;
 mod pdfview;
 mod pattern;
 mod player;
+mod projrefs;
 mod psdview;
 mod settings;
 mod sheets;
