@@ -228,8 +228,12 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
     }
 }
 
-fn is_ply(path: &Path) -> bool {
-    path.extension().is_some_and(|x| x.eq_ignore_ascii_case("ply"))
+/// Files that may hold a splat scene though their kind says otherwise: PLY (mesh or
+/// splats), GLB (model or splats), web pages (SuperSplat exports) and a loose SOG scene's
+/// meta.json.
+fn may_be_splat(path: &Path) -> bool {
+    let ext = path.extension().map(|x| x.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    matches!(ext.as_str(), "ply" | "glb" | "html" | "htm") || path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("meta.json"))
 }
 
 fn load_splat(path: &Path) -> Content {
@@ -287,6 +291,9 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(e) => Content::Error(e),
         };
     }
+    if kind != Kind::Splat && may_be_splat(path) && crate::splat::claims(path) {
+        return load_splat(path);
+    }
     match kind {
         Kind::Image | Kind::LinearImage => load_image(path, kind == Kind::LinearImage, size),
         Kind::Text => match load_text(path) {
@@ -299,7 +306,6 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(e) => Content::Error(e),
         },
         // PLY files can hold meshes, point clouds or splat scenes: the header says which.
-        Kind::Model if is_ply(path) && crate::splat::classify_ply(path).is_ok_and(|k| k != crate::splat::PlyKind::Mesh) => load_splat(path),
         Kind::Splat => load_splat(path),
         Kind::Model => match crate::model3d::read(path) {
             Ok(mesh) => Content::Model { mesh: Arc::new(mesh), tex: None, drawn: None },

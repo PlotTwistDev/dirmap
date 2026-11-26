@@ -11,6 +11,9 @@
   files are told apart by their header, so meshes still show as models, and PLY point clouds now
   show their points instead of "no faces to show". See
   [Quick Look and the preview pane](../views/file-manager.md#quick-look-and-the-preview-pane).
+- More splat formats: **compressed PLY** (PlayCanvas and SuperSplat), **SPLAT**, **KSPLAT**,
+  **SOG** (bundled or loose), **GLB** files with Gaussian splats, and **web pages exported
+  from SuperSplat**, whose embedded scene is read without running the page.
 
 ### The AI Models workspace
 

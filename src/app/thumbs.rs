@@ -337,7 +337,7 @@ fn picture(job: &Job, config: Config, kind: Kind, name: &str) -> Option<Decoded>
             Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
         }),
         Kind::Splat => splat_thumb(&local, max),
-        Kind::Model if local.extension().is_some_and(|x| x.eq_ignore_ascii_case("ply")) && crate::splat::classify_ply(&local).is_ok_and(|k| k != crate::splat::PlyKind::Mesh) => splat_thumb(&local, max),
+        Kind::Model if local.extension().is_some_and(|x| x.eq_ignore_ascii_case("ply") || x.eq_ignore_ascii_case("glb")) && crate::splat::claims(&local) => splat_thumb(&local, max),
         Kind::Model => crate::model3d::read(&local).ok().map(|m| {
             let n = max.min(512) as usize;
             Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &m.draw(n, n, crate::model3d::Angle::default(), 1)))
