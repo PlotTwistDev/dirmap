@@ -64,7 +64,7 @@ pub(super) enum Content {
     /// A 3D model, drawn from the angle it's turned to.
     Model { mesh: Arc<crate::model3d::Mesh>, tex: Option<egui::TextureHandle>, drawn: Option<(crate::model3d::Angle, [usize; 2], usize)> },
     /// A Gaussian splat scene or point cloud, drawn as points from the angle it's turned to.
-    Splat { scene: Arc<crate::splat::Scene>, tex: Option<egui::TextureHandle>, drawn: Option<(crate::model3d::Angle, [usize; 2], usize)> },
+    Splat { scene: Arc<crate::splat::Scene>, tex: Option<egui::TextureHandle>, drawn: SplatDrawn },
     Binary,
     /// Nothing to show beyond the facts.
     None,
@@ -234,7 +234,7 @@ fn is_ply(path: &Path) -> bool {
 
 fn load_splat(path: &Path) -> Content {
     match crate::splat::read(path, crate::splat::Limits::PREVIEW) {
-        Ok(scene) => Content::Splat { scene: Arc::new(scene), tex: None, drawn: None },
+        Ok(scene) => Content::Splat { scene: Arc::new(scene), tex: None, drawn: SplatDrawn::default() },
         Err(e) => Content::Error(e),
     }
 }
@@ -1759,37 +1759,96 @@ fn model_view(ui: &mut egui::Ui, path: &Path, mesh: &crate::model3d::Mesh, tex: 
     resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text("Drag to turn it, double-click to put it back");
 }
 
-/// A splat scene or point cloud drawn as points, turned by dragging like a 3D model.
-fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &crate::splat::Scene, tex: &mut Option<egui::TextureHandle>, drawn: &mut Option<(crate::model3d::Angle, [usize; 2], usize)>, size: Vec2) {
-    use crate::model3d::Angle;
+/// What the splat preview's texture shows, and the picture it's waiting for from the GPU.
+#[derive(Default)]
+pub struct SplatDrawn {
+    /// The view and size in the texture, and whether it's the real splatting.
+    shown: Option<(crate::splat::View, [usize; 2], bool)>,
+    /// The GPU wish being waited for: its id, view and size.
+    pending: Option<(u64, crate::splat::View, [usize; 2])>,
+    /// Time the last GPU picture took, and the splats in it.
+    gpu: Option<(f32, usize)>,
+}
+
+/// A splat scene or point cloud: drag to turn, right-drag (or shift-drag) to move, scroll to
+/// zoom, double-click to put it back. Splats are drawn for real on the graphics chip; until
+/// the first picture comes, or where the chip can't, their centres are drawn as points.
+fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, tex: &mut Option<egui::TextureHandle>, drawn: &mut SplatDrawn, size: Vec2) {
+    use crate::splat::{SceneKind, View, gpu};
     let pal = style::pal(ui);
-    let angle_id = egui::Id::new(("splat-angle", path));
-    let mut angle: Angle = ui.data(|d| d.get_temp(angle_id)).unwrap_or_default();
+    let view_id = egui::Id::new(("splat-view", path));
+    let mut view: View = ui.data(|d| d.get_temp(view_id)).unwrap_or_default();
     let (r, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
-    let turning = resp.dragged();
-    if turning {
-        let d = resp.drag_delta();
-        angle.yaw += d.x * 0.01;
-        angle.pitch = (angle.pitch + d.y * 0.01).clamp(-1.5, 1.5);
-    }
-    if resp.double_clicked() {
-        angle = Angle::default();
-    }
-    ui.data_mut(|d| d.insert_temp(angle_id, angle));
     let ppp = ui.ctx().pixels_per_point();
     let px = [((r.width() * ppp) as usize).clamp(16, 1600), ((r.height() * ppp) as usize).clamp(16, 1600)];
-    // While it's turning, a sample of big scenes so it keeps up.
-    let step = if turning { (scene.len() / 150_000).max(1) } else { 1 };
-    if *drawn != Some((angle, px, step)) || tex.is_none() {
-        let rgba = scene.draw(px[0], px[1], angle, step);
-        let img = egui::ColorImage::from_rgba_unmultiplied(px, &rgba);
-        match tex {
-            Some(t) => t.set(img, egui::TextureOptions::LINEAR),
-            None => *tex = Some(ui.ctx().load_texture(format!("splat:{}", path.display()), img, egui::TextureOptions::LINEAR)),
+    let shift = ui.input(|i| i.modifiers.shift);
+    let moving = resp.dragged_by(egui::PointerButton::Secondary) || resp.dragged_by(egui::PointerButton::Middle) || (shift && resp.dragged_by(egui::PointerButton::Primary));
+    let turning = !moving && resp.dragged_by(egui::PointerButton::Primary);
+    let d = resp.drag_delta();
+    if turning {
+        view.yaw += d.x * 0.01;
+        view.pitch = (view.pitch + d.y * 0.01).clamp(-1.5, 1.5);
+    } else if moving {
+        let k = view.pan_per_pixel(r.height());
+        view.pan[0] -= d.x * k;
+        view.pan[1] += d.y * k;
+    }
+    if resp.hovered() {
+        // Take the scroll for zooming, so the pane around it doesn't scroll as well.
+        let (scroll, pinch) = ui.input_mut(|i| {
+            let s = i.smooth_scroll_delta.y;
+            i.smooth_scroll_delta = Vec2::ZERO;
+            (s, i.zoom_delta())
+        });
+        if scroll != 0.0 || pinch != 1.0 {
+            view.zoom = (view.zoom * (-scroll * 0.002).exp() / pinch).clamp(0.02, 20.0);
         }
-        *drawn = Some((angle, px, step));
-        if step > 1 {
-            ui.ctx().request_repaint();
+    }
+    if resp.double_clicked() {
+        view = View::default();
+    }
+    ui.data_mut(|d| d.insert_temp(view_id, view));
+    let busy = turning || moving;
+    let set = |tex: &mut Option<egui::TextureHandle>, img: egui::ColorImage| match tex {
+        Some(t) => t.set(img, egui::TextureOptions::LINEAR),
+        None => *tex = Some(ui.ctx().load_texture(format!("splat:{}", path.display()), img, egui::TextureOptions::LINEAR)),
+    };
+    let gpu_ok = !matches!(gpu::status(), gpu::Status::Unavailable(_)) && scene.kind != SceneKind::PointCloud;
+    // A finished GPU picture.
+    if gpu_ok {
+        if let Some(pic) = gpu::take() {
+            if let Some((id, v, s)) = drawn.pending {
+                if pic.id == id {
+                    set(tex, egui::ColorImage::from_rgba_premultiplied(pic.size, &pic.rgba));
+                    drawn.shown = Some((v, s, true));
+                    drawn.gpu = Some((pic.ms, pic.drawn));
+                    drawn.pending = None;
+                }
+            }
+        }
+    }
+    let want = (view, px);
+    if drawn.shown.map(|(v, s, _)| (v, s)) != Some(want) || tex.is_none() {
+        if gpu_ok {
+            if drawn.pending.map(|(_, v, s)| (v, s)) != Some(want) {
+                let id = gpu::want(scene.clone(), view, [px[0] as u32, px[1] as u32], Some(ui.ctx().clone()));
+                drawn.pending = Some((id, view, px));
+            }
+            // Something to look at until the first picture comes.
+            if tex.is_none() {
+                set(tex, egui::ColorImage::from_rgba_unmultiplied(px, &scene.draw(px[0], px[1], &view, (scene.len() / 300_000).max(1))));
+                drawn.shown = Some((view, px, false));
+            }
+        } else {
+            // While it's moving, a sample of big scenes so it keeps up.
+            let step = if busy { (scene.len() / 150_000).max(1) } else { 1 };
+            set(tex, egui::ColorImage::from_rgba_unmultiplied(px, &scene.draw(px[0], px[1], &view, step)));
+            drawn.shown = Some((view, px, false));
+            drawn.pending = None;
+            if step > 1 {
+                drawn.shown = None; // draw it whole once it stops
+                ui.ctx().request_repaint();
+            }
         }
     }
     let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
@@ -1797,9 +1856,26 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &crate::splat::Scene, tex: 
     if let Some(t) = tex {
         p.image(t.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
-    let what = if scene.kind == crate::splat::SceneKind::PointCloud { "Points" } else { "Splat centres, drawn as points" };
-    p.text(r.left_bottom() + vec2(8.0, -6.0), egui::Align2::LEFT_BOTTOM, what, FontId::proportional(11.0), pal.weak);
-    resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text("Drag to turn it, double-click to put it back");
+    let real = drawn.shown.is_some_and(|s| s.2);
+    let what = if scene.kind == SceneKind::PointCloud {
+        "Points".to_string()
+    } else if real {
+        match (gpu::status(), drawn.gpu) {
+            (gpu::Status::Ready(name), Some((ms, n))) if n < scene.len() => format!("{name} · {ms:.0} ms · {} of the splats, to fit graphics memory", crate::splat::facts::group(n)),
+            (gpu::Status::Ready(name), Some((ms, _))) => format!("{name} · {ms:.0} ms"),
+            _ => "Splats".to_string(),
+        }
+    } else if let gpu::Status::Unavailable(why) = gpu::status() {
+        format!("Splat centres, drawn as points: {why}")
+    } else {
+        "Splat centres, drawn as points (the graphics chip is starting)".to_string()
+    };
+    // On a dark strip, so it reads over a busy scene.
+    let galley = p.layout_no_wrap(what, FontId::proportional(11.0), Color32::from_gray(220));
+    let at = r.left_bottom() + vec2(8.0, -6.0 - galley.size().y);
+    p.rect_filled(Rect::from_min_size(at - vec2(4.0, 2.0), galley.size() + vec2(8.0, 4.0)), 3.0, Color32::from_black_alpha(150));
+    p.galley(at, galley, Color32::from_gray(220));
+    resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text("Drag to turn it, right-drag or shift-drag to move it, scroll to zoom, double-click to put it back");
 }
 
 /// Text laid out in its syntax colours; what the spans don't cover is in `plain`.

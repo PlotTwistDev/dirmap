@@ -306,7 +306,10 @@ pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
     if v.has("scale_0") && !v.has("scale_2") {
         scene.notes.push("Flat (2D Gaussian) splats".into());
     }
-    let keep_sh = limits.keep_sh && is_splat && rest_per_channel > 0;
+    let keep_sh = is_splat && limits.keeps_sh(scene.total as u64, rest_per_channel);
+    if is_splat && limits.keep_sh && rest_per_channel > 0 && !keep_sh {
+        scene.notes.push(super::SH_DROPPED.into());
+    }
     let cap = limits.max_points.min(super::HARD_MAX_POINTS) as u64;
     let mut rest_vals = vec![0f32; if keep_sh { rest_per_channel * 3 } else { 0 }];
 

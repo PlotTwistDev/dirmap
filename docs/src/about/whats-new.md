@@ -5,7 +5,8 @@
 ### Gaussian splat scenes
 
 - **SPZ** files (every version) and **PLY** splat scenes now preview in Files and Storage
-  Analysis: the scene drawn as points to turn about, its splat count, colour detail, size and
+  Analysis: the splats drawn for real on the graphics chip, to turn, move and zoom about, with
+  their view-dependent colour (points where the graphics can't), the splat count, colour detail, size and
   the graphics memory it would need, and checks for invisible, oversized or stray splats. PLY
   files are told apart by their header, so meshes still show as models, and PLY point clouds now
   show their points instead of "no faces to show". See

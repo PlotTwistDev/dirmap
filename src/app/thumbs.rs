@@ -307,7 +307,7 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
 fn splat_thumb(path: &std::path::Path, max: u32) -> Option<Decoded> {
     let scene = crate::splat::read(path, crate::splat::Limits::THUMB).ok()?;
     let n = max.min(512) as usize;
-    Some(Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &scene.draw(n, n, crate::model3d::Angle::default(), 1))))
+    Some(Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &scene.draw(n, n, &crate::splat::View::default(), 1))))
 }
 
 /// Make a thumbnail picture from the file.

@@ -17,7 +17,7 @@ pub fn ply_bytes_per_splat(degree: u8) -> u64 {
     (3 + 3 + 3 + sh_rest(degree) as u64 * 3 + 1 + 3 + 4) * 4
 }
 
-fn group(n: usize) -> String {
+pub fn group(n: usize) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {

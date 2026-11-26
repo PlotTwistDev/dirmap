@@ -43,8 +43,8 @@ for the settings.
 | Sound | `.mp3` `.wav` `.flac` `.m4a` `.aac` `.ogg` `.oga` `.opus` `.wma` `.aif` `.aiff` `.alac` | Cover, waveform, tags and playback | The system, with lofty for tags |
 | CSV or TSV table | `.csv` `.tsv` `.tab` | A table, with column names from the first row | Filescape (csv) |
 | SQLite database | `.sqlite` `.sqlite3` `.db` `.db3` `.s3db` `.sl3` | Each table's columns and first rows, read-only | SQLite (rusqlite) |
-| 3D model | `.stl` `.obj` `.ply` `.gltf` `.glb` `.3mf` | A shaded model to turn about; PLY point clouds and Gaussian splat scenes are drawn as points, with their details | Filescape (gltf for glTF) |
-| Gaussian splat scene (SPZ) | `.spz` | The scene drawn as points to turn about, with its splat count, colour detail, size and checks for stray or invisible splats | Filescape |
+| 3D model | `.stl` `.obj` `.ply` `.gltf` `.glb` `.3mf` | A shaded model to turn about; PLY point clouds are drawn as points and Gaussian splat scenes as splats, with their details | Filescape (gltf for glTF) |
+| Gaussian splat scene (SPZ) | `.spz` | The splats drawn on the graphics chip to turn, move and zoom about (points where it can't), with its splat count, colour detail, size and checks for stray or invisible splats | Filescape |
 | DXF drawing | `.dxf` | The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size | Filescape |
 | CAD model (DWG, STEP, IGES) | `.dwg` `.step` `.stp` `.p21` `.iges` `.igs` | What the file says: the program that made it, units, author and parts (not drawn) | Filescape |
 | Pages, Numbers and Keynote | `.pages` `.numbers` `.key` | The picture the app saved inside the file, and the version that saved it | Filescape |

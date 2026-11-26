@@ -46,7 +46,7 @@ pub enum Category {
     Database,
     /// 3D models, drawn here to turn about.
     Model,
-    /// Gaussian splat scenes: drawn as points here to turn about, with what's in them.
+    /// Gaussian splat scenes: drawn on the graphics chip to turn about, with what's in them.
     Splat,
     /// Maps (GeoJSON, GPX, KML): their shapes drawn here, with no map tiles fetched.
     Map,
@@ -101,7 +101,7 @@ impl Format {
             "daw" => ("The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones)", "Filescape"),
             "dicom" => ("The scan (uncompressed, RLE, JPEG, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown", "Filescape"),
             "fits" => ("The first picture, stretched so faint detail shows, with the object, telescope and exposure", "Filescape"),
-            "model3d" => ("A shaded model to turn about; PLY point clouds and Gaussian splat scenes are drawn as points, with their details", "Filescape (gltf for glTF)"),
+            "model3d" => ("A shaded model to turn about; PLY point clouds are drawn as points and Gaussian splat scenes as splats, with their details", "Filescape (gltf for glTF)"),
             "heif" => ("The picture", "The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg)"),
             _ => match self.category {
                 Category::Picture => ("The picture; channels one by one", "image"),
@@ -117,7 +117,7 @@ impl Format {
                 Category::Midi => ("A piano roll, with tempo and instruments", "midly"),
                 Category::Database => ("Each table's columns and first rows, read-only", "SQLite (rusqlite)"),
                 Category::Model => ("A shaded model to turn about", "Filescape (gltf for glTF)"),
-                Category::Splat => ("The scene drawn as points to turn about, with its splat count, colour detail, size and checks for stray or invisible splats", "Filescape"),
+                Category::Splat => ("The splats drawn on the graphics chip to turn, move and zoom about (points where it can't), with its splat count, colour detail, size and checks for stray or invisible splats", "Filescape"),
                 Category::Cad => ("What the file says: the program that made it, units, author and parts (not drawn)", "Filescape"),
                 Category::Saved => ("The picture the app saved inside the file, and the version that saved it", "Filescape"),
                 Category::DiskImage => ("A disc's files and folders with sizes (ISO 9660 and UDF); a virtual disk's size, type and partitions; a Windows image's editions", "Filescape"),

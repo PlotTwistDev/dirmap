@@ -18,6 +18,9 @@ flate2 = "1"
 half = "2"
 # zstd for SPZ v4 splat scenes (pure Rust; MIT).
 ruzstd = "0.9"
+# Gaussian splat rendering on the graphics chip (MIT or Apache-2.0); pinned, the API moves.
+wgpu-3dgs-viewer = "=0.8.0"
+pollster = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff", "bmp", "exr", "hdr", "tga", "ico", "qoi", "pnm"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "tokio", "crypto-rust"] }
 lzma-rust2 = "0.25.0"
