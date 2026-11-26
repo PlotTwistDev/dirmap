@@ -100,6 +100,8 @@
   they use, marking any that aren't on this computer.
 - DICOM medical scans and FITS astronomy images preview as pictures, with what they show
   and how they were taken. Patient names, IDs and birth dates are never shown.
+- Disk images preview without being mounted: an ISO shows the files on the disc, virtual
+  machine disks show their size and type, and Windows images list their editions.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
