@@ -12,6 +12,8 @@ use crate::kit::{self, Tone};
 use crate::models::{Model, Source};
 use std::collections::BTreeSet;
 
+mod moving;
+
 #[derive(Default)]
 pub(super) struct StorageState {
     /// The Storage view is on screen instead of the library.
@@ -24,6 +26,8 @@ pub(super) struct StorageState {
     confirm: Option<Confirm>,
     removing: Option<mpsc::Receiver<Vec<(Item, Vec<Removed>)>>>,
     pub outcome: Option<(Tone, String)>,
+    /// Moving an app's folder to another drive.
+    moving: Option<moving::Moving>,
 }
 
 struct Confirm {
@@ -64,6 +68,7 @@ impl App {
     }
 
     pub(super) fn poll_storage(&mut self, ctx: &egui::Context) {
+        self.poll_moving(ctx);
         let s = &mut self.models.storage;
         if let Some(rx) = &s.rx {
             match rx.try_recv() {
@@ -130,6 +135,7 @@ impl App {
             ui.add_space(6.0);
         }
         by_app(ui, &list);
+        self.storage_places(ui, &list);
         ui.add_space(12.0);
         let busy = self.models.storage.removing.is_some();
         let Some(items) = self.models.storage.items.clone() else {

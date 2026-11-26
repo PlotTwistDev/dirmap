@@ -246,6 +246,22 @@ goes before anything happens:
 
 If Ollama is downloading a model, let it finish first.
 
+## Moving models to another drive
+
+**Storage** lists where Ollama, LM Studio and Hugging Face keep their models. **Move to another
+drive…** moves one app's whole folder to a folder you choose on another drive, and leaves a link
+where it was, so the app finds its models as before without any setting changing. This is part of
+managing models in bulk (Professional).
+
+Filescape checks first that the other drive has room and that Ollama isn't running (quit
+LM Studio, or programs using Hugging Face models, yourself). Then it copies everything into a new
+folder named, say, `Ollama models`, compares the copy with the original, and puts the link in
+place. The original is deleted only after the link has been checked; if anything fails or you
+press **Stop**, everything is put back as it was. On Windows the link is a directory junction,
+which needs no special rights.
+
+A folder that has already been moved shows where its link leads.
+
 ## On the command line
 
 `filescape --cli --models PATH` prints the models in a folder without opening a window. See

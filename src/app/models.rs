@@ -240,6 +240,7 @@ impl App {
             self.start_models();
         }
         self.storage_confirm(ui.ctx());
+        self.storage_moving(ui.ctx());
         if self.ask.open {
             self.ask_workspace(ui);
             return;

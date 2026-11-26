@@ -23,6 +23,7 @@ mod camera;
 mod camraw;
 mod categories;
 mod cleanup;
+mod relocate;
 mod cloud;
 mod cloudops;
 mod craftfile;

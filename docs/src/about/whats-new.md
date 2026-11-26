@@ -19,7 +19,9 @@
   the same drive can be shared as one file (a hard link), so every app keeps working. Each item
   lists what it changes, with one confirmation. Right-click a model and choose **Move
   to Trash…** to remove it properly: for Ollama, as `ollama rm` would. See
-  [Freeing space](../views/ai-models.md#freeing-space).
+  [Freeing space](../views/ai-models.md#freeing-space). **Move to another drive…** moves an app's
+  whole model folder and leaves a link, so the app finds its models as before (Professional). See
+  [Moving models](../views/ai-models.md#moving-models-to-another-drive).
 
 - **🔬 Lab** shows what a model would write next and how sure it is: each token coloured by its
   probability, the ten likeliest alternatives, and what temperature, top-k, top-p and min-p do to
