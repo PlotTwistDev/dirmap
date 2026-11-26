@@ -71,6 +71,8 @@ pub enum Request {
     /// The Lab: write up to `steps` tokens after `text` (as a chat message when `chat`, then
     /// `continuation`), one at a time, reporting each token's probabilities.
     Predict { text: String, chat: bool, continuation: String, steps: u32, settings: crate::lab::Settings },
+    /// The Lab's speed test.
+    Bench(crate::lab::BenchSettings),
     Unload,
 }
 
@@ -84,6 +86,10 @@ pub enum Event {
     Done(Stats),
     /// A Lab run.
     Predicted(crate::lab::Run),
+    /// How a speed test is going: (run, of runs).
+    Benching(u32, u32),
+    /// A speed test's middle results: (read speed, write speed, first token seconds, threads).
+    Benched { read_speed: f32, write_speed: f32, first_token: f32, threads: u32 },
     Unloaded,
     Error(String),
 }
@@ -159,7 +165,7 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
             Some(r) => r,
             None => match rx.recv() {
                 Ok(Request::Load(r)) => r,
-                Ok(Request::Ask { .. } | Request::Predict { .. }) => {
+                Ok(Request::Ask { .. } | Request::Predict { .. } | Request::Bench(_)) => {
                     let _ = tx.send(Event::Error("No model is loaded.".into()));
                     continue;
                 }
@@ -229,6 +235,17 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
                             ctx.clear_kv_cache();
                             Event::Error(e)
                         }
+                    });
+                }
+                Ok(Request::Bench(b)) => {
+                    let ev = bench(&model, &mut ctx, &b, &stop, &tx);
+                    // The test filled the context with its own text.
+                    cached.clear();
+                    ctx.clear_kv_cache();
+                    let _ = tx.send(match ev {
+                        Ok(Some((r, w, f))) => Event::Benched { read_speed: r, write_speed: w, first_token: f, threads: threads as u32 },
+                        Ok(None) => Event::Error("The speed test was stopped.".into()),
+                        Err(e) => Event::Error(e),
                     });
                 }
                 Ok(Request::Load(r)) => {
@@ -441,6 +458,67 @@ fn predict(
     Ok(crate::lab::Run { steps: out, prompt_tokens: tokens.len(), seconds: t.elapsed().as_secs_f32() })
 }
 
+/// The Lab's speed test: reads `read` tokens of ordinary text and writes `write` more, `runs`
+/// times from an empty context. Returns the middle read speed, write speed and time to the first
+/// token, or None if stopped.
+fn bench(
+    model: &LlamaModel,
+    ctx: &mut llama_cpp_2::context::LlamaContext,
+    b: &crate::lab::BenchSettings,
+    stop: &AtomicBool,
+    tx: &mpsc::Sender<Event>,
+) -> Result<Option<(f32, f32, f32)>, String> {
+    let n_ctx = ctx.n_ctx() as usize;
+    let read = (b.read as usize).min(n_ctx.saturating_sub(b.write as usize + 8)).max(1);
+    let write = (b.write as usize).min(n_ctx - read).max(1);
+    // Ordinary text, repeated to length: what's read doesn't change the speed much, but special
+    // tokens or one token over and over could.
+    let sample = model.vocab().tokenize(BENCH_TEXT.as_bytes(), false, true);
+    if sample.is_empty() {
+        return Err("This model's vocabulary couldn't read the test text.".into());
+    }
+    let tokens: Vec<LlamaToken> = sample.iter().copied().cycle().take(read).collect();
+    let batch_size = ctx.n_batch() as usize;
+    let mut batch = LlamaBatch::new(batch_size.max(1), 1);
+    let (mut rs, mut ws, mut fs) = (Vec::new(), Vec::new(), Vec::new());
+    for run in 0..b.runs.max(1) {
+        let _ = tx.send(Event::Benching(run + 1, b.runs.max(1)));
+        ctx.clear_kv_cache();
+        let mut fresh = Vec::new();
+        let t = Instant::now();
+        if feed(ctx, &mut batch, &tokens, &mut fresh, stop)?.is_none() {
+            return Ok(None);
+        }
+        let read_secs = t.elapsed().as_secs_f32();
+        let t = Instant::now();
+        let mut first = 0.0;
+        for i in 0..write {
+            if stop.load(Ordering::Relaxed) {
+                return Ok(None);
+            }
+            // The likeliest token: sampling isn't what's being timed.
+            let logits = ctx.get_logits_ith(batch.n_tokens() - 1);
+            let tok = LlamaToken(logits.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).map_or(0, |(i, _)| i as i32));
+            batch.clear();
+            batch.add(tok, (read + i) as i32, &[0], true).map_err(|e| e.to_string())?;
+            ctx.decode(&mut batch).map_err(|e| format!("The model stopped: {e}"))?;
+            if i == 0 {
+                first = t.elapsed().as_secs_f32();
+            }
+        }
+        let write_secs = t.elapsed().as_secs_f32();
+        rs.push(read as f32 / read_secs.max(1e-6));
+        ws.push(write as f32 / write_secs.max(1e-6));
+        fs.push(read_secs + first);
+    }
+    Ok(Some((crate::lab::median(&rs), crate::lab::median(&ws), crate::lab::median(&fs))))
+}
+
+/// What the speed test reads: plain prose, in English.
+const BENCH_TEXT: &str = "The library stood at the end of a quiet street, its windows bright against the evening. \
+Inside, people read newspapers, searched for old maps and asked the staff about books they half remembered. \
+Every afternoon a class of children arrived to hear a story, and every evening the last visitor left as the lights went out. ";
+
 fn rand_seed() -> u32 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.subsec_nanos() ^ d.as_secs() as u32)
 }
@@ -545,6 +623,44 @@ mod tests {
         assert_eq!(run(&e, "", 5).steps.iter().map(|s| s.chosen.id).collect::<Vec<_>>(), a.steps.iter().map(|s| s.chosen.id).collect::<Vec<_>>());
         let b = run(&e, &a.steps[0].chosen.text, 1);
         assert_eq!(b.steps.len(), 1);
+    }
+
+    /// The Lab's speed test on a real model.
+    #[test]
+    #[ignore]
+    fn speed_test_runs() {
+        let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
+        let e = Engine::start();
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 1024, gpu: false }));
+        e.send(Request::Bench(crate::lab::BenchSettings { read: 128, write: 16, runs: 3 }));
+        let mut runs = 0;
+        loop {
+            match e.rx.recv_timeout(std::time::Duration::from_secs(120)).unwrap() {
+                Event::Benching(_, of) => {
+                    runs += 1;
+                    assert_eq!(of, 3);
+                }
+                Event::Benched { read_speed, write_speed, first_token, threads } => {
+                    assert!(read_speed > 0.0 && write_speed > 0.0 && first_token > 0.0 && threads > 0);
+                    break;
+                }
+                Event::Error(err) => panic!("{err}"),
+                _ => {}
+            }
+        }
+        assert_eq!(runs, 3);
+        // Prediction still works after the test emptied the context.
+        e.send(Request::Predict { text: "Hi".into(), chat: false, continuation: String::new(), steps: 2, settings: Default::default() });
+        loop {
+            match e.rx.recv_timeout(std::time::Duration::from_secs(120)).unwrap() {
+                Event::Predicted(r) => {
+                    assert!(!r.steps.is_empty());
+                    break;
+                }
+                Event::Error(err) => panic!("{err}"),
+                _ => {}
+            }
+        }
     }
 
     /// Runs a real GGUF model end to end. FILESCAPE_TEST_GGUF=path cargo test --release -- --ignored llm

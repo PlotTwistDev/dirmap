@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::kit::{self, Tone};
-use crate::lab::{Run, Settings, Step};
+use crate::lab::{BenchResult, BenchSettings, Run, Settings, Step};
 use crate::llm::Request;
 use crate::vocab::visible_query as visible;
 
@@ -23,6 +23,15 @@ pub(super) struct LabState {
     asked: Option<(String, bool, String, u32, Settings)>,
     /// The step whose choices are shown.
     pub shown: usize,
+    /// The speed test is on screen instead of Next token.
+    speed: bool,
+    bench: BenchSettings,
+    /// The speed test running: (run, of runs).
+    pub bench_progress: Option<(u32, u32)>,
+    /// What the running test was asked.
+    bench_asked: BenchSettings,
+    /// Speed test results kept so far, read on first use.
+    results: Option<Vec<BenchResult>>,
 }
 
 impl Default for LabState {
@@ -36,6 +45,11 @@ impl Default for LabState {
             run: None,
             asked: None,
             shown: 0,
+            speed: false,
+            bench: BenchSettings::default(),
+            bench_progress: None,
+            bench_asked: BenchSettings::default(),
+            results: None,
         }
     }
 }
@@ -85,8 +99,17 @@ impl App {
         let name = self.ask.loaded.as_ref().map(|(_, n, _)| n.clone());
         ui.horizontal(|ui| {
             ui.heading(name.as_deref().map_or("Lab".to_string(), |n| format!("Lab · {n}")));
-            ui.weak("What the model would write next, and how sure it is.");
+            ui.add_space(8.0);
+            let busy = self.ask.phase != super::ask::Phase::Idle;
+            ui.add_enabled_ui(!busy, |ui| {
+                kit::segmented(ui, &mut self.ask.lab_state.speed, &[(false, "Next token"), (true, "Speed")], false);
+            });
         });
+        if self.ask.lab_state.speed {
+            self.lab_speed(ui, name);
+            return;
+        }
+        ui.weak("What the model would write next, and how sure it is.");
         ui.add_space(4.0);
         if let Some(p) = &self.ask.problem {
             kit::callout(ui, Tone::Warn, p.clone());
@@ -211,6 +234,117 @@ impl App {
         }
     }
 
+    /// A speed test's result arrived: keep it with the others.
+    pub(super) fn lab_benched(&mut self, read_speed: f32, write_speed: f32, first_token: f32, threads: u32) {
+        let l = &mut self.ask.lab_state;
+        l.bench_progress = None;
+        let Some((path, model, _)) = self.ask.loaded.clone() else { return };
+        let b = l.bench_asked;
+        let r = BenchResult {
+            model,
+            path,
+            when: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64),
+            context: self.ask.actual_context,
+            gpu: super::ask::use_gpu(),
+            threads,
+            read: b.read,
+            write: b.write,
+            runs: b.runs,
+            read_speed,
+            write_speed,
+            first_token,
+        };
+        match crate::lab::results_file().map(|f| crate::lab::save_result(&f, r.clone())) {
+            Some(Ok(all)) => l.results = Some(all),
+            Some(Err(e)) => {
+                l.results.get_or_insert_with(Vec::new).insert(0, r);
+                self.ask.problem = Some(format!("The result couldn't be saved: {e}"));
+            }
+            None => l.results.get_or_insert_with(Vec::new).insert(0, r),
+        }
+    }
+
+    /// The speed test: how fast the loaded model reads and writes on this computer, with the
+    /// results kept so far.
+    fn lab_speed(&mut self, ui: &mut egui::Ui, name: Option<String>) {
+        ui.weak("How fast the model reads and writes on this computer. Results are kept, to compare models and settings.");
+        ui.add_space(4.0);
+        if let Some(p) = &self.ask.problem {
+            kit::callout(ui, Tone::Warn, p.clone());
+            ui.add_space(4.0);
+        }
+        if self.ask.lab_state.results.is_none() {
+            self.ask.lab_state.results = Some(crate::lab::results_file().map(|f| crate::lab::load_results(&f)).unwrap_or_default());
+        }
+        let busy = self.ask.phase != super::ask::Phase::Idle;
+        let mut start = false;
+        let mut stop = false;
+        if name.is_some() {
+            let l = &mut self.ask.lab_state;
+            ui.horizontal(|ui| {
+                let b = &mut l.bench;
+                ui.add_enabled_ui(!busy, |ui| {
+                    ui.label("Read");
+                    egui::ComboBox::from_id_salt("bench-read").width(70.0).selected_text(format!("{}", b.read)).show_ui(ui, |ui| {
+                        for n in [128u32, 512, 2048] {
+                            ui.selectable_value(&mut b.read, n, format!("{n} tokens"));
+                        }
+                    }).response.on_hover_text("How much text to read first, as when a long question or document is sent");
+                    ui.label("Write");
+                    egui::ComboBox::from_id_salt("bench-write").width(70.0).selected_text(format!("{}", b.write)).show_ui(ui, |ui| {
+                        for n in [32u32, 128, 256] {
+                            ui.selectable_value(&mut b.write, n, format!("{n} tokens"));
+                        }
+                    });
+                    ui.label("Runs");
+                    egui::ComboBox::from_id_salt("bench-runs").width(50.0).selected_text(format!("{}", b.runs)).show_ui(ui, |ui| {
+                        for n in [1u32, 3, 5] {
+                            ui.selectable_value(&mut b.runs, n, format!("{n}"));
+                        }
+                    }).response.on_hover_text("The test is run this many times and the middle result kept, so one slow run doesn't count");
+                });
+                if busy {
+                    stop = ui.button("■ Stop").clicked();
+                    ui.spinner();
+                    if let Some((r, of)) = l.bench_progress {
+                        ui.weak(format!("Run {r} of {of}…"));
+                    }
+                } else if kit::button(ui, kit::Kind::Primary, None, "Run speed test").clicked() {
+                    start = true;
+                }
+            });
+            ui.weak("The model is busy while it runs: other apps may be slower, and so is the test if they're busy too.");
+        } else {
+            ui.add_space(8.0);
+            ui.label("Load a model on the left to test its speed.");
+        }
+        ui.add_space(8.0);
+        let results = self.ask.lab_state.results.clone().unwrap_or_default();
+        let current = self.ask.loaded.as_ref().map(|(p, _, _)| p.clone());
+        if let Some(r) = results.iter().find(|r| Some(&r.path) == current.as_ref()) {
+            speed_card(ui, r);
+            ui.add_space(10.0);
+        }
+        if results.is_empty() {
+            ui.weak("No results yet.");
+        } else {
+            ui.strong("All results");
+            ui.add_space(2.0);
+            results_table(ui, &results, current.as_deref());
+        }
+        if stop && let Some(e) = &self.ask.engine {
+            e.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if start && let Some(e) = &self.ask.engine {
+            let l = &mut self.ask.lab_state;
+            l.bench_asked = l.bench;
+            l.bench_progress = Some((1, l.bench.runs));
+            self.ask.problem = None;
+            self.ask.phase = super::ask::Phase::Answering;
+            e.send(Request::Bench(l.bench));
+        }
+    }
+
     fn lab_settings(&mut self, ui: &mut egui::Ui) {
         let s = &mut self.ask.lab_state.settings;
         egui::Grid::new("lab-settings").num_columns(4).spacing([10.0, 4.0]).show(ui, |ui| {
@@ -237,6 +371,72 @@ impl App {
             ui.end_row();
         });
     }
+}
+
+/// Roughly how many words a speed in tokens is: about ¾ of a word a token, in English.
+fn words(tokens_per_sec: f32) -> f32 {
+    tokens_per_sec * 0.75
+}
+
+/// The latest result for the loaded model, in words people can picture.
+fn speed_card(ui: &mut egui::Ui, r: &BenchResult) {
+    let t = kit::tokens(ui);
+    egui::Frame::new().fill(ui.visuals().faint_bg_color).corner_radius(6.0).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            for (big, what, tip) in [
+                (format!("{:.1}", r.write_speed), "tokens a second written", format!("About {:.0} words a second. People read about 4.", words(r.write_speed))),
+                (format!("{:.0}", r.read_speed), "tokens a second read", "How fast it takes in a question or a document before answering".to_string()),
+                (format!("{:.1} s", r.first_token), "to the first word", format!("After reading {} tokens", r.read)),
+            ] {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(big).size(22.0).color(t.accent).strong());
+                    ui.weak(what);
+                })
+                .response
+                .on_hover_text(tip);
+                ui.add_space(24.0);
+            }
+        });
+        let pace = if words(r.write_speed) >= 6.0 {
+            "Faster than you can read it."
+        } else if words(r.write_speed) >= 3.0 {
+            "About as fast as you read."
+        } else {
+            "Slower than you read: a smaller model, or a shorter context, would be quicker."
+        };
+        ui.weak(format!("{pace} {} · {} tokens of context.", place(r), crate::fit::tokens(r.context as u64)));
+    });
+}
+
+fn place(r: &BenchResult) -> String {
+    if r.gpu { "On the graphics chip".to_string() } else { format!("On the processor, {} threads", r.threads) }
+}
+
+fn results_table(ui: &mut egui::Ui, results: &[BenchResult], current: Option<&std::path::Path>) {
+    let t = kit::tokens(ui);
+    let fastest = results.iter().map(|r| r.write_speed).fold(0.0f32, f32::max).max(1e-3);
+    egui::ScrollArea::vertical().id_salt("bench-results").auto_shrink([false, true]).show(ui, |ui| {
+        egui::Grid::new("bench-table").num_columns(7).striped(true).spacing([14.0, 4.0]).show(ui, |ui| {
+            for h in ["Model", "Written", "", "Read", "First word", "Where", "When"] {
+                ui.weak(h);
+            }
+            ui.end_row();
+            for r in results {
+                let label = egui::RichText::new(&r.model);
+                ui.label(if Some(r.path.as_path()) == current { label.strong() } else { label }).on_hover_text(r.path.display().to_string());
+                ui.label(format!("{:.1}/s", r.write_speed));
+                let (rect, _) = ui.allocate_exact_size(vec2(120.0, 10.0), Sense::hover());
+                ui.painter().rect_filled(rect, 3.0, ui.visuals().faint_bg_color);
+                ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, vec2(rect.width() * r.write_speed / fastest, rect.height())), 3.0, t.accent);
+                ui.label(format!("{:.0}/s", r.read_speed));
+                ui.label(format!("{:.1} s", r.first_token));
+                ui.label(place(r)).on_hover_text(format!("{} tokens of context; read {}, wrote {}, middle of {} runs", r.context, r.read, r.write, r.runs));
+                let when = chrono::DateTime::from_timestamp(r.when, 0).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
+                ui.weak(when);
+                ui.end_row();
+            }
+        });
+    });
 }
 
 /// The likeliest tokens at one step, as bars: the model's own probability, and what's left after
