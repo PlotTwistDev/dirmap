@@ -73,6 +73,21 @@ Below, **How the numbers are stored** shows how much of the model is kept in eac
 **Q4_K_M** model, for example, keeps most of its numbers as Q4_K and a few important ones at the
 higher Q6_K precision.
 
+**Health** checks the model and lists what it found, problems first:
+
+- whether every part of a model split into several files is there;
+- whether a file is cut short, as a stopped download leaves it, or damaged, with tensors that
+  overlap or are out of place;
+- whether the format is safe to open (GGUF and safetensors) or can contain code (PyTorch
+  checkpoints);
+- whether the number of parameters matches the model's size label, and whether a GGUF model has a
+  vocabulary and a chat template.
+
+These checks only use what was already read, so they're instant. Ollama and Hugging Face name each
+downloaded file by its SHA-256 checksum. For those, **Verify checksum** reads the whole model and
+compares, which proves not a single byte has changed since it was downloaded. It takes a while for
+a large model; **Cancel** stops it.
+
 **Structure** shows how the model is built and where its space goes:
 
 - The strip at the top shows the model's layers in order, left to right. A taller column takes

@@ -11,6 +11,7 @@ use crate::kit::{self, Tone};
 use crate::models::{self, Model};
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
 
 /// The model list, and the search that fills it.
 #[derive(Default)]
@@ -34,6 +35,12 @@ struct ModelPage {
     filter: String,
     sort: TensorCol,
     descending: bool,
+    /// The health checks, once the model is read.
+    health: Vec<crate::health::Check>,
+    /// Checking the files' checksums.
+    verify: Option<Verify>,
+    /// Each checked file's result: (file index, Ok(matches) or why it couldn't be read).
+    verified: Vec<(usize, Result<bool, String>)>,
     /// The model as layers, for the Structure tab.
     structure: Option<Arc<inspect::Structure>>,
     /// The group (index into `structure.groups`) the map is zoomed into.
@@ -42,6 +49,13 @@ struct ModelPage {
     /// Tensors to show, in order (indexes into `data.tensors`), for `shown_for`.
     shown: Vec<usize>,
     shown_for: Option<(String, TensorCol, bool)>,
+}
+
+struct Verify {
+    read: Arc<std::sync::atomic::AtomicU64>,
+    total: u64,
+    cancel: Arc<AtomicBool>,
+    rx: mpsc::Receiver<Vec<(usize, Result<bool, String>)>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -53,6 +67,7 @@ enum ColourBy {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PageTab {
     Overview,
+    Health,
     Structure,
     Tensors,
     Metadata,
@@ -466,6 +481,9 @@ impl App {
             shown: Vec::new(),
             shown_for: None,
             structure: None,
+            health: Vec::new(),
+            verify: None,
+            verified: Vec::new(),
             zoom: None,
             colour: ColourBy::Part,
         });
@@ -488,6 +506,7 @@ impl App {
                     if !d.tensors.is_empty() {
                         page.structure = Some(Arc::new(inspect::structure(&d)));
                     }
+                    page.health = crate::health::checks(m, &d);
                     page.data = Some(Arc::new(d));
                     page.rx = None;
                 }
@@ -513,7 +532,12 @@ impl App {
         let metas = page.data.as_ref().map_or(0, |d| d.meta.len());
         let tensors_label = format!("Tensors ({})", group(tensors as u64));
         let meta_label = format!("Metadata ({metas})");
+        let problems = page.health.iter().filter(|c| c.level == crate::health::Level::Problem).count();
+        let health_label = if problems > 0 { format!("Health ({problems} ⚠)") } else { "Health".to_string() };
         let mut tabs = vec![(PageTab::Overview, "Overview")];
+        if page.data.is_some() {
+            tabs.push((PageTab::Health, health_label.as_str()));
+        }
         if tensors > 0 {
             tabs.push((PageTab::Structure, "Structure"));
             tabs.push((PageTab::Tensors, tensors_label.as_str()));
@@ -539,6 +563,9 @@ impl App {
                         open = Some(p);
                     }
                 });
+            }
+            (Some(_), PageTab::Health) => {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| page_health(ui, &mut page, m));
             }
             (Some(d), PageTab::Structure) => {
                 let d = d.clone();
@@ -625,6 +652,124 @@ fn page_overview(ui: &mut egui::Ui, m: &Model, d: &Inspection) -> Option<PathBuf
         ui.add_space(2.0);
     }
     open
+}
+
+/// Health: the checks, then checking the files' checksums.
+fn page_health(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model) {
+    use crate::health::Level;
+    for c in &page.health {
+        let (icon, tone) = match c.level {
+            Level::Problem => ("✖", Tone::Danger),
+            Level::Warn => ("⚠", Tone::Warn),
+            Level::Good => ("✔", Tone::Success),
+            Level::Info => ("ℹ", Tone::Neutral),
+        };
+        let colour = kit::tokens(ui).tone(tone);
+        ui.horizontal_top(|ui| {
+            ui.add_sized(vec2(18.0, 18.0), egui::Label::new(egui::RichText::new(icon).color(colour).size(14.0)));
+            ui.vertical(|ui| {
+                ui.strong(&c.title);
+                ui.add(egui::Label::new(egui::RichText::new(&c.detail).color(ui.visuals().weak_text_color())).wrap());
+            });
+        });
+        ui.add_space(8.0);
+    }
+
+    // Checksums.
+    let named: Vec<(usize, String)> = m.files.iter().enumerate().filter(|(_, f)| !f.not_local).filter_map(|(i, f)| crate::health::checksum_of(&f.path).map(|h| (i, h))).collect();
+    ui.add_space(6.0);
+    ui.strong("Checksum");
+    if named.is_empty() {
+        ui.weak("This model's files aren't named by their checksum (as Ollama's and Hugging Face's downloads are), so there's no checksum to compare with.");
+        return;
+    }
+    if let Some(v) = &page.verify {
+        match v.rx.try_recv() {
+            Ok(r) => {
+                page.verified = r;
+                page.verify = None;
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                let read = v.read.load(Ordering::Relaxed);
+                let mut stop = false;
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(format!("Reading… {} of {}", scan::human(read), scan::human(v.total)));
+                    stop = ui.small_button("Cancel").clicked();
+                });
+                kit::progress(ui, read as f32 / v.total.max(1) as f32, Tone::Accent);
+                if stop {
+                    v.cancel.store(true, Ordering::Relaxed);
+                }
+                ui.ctx().request_repaint_after(Duration::from_millis(100));
+                return;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => page.verify = None,
+        }
+    }
+    if page.verified.is_empty() {
+        let total: u64 = named.iter().map(|(i, _)| m.files[*i].size).sum();
+        ui.label(format!(
+            "The files are named by their SHA-256 checksum. Filescape can read {} and compare, to prove not a single byte has changed since download. This reads the whole model, which takes a while.",
+            if named.len() == 1 { format!("the file ({})", scan::human(total)) } else { format!("all {} files ({})", named.len(), scan::human(total)) }
+        ));
+        ui.add_space(4.0);
+        if ui.button("Verify checksum").clicked() {
+            let read = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let cancel = Arc::new(AtomicBool::new(false));
+            let (tx, rx) = mpsc::channel();
+            let files: Vec<(usize, PathBuf, String)> = named.iter().map(|(i, h)| (*i, m.files[*i].path.clone(), h.clone())).collect();
+            let (r, c) = (read.clone(), cancel.clone());
+            std::thread::spawn(move || {
+                let mut out = Vec::new();
+                for (i, path, want) in files {
+                    if c.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    // Progress counts across the files.
+                    let before = r.load(Ordering::Relaxed);
+                    let one = std::sync::atomic::AtomicU64::new(0);
+                    let res = std::thread::scope(|s| {
+                        let h = s.spawn(|| crate::actions::sha256(&path, &one, &c));
+                        while !h.is_finished() {
+                            r.store(before + one.load(Ordering::Relaxed), Ordering::Relaxed);
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                        h.join().unwrap_or_else(|_| Err(std::io::Error::other("failed")))
+                    });
+                    r.store(before + one.load(Ordering::Relaxed), Ordering::Relaxed);
+                    if c.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    out.push((i, res.map(|got| got.eq_ignore_ascii_case(&want)).map_err(|e| e.to_string())));
+                }
+                let _ = tx.send(out);
+            });
+            let total = named.iter().map(|(i, _)| m.files[*i].size).sum();
+            page.verify = Some(Verify { read, total, cancel, rx });
+        }
+        return;
+    }
+    for (i, r) in &page.verified {
+        // Files named by their checksum say nothing more by name.
+        let name = match m.files.get(*i).and_then(|f| f.path.file_name()).map(|n| n.to_string_lossy().into_owned()) {
+            Some(n) if named.len() > 1 && crate::health::checksum_of(Path::new(&n)).is_none() => n,
+            _ if named.len() > 1 => format!("Part {}", i + 1),
+            _ => "The file".into(),
+        };
+        let t = kit::tokens(ui);
+        match r {
+            Ok(true) => ui.colored_label(t.tone(Tone::Success), format!("✔ {name}: the checksum matches, so it is exactly as downloaded.")),
+            Ok(false) => ui.colored_label(t.tone(Tone::Danger), format!("✖ {name}: the checksum doesn't match. The file has changed or is damaged; download it again.")),
+            Err(e) => ui.colored_label(t.tone(Tone::Warn), format!("⚠ {name}: couldn't be read ({e}).")),
+        };
+    }
+    if page.verified.len() < named.len() {
+        ui.weak("Stopped before every file was checked.");
+    }
+    if ui.small_button("Check again").clicked() {
+        page.verified.clear();
+    }
 }
 
 /// Colours for the parts of a model, readable in both themes.

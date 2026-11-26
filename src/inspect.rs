@@ -59,6 +59,23 @@ pub struct Tensor {
     pub bytes: u64,
     /// Which of the model's files it is in.
     pub file: usize,
+    /// Where its data starts in that file.
+    pub offset: u64,
+}
+
+/// How one of the model's files is laid out, for the health checks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Layout {
+    /// Index into the model's files.
+    pub file: usize,
+    /// The file's size now.
+    pub size: u64,
+    /// Where the tensor data starts.
+    pub data_start: u64,
+    /// GGUF: what tensor data must be aligned to.
+    pub alignment: Option<u64>,
+    /// GGUF: how many files the model says it is split into.
+    pub split_count: Option<u64>,
 }
 
 impl Tensor {
@@ -85,6 +102,8 @@ pub struct Inspection {
     pub tensors: Vec<Tensor>,
     /// Largest share first.
     pub kinds: Vec<KindShare>,
+    /// How each file that was read is laid out.
+    pub layouts: Vec<Layout>,
     /// Every metadata entry, as (key, value text), in file order.
     pub meta: Vec<(String, String)>,
     /// Problems met while reading, for the user.
@@ -145,8 +164,16 @@ fn gguf_model(m: &Model, out: &mut Inspection) {
                         elements: t.elements(),
                         bytes: t.bytes,
                         file: i,
+                        offset: t.offset,
                     });
                 }
+                out.layouts.push(Layout {
+                    file: i,
+                    size: std::fs::metadata(&f.path).map_or(f.size, |m| m.len()),
+                    data_start: h.data_start,
+                    alignment: Some(h.u64("general.alignment").filter(|&a| a > 0).unwrap_or(32)),
+                    split_count: h.u64("split.count"),
+                });
                 if first.is_none() {
                     first = Some(h);
                 }
@@ -226,12 +253,13 @@ fn safetensors_model(m: &Model, out: &mut Inspection) {
             continue;
         }
         match safetensors_header(&f.path) {
-            Ok((tensors, meta)) => {
+            Ok((tensors, meta, data_start)) => {
                 read_any = true;
-                for (name, kind, shape, bytes) in tensors {
+                for (name, kind, shape, bytes, at) in tensors {
                     let elements = shape.iter().product();
-                    out.tensors.push(Tensor { name, kind, shape, elements, bytes, file: i });
+                    out.tensors.push(Tensor { name, kind, shape, elements, bytes, file: i, offset: data_start + at });
                 }
+                out.layouts.push(Layout { file: i, size: std::fs::metadata(&f.path).map_or(f.size, |m| m.len()), data_start, alignment: None, split_count: None });
                 for (k, v) in meta {
                     if !out.meta.iter().any(|(k2, _)| *k2 == k) {
                         out.meta.push((k, v));
@@ -255,10 +283,11 @@ fn is_blob(p: &Path) -> bool {
     p.parent().and_then(|d| d.file_name()).is_some_and(|n| n == "blobs")
 }
 
-type StEntry = (String, String, Vec<u64>, u64);
+type StEntry = (String, String, Vec<u64>, u64, u64);
 
-/// A safetensors header: tensors as (name, dtype, shape, bytes) and the `__metadata__` strings.
-fn safetensors_header(path: &Path) -> Result<(Vec<StEntry>, Vec<(String, String)>), String> {
+/// A safetensors header: tensors as (name, dtype, shape, bytes, offset from the data start), the
+/// `__metadata__` strings, and where the data starts.
+fn safetensors_header(path: &Path) -> Result<(Vec<StEntry>, Vec<(String, String)>, u64), String> {
     let mut f = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut len = [0u8; 8];
     f.read_exact(&mut len).map_err(|_| "too short to be a safetensors file".to_string())?;
@@ -283,13 +312,13 @@ fn safetensors_header(path: &Path) -> Result<(Vec<StEntry>, Vec<(String, String)
         }
         let kind = t["dtype"].as_str().unwrap_or("?").to_string();
         let shape: Vec<u64> = t["shape"].as_array().map(|a| a.iter().filter_map(|d| d.as_u64()).collect()).unwrap_or_default();
-        let bytes = match t["data_offsets"].as_array().map(|a| a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>()) {
-            Some(o) if o.len() == 2 && o[1] >= o[0] => o[1] - o[0],
-            _ => shape.iter().product::<u64>() * dtype_bytes(&kind).unwrap_or(0),
+        let (bytes, at) = match t["data_offsets"].as_array().map(|a| a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>()) {
+            Some(o) if o.len() == 2 && o[1] >= o[0] => (o[1] - o[0], o[0]),
+            _ => (shape.iter().product::<u64>() * dtype_bytes(&kind).unwrap_or(0), 0),
         };
-        tensors.push((k.clone(), kind, shape, bytes));
+        tensors.push((k.clone(), kind, shape, bytes, at));
     }
-    Ok((tensors, meta))
+    Ok((tensors, meta, 8 + len))
 }
 
 fn dtype_bytes(d: &str) -> Option<u64> {
@@ -758,7 +787,7 @@ mod tests {
         assert_eq!(layer_of("model.layers.12.self_attn.q_proj.weight"), Some(("model.layers".into(), 12)));
         assert_eq!(layer_of("blk.0.attn_q.weight"), Some(("blk".into(), 0)));
         assert_eq!(layer_of("token_embd.weight"), None);
-        let t = |name: &str, bytes| Tensor { name: name.into(), kind: "F16".into(), shape: vec![bytes / 2], elements: bytes / 2, bytes, file: 0 };
+        let t = |name: &str, bytes| Tensor { name: name.into(), kind: "F16".into(), shape: vec![bytes / 2], elements: bytes / 2, bytes, file: 0, offset: 0 };
         let d = Inspection {
             tensors: vec![t("token_embd.weight", 100), t("blk.10.attn_q.weight", 20), t("blk.2.attn_q.weight", 30), t("blk.2.ffn_up.weight", 50), t("output_norm.weight", 2), t("output.weight", 90)],
             ..Default::default()
