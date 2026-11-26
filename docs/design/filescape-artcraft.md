@@ -303,4 +303,5 @@ rows there and to the tracker below.
 
 | Stage | PR | State |
 |---|---|---|
-| Phase 1 audit (this doc) | #89 | In review |
+| Phase 1 audit (this doc) | #89 | Merged |
+| Stage A: Craft documents with saved pictures | (this PR) | In review |

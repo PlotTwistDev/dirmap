@@ -95,6 +95,12 @@ def texts(p):
     if os.path.isdir(os.path.join(d, "fonts")):
         names += sorted("fonts/" + f for f in os.listdir(os.path.join(d, "fonts")) if f.lower().endswith(".txt"))
     names += [n for n in BUNDLED.get(p["name"], []) if n not in names]
+    # A crate from a git workspace (craft-libs) keeps its licences at the workspace root.
+    if not names and (p.get("source") or "").startswith("git+"):
+        up = d
+        while os.path.dirname(up) != up and not os.path.isdir(os.path.join(up, ".git")) and not os.path.isfile(os.path.join(up, ".cargo-ok")):
+            up = os.path.dirname(up)
+        names = sorted(os.path.relpath(os.path.join(up, f), d) for f in os.listdir(up) if f.upper().startswith(("LICENSE", "LICENCE")))
     out = []
     for n in names:
         f = os.path.join(d, n)

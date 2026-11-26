@@ -110,6 +110,10 @@
 - Pages, Numbers and Keynote documents, and files from Sketch, Affinity, CorelDRAW, SketchUp,
   Blender, Cinema 4D and 3ds Max, preview from the picture the app saved inside them, with the
   version that saved them. Maya and Houdini scenes show their version, units and what's in them.
+- Files from the Craft Apps (PhotoCraft, VectorCraft, EffectCraft, FigCraft, DesignCraft,
+  TextureCraft, DeckCraft, AniCraft, MaterialCraft, FilmCraft and SoundCraft) preview from the
+  picture or PDF the app saved inside them, with their pages, layers, size, length and the version
+  that saved them. Filescape reads them itself, without the apps.
 - Music projects from Ableton Live (.als), REAPER (.rpp), FL Studio (.flp) and Cubase or Nuendo
   (.cpr, .npr) show the version that saved them, the tempo, tracks, plugins and the sound files
   they use, marking any that aren't on this computer.

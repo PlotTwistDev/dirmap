@@ -1163,6 +1163,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-doc"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=3b09a644a560ca526dfd0c7d8a1d107cdde26324#3b09a644a560ca526dfd0c7d8a1d107cdde26324"
+dependencies = [
+ "craft-ecproj-format",
+ "craft-pcraft-format",
+ "craft-vectorcraft-format",
+ "flate2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-ecproj-format"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=3b09a644a560ca526dfd0c7d8a1d107cdde26324#3b09a644a560ca526dfd0c7d8a1d107cdde26324"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-pcraft-format"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=3b09a644a560ca526dfd0c7d8a1d107cdde26324#3b09a644a560ca526dfd0c7d8a1d107cdde26324"
+dependencies = [
+ "flate2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-vectorcraft-format"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=3b09a644a560ca526dfd0c7d8a1d107cdde26324#3b09a644a560ca526dfd0c7d8a1d107cdde26324"
+dependencies = [
+ "flate2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1975,6 +2021,7 @@ dependencies = [
  "bzip2",
  "calamine",
  "chrono",
+ "craft-doc",
  "csv",
  "data-encoding",
  "eframe",

@@ -47,6 +47,11 @@ pub fn open(path: &Path) -> Result<Doc, String> {
         return Err(format!("Too big to show every page ({})", crate::scan::human(size)));
     }
     let data = std::fs::read(path).map_err(|e| format!("Couldn't read it: {e}"))?;
+    open_bytes(data)
+}
+
+/// A PDF already in memory (one saved inside another document, for instance).
+pub fn open_bytes(data: Vec<u8>) -> Result<Doc, String> {
     let pdf = Pdf::new(data).map_err(|e| match e {
         hayro::hayro_syntax::LoadPdfError::Decryption(_) => "This PDF is password-protected.".to_string(),
         _ => "This PDF couldn't be read (it may be damaged).".to_string(),
@@ -110,18 +115,24 @@ impl Doc {
 
 /// The first page, no larger than `max` across or down: for thumbnails and tiles.
 pub fn first_page(path: &Path, max: u32) -> Result<(usize, usize, Vec<u8>), String> {
-    let doc = open(path)?;
-    let [w, h] = doc.sizes[0];
-    let width = if h > w { (max as f32 * w / h).round().max(1.0) as u32 } else { max };
-    doc.page(0, width)
+    open(path)?.first(max)
+}
+
+impl Doc {
+    /// The first page, no larger than `max` across or down.
+    pub fn first(&self, max: u32) -> Result<(usize, usize, Vec<u8>), String> {
+        let [w, h] = self.sizes[0];
+        let width = if h > w { (max as f32 * w / h).round().max(1.0) as u32 } else { max };
+        self.page(0, width)
+    }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A one-page PDF with a filled square, written by hand (offsets worked out below).
-    fn tiny() -> Vec<u8> {
+    pub(crate) fn tiny() -> Vec<u8> {
         let objs = [
             "<< /Type /Catalog /Pages 2 0 R >>",
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
