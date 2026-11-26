@@ -57,6 +57,8 @@ pub(super) enum Content {
     Doc { blocks: Arc<Vec<crate::help::doc::Block>>, facts: Vec<(&'static str, String)> },
     /// A PDF: every page, drawn as it comes into view.
     Pdf(Arc<PdfShown>),
+    /// An archive: what's in it, as a tree with sizes.
+    Archive(Arc<crate::archtree::Tree>),
     Binary,
     /// Nothing to show beyond the facts.
     None,
@@ -71,6 +73,7 @@ impl Content {
             Content::Pdf(p) => &p.doc.facts,
             Content::Doc { facts, .. } => facts,
             Content::Sheet(b) => &b.facts,
+            Content::Archive(t) => &t.facts,
             _ => &[],
         }
     }
@@ -222,20 +225,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
     // An archive: what's in it.
     if path.file_name().is_some_and(|n| crate::fsys::archive::is_archive(&n.to_string_lossy())) {
         return match crate::fsys::archive::index(path) {
-            Ok(ix) => {
-                let files = ix.items.iter().filter(|i| !i.is_dir).count();
-                let bytes: u64 = ix.items.iter().map(|i| i.size).sum();
-                let mut text = format!("{} files, {} when extracted\n\n", group(files as u64), crate::scan::human(bytes));
-                for it in ix.items.iter().take(2000) {
-                    if it.is_dir {
-                        text.push_str(&format!("{}/\n", it.path));
-                    } else {
-                        text.push_str(&format!("{}  ({})\n", it.path, crate::scan::human(it.size)));
-                    }
-                }
-                let truncated = ix.items.len() > 2000;
-                Content::Text { text, truncated, colours: None }
-            }
+            Ok(ix) => Content::Archive(Arc::new(crate::archtree::Tree::build(&ix, path, size))),
             Err(e) => Content::Error(e),
         };
     }
@@ -1023,6 +1013,10 @@ impl App {
                 let shown = shown.clone();
                 pdf_view(ui, path, &shown, size);
             }
+            Content::Archive(tree) => {
+                let tree = tree.clone();
+                archive_view(ui, path, &tree, size);
+            }
             Content::Doc { blocks, .. } => {
                 let blocks = blocks.clone();
                 let pal = style::pal(ui);
@@ -1233,6 +1227,110 @@ fn sheet_view(ui: &mut egui::Ui, path: &Path, book: &crate::sheets::Book, size: 
             }
         });
     });
+}
+
+/// An archive's contents as a tree: folders open and close with a click, biggest first, with
+/// each item's size, a bar for its share of the whole, and how much compression saved.
+fn archive_view(ui: &mut egui::Ui, path: &Path, tree: &crate::archtree::Tree, size: Vec2) {
+    use std::collections::HashSet;
+    let pal = style::pal(ui);
+    let open_id = egui::Id::new(("preview-archive-open", path));
+    let mut open: HashSet<usize> = ui.data(|d| d.get_temp(open_id)).unwrap_or_else(|| {
+        // A single folder at the top (the usual way archives are made) starts open.
+        let root = &tree.nodes[0];
+        let mut o = HashSet::new();
+        if let [only] = root.children[..]
+            && tree.nodes[only].is_dir
+        {
+            o.insert(only);
+        }
+        o
+    });
+    // The rows showing: depth-first through the open folders.
+    let mut rows = Vec::new();
+    let mut stack: Vec<usize> = tree.nodes[0].children.iter().rev().copied().collect();
+    while let Some(i) = stack.pop() {
+        rows.push(i);
+        if open.contains(&i) {
+            stack.extend(tree.nodes[i].children.iter().rev().copied());
+        }
+    }
+    let total = tree.nodes[0].size.max(1);
+    let packed_col = tree.nodes[0].packed.is_some() && tree.nodes[0].files > 0;
+    let mut toggle = None;
+    egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+        ui.set_min_size(size - vec2(12.0, 12.0));
+        ui.set_max_size(size - vec2(12.0, 12.0));
+        let font = FontId::proportional(12.0);
+        let row_h = 20.0;
+        let size_w = 66.0;
+        let saved_w = if packed_col { 46.0 } else { 0.0 };
+        let bar_w = 56.0;
+        // Column heads.
+        let (hr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
+        let small = FontId::proportional(11.0);
+        let mut x = hr.right() - 4.0;
+        if packed_col {
+            ui.painter().text(pos2(x, hr.center().y), Align2::RIGHT_CENTER, "Saved", small.clone(), pal.weak);
+            x -= saved_w;
+        }
+        ui.painter().text(pos2(x, hr.center().y), Align2::RIGHT_CENTER, "Size", small.clone(), pal.weak);
+        ui.painter().text(pos2(hr.left() + 4.0, hr.center().y), Align2::LEFT_CENTER, "Name", small, pal.weak);
+        egui::ScrollArea::vertical().id_salt(("archive", path)).auto_shrink(false).show_rows(ui, row_h, rows.len(), |ui, range| {
+            for &i in &rows[range] {
+                let n = &tree.nodes[i];
+                let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), if n.is_dir { Sense::click() } else { Sense::hover() });
+                let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
+                if resp.hovered() {
+                    p.rect_filled(r, 3.0, pal.hover);
+                }
+                let mut right = r.right() - 4.0;
+                if packed_col {
+                    if let Some(pk) = n.packed
+                        && n.size > 0
+                    {
+                        p.text(pos2(right, r.center().y), Align2::RIGHT_CENTER, crate::archtree::saved_short(pk, n.size), font.clone(), pal.weak);
+                    }
+                    right -= saved_w;
+                }
+                p.text(pos2(right, r.center().y), Align2::RIGHT_CENTER, crate::scan::human(n.size), font.clone(), pal.text);
+                right -= size_w;
+                // Share of the whole archive.
+                let bar = Rect::from_min_size(pos2(right - bar_w, r.center().y - 3.0), vec2(bar_w, 6.0));
+                if r.width() > 260.0 {
+                    p.rect_filled(bar, 3.0, pal.weak.gamma_multiply(0.15));
+                    let f = (n.size as f32 / total as f32).clamp(0.0, 1.0);
+                    if f > 0.0 {
+                        p.rect_filled(Rect::from_min_size(bar.min, vec2((bar_w * f).max(2.0), 6.0)), 3.0, pal.accent);
+                    }
+                    right = bar.left() - 8.0;
+                }
+                let indent = r.left() + 4.0 + (n.depth.saturating_sub(1) as f32) * 14.0;
+                if n.is_dir {
+                    // A small triangle: pointing down when open.
+                    let c = pos2(indent + 5.0, r.center().y);
+                    let pts = if open.contains(&i) { vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)] } else { vec![c + vec2(-2.0, -4.0), c + vec2(3.0, 0.0), c + vec2(-2.0, 4.0)] };
+                    p.add(egui::Shape::convex_polygon(pts, pal.weak, Stroke::NONE));
+                }
+                let label = if n.is_dir { format!("{}/", n.name) } else { n.name.clone() };
+                let name_rect = Rect::from_min_max(pos2(indent + 14.0, r.top()), pos2(right, r.bottom()));
+                p.with_clip_rect(name_rect.intersect(p.clip_rect())).text(pos2(name_rect.left(), r.center().y), Align2::LEFT_CENTER, label, font.clone(), if n.is_dir { pal.strong } else { pal.text });
+                if n.is_dir {
+                    let files = n.files;
+                    let resp = resp.on_hover_text(format!("{} {} inside", group(files), if files == 1 { "file" } else { "files" }));
+                    if resp.clicked() {
+                        toggle = Some(i);
+                    }
+                }
+            }
+        });
+    });
+    if let Some(i) = toggle
+        && !open.remove(&i)
+    {
+        open.insert(i);
+    }
+    ui.data_mut(|d| d.insert_temp(open_id, open));
 }
 
 /// Text laid out in its syntax colours; what the spans don't cover is in `plain`.
