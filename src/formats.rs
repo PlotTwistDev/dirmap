@@ -54,6 +54,8 @@ pub enum Category {
     Saved,
     /// DICOM and FITS: scientific pictures, decoded here.
     Science,
+    /// Disk images: a disc's files listed, a virtual disk's size and partitions (read-only).
+    DiskImage,
 }
 
 /// One format.
@@ -112,6 +114,7 @@ impl Format {
                 Category::Model => ("A shaded model to turn about", "Filescape (gltf for glTF)"),
                 Category::Cad => ("What the file says: the program that made it, units, author and parts (not drawn)", "Filescape"),
                 Category::Saved => ("The picture the app saved inside the file, and the version that saved it", "Filescape"),
+                Category::DiskImage => ("A disc's files and folders with sizes; a virtual disk's size, type and partitions; a Windows image's editions", "Filescape"),
                 Category::Science => ("The picture, with the scan's or telescope's details", "Filescape"),
                 Category::Map => ("The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks", "Filescape"),
                 Category::Text | Category::Spreadsheet | Category::Document => ("A preview", "Filescape"),
@@ -204,6 +207,7 @@ pub static FORMATS: &[Format] = &[
     },
     Format { id: "daw", name: "Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo)", category: Category::Document, exts: &["als", "rpp", "flp", "cpr", "npr"] },
     Format { id: "dicom", name: "DICOM medical image", category: Category::Science, exts: &["dcm", "dicom"] },
+    Format { id: "diskimage", name: "Disk image", category: Category::DiskImage, exts: &["iso", "img", "dmg", "vhd", "vhdx", "avhdx", "vmdk", "qcow2", "qcow", "vdi", "wim", "esd"] },
     Format { id: "fits", name: "FITS astronomy image", category: Category::Science, exts: &["fits", "fit", "fts"] },
     Format { id: "map", name: "Map data (GeoJSON, GPX, KML)", category: Category::Map, exts: &["geojson", "gpx", "kml", "kmz"] },
     Format { id: "midi", name: "MIDI music", category: Category::Midi, exts: &["mid", "midi", "kar"] },
@@ -281,6 +285,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "dicom"
     } else if at(0, b"SIMPLE  =") {
         "fits"
+    } else if at(0, b"vhdxfile") || at(0, b"QFI\xfb") || at(0, b"KDMV") || at(0, b"MSWIM\0\0\0") || at(0, b"conectix") {
+        "diskimage"
     } else if at(0, b"BLENDER") {
         "creative"
     } else if at(0, b"ISO-10303-21;") {

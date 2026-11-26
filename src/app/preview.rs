@@ -183,6 +183,7 @@ pub(super) enum Kind {
     Saved,
     /// DICOM or FITS: decoded here.
     Science,
+    DiskImage,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -215,6 +216,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Cad => Kind::Cad,
         C::Saved => Kind::Saved,
         C::Science => Kind::Science,
+        C::DiskImage => Kind::DiskImage,
         C::Database => Kind::Database,
         C::Model => Kind::Model,
     }
@@ -353,6 +355,18 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
         },
         Kind::Cad => match crate::cadview::read_info(path) {
             Ok(i) => Content::Doc { blocks: Arc::new(i.blocks), facts: i.facts },
+            Err(e) => Content::Error(e),
+        },
+        Kind::DiskImage => match crate::diskimage::read(path) {
+            Ok(crate::diskimage::Disk::Listing { index, facts }) => {
+                let mut tree = crate::archtree::Tree::build(&index, path, size);
+                // A disc isn't compressed: keep the count and the largest file, with the disc's own details first.
+                let kept: Vec<_> = tree.facts.drain(..).filter(|f| matches!(f.0, "Contents" | "Largest")).collect();
+                tree.facts = facts;
+                tree.facts.extend(kept);
+                Content::Archive(Arc::new(tree))
+            }
+            Ok(crate::diskimage::Disk::Details { blocks, facts }) => Content::Doc { blocks: Arc::new(blocks), facts },
             Err(e) => Content::Error(e),
         },
         Kind::Science => match crate::sciimage::read(path) {
