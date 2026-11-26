@@ -38,7 +38,7 @@ files. The cost is memory: see [Scanning millions of files](millions-of-files.md
 ## Filters, duplicates and sequences
 
 - Filters are compiled once and run against the in-memory tree on a background thread. A newer
-  filter cancels the work for an older one. **Show matches only** builds a reduced tree with a map
+  filter cancels the work for an older one. **Only matches** builds a reduced tree with a map
   back to the original, so the selection and position carry over.
 - The duplicate finder groups files by size, then by a hash of the first 64 KB, then by a hash of
   the whole file, reading in parallel. See [Duplicate files](../analysis/duplicates.md).

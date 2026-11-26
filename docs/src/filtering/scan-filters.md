@@ -1,12 +1,12 @@
 # Scan exclusions
 
 **⚙ Settings > Filtering** decides what a scan reads in the first place. Unlike the filters in the
-filter bar, these **change the totals**: anything excluded here isn't counted anywhere, and you
+**Filters** panel, these **change the totals**: anything excluded here isn't counted anywhere, and you
 have to scan again for a change to take effect. When you change them, the status bar shows
 **Scan settings changed. Rescan**.
 
 Use them to leave out things you never want to see, such as a backup folder you know about or
-temporary files, not to search: for searching, the [filter bar](overview.md) is faster and
+temporary files, not to search: for searching, the [Filters panel](overview.md) is faster and
 doesn't need a rescan.
 
 ## The settings

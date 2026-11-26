@@ -2,6 +2,27 @@
 
 ## Next version
 
+### A calmer Storage Analysis toolbar
+
+- The controls above the map are one row now: **Treemap** / **Sunburst**, a **Size** menu, a
+  **Colour** menu, **Filters**, a search box and a **Display** menu. Back, Forward, Up, Whole map
+  and Zoom to selection sit beside a breadcrumb of the folder on the map, whose last part opens
+  the scan controls. In a narrow window, menus fold into **⋯** instead of wrapping.
+- Filters moved into a **Filters** panel that stays open while you use the map: file types,
+  where files are stored, size presets and ranges, and a new **Last changed** filter (last 7 or
+  30 days, last year, or untouched for over a year or five years).
+- Each filter that's on shows as a removable chip under the toolbar, with **Highlight** /
+  **Only matches**, the match count and **Clear all**. With no filter on, the row is hidden.
+  See [Filtering overview](../filtering/overview.md).
+
+### Storage Analysis keeps up with changes
+
+- Files added, changed or removed after a scan now show in Storage Analysis by themselves: a
+  download appears in the map a second or so after it finishes, and a file deleted in another
+  app disappears. Downloads still being written (.crdownload, .part, Safari's .download) are left
+  out until they're done. Turn it off under **Settings > General > Keep up with changes**. See
+  [Changes after the scan](../getting-started/scanning.md#changes-after-the-scan).
+
 ### Gaussian splat scenes
 
 - **SPZ** files (every version) and **PLY** splat scenes now preview in Files and Storage
@@ -11,8 +32,31 @@
   files are told apart by their header, so meshes still show as models, and PLY point clouds now
   show their points instead of "no faces to show". See
   [Quick Look and the preview pane](../views/file-manager.md#quick-look-and-the-preview-pane).
+- More splat formats: **compressed PLY** (PlayCanvas and SuperSplat), **SPLAT**, **KSPLAT**,
+  **SOG** (bundled or loose), **GLB** files with Gaussian splats, and **web pages exported
+  from SuperSplat**, whose embedded scene is read without running the page.
+- Splat thumbnails in Icons view and on map tiles are drawn as real splats on the graphics
+  chip, and map tiles show the format and splat count. Quick Look has **◀** and **▶** buttons
+  for the previous and next file, and a camera button on a splat scene saves the view as a PNG
+  of up to 4K.
+- A splat scene's preview can show its splats as outlines or centres, or in false colour by
+  opacity, size, crowding or distance; **Problems** picks out the splats the checks found,
+  including a new check for floaters. There's also a box round the main body, a field of view
+  control, and **W A S D** to move about. Turning a scene is smoother: pictures arrive while you
+  drag, at half size, instead of only when you stop.
 
 ### The AI Models workspace
+
+- **🖴 Storage** shows how much space AI models take, by app, and finds what can be freed: Ollama
+  downloads no model uses, unfinished downloads, older Hugging Face versions and copies. Copies on
+  the same drive can be shared as one file (a hard link), so every app keeps working. Each item
+  lists what it changes, with one confirmation. Right-click a model and choose **Move
+  to Trash…** to remove it properly: for Ollama, as `ollama rm` would. See
+  [Freeing space](../views/ai-models.md#freeing-space). **Move to another drive…** moves an app's
+  whole model folder and leaves a link, so the app finds its models as before (Professional). See
+  [Moving models](../views/ai-models.md#moving-models-to-another-drive).
+  **Shrink (quantise)…** in a model's right-click menu makes a smaller copy (Q8_0 to Q2_K), keeping
+  the original (Professional). See [Shrinking a model](../views/ai-models.md#shrinking-a-model).
 
 - **🔬 Lab** shows what a model would write next and how sure it is: each token coloured by its
   probability, the ten likeliest alternatives, and what temperature, top-k, top-p and min-p do to
@@ -156,6 +200,15 @@
   JPEG-LS or lossless JPEG now show their picture.
 - Logic Pro projects preview with Logic's picture of the project window, tempo, key and
   sound files.
+- **Steadier tile previews.** Previews on the Storage Analysis map no longer blink off and
+  fade back in as you pan and zoom: a tile keeps its preview while the map sharpens, and sound
+  waveforms hold their shape as tiles grow.
+- **Roomier preview pane.** In Storage Analysis the preview takes all the room the details
+  leave, and the details sit at the bottom of the pane.
+- **Video timeline.** A video's filmstrip is a timeline: click it to play from there, or drag
+  along it to scrub, the picture following back and forth. The video's sound is drawn under it
+  when it has some. Dragging the time slider scrubs too.
+- **Line numbers** beside the text of text files and scripts in previews.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the

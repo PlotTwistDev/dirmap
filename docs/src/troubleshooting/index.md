@@ -40,7 +40,7 @@ Check, in order:
 5. **Links** are never followed, so a folder reached through a link or junction appears empty.
    Scan the real folder instead. See [Links, junctions and mounted drives](../disk-usage/links-and-mounts.md).
 6. **A filter is on.** Filters hide files from the map without changing the totals. Look for
-   **Show matches only** or a highlighted **Show:** button, and press **Clear filters**.
+   **Only matches** or a chip under the toolbar, and press **Clear all**.
 7. **The scan was cancelled** or files changed afterwards. Press **⟳ Scan** to scan again, or select
    a folder and press **F5** to refresh just that folder.
 
@@ -61,7 +61,7 @@ Filescape's total and Windows' (or the drive's) used space measure different thi
 ## Differences between file sizes and Windows' disk usage
 
 By default Filescape shows **size on disk**, like **Size on disk** in Explorer's Properties; the
-**Size** switch above the map changes to **Logical** sizes, like **Size**. The two differ for
+**Size** menu above the map changes to **Logical** sizes, like **Size**. The two differ for
 compressed files, sparse files, cloud files that are only online and hard links, and by up to one
 cluster (usually 4 KB) per file. Folder totals in Filescape also include hidden and system files
 by default, which Explorer may hide. See [How sizes are calculated](../disk-usage/sizes.md).
@@ -86,7 +86,7 @@ Filescape keeps the whole scan in memory: roughly 150–250 MB per million files
 
 - Scan a smaller folder rather than the whole drive.
 - Add large folders you don't care about (backups, caches) to **Folders to skip**.
-- Close a snapshot comparison (**Stop comparing**) and switch **Show matches only** back to
+- Close a snapshot comparison (**Stop comparing**) and switch **Only matches** back to
   **Highlight**: each holds an extra copy of the tree.
 - Close and reopen Filescape after very large scans to return all memory to the system.
 
@@ -100,8 +100,8 @@ See [Scanning millions of files](../advanced/millions-of-files.md).
   `.beauty`. Use `*beauty*` to find names containing it.
 - `####` needs **exactly** four digits, and a frame symbol always takes the whole number:
   `render.####.exr` won't match `render.00001.exr`. Try `{frame}`.
-- Several filters must **all** match: a **Show:** category, size limits and the Custom pattern are
-  combined. Press **Clear filters** and add them back one at a time.
+- Several filters must **all** match: a **File types** choice, size limits and the Custom pattern are
+  combined. Press **Clear all** and add them back one at a time.
 - **Case-sensitive** or **Match all terms (AND)** may be on in the **⏷** menu.
 
 See [Custom filter syntax](../filtering/syntax.md).
@@ -115,7 +115,7 @@ See [Custom filter syntax](../filtering/syntax.md).
 - Treemap keys (**+**, **−**, **Home**, **Alt+←**, **Alt+→**) only work when the treemap is shown.
 - See [Keyboard shortcuts](../reference/keyboard.md) for the full list.
 
-## Color by: Change is greyed out
+## Colour: Change is greyed out
 
 It needs a snapshot to compare with. Open the **Changes** tab and press **📂 Compare with
 snapshot…**. See [Comparing with a snapshot](../analysis/snapshots.md).

@@ -62,6 +62,9 @@ pub struct Settings {
     pub units: SizeUnits,
     pub stripes: bool,
     pub live_tree: bool,
+    /// Keep Storage Analysis up to date as files are added, changed or removed after the scan
+    /// (downloads, deletes in other apps), without scanning again.
+    pub watch_changes: bool,
     /// The size Storage Analysis opens with: on disk (default) or logical. The switch above the
     /// map changes it.
     pub size_metric: crate::scan::Metric,
@@ -87,6 +90,9 @@ pub struct Settings {
     /// Ask filescape.app for the newest version at launch and show a notice when there's a newer
     /// one. Nothing about the user or the computer is sent.
     pub check_updates: bool,
+    /// At launch, remind the user to keep offline backups, since Filescape can delete and
+    /// overwrite files. The reminder's "Don't show this again" box turns it off.
+    pub backup_reminder: bool,
     /// Size of everything on screen (1 = 100%). Ctrl + and Ctrl − change it too.
     pub ui_scale: f32,
 
@@ -169,6 +175,7 @@ impl Default for Settings {
             units: SizeUnits::Binary,
             stripes: true,
             live_tree: true,
+            watch_changes: true,
             size_metric: crate::scan::Metric::Disk,
             cloud_icons: true,
             system_notes: true,
@@ -178,6 +185,7 @@ impl Default for Settings {
             cloud_confirm: true,
             cloud_mounts: false,
             check_updates: true,
+            backup_reminder: true,
             ui_scale: 1.0,
             exclude_folders: String::new(),
             exclude_files: String::new(),
@@ -263,8 +271,8 @@ impl Settings {
         let def = Settings::default();
         match page {
             Tab::General => {
-                (self.theme, self.units, self.stripes, self.live_tree, self.check_updates, self.ui_scale, self.system_notes) =
-                    (def.theme, def.units, def.stripes, def.live_tree, def.check_updates, def.ui_scale, def.system_notes);
+                (self.theme, self.units, self.stripes, self.live_tree, self.watch_changes, self.check_updates, self.ui_scale, self.system_notes, self.backup_reminder) =
+                    (def.theme, def.units, def.stripes, def.live_tree, def.watch_changes, def.check_updates, def.ui_scale, def.system_notes, def.backup_reminder);
             }
             Tab::Filtering => {
                 self.exclude_folders = def.exclude_folders;

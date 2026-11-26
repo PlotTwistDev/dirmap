@@ -142,3 +142,11 @@ comparing against a saved snapshot.
 
 The GUI draws with OpenGL on Windows and wgpu elsewhere, and falls back to the other automatically. On macOS, scanning `/` covers the
 system and data volumes together (they are one disk in Finder) without counting anything twice.
+
+## No warranty
+
+Filescape is provided "as is", without warranty of any kind. It can delete, move, rename, copy,
+overwrite, transfer and sync files, and some of that can't be undone, so keep backups of anything you
+can't afford to lose. To the extent the law allows, the authors aren't liable for lost, damaged or
+deleted files or data, however it happens. Consumers keep their legal rights. Full wording:
+[filescape.app/terms](https://filescape.app/terms).

@@ -132,18 +132,29 @@ pub(super) struct Look {
 /// A video's filmstrip: being read, then its frames.
 struct StripView {
     path: PathBuf,
-    rx: Option<mpsc::Receiver<Result<Vec<crate::video::Frame>, String>>>,
+    rx: Option<mpsc::Receiver<Result<(crate::video::Info, Vec<crate::video::Frame>), String>>>,
     frames: Vec<(f64, egui::TextureHandle)>,
+    /// The video's length, from the filmstrip's reading of it.
+    length: Option<f64>,
+    /// Its sound's shape and the seconds that covers, read after the frames (`None` while
+    /// reading, `Some(None)` when it has no sound).
+    wave_rx: Option<mpsc::Receiver<Option<(Vec<f32>, f64)>>>,
+    wave: Option<Option<(Vec<f32>, f64)>>,
 }
 
-/// The filmstrip's height.
+/// The filmstrip's height, and the sound's under it.
 const STRIP_H: f32 = 56.0;
+const STRIP_WAVE_H: f32 = 30.0;
+/// Stretches in a video's sound on its timeline.
+const STRIP_WAVE_BARS: usize = 600;
 
 /// A video playing in a preview, and its picture.
 pub(super) struct VideoView {
     pub video: crate::video::Video,
     tex: Option<egui::TextureHandle>,
     serial: u64,
+    /// While the time slider is dragged: whether it was playing before, and where it's at.
+    scrub: Option<(bool, f64)>,
 }
 
 impl Look {
@@ -228,8 +239,12 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
     }
 }
 
-fn is_ply(path: &Path) -> bool {
-    path.extension().is_some_and(|x| x.eq_ignore_ascii_case("ply"))
+/// Files that may hold a splat scene though their kind says otherwise: PLY (mesh or
+/// splats), GLB (model or splats), web pages (SuperSplat exports) and a loose SOG scene's
+/// meta.json.
+fn may_be_splat(path: &Path) -> bool {
+    let ext = path.extension().map(|x| x.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    matches!(ext.as_str(), "ply" | "glb" | "html" | "htm") || path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("meta.json"))
 }
 
 fn load_splat(path: &Path) -> Content {
@@ -287,6 +302,9 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(e) => Content::Error(e),
         };
     }
+    if kind != Kind::Splat && may_be_splat(path) && crate::splat::claims(path) {
+        return load_splat(path);
+    }
     match kind {
         Kind::Image | Kind::LinearImage => load_image(path, kind == Kind::LinearImage, size),
         Kind::Text => match load_text(path) {
@@ -299,7 +317,6 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(e) => Content::Error(e),
         },
         // PLY files can hold meshes, point clouds or splat scenes: the header says which.
-        Kind::Model if is_ply(path) && crate::splat::classify_ply(path).is_ok_and(|k| k != crate::splat::PlyKind::Mesh) => load_splat(path),
         Kind::Splat => load_splat(path),
         Kind::Model => match crate::model3d::read(path) {
             Ok(mesh) => Content::Model { mesh: Arc::new(mesh), tex: None, drawn: None },
@@ -897,6 +914,7 @@ impl App {
         let size = vec2((screen.width() * 0.72).max(420.0), (screen.height() * 0.78).max(320.0));
         let full = self.files.look.full;
         let mut open = true;
+        let mut step = 0i64;
         let mut win = egui::Window::new(egui::RichText::new(format!("{}", e.name)).strong())
             // A window of its own when full, so it comes back to its old size and place.
             .id(egui::Id::new(("quick-look", full)))
@@ -919,6 +937,16 @@ impl App {
                         if ui.button(icon).on_hover_text(tip).clicked() {
                             self.files.look.full = !full;
                         }
+                        // Previous and next file, as the arrow keys do (not from the map,
+                        // which has no order to walk).
+                        if !self.files.look.from_map {
+                            if ui.button("▶").on_hover_text("Next file (↓)").clicked() {
+                                step = 1;
+                            }
+                            if ui.button("◀").on_hover_text("Previous file (↑)").clicked() {
+                                step = -1;
+                            }
+                        }
                         let next = if self.files.look.from_map { "" } else { "⏶⏷ next · " };
                         ui.weak(if cfg!(target_os = "macos") { format!("{next}Space closes") } else { format!("{next}Space or Esc closes") });
                     });
@@ -930,6 +958,9 @@ impl App {
         if !open {
             self.files.look.open = false;
             self.files.look.full = false;
+        }
+        if step != 0 {
+            self.files_move_cursor(|pos, _| pos.map(|p| p as i64 + step).unwrap_or(0), false);
         }
     }
 
@@ -1122,39 +1153,58 @@ impl App {
             }
             return self.preview_main(ui, path, e, size);
         }
-        self.preview_main(ui, path, e, vec2(size.x, size.y - STRIP_H - ui.spacing().item_spacing.y));
-        self.filmstrip(ui, path, vec2(size.x, STRIP_H));
+        // The sound under the frames, once it's known there is some.
+        let wave = self.files.look.strip.as_ref().is_some_and(|s| s.path == path && matches!(s.wave, Some(Some(_))));
+        let strip_h = STRIP_H + if wave { STRIP_WAVE_H } else { 0.0 };
+        self.preview_main(ui, path, e, vec2(size.x, size.y - strip_h - ui.spacing().item_spacing.y));
+        self.filmstrip(ui, path, vec2(size.x, strip_h));
     }
 
-    /// Frames from across a video; clicking one plays from there.
+    /// The video as a timeline: frames from across it, and its sound under them when it has
+    /// some. Click to play from that moment; drag to scrub, the picture following back and forth.
     fn filmstrip(&mut self, ui: &mut egui::Ui, path: &Path, size: Vec2) {
         const N: usize = 8;
         let pal = style::pal(ui);
         if self.files.look.strip.as_ref().is_none_or(|s| s.path != path) {
             let (tx, rx) = mpsc::channel();
+            let (wtx, wrx) = mpsc::channel();
             let (p, ctx) = (path.to_path_buf(), ui.ctx().clone());
             let h = (STRIP_H * ui.ctx().pixels_per_point()).round() as u32;
             let _ = std::thread::Builder::new().name("filescape-filmstrip".into()).spawn(move || {
-                let _ = tx.send(crate::video::filmstrip(&p, N, h).map(|(_, f)| f));
+                let _ = tx.send(crate::video::filmstrip(&p, N, h));
+                ctx.request_repaint();
+                // The sound after the pictures, so they come first.
+                let wave = crate::wave::timeline(&p, STRIP_WAVE_BARS).ok().filter(|(w, _)| w.iter().any(|v| *v > 0.01));
+                let _ = wtx.send(wave);
                 ctx.request_repaint();
             });
-            self.files.look.strip = Some(StripView { path: path.to_path_buf(), rx: Some(rx), frames: Vec::new() });
+            self.files.look.strip = Some(StripView { path: path.to_path_buf(), rx: Some(rx), frames: Vec::new(), length: None, wave_rx: Some(wrx), wave: None });
         }
         let st = self.files.look.strip.as_mut().expect("just set");
         if let Some(rx) = &st.rx
             && let Ok(res) = rx.try_recv()
         {
             st.rx = None;
-            for (i, f) in res.unwrap_or_default().into_iter().enumerate() {
-                let img = egui::ColorImage::from_rgba_unmultiplied(f.size, &f.rgba);
-                st.frames.push((f.pts, ui.ctx().load_texture(format!("strip:{}:{i}", path.display()), img, egui::TextureOptions::LINEAR)));
+            if let Ok((info, frames)) = res {
+                st.length = info.duration.filter(|d| *d > 0.0);
+                for (i, f) in frames.into_iter().enumerate() {
+                    let img = egui::ColorImage::from_rgba_unmultiplied(f.size, &f.rgba);
+                    st.frames.push((f.pts, ui.ctx().load_texture(format!("strip:{}:{i}", path.display()), img, egui::TextureOptions::LINEAR)));
+                }
             }
+        }
+        if let Some(rx) = &st.wave_rx
+            && let Ok(w) = rx.try_recv()
+        {
+            st.wave_rx = None;
+            st.wave = Some(w);
         }
         let (r, _) = ui.allocate_exact_size(size, Sense::hover());
         let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
         p.rect_filled(r, style::RADIUS, Color32::BLACK);
+        let film = Rect::from_min_size(r.min, vec2(r.width(), STRIP_H.min(r.height())));
         if st.rx.is_some() {
-            ui.put(Rect::from_center_size(r.center(), vec2(18.0, 18.0)), egui::Spinner::new());
+            ui.put(Rect::from_center_size(film.center(), vec2(18.0, 18.0)), egui::Spinner::new());
             return;
         }
         if st.frames.is_empty() {
@@ -1162,37 +1212,101 @@ impl App {
         }
         // As many as fit at a useful size: every other one in a narrow pane.
         let total = st.frames.len();
-        let fit = ((r.width() / (STRIP_H * 1.5)).floor() as usize).clamp(3, total.max(3)).min(total);
+        let fit = ((film.width() / (STRIP_H * 1.5)).floor() as usize).clamp(3, total.max(3)).min(total);
         let shown: Vec<usize> = (0..fit).map(|k| (k * total + total / 2) / fit).map(|i| i.min(total - 1)).collect();
-        let cell = r.width() / fit as f32;
-        let mut seek = None;
-        for (i, (t, tex)) in shown.iter().map(|&j| &st.frames[j]).enumerate() {
-            let c = Rect::from_min_size(pos2(r.left() + i as f32 * cell, r.top()), vec2(cell, r.height())).shrink(1.0);
+        let cell = film.width() / fit as f32;
+        for (i, (_, tex)) in shown.iter().map(|&j| &st.frames[j]).enumerate() {
+            let c = Rect::from_min_size(pos2(film.left() + i as f32 * cell, film.top()), vec2(cell, film.height())).shrink(1.0);
             let ts = tex.size_vec2();
-            let s = (c.width() / ts.x).min(c.height() / ts.y);
-            let img = Rect::from_center_size(c.center(), ts * s);
-            p.image(tex.id(), img, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-            let resp = ui.interact(c, ui.id().with(("strip", path, i)), Sense::click());
-            if resp.hovered() {
-                p.rect_stroke(img, 2.0, Stroke::new(2.0, pal.accent), egui::StrokeKind::Inside);
-            }
-            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(format!("Play from {}", crate::media::clock(*t))).clicked() {
-                seek = Some(*t);
+            let s = (c.width() / ts.x).max(c.height() / ts.y);
+            // Each frame fills its cell, cropped from the middle, so the strip reads as one band.
+            let (fx, fy) = (c.width() / (ts.x * s), c.height() / (ts.y * s));
+            p.image(tex.id(), c, Rect::from_center_size(pos2(0.5, 0.5), vec2(fx, fy)), Color32::WHITE);
+        }
+        // The sound, along the same time as the frames.
+        if let Some(Some((w, secs))) = &st.wave
+            && let Some(len) = st.length
+            && r.height() > STRIP_H + 4.0
+        {
+            let band = Rect::from_min_max(pos2(r.left(), film.bottom() + 2.0), pos2(r.right(), r.bottom() - 2.0));
+            let span = band.width() * (secs / len).min(1.0) as f32;
+            let bars = ((span / 2.0) as usize).clamp(1, w.len());
+            let bw = span / bars as f32;
+            let mid = band.center().y;
+            let ink = style::blend(pal.accent, Color32::WHITE, 0.25);
+            for i in 0..bars {
+                let (lo, hi) = (i * w.len() / bars, ((i + 1) * w.len() / bars).max(i * w.len() / bars + 1));
+                let v = w[lo..hi.min(w.len())].iter().copied().fold(0.0, f32::max);
+                let h = (v * band.height() * 0.5).max(0.5);
+                let x = band.left() + i as f32 * bw;
+                p.rect_filled(Rect::from_min_max(pos2(x, mid - h), pos2(x + (bw - 0.5).max(0.5), mid + h)), 0.0, ink);
             }
         }
-        if let Some(t) = seek {
-            match &self.files.look.video {
-                Some(v) if v.video.path == path => {
+        let Some(len) = st.length else { return };
+        let resp = ui.interact(r, ui.id().with(("timeline", path)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        let at_x = |x: f32| ((x - r.left()) / r.width()).clamp(0.0, 1.0) as f64 * len;
+        // Where the video is, and where the pointer would take it.
+        let playing_here = self.files.look.video.as_ref().filter(|v| v.video.path == path);
+        let head = playing_here.map(|v| v.scrub.map_or(v.video.state().position, |s| s.1));
+        if let Some(t) = head {
+            let x = r.left() + (t / len).clamp(0.0, 1.0) as f32 * r.width();
+            p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(2.0, Color32::WHITE));
+            p.circle_filled(pos2(x, r.top() + 1.0), 4.0, Color32::WHITE);
+        }
+        if let Some(q) = resp.hover_pos() {
+            let x = q.x.clamp(r.left(), r.right());
+            p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(1.0, pal.accent));
+            let label = crate::media::clock(at_x(x));
+            let g = p.layout_no_wrap(label, FontId::monospace(11.0), Color32::WHITE);
+            let left = (x - g.size().x / 2.0 - 4.0).clamp(r.left(), (r.right() - g.size().x - 8.0).max(r.left()));
+            let chip = Rect::from_min_size(pos2(left, r.bottom() - g.size().y - 6.0), g.size() + vec2(8.0, 4.0));
+            p.rect_filled(chip, 3.0, Color32::from_black_alpha(190));
+            p.galley(chip.min + vec2(4.0, 2.0), g, Color32::WHITE);
+        }
+        let pointer = resp.interact_pointer_pos().map(|q| at_x(q.x));
+        if (resp.dragged() || resp.drag_started()) && let Some(t) = pointer {
+            // Scrub: paused while dragging, the picture following the pointer.
+            if self.files.look.video.as_ref().is_none_or(|v| v.video.path != path) {
+                let ctx = ui.ctx().clone();
+                let video = crate::video::Video::start(path, true, move || ctx.request_repaint());
+                video.pause();
+                self.files.look.video = Some(VideoView { video, tex: None, serial: 0, scrub: Some((false, f64::NAN)) });
+            }
+            if let Some(v) = self.files.look.video.as_mut() {
+                let was = v.scrub.map_or_else(|| v.video.state().playing, |s| s.0);
+                if v.scrub.is_none() && was {
+                    v.video.pause();
+                }
+                if v.scrub.is_none_or(|s| s.1 != t) {
+                    v.video.seek(t);
+                }
+                v.scrub = Some((was, t));
+            }
+        } else if resp.drag_stopped() {
+            // Let go: carry on playing if it was before.
+            if let Some(v) = self.files.look.video.as_mut().filter(|v| v.video.path == path)
+                && v.scrub.take().is_some_and(|s| s.0)
+            {
+                v.video.play();
+            }
+        } else if resp.clicked() && let Some(t) = pointer {
+            // A click plays from there.
+            match self.files.look.video.as_mut().filter(|v| v.video.path == path) {
+                Some(v) => {
+                    v.scrub = None;
                     v.video.seek(t);
                     v.video.play();
                 }
-                _ => {
+                None => {
                     let ctx = ui.ctx().clone();
                     let video = crate::video::Video::start(path, true, move || ctx.request_repaint());
                     video.seek(t);
-                    self.files.look.video = Some(VideoView { video, tex: None, serial: 0 });
+                    self.files.look.video = Some(VideoView { video, tex: None, serial: 0, scrub: None });
                 }
             }
+        }
+        if head.is_some() {
+            ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
     }
 
@@ -1459,7 +1573,7 @@ impl App {
             if crate::video::supported() {
                 let ctx = ui.ctx().clone();
                 let video = crate::video::Video::start(path, true, move || ctx.request_repaint());
-                self.files.look.video = Some(VideoView { video, tex: None, serial: 0 });
+                self.files.look.video = Some(VideoView { video, tex: None, serial: 0, scrub: None });
             } else {
                 let v = path.to_path_buf();
                 self.files.spawn(move || crate::media::play_video(&v));
@@ -1515,11 +1629,26 @@ fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
     };
     let tw = 140.0;
     if let Some(l) = st.info.and_then(|i| i.duration).filter(|l| *l > 0.0) {
-        let mut at = st.position.min(l);
+        let mut at = v.scrub.map_or(st.position, |s| s.1).min(l);
         ui.spacing_mut().slider_width = (ui.available_width() - tw - 34.0).max(40.0);
         let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
+        // Dragging scrubs: the picture follows the handle back and forth, paused, and playing
+        // carries on from there when it's let go if it was playing before.
+        if s.dragged() {
+            let was = v.scrub.map_or(st.playing, |s| s.0);
+            if v.scrub.is_none() && st.playing {
+                v.video.pause();
+            }
+            if v.scrub.is_none_or(|s| s.1 != at) {
+                v.video.seek(at);
+            }
+            v.scrub = Some((was, at));
+        }
         if s.drag_stopped() || (s.clicked() && !s.dragged()) {
             v.video.seek(at);
+            if v.scrub.take().is_some_and(|s| s.0) {
+                v.video.play();
+            }
         }
     }
     ui.label(egui::RichText::new(time).monospace().size(12.0).color(pal.weak));
@@ -1547,20 +1676,45 @@ fn text_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: 
         ui.set_min_size(size - vec2(16.0, 16.0));
         ui.set_max_size(size - vec2(16.0, 16.0));
         egui::ScrollArea::vertical().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
-            match colours {
-                Some(c) => {
-                    let spans = if ui.visuals().dark_mode { &c.dark } else { &c.light };
-                    ui.add(egui::Label::new(coloured_job(text, spans, ui.visuals().text_color())).wrap());
-                }
-                None => {
-                    ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).wrap());
-                }
-            }
+            let ink = ui.visuals().text_color();
+            let job = match colours {
+                Some(c) => coloured_job(text, if ui.visuals().dark_mode { &c.dark } else { &c.light }, ink),
+                None => egui::text::LayoutJob::simple(text.to_string(), FontId::monospace(12.0), ink, f32::INFINITY),
+            };
+            numbered(ui, text, job);
             if truncated {
                 ui.weak("… (only the first 256 KB is shown)");
             }
         });
     });
+}
+
+/// Text laid out with its line numbers in a gutter at the left: the number on the first row of
+/// each line, so a wrapped line keeps one number.
+fn numbered(ui: &mut egui::Ui, text: &str, mut job: egui::text::LayoutJob) {
+    let font = FontId::monospace(11.0);
+    let lines = text.lines().count().max(1);
+    let digits = lines.to_string().len();
+    let gutter = ui.fonts_mut(|f| f.glyph_width(&font, '0')) * digits as f32 + 12.0;
+    job.wrap.max_width = (ui.available_width() - gutter).max(40.0);
+    let galley = ui.painter().layout_job(job);
+    let (r, _) = ui.allocate_exact_size(vec2(gutter + galley.size().x, galley.size().y), Sense::hover());
+    let p = ui.painter();
+    let weak = ui.visuals().weak_text_color().gamma_multiply(0.8);
+    let view = ui.clip_rect();
+    let mut line = 1;
+    let mut starts = true;
+    for row in &galley.rows {
+        let y = r.top() + row.pos.y;
+        if starts && y + row.rect().height() >= view.top() && y <= view.bottom() {
+            p.text(pos2(r.left() + gutter - 8.0, y + row.rect().height() / 2.0), Align2::RIGHT_CENTER, line.to_string(), font.clone(), weak);
+        }
+        if row.ends_with_newline {
+            line += 1;
+        }
+        starts = row.ends_with_newline;
+    }
+    p.galley(r.min + vec2(gutter, 0.0), galley, ui.visuals().text_color());
 }
 
 /// A workbook: a switch between its sheets, and the cells of the one picked, drawn only where
@@ -1788,8 +1942,14 @@ pub struct SplatDrawn {
     shown: Option<(crate::splat::View, [usize; 2], bool)>,
     /// The GPU wish being waited for: its id, view and size.
     pending: Option<(u64, crate::splat::View, [usize; 2])>,
+    /// Recent wishes, newest last. While the scene is being turned a new one is made every
+    /// frame, so a finished picture is usually for one a frame or two old: it's shown all the
+    /// same (it's the newest there is), or turning would show nothing until the drag stopped.
+    asked: VecDeque<(u64, crate::splat::View, [usize; 2])>,
     /// Time the last GPU picture took, and the splats in it.
     gpu: Option<(f32, usize)>,
+    /// The false colours of the look on show, made when it was picked.
+    paint: Option<(crate::splat::inspect::Look, crate::splat::gpu::Paint)>,
 }
 
 /// A splat scene or point cloud: drag to turn, right-drag (or shift-drag) to move, scroll to
@@ -1826,45 +1986,87 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
             view.zoom = (view.zoom * (-scroll * 0.002).exp() / pinch).clamp(0.02, 20.0);
         }
     }
-    if resp.double_clicked() {
-        view = View::default();
+    // W A S D to move about (and Q and E down and up) while the pointer is over it.
+    let mut keys_moving = false;
+    if resp.hovered() && !ui.ctx().egui_wants_keyboard_input() {
+        let dt = ui.input(|i| i.stable_dt).min(0.1);
+        let held = |k: egui::Key| ui.input(|i| i.key_down(k) && i.modifiers.is_none());
+        let (fwd, side, up) = (held(egui::Key::W) as i8 - held(egui::Key::S) as i8, held(egui::Key::D) as i8 - held(egui::Key::A) as i8, held(egui::Key::E) as i8 - held(egui::Key::Q) as i8);
+        if fwd != 0 || side != 0 || up != 0 {
+            keys_moving = true;
+            view.zoom = (view.zoom * (-(fwd as f32) * dt * 0.8).exp()).clamp(0.02, 20.0);
+            view.pan[0] += side as f32 * dt * 0.6 * view.zoom;
+            view.pan[1] += up as f32 * dt * 0.6 * view.zoom;
+            ui.ctx().request_repaint();
+        }
     }
+    if resp.double_clicked() {
+        // Back to the start, keeping the look and field of view.
+        view = View { look: view.look, fov: view.fov, ..View::default() };
+    }
+    let bounds_id = egui::Id::new(("splat-bounds", path));
+    let mut show_bounds: bool = ui.data(|d| d.get_temp(bounds_id)).unwrap_or(false);
     ui.data_mut(|d| d.insert_temp(view_id, view));
-    let busy = turning || moving;
+    let busy = turning || moving || keys_moving;
+    // A false-colour look's colours, made once when it's picked.
+    if !view.look.recolours() {
+        drawn.paint = None;
+    } else if drawn.paint.as_ref().is_none_or(|(l, _)| *l != view.look) {
+        drawn.paint = crate::splat::inspect::paint(scene, &scene.analysis, view.look).map(|p| (view.look, Arc::new(p)));
+    }
+    let paint = drawn.paint.as_ref().map(|(_, p)| p.clone());
     let set = |tex: &mut Option<egui::TextureHandle>, img: egui::ColorImage| match tex {
         Some(t) => t.set(img, egui::TextureOptions::LINEAR),
         None => *tex = Some(ui.ctx().load_texture(format!("splat:{}", path.display()), img, egui::TextureOptions::LINEAR)),
     };
     let gpu_ok = !matches!(gpu::status(), gpu::Status::Unavailable(_)) && scene.kind != SceneKind::PointCloud;
+    // The same scene can be on screen twice (Quick Look over the preview pane), sharing one
+    // picture. Only the bigger view draws; the other shows its picture stretched, so the two
+    // don't take turns asking for their own size for ever.
+    let claim_id = egui::Id::new(("splat-claim", path));
+    let pass = ui.ctx().cumulative_pass_nr();
+    let claim: Option<(u64, usize)> = ui.data(|d| d.get_temp(claim_id));
+    let follower = claim.is_some_and(|(p, area)| p + 1 >= pass && area > px[0] * px[1]);
+    if !follower {
+        ui.data_mut(|d| d.insert_temp(claim_id, (pass, px[0] * px[1])));
+    }
     // A finished GPU picture.
-    if gpu_ok {
+    if gpu_ok && !follower {
         if let Some(pic) = gpu::take() {
-            if let Some((id, v, s)) = drawn.pending {
-                if pic.id == id {
-                    set(tex, egui::ColorImage::from_rgba_premultiplied(pic.size, &pic.rgba));
-                    drawn.shown = Some((v, s, true));
-                    drawn.gpu = Some((pic.ms, pic.drawn));
+            if let Some(&(_, v, s)) = drawn.asked.iter().find(|(id, _, _)| *id == pic.id) {
+                set(tex, egui::ColorImage::from_rgba_premultiplied(pic.size, &pic.rgba));
+                drawn.shown = Some((v, s, true));
+                drawn.gpu = Some((pic.ms, pic.drawn));
+                drawn.asked.retain(|(id, _, _)| *id > pic.id);
+                if drawn.pending.is_some_and(|(id, _, _)| id <= pic.id) {
                     drawn.pending = None;
                 }
             }
         }
     }
-    let want = (view, px);
-    if drawn.shown.map(|(v, s, _)| (v, s)) != Some(want) || tex.is_none() {
+    // While it's moving, pictures at half size: a quarter of the pixels to draw, copy back
+    // and upload, so it keeps up; the full size follows when it stops.
+    let gpu_px = if busy && gpu_ok { [(px[0] / 2).max(16), (px[1] / 2).max(16)] } else { px };
+    let want = (view, gpu_px);
+    if !follower && (drawn.shown.map(|(v, s, _)| (v, s)) != Some(want) || tex.is_none()) {
         if gpu_ok {
             if drawn.pending.map(|(_, v, s)| (v, s)) != Some(want) {
-                let id = gpu::want(scene.clone(), view, [px[0] as u32, px[1] as u32], Some(ui.ctx().clone()));
-                drawn.pending = Some((id, view, px));
+                let id = gpu::want(scene.clone(), paint.clone(), view, [gpu_px[0] as u32, gpu_px[1] as u32], Some(ui.ctx().clone()));
+                drawn.pending = Some((id, view, gpu_px));
+                drawn.asked.push_back((id, view, gpu_px));
+                while drawn.asked.len() > 32 {
+                    drawn.asked.pop_front();
+                }
             }
             // Something to look at until the first picture comes.
             if tex.is_none() {
-                set(tex, egui::ColorImage::from_rgba_unmultiplied(px, &scene.draw(px[0], px[1], &view, (scene.len() / 300_000).max(1))));
+                set(tex, egui::ColorImage::from_rgba_unmultiplied(px, &scene.draw_painted(px[0], px[1], &view, (scene.len() / 300_000).max(1), paint.as_deref().map(|p| p.as_slice()))));
                 drawn.shown = Some((view, px, false));
             }
         } else {
             // While it's moving, a sample of big scenes so it keeps up.
             let step = if busy { (scene.len() / 150_000).max(1) } else { 1 };
-            set(tex, egui::ColorImage::from_rgba_unmultiplied(px, &scene.draw(px[0], px[1], &view, step)));
+            set(tex, egui::ColorImage::from_rgba_unmultiplied(px, &scene.draw_painted(px[0], px[1], &view, step, paint.as_deref().map(|p| p.as_slice()))));
             drawn.shown = Some((view, px, false));
             drawn.pending = None;
             if step > 1 {
@@ -1901,7 +2103,221 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
     let at = r.left_bottom() + vec2(8.0, -6.0 - galley.size().y);
     p.rect_filled(Rect::from_min_size(at - vec2(4.0, 2.0), galley.size() + vec2(8.0, 4.0)), 3.0, Color32::from_black_alpha(150));
     p.galley(at, galley, Color32::from_gray(220));
-    resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text("Drag to turn it, right-drag or shift-drag to move it, scroll to zoom, double-click to put it back");
+    let on_button = ui.rect_contains_pointer(save_button_rect(r));
+    let resp = resp.on_hover_cursor(egui::CursorIcon::Grab);
+    let resp = if on_button { resp } else { resp.on_hover_text("Drag to turn it, right-drag or shift-drag to move it, scroll to zoom, double-click to put it back") };
+    if show_bounds {
+        draw_bounds(&p, scene, &view, r);
+    }
+    splat_legend(&p, scene, view.look, r);
+    // The tools along the top (look, bounds, field of view), when there's room; a change
+    // shows from the next frame.
+    if r.height() >= 150.0 && r.width() >= 300.0 && scene.kind != SceneKind::PointCloud {
+        let mut v = view;
+        splat_tools(ui, r, &mut v, &mut show_bounds, resp.hovered() || resp.dragged());
+        ui.data_mut(|d| d.insert_temp(bounds_id, show_bounds));
+        if v != view {
+            ui.data_mut(|d| d.insert_temp(view_id, v));
+            ui.ctx().request_repaint();
+        }
+    }
+    save_view_button(ui, path, scene, paint, view, r, px, resp.hovered());
+}
+
+/// The look picker, bounds switch and field of view along the top of a splat view: faint
+/// until the pointer comes over the view, and always shown while a look other than the
+/// scene's own is on.
+fn splat_tools(ui: &mut egui::Ui, r: Rect, view: &mut crate::splat::View, bounds: &mut bool, hovered: bool) {
+    use crate::splat::inspect::Look;
+    let bar = Rect::from_min_size(r.min + vec2(8.0, 8.0), vec2((r.width() - 60.0).min(430.0), 26.0));
+    // The pointer anywhere over the view (or over the look list, which hangs below the bar
+    // and is on a layer of its own).
+    let pointer_in = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p));
+    let near = hovered || pointer_in || ui.ctx().any_popup_open();
+    if !near && view.look == Look::Splats && !*bounds {
+        return;
+    }
+    ui.painter().rect_filled(bar.expand(2.0), 6.0, Color32::from_black_alpha(if near { 175 } else { 110 }));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(vec2(6.0, 2.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    // Dark controls on the dark bar, whatever the app's theme: in the light theme the boxes
+    // would be light, and light text on them unreadable.
+    child.set_visuals(egui::Visuals::dark());
+    egui::ComboBox::from_id_salt(("splat-look", r.min.x as i32, r.min.y as i32))
+        .selected_text(view.look.name())
+        .width(92.0)
+        .show_ui(&mut child, |ui| {
+            for l in Look::ALL {
+                ui.selectable_value(&mut view.look, l, l.name()).on_hover_text(l.about());
+            }
+        })
+        .response
+        .on_hover_text(view.look.about());
+    child.checkbox(bounds, "Bounds").on_hover_text("The box round the scene's main body (the middle 80% of its splats on each axis)");
+    child.label("FOV");
+    child
+        .add(egui::Slider::new(&mut view.fov, crate::splat::FOV_RANGE).suffix("°").show_value(true).max_decimals(0))
+        .on_hover_text("Field of view: the camera moves in or out as it changes, so only the perspective changes");
+}
+
+/// The main body's box, as lines over the picture.
+fn draw_bounds(p: &egui::Painter, scene: &crate::splat::Scene, view: &crate::splat::View, r: Rect) {
+    if scene.pos.is_empty() {
+        return;
+    }
+    let (lo, hi) = crate::splat::facts::bounds(scene);
+    let proj = scene.projector(view, r.width(), r.height());
+    let corner = |i: usize| [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
+    let stroke = egui::Stroke::new(1.5, Color32::from_rgb(120, 220, 255));
+    for a in 0..8usize {
+        for bit in [1, 2, 4] {
+            let b = a | bit;
+            if b == a {
+                continue;
+            }
+            // Along the edge in steps, so an edge passing behind the camera is cut, not wrapped.
+            let pts: Vec<egui::Pos2> = (0..=16)
+                .filter_map(|k| {
+                    let t = k as f32 / 16.0;
+                    let (pa, pb) = (corner(a), corner(b));
+                    proj([pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t, pa[2] + (pb[2] - pa[2]) * t]).map(|q| r.min + vec2(q[0], q[1]))
+                })
+                .collect();
+            if pts.len() >= 2 {
+                p.add(egui::Shape::line(pts, stroke));
+            }
+        }
+    }
+}
+
+/// What a false-colour look's colours mean, or what the Problems look found, in the bottom
+/// right corner.
+fn splat_legend(p: &egui::Painter, scene: &crate::splat::Scene, look: crate::splat::inspect::Look, r: Rect) {
+    use crate::splat::inspect::{self, Look};
+    let font = FontId::proportional(11.0);
+    let ink = Color32::from_gray(225);
+    if let Some((lo, hi)) = look.scale_ends() {
+        let w = 140.0;
+        let bar = Rect::from_min_size(pos2(r.right() - w - 14.0, r.bottom() - 34.0), vec2(w, 8.0));
+        p.rect_filled(bar.expand2(vec2(8.0, 20.0)).translate(vec2(0.0, 6.0)), 4.0, Color32::from_black_alpha(160));
+        let steps = 28;
+        for k in 0..steps {
+            let c = inspect::ramp(k as f32 / (steps - 1) as f32);
+            let x0 = bar.left() + bar.width() * k as f32 / steps as f32;
+            p.rect_filled(Rect::from_min_max(pos2(x0, bar.top()), pos2(x0 + bar.width() / steps as f32 + 0.5, bar.bottom())), 0.0, Color32::from_rgb(c[0], c[1], c[2]));
+        }
+        p.text(pos2(bar.left(), bar.bottom() + 3.0), Align2::LEFT_TOP, lo, font.clone(), ink);
+        p.text(pos2(bar.right(), bar.bottom() + 3.0), Align2::RIGHT_TOP, hi, font, ink);
+    } else if look == Look::Problems {
+        let a = &scene.analysis;
+        let rows: Vec<(String, [u8; 3])> = inspect::PROBLEMS.iter().map(|(bit, rgb, name)| (format!("{name}: {}", crate::splat::facts::group(inspect::count(a, *bit))), *rgb)).collect();
+        let h = rows.len() as f32 * 16.0 + 8.0;
+        let bx = Rect::from_min_size(pos2(r.right() - 190.0, r.bottom() - h - 8.0), vec2(182.0, h));
+        p.rect_filled(bx, 4.0, Color32::from_black_alpha(170));
+        for (i, (text, c)) in rows.into_iter().enumerate() {
+            let y = bx.top() + 12.0 + i as f32 * 16.0;
+            p.circle_filled(pos2(bx.left() + 12.0, y), 4.5, Color32::from_rgb(c[0], c[1], c[2]));
+            p.text(pos2(bx.left() + 22.0, y), Align2::LEFT_CENTER, text, font.clone(), ink);
+        }
+    }
+}
+
+/// Where a saved picture of a splat view is up to: the picker's answer, then the drawing.
+#[derive(Clone)]
+struct SavingView {
+    picked: crate::asking::Mailbox,
+    view: crate::splat::View,
+    px: [usize; 2],
+    /// What happened, once the picture has been drawn and written.
+    said: Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>>,
+    started: bool,
+}
+
+fn save_button_rect(r: Rect) -> Rect {
+    Rect::from_min_size(pos2(r.right() - 34.0, r.top() + 8.0), vec2(26.0, 26.0))
+}
+
+/// The biggest side of a saved picture of a splat view.
+const SAVED_VIEW_MAX: f32 = 3840.0;
+
+/// A "Save picture" button in the top right corner of a splat view: the view as it is, drawn
+/// again at up to twice its size (up to 4K) and saved as a PNG where the person picks.
+fn save_view_button(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, paint: Option<crate::splat::gpu::Paint>, view: crate::splat::View, r: Rect, px: [usize; 2], hovered: bool) {
+    let id = egui::Id::new(("splat-save", path));
+    let mut st: Option<SavingView> = ui.data(|d| d.get_temp(id));
+    let said = st.as_ref().and_then(|s| s.said.lock().unwrap().clone());
+    let fresh_said = said.as_ref().filter(|(_, t)| t.elapsed().as_secs() < 6);
+    let busy = st.as_ref().is_some_and(|s| s.started && s.said.lock().unwrap().is_none());
+    let button = save_button_rect(r);
+    let over = ui.rect_contains_pointer(button);
+    if hovered || over || busy || fresh_said.is_some() {
+        let p = ui.painter();
+        p.rect_filled(button, 6.0, Color32::from_black_alpha(if over { 200 } else { 140 }));
+        p.text(button.center(), Align2::CENTER_CENTER, if busy { "…" } else { "📷" }, FontId::proportional(14.0), Color32::from_gray(230));
+        let b = ui.interact(button, id.with("button"), Sense::click()).on_hover_text("Save this view as a picture (PNG, up to 4K)");
+        if b.clicked() && !busy {
+            let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Scene".into());
+            let mut d = crate::asking::Dialog::new().set_file_name(format!("{stem} view.png")).add_filter("PNG picture", &["png"]);
+            if let Some(dir) = path.parent() {
+                d = d.set_directory(dir);
+            }
+            st = Some(SavingView { picked: crate::asking::ask_into(d, crate::asking::Pick::Save, ui.ctx()), view, px, said: Default::default(), started: false });
+        }
+    }
+    if let Some(s) = st.as_mut().filter(|s| !s.started) {
+        let picked = s.picked.lock().unwrap().take();
+        if let Some(dest) = picked {
+            s.started = true;
+            let (scene, view, said, ctx, paint) = (scene.clone(), s.view, s.said.clone(), ui.ctx().clone(), paint.clone());
+            let k = (SAVED_VIEW_MAX / s.px[0].max(s.px[1]) as f32).min(2.0);
+            let size = [(s.px[0] as f32 * k) as usize, (s.px[1] as f32 * k) as usize];
+            std::thread::spawn(move || {
+                let msg = match save_view(&scene, paint, view, size, &dest) {
+                    Ok(()) => format!("Saved {}", dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
+                    Err(e) => format!("Couldn't save the picture: {e}"),
+                };
+                *said.lock().unwrap() = Some((msg, std::time::Instant::now()));
+                ctx.request_repaint();
+            });
+        }
+    }
+    if let Some((msg, _)) = fresh_said {
+        let p = ui.painter();
+        let galley = p.layout_no_wrap(msg.clone(), FontId::proportional(11.0), Color32::from_gray(230));
+        let at = pos2(button.left() - 8.0 - galley.size().x, button.center().y - galley.size().y / 2.0);
+        p.rect_filled(Rect::from_min_size(at - vec2(5.0, 3.0), galley.size() + vec2(10.0, 6.0)), 4.0, Color32::from_black_alpha(170));
+        p.galley(at, galley, Color32::from_gray(230));
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+    }
+    if busy || st.as_ref().is_some_and(|s| !s.started) {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+    }
+    if let Some(s) = st {
+        ui.data_mut(|d| d.insert_temp(id, s));
+    }
+}
+
+/// Draw a splat view at `size` (on the graphics chip, or as points where it can't be used) and
+/// write it as a PNG.
+pub(super) fn save_view(scene: &Arc<crate::splat::Scene>, paint: Option<crate::splat::gpu::Paint>, view: crate::splat::View, size: [usize; 2], dest: &Path) -> Result<(), String> {
+    use crate::splat::{SceneKind, gpu};
+    let gpu_pic = if scene.kind == SceneKind::Splat { gpu::picture_now(scene.clone(), paint.clone(), view, [size[0] as u32, size[1] as u32], std::time::Duration::from_secs(60)) } else { None };
+    let (w, h, rgba) = match gpu_pic {
+        Some(p) => {
+            // Premultiplied to straight alpha.
+            let mut rgba = p.rgba;
+            for c in rgba.chunks_exact_mut(4) {
+                if c[3] > 0 && c[3] < 255 {
+                    for k in 0..3 {
+                        c[k] = ((c[k] as u32 * 255 + c[3] as u32 / 2) / c[3] as u32).min(255) as u8;
+                    }
+                }
+            }
+            (p.size[0], p.size[1], rgba)
+        }
+        None => (size[0], size[1], scene.draw_painted(size[0], size[1], &view, 1, paint.as_deref().map(|p| p.as_slice()))),
+    };
+    let img = image::RgbaImage::from_raw(w as u32, h as u32, rgba).ok_or("the picture came back the wrong size")?;
+    img.save_with_format(dest, image::ImageFormat::Png).map_err(|e| e.to_string())
 }
 
 /// Text laid out in its syntax colours; what the spans don't cover is in `plain`.
@@ -2388,5 +2804,36 @@ mod tests {
         assert!((srgb(1.0) - 1.0).abs() < 1e-4);
         assert!((srgb(0.18) - 0.46).abs() < 0.01);
         assert_eq!(srgb(-1.0), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod splat_save_tests {
+    #[test]
+    fn a_splat_view_saves_as_a_png() {
+        let dir = std::env::temp_dir().join(format!("filescape-save-view-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ply = b"ply\nformat binary_little_endian 1.0\nelement vertex 200\n".to_vec();
+        let props = ["x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"];
+        for p in props {
+            ply.extend_from_slice(format!("property float {p}\n").as_bytes());
+        }
+        ply.extend_from_slice(b"end_header\n");
+        for i in 0..200u32 {
+            let v = [(i % 20) as f32 * 0.1, (i / 20) as f32 * 0.1, 0.0, 1.0, 0.5, 0.0, 4.0, -3.0, -3.0, -3.0, 1.0, 0.0, 0.0, 0.0];
+            for x in v {
+                ply.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        let src = dir.join("scene.ply");
+        std::fs::write(&src, ply).unwrap();
+        let scene = std::sync::Arc::new(crate::splat::read(&src, crate::splat::Limits::PREVIEW).unwrap());
+        let dest = dir.join("scene view.png");
+        super::save_view(&scene, None, crate::splat::View::default(), [160, 100], &dest).unwrap();
+        let img = image::open(&dest).unwrap().to_rgba8();
+        assert_eq!(img.dimensions(), (160, 100));
+        // Something was drawn.
+        assert!(img.pixels().filter(|p| p[3] > 100 && p[0] > 60).count() > 200);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

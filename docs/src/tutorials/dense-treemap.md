@@ -16,13 +16,13 @@
 6. **Step back** with **Alt+←** or the mouse's back button. Each place you stopped at is
    remembered, including how far you were zoomed in. **Alt+→** goes forward again.
 7. **Go up** with a right-click: first out to the folder you're in, then up to its parent.
-8. **Start over** with **⟲ Whole map** or **Home**.
+8. **Start over** with **Whole map** (⌂) or **Home**.
 
 ## Tips
 
 - Lost? Look at the breadcrumbs and the selection's path in the status bar.
 - Lost the selection? Press **Zoom to selection**.
-- Too busy? Turn off **File names on tiles**, or filter: **Show matches only** removes everything
+- Too busy? Turn off **File names on tiles**, or filter: **Only matches** removes everything
   you don't need.
 - Zooming too fast or slow? Adjust **Zoom sensitivity** in **⚙ Settings > Treemap**.
 

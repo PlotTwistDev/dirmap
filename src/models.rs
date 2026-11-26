@@ -62,7 +62,7 @@ impl Format {
         }
     }
 
-    fn of_ext(ext: &str) -> Option<Format> {
+    pub fn of_ext(ext: &str) -> Option<Format> {
         Some(match ext {
             "gguf" | "llamafile" => Format::Gguf,
             "safetensors" => Format::Safetensors,
@@ -134,6 +134,8 @@ pub struct Model {
     /// Bytes of this model that are identical to a file of a model listed before it: what
     /// deleting this copy would free.
     pub extra: u64,
+    /// This model's files that are extra copies: (file index, the copy that's kept).
+    pub same_as: Vec<(usize, PathBuf)>,
     /// For Ollama: blobs no model uses any more (left behind by `ollama rm` or failed pulls).
     pub orphan: bool,
 }
@@ -210,6 +212,7 @@ pub fn finish(models: &mut Vec<Model>, progress: &Progress) -> Option<()> {
     for m in models.iter_mut() {
         m.copies.clear();
         m.extra = 0;
+        m.same_as.clear();
     }
     mark_copies(models, progress)
 }
@@ -372,7 +375,7 @@ impl Found {
                 _ => display_name(&dir, &key),
             };
             let size = files.iter().map(|f| f.size).sum();
-            models.push(Model { name, source: src, format, info, files, size, copies: Vec::new(), extra: 0, orphan: false });
+            models.push(Model { name, source: src, format, info, files, size, copies: Vec::new(), extra: 0, same_as: Vec::new(), orphan: false });
         }
         models.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
         Some(models)
@@ -502,6 +505,7 @@ fn ollama_models(store: &Path, blobs: Vec<File>, cancel: &AtomicBool) -> Option<
     manifests.sort();
     let mut out: Vec<Model> = Vec::new();
     let mut used: HashMap<String, usize> = HashMap::new();
+    let mut referenced = std::collections::HashSet::new();
     for m in manifests {
         if cancel.load(Ordering::Relaxed) {
             return None;
@@ -509,6 +513,10 @@ fn ollama_models(store: &Path, blobs: Vec<File>, cancel: &AtomicBool) -> Option<
         let Some(name) = ollama_name(&store.join("manifests"), &m) else { continue };
         let Ok(text) = std::fs::read_to_string(&m) else { continue };
         let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+        // Every blob a manifest names is in use, whatever its kind.
+        for d in json["layers"].as_array().into_iter().flatten().chain([&json["config"]]).filter_map(|l| l["digest"].as_str()) {
+            referenced.insert(d.replace(':', "-"));
+        }
         let mut files = Vec::new();
         let mut main = None;
         for layer in json["layers"].as_array().into_iter().flatten() {
@@ -545,17 +553,18 @@ fn ollama_models(store: &Path, blobs: Vec<File>, cancel: &AtomicBool) -> Option<
             info.companion = true;
         }
         let size = files.iter().map(|f| f.size).sum();
-        out.push(Model { name, source: Source::Ollama, format: Format::Gguf, info, files, size, copies: Vec::new(), extra: 0, orphan: false });
+        out.push(Model { name, source: Source::Ollama, format: Format::Gguf, info, files, size, copies: Vec::new(), extra: 0, same_as: Vec::new(), orphan: false });
     }
     // Large blobs no manifest mentions.
-    let mut left: Vec<File> = by_digest.into_values().collect();
+    let mut left: Vec<File> = by_digest.into_iter().filter(|(k, _)| !referenced.contains(k)).map(|(_, f)| f).collect();
     left.sort_by(|a, b| b.size.cmp(&a.size));
     for f in left {
         let format = format_of(&f);
         let info = if format == Format::Gguf && !f.not_local { gguf_info(&f.path).unwrap_or_default() } else { Info::default() };
-        let name = info.name.clone().unwrap_or_else(|| "Unused Ollama download".into());
+        let partial = f.path.file_name().is_some_and(|n| n.to_string_lossy().contains("-partial"));
+        let name = info.name.clone().unwrap_or_else(|| if partial { "Unfinished Ollama download" } else { "Unused Ollama download" }.into());
         let size = f.size;
-        out.push(Model { name, source: Source::Ollama, format, info, files: vec![f], size, copies: Vec::new(), extra: 0, orphan: true });
+        out.push(Model { name, source: Source::Ollama, format, info, files: vec![f], size, copies: Vec::new(), extra: 0, same_as: Vec::new(), orphan: true });
     }
     Some(out)
 }
@@ -616,7 +625,7 @@ fn hf_models(repo: &str, files: Vec<File>) -> Vec<Model> {
             Some(q) => format!("{repo} ({q})"),
             None => repo.to_string(),
         };
-        out.push(Model { name, source: Source::HuggingFace, format: Format::Gguf, info, files, size, copies: Vec::new(), extra: 0, orphan: false });
+        out.push(Model { name, source: Source::HuggingFace, format: Format::Gguf, info, files, size, copies: Vec::new(), extra: 0, same_as: Vec::new(), orphan: false });
     }
     if !rest.is_empty() {
         // The format most of the bytes are in.
@@ -629,7 +638,7 @@ fn hf_models(repo: &str, files: Vec<File>) -> Vec<Model> {
         files.sort_by(|a, b| a.path.cmp(&b.path));
         let info = read_info(format, &files);
         let size = files.iter().map(|f| f.size).sum();
-        out.push(Model { name: repo.to_string(), source: Source::HuggingFace, format, info, files, size, copies: Vec::new(), extra: 0, orphan: false });
+        out.push(Model { name: repo.to_string(), source: Source::HuggingFace, format, info, files, size, copies: Vec::new(), extra: 0, same_as: Vec::new(), orphan: false });
     }
     out
 }
@@ -639,9 +648,11 @@ fn hf_models(repo: &str, files: Vec<File>) -> Vec<Model> {
 /// Finds byte-identical files across models and marks the models that share them.
 fn mark_copies(models: &mut [Model], progress: &Progress) -> Option<()> {
     let mut cands = Vec::new();
+    // Names of one file (hard links) are the same file, not copies: only the first is read.
+    let mut ids = std::collections::HashSet::new();
     for (mi, m) in models.iter().enumerate() {
         for (fi, f) in m.files.iter().enumerate() {
-            if !f.not_local {
+            if !f.not_local && crate::cleanup::file_id(&f.path).is_none_or(|id| ids.insert(id)) {
                 // `tree_path` carries (model, file) here; the real path is in `path`.
                 cands.push(crate::dupes::Candidate { tree_path: vec![mi as u32, fi as u32], path: f.path.clone(), size: f.size });
             }
@@ -658,15 +669,18 @@ fn mark_copies(models: &mut [Model], progress: &Progress) -> Option<()> {
         // The first copy in the list (the largest model, as sorted) is the one kept; the others
         // are extra. Copies inside one model (rare) count as extra too.
         let mut seen = std::collections::HashSet::new();
-        let mut kept = false;
+        let mut kept: Option<PathBuf> = None;
         let mut sorted = g.files.clone();
         sorted.sort_by_key(|c| (c.tree_path[0], c.tree_path[1]));
         for c in &sorted {
             let mi = c.tree_path[0] as usize;
-            if kept {
-                models[mi].extra += g.size;
+            match &kept {
+                Some(k) => {
+                    models[mi].extra += g.size;
+                    models[mi].same_as.push((c.tree_path[1] as usize, k.clone()));
+                }
+                None => kept = Some(c.path.clone()),
             }
-            kept = true;
             seen.insert(mi);
         }
         for &a in &owners {

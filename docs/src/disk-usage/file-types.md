@@ -13,7 +13,7 @@ The **File types** tab on the right lists every extension found, largest total f
 
 | Column | Meaning |
 |---|---|
-| Colour swatch | The colour of these files on the treemap (in **Color by: Type**). |
+| Colour swatch | The colour of these files on the treemap (in **Colour: Type**). |
 | **Type** | The extension, or **(none)**. |
 | **Size** | Total size of all files with this extension. |
 | **%** | Share of the whole scan. |
@@ -29,7 +29,7 @@ The **File types** tab on the right lists every extension found, largest total f
   - **Add to Exclusion Filter**: adds `*.ext` to the files skipped by future scans. See
     [Scan exclusions](../filtering/scan-filters.md).
 
-In **Show matches only** mode the list covers only the matching files and says so.
+In **Only matches** mode the list covers only the matching files and says so.
 
 ## Colours
 
@@ -40,7 +40,7 @@ colour in a different scan.
 
 ## Categories
 
-The **Show:** buttons group extensions into kinds such as Audio, Video, Images, AI models and
+The **File types** buttons in the **Filters** panel group extensions into kinds such as Audio, Video, Images, AI models and
 Disk images. See [File categories](../filtering/categories.md) for exactly which extensions each
 one includes.
 

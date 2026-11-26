@@ -46,7 +46,7 @@ The full list is in [Keyboard shortcuts](../reference/keyboard.md#file-manager).
 ### The file manager and the map move together
 
 - Opening a folder in the file manager zooms the map to it.
-- Zooming the map (double-click, the wheel, right-click, the breadcrumbs or **⟲ Whole map**)
+- Zooming the map (double-click, the wheel, right-click, the breadcrumbs or **Whole map** (⌂))
   takes the file manager to the folder the map shows.
 - Clicking something on the map, in the Duplicates tab or in any other list selects it in the
   file manager, opening the folder that holds it. The map doesn't move.
@@ -130,14 +130,14 @@ The order applies to every layout, tab and folder.
 
 ## Filters
 
-The **Show:** categories, **Larger than** / **Smaller than** and the **🔍 Custom** filter work
+The **File types** in the **Filters** panel, **Larger than** / **Smaller than** and the search box work
 here as they do on the maps. See [Filtering overview](../filtering/overview.md).
 
 - With **Highlight**, files that don't match and folders with no matches inside are greyed out.
-- With **Show matches only**, they're left out altogether, and folder sizes count only the
+- With **Only matches**, they're left out altogether, and folder sizes count only the
   matching files.
 
-The **Color by** setting colours the size bars (and, on macOS and Linux, the file icons) the same
+The **Colour** setting colours the size bars (and, on macOS and Linux, the file icons) the same
 way it colours the map.
 
 ## Right-click menu

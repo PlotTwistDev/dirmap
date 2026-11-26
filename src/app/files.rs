@@ -3361,7 +3361,7 @@ impl App {
 
     /// Move the keyboard cursor to the row `to(current row, row count)` returns, selecting it
     /// (or, with Shift, everything from the anchor to it).
-    fn files_move_cursor(&mut self, to: impl Fn(Option<usize>, usize) -> i64, extend: bool) {
+    pub(super) fn files_move_cursor(&mut self, to: impl Fn(Option<usize>, usize) -> i64, extend: bool) {
         let t = self.files.tab();
         let Some(l) = t.listing.as_ref() else { return };
         let n = t.order.len();

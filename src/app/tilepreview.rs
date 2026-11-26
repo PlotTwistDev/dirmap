@@ -31,12 +31,15 @@ const SHARP_FROM: f32 = 400.0;
 const MOST: usize = 160;
 /// Previews fade in over this long once loaded.
 const FADE_IN: f32 = 0.18;
+/// A preview off the map for less than this (a frame or two while the map swaps its tile sets,
+/// or a tile pushed out of the `MOST` biggest) comes straight back rather than fading in again.
+const KEEP: f32 = 0.6;
 
 pub(super) struct TilePreviews {
     small: Thumbs,
     sharp: Thumbs,
-    /// When each preview on screen first appeared, for the fade-in.
-    born: HashMap<PathBuf, Instant>,
+    /// When each preview on screen first appeared, for the fade-in, and when it was last drawn.
+    born: HashMap<PathBuf, (Instant, Instant)>,
     /// A two-tone check, repeated behind pictures so transparent parts show as transparent
     /// rather than taking the tile's colour.
     checker: Option<egui::TextureHandle>,
@@ -107,20 +110,27 @@ impl App {
         }
         let mut hover_seen = false;
         let Some(zroot) = tree.at(root) else { return shown };
-        let mut tiles: Vec<(Rect, Vec<u32>, f32)> = self
+        let tiles: Vec<(Rect, Vec<u32>, f32)> = self
             .map
             .labels(bounds)
             .into_iter()
             .filter(|(r, _, _)| r.width() >= MIN.x && r.height() >= MIN.y)
             .map(|(r, l, a)| (r, l.path.clone(), a))
             .collect();
-        tiles.sort_by(|a, b| (b.0.area()).total_cmp(&a.0.area()));
+        // The biggest on screen first, but tiles already showing a preview before the rest, so
+        // tiles of much the same size don't take turns at the cut as the map moves.
+        let shown_before = |rel: &[u32]| {
+            let mut abs = root.to_vec();
+            abs.extend_from_slice(rel);
+            self.tile_prev.born.contains_key(&self.full_path(&abs))
+        };
+        let mut tiles: Vec<(Rect, Vec<u32>, f32, bool)> = tiles.into_iter().map(|(r, l, a)| { let s = shown_before(&l); (r, l, a, s) }).collect();
+        tiles.sort_by(|a, b| b.3.cmp(&a.3).then(b.0.intersect(bounds).area().total_cmp(&a.0.intersect(bounds).area())));
         tiles.truncate(MOST);
         let ppp = ctx.pixels_per_point();
         let now = Instant::now();
         let mut fading = false;
-        let mut seen = HashSet::new();
-        for (r, rel, a) in tiles {
+        for (r, rel, a, _) in tiles {
             let Some(n) = zroot.at(&rel) else { continue };
             if n.is_dir || !previewable(&n.name) || !readable_here(n) {
                 continue;
@@ -138,15 +148,22 @@ impl App {
                     Pic::Wave(w) => Got::Wave(w.clone()),
                 };
                 let sound = crate::media::media_of(&n.name) == Some(crate::media::Media::Audio);
-                let sharp = if big && !sound && thumbs::text_kind(&n.name).is_none() { tp.sharp.pic(&path, stamp, n.logical).map(pick) } else { None };
-                match sharp {
-                    Some(g) => Some(g),
-                    None => tp.small.pic(&path, stamp, n.logical).map(pick),
+                let sharpens = !sound && thumbs::text_kind(&n.name).is_none();
+                // Whichever picture is ready stands in while the one for this size loads, so a
+                // tile crossing `SHARP_FROM` either way never goes blank.
+                if big && sharpens {
+                    tp.sharp.pic(&path, stamp, n.logical).map(pick).or_else(|| tp.small.pic(&path, stamp, n.logical).map(pick))
+                } else {
+                    tp.small.pic(&path, stamp, n.logical).map(pick).or_else(|| tp.sharp.ready(&path, stamp).map(pick).filter(|_| sharpens))
                 }
             };
             let Some(got) = got else { continue };
-            let born = *tp.born.entry(path.clone()).or_insert(now);
-            seen.insert(path.clone());
+            let badge = tp.sharp.badge(&path).or_else(|| tp.small.badge(&path));
+            let born = {
+                let e = tp.born.entry(path.clone()).or_insert((now, now));
+                e.1 = now;
+                e.0
+            };
             let fade_in = (now.duration_since(born).as_secs_f32() / FADE_IN).min(1.0);
             fading |= fade_in < 1.0;
             let alpha = a * fade_in * smooth(MIN.x, FULL.x, r.width()) * smooth(MIN.y, FULL.y, r.height());
@@ -201,12 +218,15 @@ impl App {
                     p.rect_filled(inner, 2.0, style::blend(Color32::from_rgb(14, 15, 18), c, 0.22).gamma_multiply(alpha));
                     let strip = if inner.height() >= 60.0 { 22.0 } else { 0.0 };
                     let area = Rect::from_min_max(inner.min + vec2(6.0, 6.0), pos2(inner.max.x - 6.0, inner.max.y - 6.0 - strip));
-                    let bars = ((area.width() / 3.0) as usize).clamp(8, w.len().max(8));
-                    let bw = area.width() / bars as f32;
+                    // Each bar the loudest of a fixed run of the waveform's stretches, so the shape
+                    // holds still as the tile grows rather than shimmering.
+                    let k = wave_run(w.len(), ((area.width() / 3.0) as usize).max(8));
+                    let bars = w.len() / k;
+                    let bw = area.width() / bars.max(1) as f32;
                     let mid = area.center().y;
                     let ink = style::blend(c, Color32::WHITE, 0.15).gamma_multiply(alpha);
                     for i in 0..bars {
-                        let v = w[i * w.len() / bars];
+                        let v = w[i * k..(i + 1) * k].iter().copied().fold(0.0, f32::max);
                         let h = (v * area.height() * 0.5).max(0.75);
                         let x = area.left() + i as f32 * bw;
                         p.rect_filled(Rect::from_min_max(pos2(x + bw * 0.15, mid - h), pos2(x + bw * 0.85, mid + h)), 1.0, ink);
@@ -223,6 +243,14 @@ impl App {
                     let shown_text = wrap(&text, cols, rows);
                     p.text(inner.min + vec2(6.0, 5.0), Align2::LEFT_TOP, shown_text, font, Color32::from_rgb(214, 218, 224).gamma_multiply(alpha));
                 }
+            }
+            // A splat scene's format and splat count, in a pill at the top left.
+            if let Some(b) = badge.filter(|_| inner.width() >= 110.0 && inner.height() >= 70.0) {
+                let font = FontId::proportional((r.width() / 26.0).clamp(10.0, 13.0));
+                let galley = p.layout_no_wrap(b.to_string(), font, Color32::from_white_alpha(240).gamma_multiply(alpha));
+                let pill = Rect::from_min_size(inner.min + vec2(6.0, 6.0), galley.size() + vec2(12.0, 6.0));
+                p.rect_filled(pill, pill.height() / 2.0, Color32::from_black_alpha((170.0 * alpha) as u8));
+                p.galley(pill.min + vec2(6.0, 3.0), galley, Color32::WHITE);
             }
             // The name on a dark strip along the bottom.
             if inner.height() >= 60.0 {
@@ -241,7 +269,7 @@ impl App {
             tp.hover_video = None;
             tp.hover_wait = None;
         }
-        tp.born.retain(|p, _| seen.contains(p));
+        tp.born.retain(|_, (_, last)| now.duration_since(*last).as_secs_f32() < KEEP);
         tp.small.flush();
         tp.sharp.flush();
         if fading {
@@ -321,7 +349,9 @@ impl App {
     }
 
     /// The pane at the right of the map: the clicked tile's preview and what's known about it.
-    pub(super) fn map_preview_pane(&mut self, ui: &mut egui::Ui) {
+    /// The preview takes all the room the facts under it leave in the pane (`tall` points high),
+    /// so the facts sit at the bottom and pictures and videos get the space.
+    pub(super) fn map_preview_pane(&mut self, ui: &mut egui::Ui, tall: f32) {
         let pal = style::pal(ui);
         ui.add_space(6.0);
         ui.horizontal(|ui| {
@@ -348,9 +378,13 @@ impl App {
         } else if crate::fsys::remote::is_remote(&path) && !previewable(&n.name) {
             // Nothing worth fetching from a server.
         } else {
-            let h = (ui.available_height() * 0.5).clamp(120.0, w * 1.2);
+            // The facts' height as last drawn (they're drawn after the preview).
+            let facts = ui.data(|d| d.get_temp::<f32>(egui::Id::new("map-preview-facts"))).unwrap_or(220.0);
+            let above = ui.cursor().top() - ui.max_rect().top();
+            let h = (tall - above - facts - 10.0).max(tall * 0.45).max(120.0);
             self.preview_body(ui, &path, &e, vec2(w, h));
         }
+        let facts_top = ui.cursor().top();
         ui.add_space(8.0);
         ui.add(egui::Label::new(egui::RichText::new(&*n.name).strong()).wrap());
         ui.add_space(4.0);
@@ -475,12 +509,20 @@ impl App {
                 self.files.spawn(move || crate::actions::reveal(&p));
             }
         });
+        let facts = ui.cursor().top() - facts_top;
+        ui.data_mut(|d| d.insert_temp(egui::Id::new("map-preview-facts"), facts));
         if let Some(p) = go {
             self.select(p);
         }
     }
 }
 
+
+/// How many of a waveform's `n` stretches go in each bar so there are no more than `most` bars:
+/// always a whole share of `n`, so the bars' edges stay put as the tile changes size.
+fn wave_run(n: usize, most: usize) -> usize {
+    (1..=n.max(1)).find(|k| n % k == 0 && n / k <= most.max(1)).unwrap_or(n.max(1))
+}
 
 /// The first `rows` lines of `text` wrapped to `cols` characters, breaking at the last space
 /// that fits (mid-word when there's none).
@@ -531,6 +573,15 @@ mod tests {
             n.flags = scan::store::CLOUD | f;
             assert!(!readable_here(&n));
         }
+    }
+
+    #[test]
+    fn waveform_bars_are_whole_runs() {
+        assert_eq!(wave_run(240, 1000), 1);
+        assert_eq!(wave_run(240, 100), 3);
+        assert_eq!(wave_run(240, 8), 30);
+        assert_eq!(wave_run(7, 3), 7);
+        assert_eq!(wave_run(0, 8), 1);
     }
 
     #[test]

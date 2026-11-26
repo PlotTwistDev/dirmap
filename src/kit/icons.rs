@@ -50,6 +50,23 @@ pub enum Icon {
     CloudHalf,
     /// Local copy unknown: a cloud with a question mark.
     CloudQuestion,
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
+    Home,
+    /// Zoom to the selection: a crosshair.
+    Target,
+    /// The treemap view: nested rectangles.
+    Treemap,
+    /// The sunburst view: a centre and a ring.
+    Sunburst,
+    /// Display options: an eye.
+    Eye,
+    ChevronDown,
+    /// The size measure: stacked layers.
+    Layers,
+    /// More controls (overflow menu): three dots.
+    More,
 }
 
 /// Draw `icon` filling `rect` (best square), in `color`.
@@ -275,6 +292,60 @@ pub fn paint(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             let cut = Stroke::new((1.6 * u).max(1.0), Color32::WHITE);
             let v: Vec<Pos2> = [(5.0, 8.2), (7.2, 10.4), (11.1, 5.9)].iter().map(|&(x, y)| at(x, y)).collect();
             p.add(Shape::line(v, cut));
+        }
+        Icon::ArrowLeft => {
+            line((13.5, 8.0), (2.8, 8.0));
+            poly(&[(7.0, 3.8), (2.8, 8.0), (7.0, 12.2)], false);
+        }
+        Icon::ArrowRight => {
+            line((2.5, 8.0), (13.2, 8.0));
+            poly(&[(9.0, 3.8), (13.2, 8.0), (9.0, 12.2)], false);
+        }
+        Icon::ArrowUp => {
+            line((8.0, 13.5), (8.0, 2.8));
+            poly(&[(3.8, 7.0), (8.0, 2.8), (12.2, 7.0)], false);
+        }
+        Icon::Home => {
+            poly(&[(1.8, 8.2), (8.0, 2.4), (14.2, 8.2)], false);
+            poly(&[(3.8, 6.6), (3.8, 13.6), (12.2, 13.6), (12.2, 6.6)], false);
+            poly(&[(6.6, 13.6), (6.6, 9.8), (9.4, 9.8), (9.4, 13.6)], false);
+        }
+        Icon::Target => {
+            circle((8.0, 8.0), 4.6);
+            dot((8.0, 8.0), 1.1);
+            line((8.0, 0.8), (8.0, 3.4));
+            line((8.0, 12.6), (8.0, 15.2));
+            line((0.8, 8.0), (3.4, 8.0));
+            line((12.6, 8.0), (15.2, 8.0));
+        }
+        Icon::Treemap => {
+            rrect(1.8, 2.5, 14.2, 13.5, 1.5);
+            line((9.0, 2.5), (9.0, 13.5));
+            line((1.8, 9.0), (9.0, 9.0));
+            line((9.0, 6.5), (14.2, 6.5));
+        }
+        Icon::Sunburst => {
+            circle((8.0, 8.0), 2.4);
+            circle((8.0, 8.0), 6.2);
+            line((8.0, 1.8), (8.0, 5.6));
+            line((13.4, 11.1), (10.1, 9.2));
+            line((2.6, 11.1), (5.9, 9.2));
+        }
+        Icon::Eye => {
+            arc((8.0, 13.0), 7.6, PI * 1.18, PI * 1.82);
+            arc((8.0, 3.0), 7.6, PI * 0.18, PI * 0.82);
+            circle((8.0, 8.0), 2.2);
+        }
+        Icon::ChevronDown => poly(&[(4.0, 6.0), (8.0, 10.0), (12.0, 6.0)], false),
+        Icon::Layers => {
+            poly(&[(8.0, 2.5), (14.0, 5.5), (8.0, 8.5), (2.0, 5.5)], true);
+            poly(&[(2.0, 8.3), (8.0, 11.3), (14.0, 8.3)], false);
+            poly(&[(2.0, 11.0), (8.0, 14.0), (14.0, 11.0)], false);
+        }
+        Icon::More => {
+            for x in [3.5, 8.0, 12.5] {
+                dot((x, 8.0), 1.25);
+            }
         }
     }
 }

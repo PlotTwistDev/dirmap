@@ -20,7 +20,7 @@ Empty folders and empty files take no space and so don't appear on the map.
 
 ## What the colours mean
 
-With **Color by: Type** (the default), the colour shows the file's extension, matching the
+With **Colour: Type** (the default), the colour shows the file's extension, matching the
 swatches in the **File types** list. Other colour modes show age or change since a snapshot; see
 [Colour modes](color-modes.md). Empty dark areas are files a filter has hidden; see
 [Filtering overview](../filtering/overview.md).
@@ -62,7 +62,9 @@ by: Age** or **Change** only the totals line is shown, since the colours then me
 As you zoom in, a file's rectangle that grows big enough shows what's in the file instead of a
 plain colour: a picture fills it, a video shows a frame (rest the pointer on it and it plays,
 silently, until you move away), a sound shows its waveform, a PDF shows its first page, and text
-files, code and Word or OpenDocument documents show their first lines. The file's name and size
+files, code and Word or OpenDocument documents show their first lines. A Gaussian splat scene
+shows the splats drawn on the graphics chip, with its format and splat count (such as
+"SPZ · 1.2M splats") in the top corner. The file's name and size
 move to a dark strip along the bottom, and a thin edge of the type colour stays round it.
 Transparent parts of pictures show a grey check pattern, not the tile's colour. Bigger
 tiles get sharper pictures and bigger text.
@@ -70,7 +72,7 @@ tiles get sharper pictures and bigger text.
 Previews load in the background, so zooming never waits for them, and only for tiles on screen.
 Only files on this computer are read: a cloud file that isn't downloaded, a file on a mounted
 cloud drive or a server, or one inside an archive keeps its plain colour, so zooming never
-downloads anything. Turn previews off with **Previews** in the filter bar, or **Previews on
+downloads anything. Turn previews off with **Previews** above the map, or **Previews on
 tiles** in Settings > Treemap.
 
 ## The preview pane
@@ -83,7 +85,7 @@ playing in the pane needs `ffmpeg`; on Windows the pane plays the picture only, 
 for sound); a cloud file that isn't downloaded is only fetched if you ask), and its kind, size in bytes, size on disk, share of the analysis, date, where
 it is and, for a cloud file, how it's stored. For a folder it lists the largest items inside;
 click one to select it. **Open** opens the item and **Show in folder** (**Show in Finder** on macOS)
-shows it in your file manager. Hide or show the pane with **Preview pane** in the filter bar or
+shows it in your file manager. Hide or show the pane with **Preview pane** above the map or
 **Alt+P** (**⌥P** on macOS).
 
 ### Quick Look on the map

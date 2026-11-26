@@ -16,10 +16,10 @@ as smoothly as a scan of a thousand, because:
   level leads straight to where the space is. Then use **Zoom to selection** to see it on the map.
 - **Use breadcrumbs and Back.** Double-click into a folder to work inside it; the breadcrumbs
   show the way back, and **Alt+←** retraces your steps.
-- **Filter instead of searching by eye.** **Show:** categories, size limits and the Custom
-  filter make the files you care about stand out. **Show matches only** removes everything else
+- **Filter instead of searching by eye.** **File types** in the **Filters** panel, size limits and the Custom
+  filter make the files you care about stand out. **Only matches** removes everything else
   from the map, which is much easier to read when the matches are a small fraction of the scan.
-- **Turn off file names** on tiles if the map feels busy (**File names on tiles** in the filter bar).
+- **Turn off file names** on tiles if the map feels busy (**File names on tiles** above the map).
 - **Use a flat look** (Settings > Treemap > Presets > Flat) for a crisper view of very small tiles.
 
 ## If zooming feels slow
