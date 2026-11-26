@@ -73,6 +73,8 @@
   and warnings about password-protected files, unsafe names and archives that unpack to a huge size.
 - Pictures can be looked at channel by channel, HDR and OpenEXR pictures have an exposure
   slider, and multilayer OpenEXR files show each layer (render pass).
+- Videos have a filmstrip under the picture (click a frame to play from there), and a video that
+  starts black or with a title card is shown by a more telling frame.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
   details.
 - Quick Look works in Storage Analysis too: click a tile and press **Space**. **Full screen** (or
