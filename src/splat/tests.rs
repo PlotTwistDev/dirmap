@@ -304,7 +304,7 @@ fn real_scenes() {
         eprintln!("{n}: {} splats, read {read_time:?}, drawn {draw_time:?}", s.len());
         let s = Arc::new(s);
         for (k, v) in [(0, View::default()), (1, View { yaw: 0.9, zoom: 0.6, ..View::default() })] {
-            let id = gpu::want(s.clone(), v, [960, 640], None);
+            let id = gpu::want(s.clone(), None, v, [960, 640], None);
             match gpu::wait_for(id, std::time::Duration::from_secs(300)) {
                 Some(pic) => {
                     // Over a dark grey, as the preview pane shows it.
@@ -332,7 +332,7 @@ fn gpu_draws_splats_or_says_why_not() {
         "scale_0" | "scale_1" | "scale_2" => -3.0,
         _ => plain(i, p),
     })), Limits::PREVIEW).unwrap());
-    let id = gpu::want(s.clone(), View::default(), [96, 64], None);
+    let id = gpu::want(s.clone(), None, View::default(), [96, 64], None);
     // Longer than the 30 s after which a hung driver is given up on.
     let Some(pic) = gpu::wait_for(id, std::time::Duration::from_secs(45)) else {
         eprintln!("no GPU picture: {:?}", gpu::status());
@@ -352,7 +352,7 @@ fn gpu_draws_splats_or_says_why_not() {
     assert!(both * 2 > cpu_covered, "{both} of {cpu_covered}");
     // A four-splat file, which the viewer once couldn't take, draws or fails without a crash.
     let tiny = Arc::new(spz::parse(MIN_V4, Limits::PREVIEW).unwrap());
-    let id = gpu::want(tiny, View::default(), [64, 64], None);
+    let id = gpu::want(tiny, None, View::default(), [64, 64], None);
     let tiny_pic = gpu::wait_for(id, std::time::Duration::from_secs(60));
     eprintln!("tiny: {:?} {:?}", tiny_pic.map(|p| p.drawn), gpu::status());
 }
@@ -707,7 +707,7 @@ fn s3_real_scenes_look_the_same() {
             ("html", enc_html(&sog, "scene.sog")),
         ];
         let picture = |s: Scene| {
-            let id = gpu::want(Arc::new(s), View::default(), [480, 320], None);
+            let id = gpu::want(Arc::new(s), None, View::default(), [480, 320], None);
             gpu::wait_for(id, std::time::Duration::from_secs(120)).expect("GPU picture").rgba
         };
         let base = picture(src);
@@ -758,7 +758,7 @@ fn gpu_pictures_for_thumbnails_come_back_on_their_own() {
     let a = Arc::new(read(&tmp("side-a.splat", &enc_splat(&ts)), Limits::PREVIEW).unwrap());
     let b = Arc::new(read(&tmp("side-b.splat", &enc_splat(&ts[..100])), Limits::THUMB).unwrap());
     // Two thumbnails at once (the preview's own slot is left alone): each gets its own picture.
-    let t = |s: Arc<Scene>, size: u32| std::thread::spawn(move || gpu::picture_now(s, View::default(), [size, size], std::time::Duration::from_secs(45)));
+    let t = |s: Arc<Scene>, size: u32| std::thread::spawn(move || gpu::picture_now(s, None, View::default(), [size, size], std::time::Duration::from_secs(45)));
     let (ja, jb) = (t(a, 80), t(b, 48));
     match (ja.join().unwrap(), jb.join().unwrap()) {
         (Some(m), Some(s)) => {
@@ -767,4 +767,98 @@ fn gpu_pictures_for_thumbnails_come_back_on_their_own() {
         }
         _ => assert!(matches!(gpu::status(), gpu::Status::Unavailable(_)), "no picture and no reason: {:?}", gpu::status()),
     }
+}
+
+// ---- S5: the inspector.
+
+/// A 20 × 20 × 20 block of small splats, with odd ones at the end: one alone just outside the
+/// block, one far away, one huge one inside, and a nearly invisible one.
+fn odd_scene() -> Scene {
+    let n = 8000 + 4;
+    read(&tmp("odd.ply", &splat_ply(n, 0, None, |i, p| {
+        let grid = |a: u64| (a % 20) as f32 * 0.05;
+        let (x, y, z) = match i {
+            8000 => (1.6, 0.5, 0.5),   // alone, outside the block
+            8001 => (90.0, 0.0, 0.0),  // far out
+            8002 => (0.5, 0.5, 0.5),   // huge, in the middle
+            8003 => (0.45, 0.45, 0.45), // nearly invisible
+            _ => (grid(i), grid(i / 20), grid(i / 400)),
+        };
+        match p {
+            "x" => x,
+            "y" => y,
+            "z" => z,
+            "opacity" => if i == 8003 { -6.0 } else { 3.0 },
+            "scale_0" | "scale_1" | "scale_2" => if i == 8002 { 3.0 } else { -5.0 },
+            "rot_0" => 1.0,
+            _ => 0.0,
+        }
+    })), Limits::PREVIEW).unwrap()
+}
+
+#[test]
+fn checks_pick_out_the_odd_splats() {
+    use inspect::*;
+    let s = odd_scene();
+    let a = &s.analysis;
+    assert_eq!(a.flags.len(), s.len());
+    let has = |i: usize, bit: u8| a.flags[i] & bit != 0;
+    assert!(has(8000, ALONE), "{:b}", a.flags[8000]);
+    assert!(has(8001, FAR) && !has(8001, ALONE));
+    assert!(has(8002, HUGE));
+    assert!(has(8003, FAINT) && !has(8003, ALONE));
+    // The block itself is clean, apart from its faces' few loners at most.
+    assert_eq!((0..8000).filter(|&i| a.flags[i] & (FAR | HUGE | FAINT) != 0).count(), 0);
+    assert!(count(a, ALONE) <= 1, "{}", count(a, ALONE));
+    // Crowding: splats in the block share cells; the loner is alone in its own.
+    assert!(a.crowd[100] > a.crowd[8000] && a.crowd[8000] == 1);
+    // The facts say so.
+    let says = |k: &str| s.facts.iter().any(|(key, _)| *key == k);
+    assert!(says("Floaters") && says("Far out") && says("Oversized") && says("Nearly invisible"));
+}
+
+#[test]
+fn every_look_draws() {
+    use inspect::Look;
+    let s = Arc::new(odd_scene());
+    for look in Look::ALL {
+        let paint = inspect::paint(&s, &s.analysis, look);
+        assert_eq!(paint.is_some(), look.recolours(), "{look:?}");
+        if let Some(p) = &paint {
+            assert_eq!(p.len(), s.len());
+        }
+        let view = View { look, ..View::default() };
+        let pic = s.draw_painted(64, 48, &view, 1, paint.as_deref());
+        assert!(pic.chunks_exact(4).any(|p| p[3] > 0), "{look:?} drew nothing");
+    }
+    // Problems: the odd ones in their colours, the rest grey.
+    let p = inspect::paint(&s, &s.analysis, Look::Problems).unwrap();
+    assert_eq!(&p[8002][..3], &inspect::PROBLEMS.iter().find(|x| x.0 == inspect::HUGE).unwrap().1);
+    assert!(p[100][0] == p[100][1] && p[100][1] == p[100][2]);
+    // On the graphics chip too: outlines and centres, and a false-colour look.
+    for (look, paint) in [(Look::Ellipses, None), (Look::Centres, None), (Look::Density, inspect::paint(&s, &s.analysis, Look::Density).map(Arc::new))] {
+        match gpu::picture_now(s.clone(), paint, View { look, ..View::default() }, [64, 48], std::time::Duration::from_secs(45)) {
+            Some(pic) => assert!(pic.rgba.chunks_exact(4).any(|p| p[3] > 0), "{look:?}"),
+            None => assert!(matches!(gpu::status(), gpu::Status::Unavailable(_)), "{:?}", gpu::status()),
+        }
+    }
+}
+
+#[test]
+fn the_projector_puts_points_where_the_drawing_does() {
+    let s = odd_scene();
+    for view in [View::default(), View { yaw: 1.0, pitch: -0.3, zoom: 1.2, pan: [0.1, -0.2], fov: 90.0, ..View::default() }] {
+        let proj = s.projector(&view, 200.0, 150.0);
+        // The block's corner splats land where the drawing has colour.
+        let pic = s.draw(200, 150, &view, 1);
+        for i in [0usize, 19, 7999] {
+            let [x, y] = proj(s.pos[i]).unwrap();
+            let (x, y) = (x as usize, y as usize);
+            assert!(pic[(y.min(149) * 200 + x.min(199)) * 4 + 3] > 0, "splat {i} at {x},{y}");
+        }
+    }
+    // A wider field of view moves the camera in, so the scene stays the same size.
+    let r = framing(&s).1;
+    let (narrow, wide) = (View { fov: 30.0, ..View::default() }, View { fov: 90.0, ..View::default() });
+    assert!(narrow.distance(r) > wide.distance(r));
 }

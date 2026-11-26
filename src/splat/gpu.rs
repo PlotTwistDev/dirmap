@@ -41,9 +41,13 @@ pub enum Status {
     Unavailable(String),
 }
 
+/// Colours for the splats in place of their own (a false-colour look), one per splat.
+pub type Paint = Arc<Vec<[u8; 4]>>;
+
 struct Wish {
     id: u64,
     scene: Arc<Scene>,
+    paint: Option<Paint>,
     view: View,
     size: [u32; 2],
     ctx: Option<eframe::egui::Context>,
@@ -97,10 +101,10 @@ pub fn status() -> Status {
 
 /// Ask for a picture of `scene` from `view`, `size` pixels. Returns the wish's id; the
 /// picture comes from [`take`] when it's ready, and `ctx` is asked to repaint then.
-pub fn want(scene: Arc<Scene>, view: View, size: [u32; 2], ctx: Option<eframe::egui::Context>) -> u64 {
+pub fn want(scene: Arc<Scene>, paint: Option<Paint>, view: View, size: [u32; 2], ctx: Option<eframe::egui::Context>) -> u64 {
     let s = shared();
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    *s.wish.lock().unwrap() = Some(Wish { id, scene, view, size, ctx });
+    *s.wish.lock().unwrap() = Some(Wish { id, scene, paint, view, size, ctx });
     s.ready.notify_one();
     id
 }
@@ -134,7 +138,7 @@ const SIDE_MAX: usize = 8;
 /// Draw a picture for a thumbnail or a saved picture, waiting up to `limit`. The preview's pictures go first, and
 /// the preview's scene stays loaded; `None` when the graphics chip can't be used or is busy for
 /// too long (the caller draws points instead).
-pub fn picture_now(scene: Arc<Scene>, view: View, size: [u32; 2], limit: Duration) -> Option<Picture> {
+pub fn picture_now(scene: Arc<Scene>, paint: Option<Paint>, view: View, size: [u32; 2], limit: Duration) -> Option<Picture> {
     if matches!(status(), Status::Unavailable(_)) {
         return None;
     }
@@ -147,7 +151,7 @@ pub fn picture_now(scene: Arc<Scene>, view: View, size: [u32; 2], limit: Duratio
             return None;
         }
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        side.push_back((Wish { id, scene, view, size, ctx: None }, tx));
+        side.push_back((Wish { id, scene, paint, view, size, ctx: None }, tx));
         s.ready.notify_one();
     }
     rx.recv_timeout(limit).ok()
@@ -171,6 +175,15 @@ impl Loaded {
         }
     }
 
+    fn set_display(&mut self, q: &wgpu::Queue, display: u8, degree: gs::core::GaussianShDegree) {
+        let std_dev = gs::core::GaussianMaxStdDev::new(3.0).unwrap();
+        let mode = display_mode(display);
+        match self {
+            Loaded::Sh(v) => v.update_gaussian_transform(q, 1.0, mode, degree, false, std_dev),
+            Loaded::Flat(v) => v.update_gaussian_transform(q, 1.0, mode, degree, false, std_dev),
+        }
+    }
+
     fn render(&self, enc: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         match self {
             Loaded::Sh(v) => v.render(enc, view),
@@ -182,6 +195,7 @@ impl Loaded {
 /// The camera, matching the processor drawing in `Scene::draw` exactly.
 struct Orbit {
     view: Mat4,
+    fov: f32,
     near: f32,
     far: f32,
 }
@@ -193,7 +207,7 @@ impl gs::CameraTrait for Orbit {
 
     fn projection(&self, aspect: f32) -> Mat4 {
         #[allow(deprecated)] // the same 0..1 depth projection under its new name in later glam
-        Mat4::perspective_rh(super::FOV, aspect, self.near, self.far)
+        Mat4::perspective_rh(self.fov, aspect, self.near, self.far)
     }
 }
 
@@ -204,12 +218,13 @@ fn orbit(scene: &Scene, v: &View) -> Orbit {
     // Rows of the rotation are the camera's axes; glam is column-major.
     let rot = Mat4::from_cols_array(&[m[0][0], m[1][0], m[2][0], 0.0, m[0][1], m[1][1], m[2][1], 0.0, m[0][2], m[1][2], m[2][2], 0.0, 0.0, 0.0, 0.0, 1.0]);
     let view = Mat4::from_translation(Vec3::new(-v.pan[0] * r, -v.pan[1] * r, -dist)) * rot;
-    Orbit { view, near: (dist * 0.005).max(1e-4), far: dist * 400.0 + r * 50.0 }
+    Orbit { view, fov: v.fov_radians(), near: (dist * 0.005).max(1e-4), far: dist * 400.0 + r * 50.0 }
 }
 
 /// Splats as the viewer's own type, made one at a time from the scene (no second copy).
 struct Splats {
     scene: Arc<Scene>,
+    paint: Option<Paint>,
     step: usize,
 }
 
@@ -224,7 +239,11 @@ impl gs::core::IterGaussian for Splats {
     fn iter_gaussian(&self) -> impl ExactSizeIterator<Item = gs::core::Gaussian> + '_ {
         let s = &*self.scene;
         let rest = super::sh_rest(s.sh_degree);
-        let has_sh = !s.sh.is_empty();
+        let has_sh = !s.sh.is_empty() && self.paint.is_none();
+        let colours: &[[u8; 4]] = match &self.paint {
+            Some(p) if p.len() == s.len() => p,
+            _ => &s.color,
+        };
         (0..s.len()).step_by(self.step).map(move |i| {
             let mut sh = [Vec3::ZERO; 15];
             if has_sh {
@@ -235,7 +254,7 @@ impl gs::core::IterGaussian for Splats {
                 }
             }
             let r = s.rot[i];
-            let c = s.color[i];
+            let c = colours[i];
             gs::core::Gaussian {
                 rot: Quat::from_xyzw(r[0], r[1], r[2], r[3]),
                 pos: Vec3::from_array(s.pos[i]),
@@ -281,6 +300,10 @@ fn open_device() -> Result<Device, String> {
 
 struct Current {
     scene: Arc<Scene>,
+    paint: Option<Paint>,
+    /// How the splats are drawn now (see [`super::inspect::Look::display`]).
+    display: u8,
+    degree: gs::core::GaussianShDegree,
     loaded: Loaded,
     drawn: usize,
 }
@@ -321,7 +344,7 @@ fn worker(s: Arc<Shared>) {
         // A thumbnail's scene is loaded beside the preview's and let go straight after (unless
         // it is the preview's, as for a saved picture of the view).
         let mut aside = None;
-        let same = cur.as_ref().is_some_and(|c| Arc::ptr_eq(&c.scene, &wish.scene));
+        let same = cur.as_ref().is_some_and(|c| c.holds(&wish.scene, &wish.paint));
         let slot = if answer.is_some() && !same { &mut aside } else { &mut cur };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| draw(&mut dev, slot, &wish)));
         drop(aside);
@@ -370,10 +393,10 @@ fn draw(dev: &mut Option<Device>, cur: &mut Option<Current>, wish: &Wish) -> Res
     }
     let d = dev.as_ref().unwrap();
     let format = wgpu::TextureFormat::Rgba8Unorm;
-    if cur.as_ref().is_none_or(|c| !Arc::ptr_eq(&c.scene, &wish.scene)) {
+    if cur.as_ref().is_none_or(|c| !c.holds(&wish.scene, &wish.paint)) {
         *cur = None; // free the old scene's buffers first
         stage("loading the scene");
-        *cur = Some(load(d, &wish.scene, format)?);
+        *cur = Some(load(d, &wish.scene, wish.paint.clone(), format)?);
     }
     let c = cur.as_mut().unwrap();
     let [w, h] = [wish.size[0].clamp(16, 4096), wish.size[1].clamp(16, 4096)];
@@ -381,6 +404,11 @@ fn draw(dev: &mut Option<Device>, cur: &mut Option<Current>, wish: &Wish) -> Res
     let scope = d.device.push_error_scope(wgpu::ErrorFilter::Validation);
     let oom = d.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
     c.loaded.update_camera(&d.queue, &orbit(&wish.scene, &wish.view), UVec2::new(w, h));
+    let display = wish.view.look.display();
+    if display != c.display {
+        c.display = display;
+        c.loaded.set_display(&d.queue, display, c.degree);
+    }
     let tex = d.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("splat picture"),
         size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
@@ -428,16 +456,36 @@ fn draw(dev: &mut Option<Device>, cur: &mut Option<Current>, wish: &Wish) -> Res
     Ok(Picture { id: wish.id, size: [w as usize, h as usize], rgba, ms: t.elapsed().as_secs_f32() * 1000.0, drawn: c.drawn })
 }
 
-fn load(d: &Device, scene: &Arc<Scene>, format: wgpu::TextureFormat) -> Result<Current, String> {
+fn display_mode(display: u8) -> gs::core::GaussianDisplayMode {
+    match display {
+        1 => gs::core::GaussianDisplayMode::Ellipse,
+        2 => gs::core::GaussianDisplayMode::Point,
+        _ => gs::core::GaussianDisplayMode::Splat,
+    }
+}
+
+impl Current {
+    /// Whether this is the scene, with these colours, already on the graphics chip.
+    fn holds(&self, scene: &Arc<Scene>, paint: &Option<Paint>) -> bool {
+        Arc::ptr_eq(&self.scene, scene)
+            && match (&self.paint, paint) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }
+    }
+}
+
+fn load(d: &Device, scene: &Arc<Scene>, paint: Option<Paint>, format: wgpu::TextureFormat) -> Result<Current, String> {
     let n = scene.len();
     if n == 0 || scene.rot.len() != n || scene.scale.len() != n {
         return Err("Nothing to draw".into());
     }
-    let has_sh = !scene.sh.is_empty() && scene.sh_degree > 0;
+    let has_sh = !scene.sh.is_empty() && scene.sh_degree > 0 && paint.is_none();
     let per = if has_sh { std::mem::size_of::<ShPod>() } else { std::mem::size_of::<FlatPod>() } as u64;
     // Thin evenly until the splats fit one storage buffer.
     let step = (n as u64 * per).div_ceil(d.max_binding.max(1)).max(1) as usize;
-    let splats = Splats { scene: scene.clone(), step };
+    let splats = Splats { scene: scene.clone(), paint: paint.clone(), step };
     let drawn = n.div_ceil(step);
     let scope = d.device.push_error_scope(wgpu::ErrorFilter::Validation);
     let oom = d.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
@@ -471,5 +519,5 @@ fn load(d: &Device, scene: &Arc<Scene>, format: wgpu::TextureFormat) -> Result<C
     if let Some(e) = pollster::block_on(scope.pop()) {
         return Err(format!("The graphics driver refused the scene ({e})"));
     }
-    Ok(Current { scene: scene.clone(), loaded, drawn })
+    Ok(Current { scene: scene.clone(), paint, display: 0, degree, loaded, drawn })
 }

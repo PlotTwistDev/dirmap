@@ -1808,8 +1808,14 @@ pub struct SplatDrawn {
     shown: Option<(crate::splat::View, [usize; 2], bool)>,
     /// The GPU wish being waited for: its id, view and size.
     pending: Option<(u64, crate::splat::View, [usize; 2])>,
+    /// Recent wishes, newest last. While the scene is being turned a new one is made every
+    /// frame, so a finished picture is usually for one a frame or two old: it's shown all the
+    /// same (it's the newest there is), or turning would show nothing until the drag stopped.
+    asked: VecDeque<(u64, crate::splat::View, [usize; 2])>,
     /// Time the last GPU picture took, and the splats in it.
     gpu: Option<(f32, usize)>,
+    /// The false colours of the look on show, made when it was picked.
+    paint: Option<(crate::splat::inspect::Look, crate::splat::gpu::Paint)>,
 }
 
 /// A splat scene or point cloud: drag to turn, right-drag (or shift-drag) to move, scroll to
@@ -1846,11 +1852,35 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
             view.zoom = (view.zoom * (-scroll * 0.002).exp() / pinch).clamp(0.02, 20.0);
         }
     }
-    if resp.double_clicked() {
-        view = View::default();
+    // W A S D to move about (and Q and E down and up) while the pointer is over it.
+    let mut keys_moving = false;
+    if resp.hovered() && !ui.ctx().egui_wants_keyboard_input() {
+        let dt = ui.input(|i| i.stable_dt).min(0.1);
+        let held = |k: egui::Key| ui.input(|i| i.key_down(k) && i.modifiers.is_none());
+        let (fwd, side, up) = (held(egui::Key::W) as i8 - held(egui::Key::S) as i8, held(egui::Key::D) as i8 - held(egui::Key::A) as i8, held(egui::Key::E) as i8 - held(egui::Key::Q) as i8);
+        if fwd != 0 || side != 0 || up != 0 {
+            keys_moving = true;
+            view.zoom = (view.zoom * (-(fwd as f32) * dt * 0.8).exp()).clamp(0.02, 20.0);
+            view.pan[0] += side as f32 * dt * 0.6 * view.zoom;
+            view.pan[1] += up as f32 * dt * 0.6 * view.zoom;
+            ui.ctx().request_repaint();
+        }
     }
+    if resp.double_clicked() {
+        // Back to the start, keeping the look and field of view.
+        view = View { look: view.look, fov: view.fov, ..View::default() };
+    }
+    let bounds_id = egui::Id::new(("splat-bounds", path));
+    let mut show_bounds: bool = ui.data(|d| d.get_temp(bounds_id)).unwrap_or(false);
     ui.data_mut(|d| d.insert_temp(view_id, view));
-    let busy = turning || moving;
+    let busy = turning || moving || keys_moving;
+    // A false-colour look's colours, made once when it's picked.
+    if !view.look.recolours() {
+        drawn.paint = None;
+    } else if drawn.paint.as_ref().is_none_or(|(l, _)| *l != view.look) {
+        drawn.paint = crate::splat::inspect::paint(scene, &scene.analysis, view.look).map(|p| (view.look, Arc::new(p)));
+    }
+    let paint = drawn.paint.as_ref().map(|(_, p)| p.clone());
     let set = |tex: &mut Option<egui::TextureHandle>, img: egui::ColorImage| match tex {
         Some(t) => t.set(img, egui::TextureOptions::LINEAR),
         None => *tex = Some(ui.ctx().load_texture(format!("splat:{}", path.display()), img, egui::TextureOptions::LINEAR)),
@@ -1869,32 +1899,40 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
     // A finished GPU picture.
     if gpu_ok && !follower {
         if let Some(pic) = gpu::take() {
-            if let Some((id, v, s)) = drawn.pending {
-                if pic.id == id {
-                    set(tex, egui::ColorImage::from_rgba_premultiplied(pic.size, &pic.rgba));
-                    drawn.shown = Some((v, s, true));
-                    drawn.gpu = Some((pic.ms, pic.drawn));
+            if let Some(&(_, v, s)) = drawn.asked.iter().find(|(id, _, _)| *id == pic.id) {
+                set(tex, egui::ColorImage::from_rgba_premultiplied(pic.size, &pic.rgba));
+                drawn.shown = Some((v, s, true));
+                drawn.gpu = Some((pic.ms, pic.drawn));
+                drawn.asked.retain(|(id, _, _)| *id > pic.id);
+                if drawn.pending.is_some_and(|(id, _, _)| id <= pic.id) {
                     drawn.pending = None;
                 }
             }
         }
     }
-    let want = (view, px);
+    // While it's moving, pictures at half size: a quarter of the pixels to draw, copy back
+    // and upload, so it keeps up; the full size follows when it stops.
+    let gpu_px = if busy && gpu_ok { [(px[0] / 2).max(16), (px[1] / 2).max(16)] } else { px };
+    let want = (view, gpu_px);
     if !follower && (drawn.shown.map(|(v, s, _)| (v, s)) != Some(want) || tex.is_none()) {
         if gpu_ok {
             if drawn.pending.map(|(_, v, s)| (v, s)) != Some(want) {
-                let id = gpu::want(scene.clone(), view, [px[0] as u32, px[1] as u32], Some(ui.ctx().clone()));
-                drawn.pending = Some((id, view, px));
+                let id = gpu::want(scene.clone(), paint.clone(), view, [gpu_px[0] as u32, gpu_px[1] as u32], Some(ui.ctx().clone()));
+                drawn.pending = Some((id, view, gpu_px));
+                drawn.asked.push_back((id, view, gpu_px));
+                while drawn.asked.len() > 32 {
+                    drawn.asked.pop_front();
+                }
             }
             // Something to look at until the first picture comes.
             if tex.is_none() {
-                set(tex, egui::ColorImage::from_rgba_unmultiplied(px, &scene.draw(px[0], px[1], &view, (scene.len() / 300_000).max(1))));
+                set(tex, egui::ColorImage::from_rgba_unmultiplied(px, &scene.draw_painted(px[0], px[1], &view, (scene.len() / 300_000).max(1), paint.as_deref().map(|p| p.as_slice()))));
                 drawn.shown = Some((view, px, false));
             }
         } else {
             // While it's moving, a sample of big scenes so it keeps up.
             let step = if busy { (scene.len() / 150_000).max(1) } else { 1 };
-            set(tex, egui::ColorImage::from_rgba_unmultiplied(px, &scene.draw(px[0], px[1], &view, step)));
+            set(tex, egui::ColorImage::from_rgba_unmultiplied(px, &scene.draw_painted(px[0], px[1], &view, step, paint.as_deref().map(|p| p.as_slice()))));
             drawn.shown = Some((view, px, false));
             drawn.pending = None;
             if step > 1 {
@@ -1934,7 +1972,117 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
     let on_button = ui.rect_contains_pointer(save_button_rect(r));
     let resp = resp.on_hover_cursor(egui::CursorIcon::Grab);
     let resp = if on_button { resp } else { resp.on_hover_text("Drag to turn it, right-drag or shift-drag to move it, scroll to zoom, double-click to put it back") };
-    save_view_button(ui, path, scene, view, r, px, resp.hovered());
+    if show_bounds {
+        draw_bounds(&p, scene, &view, r);
+    }
+    splat_legend(&p, scene, view.look, r);
+    // The tools along the top (look, bounds, field of view), when there's room; a change
+    // shows from the next frame.
+    if r.height() >= 150.0 && r.width() >= 300.0 && scene.kind != SceneKind::PointCloud {
+        let mut v = view;
+        splat_tools(ui, r, &mut v, &mut show_bounds, resp.hovered() || resp.dragged());
+        ui.data_mut(|d| d.insert_temp(bounds_id, show_bounds));
+        if v != view {
+            ui.data_mut(|d| d.insert_temp(view_id, v));
+            ui.ctx().request_repaint();
+        }
+    }
+    save_view_button(ui, path, scene, paint, view, r, px, resp.hovered());
+}
+
+/// The look picker, bounds switch and field of view along the top of a splat view: faint
+/// until the pointer comes over the view, and always shown while a look other than the
+/// scene's own is on.
+fn splat_tools(ui: &mut egui::Ui, r: Rect, view: &mut crate::splat::View, bounds: &mut bool, hovered: bool) {
+    use crate::splat::inspect::Look;
+    let bar = Rect::from_min_size(r.min + vec2(8.0, 8.0), vec2((r.width() - 60.0).min(430.0), 26.0));
+    // The pointer anywhere over the view (or over the look list, which hangs below the bar
+    // and is on a layer of its own).
+    let pointer_in = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p));
+    let near = hovered || pointer_in || ui.ctx().any_popup_open();
+    if !near && view.look == Look::Splats && !*bounds {
+        return;
+    }
+    ui.painter().rect_filled(bar.expand(2.0), 6.0, Color32::from_black_alpha(if near { 175 } else { 110 }));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(vec2(6.0, 2.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    child.visuals_mut().override_text_color = Some(Color32::from_gray(230));
+    egui::ComboBox::from_id_salt(("splat-look", r.min.x as i32, r.min.y as i32))
+        .selected_text(view.look.name())
+        .width(92.0)
+        .show_ui(&mut child, |ui| {
+            for l in Look::ALL {
+                ui.selectable_value(&mut view.look, l, l.name()).on_hover_text(l.about());
+            }
+        })
+        .response
+        .on_hover_text(view.look.about());
+    child.checkbox(bounds, "Bounds").on_hover_text("The box round the scene's main body (the middle 80% of its splats on each axis)");
+    child.label("FOV");
+    child
+        .add(egui::Slider::new(&mut view.fov, crate::splat::FOV_RANGE).suffix("°").show_value(true).max_decimals(0))
+        .on_hover_text("Field of view: the camera moves in or out as it changes, so only the perspective changes");
+}
+
+/// The main body's box, as lines over the picture.
+fn draw_bounds(p: &egui::Painter, scene: &crate::splat::Scene, view: &crate::splat::View, r: Rect) {
+    if scene.pos.is_empty() {
+        return;
+    }
+    let (lo, hi) = crate::splat::facts::bounds(scene);
+    let proj = scene.projector(view, r.width(), r.height());
+    let corner = |i: usize| [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
+    let stroke = egui::Stroke::new(1.5, Color32::from_rgb(120, 220, 255));
+    for a in 0..8usize {
+        for bit in [1, 2, 4] {
+            let b = a | bit;
+            if b == a {
+                continue;
+            }
+            // Along the edge in steps, so an edge passing behind the camera is cut, not wrapped.
+            let pts: Vec<egui::Pos2> = (0..=16)
+                .filter_map(|k| {
+                    let t = k as f32 / 16.0;
+                    let (pa, pb) = (corner(a), corner(b));
+                    proj([pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t, pa[2] + (pb[2] - pa[2]) * t]).map(|q| r.min + vec2(q[0], q[1]))
+                })
+                .collect();
+            if pts.len() >= 2 {
+                p.add(egui::Shape::line(pts, stroke));
+            }
+        }
+    }
+}
+
+/// What a false-colour look's colours mean, or what the Problems look found, in the bottom
+/// right corner.
+fn splat_legend(p: &egui::Painter, scene: &crate::splat::Scene, look: crate::splat::inspect::Look, r: Rect) {
+    use crate::splat::inspect::{self, Look};
+    let font = FontId::proportional(11.0);
+    let ink = Color32::from_gray(225);
+    if let Some((lo, hi)) = look.scale_ends() {
+        let w = 140.0;
+        let bar = Rect::from_min_size(pos2(r.right() - w - 14.0, r.bottom() - 34.0), vec2(w, 8.0));
+        p.rect_filled(bar.expand2(vec2(8.0, 20.0)).translate(vec2(0.0, 6.0)), 4.0, Color32::from_black_alpha(160));
+        let steps = 28;
+        for k in 0..steps {
+            let c = inspect::ramp(k as f32 / (steps - 1) as f32);
+            let x0 = bar.left() + bar.width() * k as f32 / steps as f32;
+            p.rect_filled(Rect::from_min_max(pos2(x0, bar.top()), pos2(x0 + bar.width() / steps as f32 + 0.5, bar.bottom())), 0.0, Color32::from_rgb(c[0], c[1], c[2]));
+        }
+        p.text(pos2(bar.left(), bar.bottom() + 3.0), Align2::LEFT_TOP, lo, font.clone(), ink);
+        p.text(pos2(bar.right(), bar.bottom() + 3.0), Align2::RIGHT_TOP, hi, font, ink);
+    } else if look == Look::Problems {
+        let a = &scene.analysis;
+        let rows: Vec<(String, [u8; 3])> = inspect::PROBLEMS.iter().map(|(bit, rgb, name)| (format!("{name}: {}", crate::splat::facts::group(inspect::count(a, *bit))), *rgb)).collect();
+        let h = rows.len() as f32 * 16.0 + 8.0;
+        let bx = Rect::from_min_size(pos2(r.right() - 190.0, r.bottom() - h - 8.0), vec2(182.0, h));
+        p.rect_filled(bx, 4.0, Color32::from_black_alpha(170));
+        for (i, (text, c)) in rows.into_iter().enumerate() {
+            let y = bx.top() + 12.0 + i as f32 * 16.0;
+            p.circle_filled(pos2(bx.left() + 12.0, y), 4.5, Color32::from_rgb(c[0], c[1], c[2]));
+            p.text(pos2(bx.left() + 22.0, y), Align2::LEFT_CENTER, text, font.clone(), ink);
+        }
+    }
 }
 
 /// Where a saved picture of a splat view is up to: the picker's answer, then the drawing.
@@ -1957,7 +2105,7 @@ const SAVED_VIEW_MAX: f32 = 3840.0;
 
 /// A "Save picture" button in the top right corner of a splat view: the view as it is, drawn
 /// again at up to twice its size (up to 4K) and saved as a PNG where the person picks.
-fn save_view_button(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, view: crate::splat::View, r: Rect, px: [usize; 2], hovered: bool) {
+fn save_view_button(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, paint: Option<crate::splat::gpu::Paint>, view: crate::splat::View, r: Rect, px: [usize; 2], hovered: bool) {
     let id = egui::Id::new(("splat-save", path));
     let mut st: Option<SavingView> = ui.data(|d| d.get_temp(id));
     let said = st.as_ref().and_then(|s| s.said.lock().unwrap().clone());
@@ -1983,11 +2131,11 @@ fn save_view_button(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Sc
         let picked = s.picked.lock().unwrap().take();
         if let Some(dest) = picked {
             s.started = true;
-            let (scene, view, said, ctx) = (scene.clone(), s.view, s.said.clone(), ui.ctx().clone());
+            let (scene, view, said, ctx, paint) = (scene.clone(), s.view, s.said.clone(), ui.ctx().clone(), paint.clone());
             let k = (SAVED_VIEW_MAX / s.px[0].max(s.px[1]) as f32).min(2.0);
             let size = [(s.px[0] as f32 * k) as usize, (s.px[1] as f32 * k) as usize];
             std::thread::spawn(move || {
-                let msg = match save_view(&scene, view, size, &dest) {
+                let msg = match save_view(&scene, paint, view, size, &dest) {
                     Ok(()) => format!("Saved {}", dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
                     Err(e) => format!("Couldn't save the picture: {e}"),
                 };
@@ -2014,9 +2162,9 @@ fn save_view_button(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Sc
 
 /// Draw a splat view at `size` (on the graphics chip, or as points where it can't be used) and
 /// write it as a PNG.
-pub(super) fn save_view(scene: &Arc<crate::splat::Scene>, view: crate::splat::View, size: [usize; 2], dest: &Path) -> Result<(), String> {
+pub(super) fn save_view(scene: &Arc<crate::splat::Scene>, paint: Option<crate::splat::gpu::Paint>, view: crate::splat::View, size: [usize; 2], dest: &Path) -> Result<(), String> {
     use crate::splat::{SceneKind, gpu};
-    let gpu_pic = if scene.kind == SceneKind::Splat { gpu::picture_now(scene.clone(), view, [size[0] as u32, size[1] as u32], std::time::Duration::from_secs(60)) } else { None };
+    let gpu_pic = if scene.kind == SceneKind::Splat { gpu::picture_now(scene.clone(), paint.clone(), view, [size[0] as u32, size[1] as u32], std::time::Duration::from_secs(60)) } else { None };
     let (w, h, rgba) = match gpu_pic {
         Some(p) => {
             // Premultiplied to straight alpha.
@@ -2030,7 +2178,7 @@ pub(super) fn save_view(scene: &Arc<crate::splat::Scene>, view: crate::splat::Vi
             }
             (p.size[0], p.size[1], rgba)
         }
-        None => (size[0], size[1], scene.draw(size[0], size[1], &view, 1)),
+        None => (size[0], size[1], scene.draw_painted(size[0], size[1], &view, 1, paint.as_deref().map(|p| p.as_slice()))),
     };
     let img = image::RgbaImage::from_raw(w as u32, h as u32, rgba).ok_or("the picture came back the wrong size")?;
     img.save_with_format(dest, image::ImageFormat::Png).map_err(|e| e.to_string())
@@ -2545,7 +2693,7 @@ mod splat_save_tests {
         std::fs::write(&src, ply).unwrap();
         let scene = std::sync::Arc::new(crate::splat::read(&src, crate::splat::Limits::PREVIEW).unwrap());
         let dest = dir.join("scene view.png");
-        super::save_view(&scene, crate::splat::View::default(), [160, 100], &dest).unwrap();
+        super::save_view(&scene, None, crate::splat::View::default(), [160, 100], &dest).unwrap();
         let img = image::open(&dest).unwrap().to_rgba8();
         assert_eq!(img.dimensions(), (160, 100));
         // Something was drawn.
