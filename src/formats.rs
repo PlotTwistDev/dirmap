@@ -40,6 +40,8 @@ pub enum Category {
     Pdf,
     /// Word, PowerPoint, OpenDocument and EPUB files, read and formatted here.
     Document,
+    /// MIDI music: a piano roll drawn here.
+    Midi,
 }
 
 /// One format.
@@ -117,6 +119,7 @@ pub static FORMATS: &[Format] = &[
         category: Category::Audio,
         exts: &["mp3", "wav", "flac", "m4a", "aac", "ogg", "oga", "opus", "wma", "aif", "aiff", "alac"],
     },
+    Format { id: "midi", name: "MIDI music", category: Category::Midi, exts: &["mid", "midi", "kar"] },
     Format { id: "pdf", name: "PDF document", category: Category::Pdf, exts: &["pdf"] },
     Format { id: "docx", name: "Word document", category: Category::Document, exts: &["docx", "docm", "dotx"] },
     Format { id: "sheet", name: "Spreadsheet", category: Category::Spreadsheet, exts: &["xlsx", "xlsm", "xlsb", "xls", "xltx", "xltm", "ods", "ots"] },
@@ -167,6 +170,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "font"
     } else if at(0, b"8BPS") {
         "psd"
+    } else if at(0, b"MThd") {
+        "midi"
     } else if at(0, b"%PDF-") {
         "pdf"
     } else if at(4, b"ftyp") {
@@ -224,5 +229,7 @@ mod tests {
         assert!(sniff(b"hello, world").is_none());
         assert_eq!(sniff(b"OTTO\0\x0b\0\x80").map(|f| f.id), Some("font"));
         assert_eq!(by_name("Inter.TTF").map(|f| f.category), Some(Category::Font));
+        assert_eq!(by_name("tune.MID").map(|f| f.category), Some(Category::Midi));
+        assert_eq!(sniff(b"MThd\0\0\0\x06").map(|f| f.id), Some("midi"));
     }
 }
