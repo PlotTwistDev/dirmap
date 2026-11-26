@@ -72,6 +72,30 @@ Researchers call this a *logit lens*.
 The last layer's prediction is the model's own: it matches what **Next token** shows. Looking
 inside reads the model's file to work out the predictions and changes nothing in it.
 
+## Steering a model
+
+Press **Steer** at the top of the Lab to push a model towards one idea and away from another while
+it writes. Type the text for it to carry on, a word or phrase in **Towards** (such as "Love") and
+one in **Away from** (such as "Hate"), and press **Write both ways**. The Lab writes the text twice
+with the same settings and seed: once as the model would, and once pushed. The two appear side by
+side, each token coloured by how sure the model was.
+
+The push is worked out from your two words alone. The Lab reads each one, takes what the chosen
+layer makes of it, and adds the difference to that layer's output for every token while it writes.
+Researchers call this *activation steering*, and the difference a *steering vector*.
+
+- **Strength** is how hard to push. Below 0 pushes the other way. Too strong and the text stops
+  making sense; the line under the result says how big the push was beside that layer's own
+  output.
+- **At layer** chooses where to push. Early layers change words more than ideas, and late ones
+  have little room left to change anything; about a third of the way in usually works best and is
+  where the Lab starts.
+- Leave one box empty to push towards (or away from) a single idea.
+
+The push only exists while the text is written, in a copy of the model's working memory that's
+thrown away afterwards. The model's file, Ask AI and the other Lab pages aren't affected. The
+sampling settings are the ones on **Next token**.
+
 ## Testing a model's speed
 
 Press **Speed** at the top of the Lab to see how fast the loaded model runs on this computer.

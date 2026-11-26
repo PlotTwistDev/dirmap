@@ -33,7 +33,7 @@ pub(super) fn stamp(size: u64, modified: i64) -> u64 {
 pub(super) fn wants_thumb(name: &str) -> bool {
     match preview::kind_of(name) {
         Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Saved | Kind::Science | Kind::Media(_) => true,
-        Kind::Midi | Kind::Model | Kind::Map => crate::thumbcache::rich(),
+        Kind::Midi | Kind::Model | Kind::Map | Kind::Splat => crate::thumbcache::rich(),
         Kind::Cad => crate::thumbcache::rich() && name.to_ascii_lowercase().ends_with(".dxf"),
         _ => false,
     }
@@ -303,6 +303,13 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
     Some(made)
 }
 
+/// A splat scene or point cloud drawn from a sample of its points.
+fn splat_thumb(path: &std::path::Path, max: u32) -> Option<Decoded> {
+    let scene = crate::splat::read(path, crate::splat::Limits::THUMB).ok()?;
+    let n = max.min(512) as usize;
+    Some(Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &scene.draw(n, n, crate::model3d::Angle::default(), 1))))
+}
+
 /// Make a thumbnail picture from the file.
 fn picture(job: &Job, config: Config, kind: Kind, name: &str) -> Option<Decoded> {
     let local = if crate::fsys::remote::is_remote(&job.path) {
@@ -329,6 +336,8 @@ fn picture(job: &Job, config: Config, kind: Kind, name: &str) -> Option<Decoded>
             let rgba = img.to_rgba8();
             Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
         }),
+        Kind::Splat => splat_thumb(&local, max),
+        Kind::Model if local.extension().is_some_and(|x| x.eq_ignore_ascii_case("ply")) && crate::splat::classify_ply(&local).is_ok_and(|k| k != crate::splat::PlyKind::Mesh) => splat_thumb(&local, max),
         Kind::Model => crate::model3d::read(&local).ok().map(|m| {
             let n = max.min(512) as usize;
             Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &m.draw(n, n, crate::model3d::Angle::default(), 1)))

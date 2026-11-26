@@ -46,6 +46,8 @@ pub enum Category {
     Database,
     /// 3D models, drawn here to turn about.
     Model,
+    /// Gaussian splat scenes: drawn as points here to turn about, with what's in them.
+    Splat,
     /// Maps (GeoJSON, GPX, KML): their shapes drawn here, with no map tiles fetched.
     Map,
     /// CAD: DXF drawn here; DWG, STEP and IGES described from what they say about themselves.
@@ -84,7 +86,6 @@ impl Format {
             "markdown" => ("Formatted text, with the source a click away", "Filescape"),
             "text" => ("The text, in syntax colours for code (about 200 languages)", "Filescape (syntect, two-face)"),
             "aep" => ("The version that saved it, its compositions and the footage files it uses, marking any missing", "craft-aep"),
-            "model3d" => ("A shaded model to turn about", "Filescape (gltf for glTF, craft-mesh for FBX, COLLADA and Alembic)"),
             "cad" => ("DWG: the drawing (lines, curves and blocks; text isn't drawn). STEP and IGES: the program that made it, units, author and parts (not drawn)", "Filescape (craft-dwg with acadrust for DWG)"),
             "paint" => ("The picture the app saved inside the file, with its size, colours and layers", "Filescape"),
             "layered" => ("The picture, drawn from its layers, with its size, colours and layers", "craft-xcf, craft-pdn"),
@@ -106,6 +107,7 @@ impl Format {
             "jpeg" => ("The picture, including 12-bit and arithmetic-coded JPEGs; channels one by one", "image (craft-jpeg for 12-bit and arithmetic-coded)"),
             "psd" => ("The flattened picture, with its layers, groups, text and smart objects listed", "Filescape (craft-psd for the layers)"),
             "fits" => ("The first picture, stretched so faint detail shows, with the object, telescope and exposure", "Filescape"),
+            "model3d" => ("A shaded model to turn about; PLY point clouds and Gaussian splat scenes are drawn as points, with their details", "Filescape (gltf for glTF, craft-mesh for FBX, COLLADA and Alembic)"),
             "heif" => ("The picture", "The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg)"),
             _ => match self.category {
                 Category::Picture => ("The picture; channels one by one", "image"),
@@ -121,6 +123,7 @@ impl Format {
                 Category::Midi => ("A piano roll, with tempo and instruments", "midly"),
                 Category::Database => ("Each table's columns and first rows, read-only", "SQLite (rusqlite)"),
                 Category::Model => ("A shaded model to turn about", "Filescape (gltf for glTF)"),
+                Category::Splat => ("The scene drawn as points to turn about, with its splat count, colour detail, size and checks for stray or invisible splats", "Filescape"),
                 Category::Cad => ("What the file says: the program that made it, units, author and parts (not drawn)", "Filescape"),
                 Category::Saved => ("The picture the app saved inside the file, and the version that saved it", "Filescape"),
                 Category::DiskImage => ("A disc's files and folders with sizes (ISO 9660 and UDF); a virtual disk's size, type and partitions; a Windows image's editions", "Filescape"),
@@ -206,6 +209,7 @@ pub static FORMATS: &[Format] = &[
     Format { id: "csv", name: "CSV or TSV table", category: Category::Spreadsheet, exts: &["csv", "tsv", "tab"] },
     Format { id: "sqlite", name: "SQLite database", category: Category::Database, exts: &["sqlite", "sqlite3", "db", "db3", "s3db", "sl3"] },
     Format { id: "model3d", name: "3D model", category: Category::Model, exts: &["stl", "obj", "ply", "gltf", "glb", "3mf", "fbx", "dae", "abc"] },
+    Format { id: "spz", name: "Gaussian splat scene (SPZ)", category: Category::Splat, exts: &["spz"] },
     Format { id: "dxf", name: "DXF drawing", category: Category::Cad, exts: &["dxf"] },
     Format { id: "cad", name: "CAD model (DWG, STEP, IGES)", category: Category::Cad, exts: &["dwg", "step", "stp", "p21", "iges", "igs"] },
     Format { id: "iwork", name: "Pages, Numbers and Keynote", category: Category::Saved, exts: &["pages", "numbers", "key"] },
@@ -291,6 +295,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "psd"
     } else if at(0, crate::tables::SQLITE_MAGIC) {
         "sqlite"
+    } else if at(0, b"NGSP") {
+        "spz"
     } else if at(0, b"glTF") {
         "model3d"
     } else if at(0, b"MThd") {

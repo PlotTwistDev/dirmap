@@ -77,14 +77,30 @@ pub enum Request {
     Look { text: String, chat: bool },
     /// The Lab: what each layer would predict after token `n` of the last look.
     Lens(usize),
+    /// The Lab: write after `text` twice, as it is and pushed after layer `layer` (from 0) along
+    /// the difference between `towards` and `away`, `strength` times over.
+    Steer(Steer),
     Unload,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Steer {
+    pub text: String,
+    pub chat: bool,
+    pub towards: String,
+    pub away: String,
+    pub layer: usize,
+    pub strength: f32,
+    pub steps: u32,
+    pub settings: crate::lab::Settings,
 }
 
 /// What the engine says back.
 #[derive(Debug)]
 pub enum Event {
     Loading,
-    Loaded { context: u32, seconds: f32 },
+    /// Loaded, with its context length and number of layers.
+    Loaded { context: u32, seconds: f32, layers: u32 },
     /// More of the answer.
     Text(String),
     Done(Stats),
@@ -99,6 +115,9 @@ pub enum Event {
     /// What each layer would predict after token `token`: per layer, the likeliest tokens and
     /// their probabilities.
     Lensed { token: usize, layers: Vec<Vec<(String, f32)>> },
+    /// Steered writing beside the same without: and how long the push was, as a share of the
+    /// layer's typical output.
+    Steered { plain: crate::lab::Run, steered: crate::lab::Run, push: f32 },
     Unloaded,
     Error(String),
 }
@@ -174,7 +193,7 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
             Some(r) => r,
             None => match rx.recv() {
                 Ok(Request::Load(r)) => r,
-                Ok(Request::Ask { .. } | Request::Predict { .. } | Request::Bench(_) | Request::Look { .. } | Request::Lens(_)) => {
+                Ok(Request::Ask { .. } | Request::Predict { .. } | Request::Bench(_) | Request::Look { .. } | Request::Lens(_) | Request::Steer(_)) => {
                     let _ = tx.send(Event::Error("No model is loaded.".into()));
                     continue;
                 }
@@ -218,7 +237,7 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
             }
         };
         let template = model.chat_template(None).ok();
-        let _ = tx.send(Event::Loaded { context, seconds: t.elapsed().as_secs_f32() });
+        let _ = tx.send(Event::Loaded { context, seconds: t.elapsed().as_secs_f32(), layers: model.n_layer() });
         // Tokens already in the context, from the previous turn.
         let mut cached: Vec<LlamaToken> = Vec::new();
         // The Lab's last look inside, and the model's last steps (read when first needed).
@@ -275,6 +294,13 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
                             let _ = tx.send(Event::Error(e));
                         }
                     }
+                }
+                Ok(Request::Steer(st)) => {
+                    let full = if st.chat { prompt(&model, template.as_ref(), &[Message { role: Role::User, text: st.text.clone() }]) } else { st.text.clone() };
+                    let _ = tx.send(match steer(&model, &full, &st, threads, &stop) {
+                        Ok(ev) => ev,
+                        Err(e) => Event::Error(e),
+                    });
                 }
                 Ok(Request::Lens(n)) => {
                     let head = head.get_or_insert_with(|| crate::lens::Head::read(&req.path));
@@ -501,6 +527,24 @@ fn look(model: &LlamaModel, text: &str, threads: i32) -> Result<(crate::probe::L
         seconds: t.elapsed().as_secs_f32(),
     };
     Ok((layers, inside))
+}
+
+/// The Lab's steering: the same text written without and with a push.
+fn steer(model: &LlamaModel, text: &str, st: &Steer, threads: i32, stop: &AtomicBool) -> Result<Event, String> {
+    let tok = |s: &str| model.vocab().tokenize(s.as_bytes(), true, true);
+    if st.towards.trim().is_empty() && st.away.trim().is_empty() {
+        return Err("Type a word to steer towards, or away from.".into());
+    }
+    let tokens = tok(text);
+    if tokens.len() + st.steps as usize > crate::probe::MAX_TOKENS * 4 {
+        return Err("The text is too long to steer. Shorten it.".into());
+    }
+    let side = |s: &str| if s.trim().is_empty() { Vec::new() } else { tok(s) };
+    let (d, share) = crate::probe::direction(model, &side(&st.towards), &side(&st.away), st.layer, threads)?;
+    let v: Vec<f32> = d.iter().map(|x| x * st.strength).collect();
+    let plain = crate::probe::write(model, &tokens, st.steps, &st.settings, None, threads, stop)?;
+    let steered = crate::probe::write(model, &tokens, st.steps, &st.settings, Some(crate::probe::Push { layer: st.layer, vector: &v }), threads, stop)?;
+    Ok(Event::Steered { plain, steered, push: share * st.strength.abs() })
 }
 
 /// How many guesses the Lab shows for each layer.

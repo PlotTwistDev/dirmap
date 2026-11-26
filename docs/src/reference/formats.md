@@ -43,7 +43,8 @@ for the settings.
 | Sound | `.mp3` `.wav` `.flac` `.m4a` `.aac` `.ogg` `.oga` `.opus` `.wma` `.aif` `.aiff` `.alac` | Cover, waveform, tags and playback | The system, with lofty for tags |
 | CSV or TSV table | `.csv` `.tsv` `.tab` | A table, with column names from the first row | Filescape (csv) |
 | SQLite database | `.sqlite` `.sqlite3` `.db` `.db3` `.s3db` `.sl3` | Each table's columns and first rows, read-only | SQLite (rusqlite) |
-| 3D model | `.stl` `.obj` `.ply` `.gltf` `.glb` `.3mf` `.fbx` `.dae` `.abc` | A shaded model to turn about | Filescape (gltf for glTF, craft-mesh for FBX, COLLADA and Alembic) |
+| 3D model | `.stl` `.obj` `.ply` `.gltf` `.glb` `.3mf` `.fbx` `.dae` `.abc` | A shaded model to turn about; PLY point clouds and Gaussian splat scenes are drawn as points, with their details | Filescape (gltf for glTF, craft-mesh for FBX, COLLADA and Alembic) |
+| Gaussian splat scene (SPZ) | `.spz` | The scene drawn as points to turn about, with its splat count, colour detail, size and checks for stray or invisible splats | Filescape |
 | DXF drawing | `.dxf` | The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size | Filescape |
 | CAD model (DWG, STEP, IGES) | `.dwg` `.step` `.stp` `.p21` `.iges` `.igs` | DWG: the drawing (lines, curves and blocks; text isn't drawn). STEP and IGES: the program that made it, units, author and parts (not drawn) | Filescape (craft-dwg with acadrust for DWG) |
 | Pages, Numbers and Keynote | `.pages` `.numbers` `.key` | The picture the app saved inside the file, and the version that saved it | Filescape |
