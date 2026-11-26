@@ -160,7 +160,10 @@ pub(super) fn parse(data: &[u8], limits: Limits) -> Result<Scene, String> {
     scene.sh_degree = head.sh_degree;
     scene.antialiased = head.flags & 1 != 0;
     let rest = sh_rest(head.sh_degree);
-    let keep_sh = limits.keep_sh && rest > 0;
+    let keep_sh = limits.keeps_sh(n as u64, rest);
+    if limits.keep_sh && rest > 0 && !keep_sh {
+        scene.notes.push(super::SH_DROPPED.into());
+    }
     let cap = limits.max_points.min(super::HARD_MAX_POINTS);
     let every = n.div_ceil(cap.max(1)).max(1);
     let frac = 1.0 / (1u32 << head.fractional_bits.min(24)) as f32;

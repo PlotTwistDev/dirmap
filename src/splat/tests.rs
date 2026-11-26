@@ -1,5 +1,6 @@
 use super::*;
 use std::io::Write;
+use std::sync::Arc;
 
 /// The tiny SPZ files are PlayCanvas splat-transform's test fixtures (MIT, © PlayCanvas Ltd):
 /// four splats each, as raw (uncompressed) v2, gzip v2 and v3, and zstd v4.
@@ -264,7 +265,7 @@ fn drawing_puts_points_on_the_picture() {
         "scale_0" | "scale_1" | "scale_2" => -3.0,
         _ => plain(i, p),
     })), Limits::PREVIEW).unwrap();
-    let px = s.draw(64, 64, Angle::default(), 1);
+    let px = s.draw(64, 64, &View::default(), 1);
     assert_eq!(px.len(), 64 * 64 * 4);
     let covered = px.chunks_exact(4).filter(|p| p[3] > 0).count();
     assert!(covered > 100, "{covered}");
@@ -287,7 +288,8 @@ fn real_scenes() {
             continue;
         }
         let t = std::time::Instant::now();
-        let s = match read(&p, Limits::PREVIEW) {
+        let limits = if std::env::var("FILESCAPE_SPLAT_NOSH").is_ok() { Limits { keep_sh: false, ..Limits::PREVIEW } } else { Limits::PREVIEW };
+        let s = match read(&p, limits) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("{n}: {e}");
@@ -296,12 +298,61 @@ fn real_scenes() {
         };
         let read_time = t.elapsed();
         let t = std::time::Instant::now();
-        let px = s.draw(640, 480, Angle::default(), 1);
+        let px = s.draw(640, 480, &View::default(), 1);
         let draw_time = t.elapsed();
         image::save_buffer(format!("{n}.preview.png"), &px, 640, 480, image::ExtendedColorType::Rgba8).unwrap();
         eprintln!("{n}: {} splats, read {read_time:?}, drawn {draw_time:?}", s.len());
+        let s = Arc::new(s);
+        for (k, v) in [(0, View::default()), (1, View { yaw: 0.9, zoom: 0.6, ..View::default() })] {
+            let id = gpu::want(s.clone(), v, [960, 640], None);
+            match gpu::wait_for(id, std::time::Duration::from_secs(300)) {
+                Some(pic) => {
+                    // Over a dark grey, as the preview pane shows it.
+                    let rgba: Vec<u8> = pic.rgba.chunks_exact(4).flat_map(|p| { let a = 255 - p[3] as u16; [p[0] + (30 * a / 255) as u8, p[1] + (30 * a / 255) as u8, p[2] + (34 * a / 255) as u8, 255] }).collect();
+                    image::save_buffer(format!("{n}.gpu{k}.png"), &rgba, 960, 640, image::ExtendedColorType::Rgba8).unwrap();
+                    eprintln!("    GPU picture {k}: {:.0} ms, {} splats", pic.ms, pic.drawn);
+                }
+                None => eprintln!("    no GPU picture: {:?}", gpu::status()),
+            }
+        }
         for (k, v) in &s.facts {
             eprintln!("    {k}: {v}");
         }
     }
+}
+
+/// Real splatting on the graphics chip. Skipped where there's no adapter that can (CI); in the
+/// container, Mesa's software Vulkan runs it (`WGPU_BACKEND=vulkan`).
+#[test]
+fn gpu_draws_splats_or_says_why_not() {
+    let s = Arc::new(read(&tmp("gpu.ply", &splat_ply(400, 0, None, |i, p| match p {
+        "x" => (i % 20) as f32 * 0.1,
+        "y" => (i / 20) as f32 * 0.1,
+        "opacity" => 4.0,
+        "scale_0" | "scale_1" | "scale_2" => -3.0,
+        _ => plain(i, p),
+    })), Limits::PREVIEW).unwrap());
+    let id = gpu::want(s.clone(), View::default(), [96, 64], None);
+    // Longer than the 30 s after which a hung driver is given up on.
+    let Some(pic) = gpu::wait_for(id, std::time::Duration::from_secs(45)) else {
+        eprintln!("no GPU picture: {:?}", gpu::status());
+        assert!(matches!(gpu::status(), gpu::Status::Unavailable(_)), "neither a picture nor a reason");
+        return;
+    };
+    assert_eq!(pic.size, [96, 64]);
+    assert_eq!(pic.drawn, 400);
+    let covered = pic.rgba.chunks_exact(4).filter(|p| p[3] > 0).count();
+    assert!(covered > 300, "{covered}");
+    // Premultiplied: no channel above its alpha.
+    assert!(pic.rgba.chunks_exact(4).all(|p| p[0] <= p[3] && p[1] <= p[3] && p[2] <= p[3]));
+    // The splats sit where the processor drawing puts their centres.
+    let cpu = s.draw(96, 64, &View::default(), 1);
+    let both = pic.rgba.chunks_exact(4).zip(cpu.chunks_exact(4)).filter(|(g, c)| g[3] > 40 && c[3] > 40).count();
+    let cpu_covered = cpu.chunks_exact(4).filter(|c| c[3] > 40).count();
+    assert!(both * 2 > cpu_covered, "{both} of {cpu_covered}");
+    // A four-splat file, which the viewer once couldn't take, draws or fails without a crash.
+    let tiny = Arc::new(spz::parse(MIN_V4, Limits::PREVIEW).unwrap());
+    let id = gpu::want(tiny, View::default(), [64, 64], None);
+    let tiny_pic = gpu::wait_for(id, std::time::Duration::from_secs(60));
+    eprintln!("tiny: {:?} {:?}", tiny_pic.map(|p| p.drawn), gpu::status());
 }

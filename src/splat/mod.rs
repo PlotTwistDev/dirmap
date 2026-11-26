@@ -6,6 +6,7 @@
 //! and reads big files by sampling blocks rather than all of it when only a picture is needed.
 //! Nothing in a file is run. See `docs/design/filescape-splats.md`.
 
+pub mod gpu;
 pub mod facts;
 pub mod ply;
 pub mod spz;
@@ -55,10 +56,22 @@ pub struct Limits {
 
 impl Limits {
     /// For the preview pane.
-    pub const PREVIEW: Limits = Limits { max_points: 4_000_000, keep_sh: false };
+    pub const PREVIEW: Limits = Limits { max_points: 4_000_000, keep_sh: true };
     /// For a thumbnail: a sample is plenty.
     pub const THUMB: Limits = Limits { max_points: 400_000, keep_sh: false };
+
+    /// Memory the view-dependent colour may take (half precision); scenes needing more are
+    /// shown with base colour only, and say so.
+    pub const SH_BYTES: u64 = 256 << 20;
+
+    /// Whether to keep harmonics for `points` splats with `rest` higher values per channel.
+    pub fn keeps_sh(&self, points: u64, rest: usize) -> bool {
+        self.keep_sh && rest > 0 && points.min(self.max_points as u64) * rest as u64 * 3 * 2 <= Self::SH_BYTES
+    }
 }
+
+/// The note for a scene whose view-dependent colour was left out to save memory.
+pub const SH_DROPPED: &str = "Too big to show its view-dependent colour, so base colour is shown";
 
 /// Points kept by any reader, whatever the limits say.
 pub const HARD_MAX_POINTS: usize = 50_000_000;
@@ -181,8 +194,47 @@ pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
     Ok(scene)
 }
 
-/// Turning angle for the drawn preview (same meaning as the 3D model preview's).
-pub use crate::model3d::Angle;
+/// How the scene is looked at: turned (as the 3D model preview turns), zoomed and panned.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct View {
+    pub yaw: f32,
+    pub pitch: f32,
+    /// Distance from the framed middle, as a multiple of the starting distance.
+    pub zoom: f32,
+    /// Sideways and up, in units of the scene's framed radius.
+    pub pan: [f32; 2],
+}
+
+impl Default for View {
+    fn default() -> Self {
+        let a = crate::model3d::Angle::default();
+        View { yaw: a.yaw, pitch: a.pitch, zoom: 1.0, pan: [0.0, 0.0] }
+    }
+}
+
+/// Vertical field of view of the preview camera.
+pub const FOV: f32 = 50.0 * std::f32::consts::PI / 180.0;
+
+impl View {
+    /// Camera distance for a scene framed with radius `r`.
+    pub fn distance(&self, r: f32) -> f32 {
+        r / (FOV / 2.0).tan() * 1.35 * self.zoom
+    }
+
+    /// The rotation from the scene (y up, middle at the origin) to the camera's axes, as
+    /// rows: x right, y up, z towards the viewer.
+    pub fn rotation(&self) -> [[f32; 3]; 3] {
+        let (sy, cy) = (self.yaw + std::f32::consts::PI).sin_cos();
+        let (sp, cp) = self.pitch.sin_cos();
+        // Turn about y, then tilt about x.
+        [[cy, 0.0, sy], [-sp * -sy, cp, -sp * cy], [cp * -sy, sp, cp * cy]]
+    }
+
+    /// How far one pixel of a picture `h` pixels high moves the pan.
+    pub fn pan_per_pixel(&self, h: f32) -> f32 {
+        self.zoom * 2.7 / h.max(1.0)
+    }
+}
 
 /// Where the camera looks: the middle of the scene and how far out it reaches, from the 10th
 /// to the 90th percentile of positions on each axis (captures carry a shell of sky and
@@ -210,7 +262,7 @@ impl Scene {
     /// The scene drawn `w` × `h` as soft round points, back to front, on transparent (RGBA,
     /// not premultiplied). A stand-in for real splatting: it shows what's there and where.
     /// `step` > 1 draws only every `step`th point (quicker while turning).
-    pub fn draw(&self, w: usize, h: usize, a: Angle, step: usize) -> Vec<u8> {
+    pub fn draw(&self, w: usize, h: usize, view: &View, step: usize) -> Vec<u8> {
         let mut out = vec![0u8; w * h * 4];
         if w == 0 || h == 0 || self.pos.is_empty() {
             return out;
@@ -218,23 +270,21 @@ impl Scene {
         let (c, r) = framing(self);
         // Up is -y for trainer PLYs, +y for SPZ.
         let flip = if self.frame == Frame::RightDownForward { -1.0 } else { 1.0 };
-        let (sy, cy) = (a.yaw + std::f32::consts::PI).sin_cos();
-        let (sp, cp) = a.pitch.sin_cos();
-        let fov = 50f32.to_radians();
-        let dist = r / (fov / 2.0).tan() * 1.35;
-        let focal = 0.5 * h as f32 / (fov / 2.0).tan();
+        let m = view.rotation();
+        let dist = view.distance(r);
+        let focal = 0.5 * h as f32 / (FOV / 2.0).tan();
         let (cx, cyc) = (w as f32 / 2.0, h as f32 / 2.0);
         let near = dist * 0.02;
+        let (px0, py0) = (view.pan[0] * r, view.pan[1] * r);
         let step = step.max(1);
         // Project: (screen x, screen y, depth, radius in pixels, index).
         let mut pts: Vec<(f32, f32, f32, f32, u32)> = Vec::with_capacity(self.pos.len() / step + 1);
         for i in (0..self.pos.len()).step_by(step) {
             let p = self.pos[i];
-            let (x0, y0, z0) = (p[0] - c[0], flip * (p[1] - c[1]), flip * (p[2] - c[2]));
-            let x = x0 * cy + z0 * sy;
-            let z = -x0 * sy + z0 * cy;
-            let y = y0 * cp - z * sp;
-            let z = y0 * sp + z * cp;
+            let v = [p[0] - c[0], flip * (p[1] - c[1]), flip * (p[2] - c[2])];
+            let x = m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2] - px0;
+            let y = m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2] - py0;
+            let z = m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2];
             let depth = dist - z;
             if depth < near {
                 continue;
