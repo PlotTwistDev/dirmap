@@ -343,6 +343,8 @@ pub(super) enum TextKind {
     Slides,
     /// An EPUB book: its first lines.
     Book,
+    /// A SQLite database: its first table's first rows.
+    Database,
 }
 
 pub(super) fn text_kind(name: &str) -> Option<TextKind> {
@@ -350,6 +352,8 @@ pub(super) fn text_kind(name: &str) -> Option<TextKind> {
     match f.id {
         "docx" => Some(TextKind::Docx),
         "sheet" => Some(TextKind::Sheet),
+        "csv" => Some(TextKind::Plain),
+        "sqlite" => Some(TextKind::Database),
         "odt" => Some(TextKind::Odt),
         "pptx" | "odp" => Some(TextKind::Slides),
         "epub" => Some(TextKind::Book),
@@ -372,6 +376,7 @@ fn snippet(path: &Path, kind: TextKind) -> Option<String> {
             let k = crate::officedoc::kind_of(&path.file_name()?.to_string_lossy())?;
             crate::officedoc::plain_text(&crate::officedoc::read(path, k).ok()?)
         }
+        TextKind::Database => crate::sheets::snippet(&crate::tables::read_sqlite(path, 40, 12).ok()?),
         TextKind::Book => crate::officedoc::plain_text(&crate::epub::open(path, 40).ok()?.blocks),
     };
     let mut out = String::new();

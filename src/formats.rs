@@ -42,6 +42,8 @@ pub enum Category {
     Document,
     /// MIDI music: a piano roll drawn here.
     Midi,
+    /// SQLite databases: their tables, read-only.
+    Database,
 }
 
 /// One format.
@@ -100,7 +102,7 @@ pub static FORMATS: &[Format] = &[
         name: "Text, code and settings",
         category: Category::Text,
         exts: &[
-            "txt", "rst", "log", "csv", "tsv", "json", "jsonl", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "rs", "py", "js", "mjs", "ts",
+            "txt", "rst", "log", "json", "jsonl", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "rs", "py", "js", "mjs", "ts",
             "tsx", "jsx", "c", "h", "cpp", "hpp", "cc", "cs", "java", "kt", "go", "rb", "php", "swift", "m", "mm", "sh", "bash", "zsh", "fish", "ps1",
             "psm1", "bat", "cmd", "lua", "sql", "html", "htm", "css", "scss", "less", "vue", "svelte", "glsl", "hlsl", "wgsl", "osl", "vex", "mel",
             "nk", "usda", "obj", "mtl", "gitignore", "dockerfile", "makefile", "cmake", "gradle", "properties", "env", "srt", "vtt", "tex", "bib",
@@ -119,6 +121,8 @@ pub static FORMATS: &[Format] = &[
         category: Category::Audio,
         exts: &["mp3", "wav", "flac", "m4a", "aac", "ogg", "oga", "opus", "wma", "aif", "aiff", "alac"],
     },
+    Format { id: "csv", name: "CSV or TSV table", category: Category::Spreadsheet, exts: &["csv", "tsv", "tab"] },
+    Format { id: "sqlite", name: "SQLite database", category: Category::Database, exts: &["sqlite", "sqlite3", "db", "db3", "s3db", "sl3"] },
     Format { id: "midi", name: "MIDI music", category: Category::Midi, exts: &["mid", "midi", "kar"] },
     Format { id: "pdf", name: "PDF document", category: Category::Pdf, exts: &["pdf"] },
     Format { id: "docx", name: "Word document", category: Category::Document, exts: &["docx", "docm", "dotx"] },
@@ -170,6 +174,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "font"
     } else if at(0, b"8BPS") {
         "psd"
+    } else if at(0, crate::tables::SQLITE_MAGIC) {
+        "sqlite"
     } else if at(0, b"MThd") {
         "midi"
     } else if at(0, b"%PDF-") {

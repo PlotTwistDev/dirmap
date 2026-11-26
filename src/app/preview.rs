@@ -70,6 +70,7 @@ impl Content {
             Content::Image { facts, .. } => facts,
             Content::Pdf(p) => &p.doc.facts,
             Content::Doc { facts, .. } => facts,
+            Content::Sheet(b) => &b.facts,
             _ => &[],
         }
     }
@@ -144,8 +145,10 @@ pub(super) enum Kind {
     Raw,
     /// Photoshop: the flattened picture.
     Psd,
-    /// A spreadsheet: its cells.
+    /// A spreadsheet or CSV file: its cells.
     Sheet,
+    /// A SQLite database: its tables.
+    Database,
     /// Word, PowerPoint or OpenDocument: formatted.
     Doc,
     /// MIDI: a piano roll.
@@ -178,6 +181,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::SystemPicture => Kind::Media(Media::Picture),
         C::Document => Kind::Doc,
         C::Midi => Kind::Midi,
+        C::Database => Kind::Database,
     }
 }
 
@@ -243,6 +247,10 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
         },
         Kind::Doc => load_doc(path),
         Kind::Sheet => match crate::sheets::read(path, crate::sheets::ROWS, crate::sheets::COLS) {
+            Ok(b) => Content::Sheet(Arc::new(b)),
+            Err(e) => Content::Error(e),
+        },
+        Kind::Database => match crate::tables::read_sqlite(path, crate::sheets::ROWS, crate::sheets::COLS) {
             Ok(b) => Content::Sheet(Arc::new(b)),
             Err(e) => Content::Error(e),
         },
@@ -1175,18 +1183,24 @@ fn sheet_view(ui: &mut egui::Ui, path: &Path, book: &crate::sheets::Book, size: 
         }
         let sheet = &book.sheets[pick];
         let (h, w) = sheet.size;
-        let mut note = format!("{} rows × {} columns", group(h as u64), group(w as u64));
+        let more = if sheet.rows_known { "" } else { "+" };
+        let mut note = format!("{}{more} {} × {} columns", group(h as u64), if h == 1 && sheet.rows_known { "row" } else { "rows" }, group(w as u64));
         if h > sheet.rows.len() || w > crate::sheets::COLS {
             note.push_str(&format!(" · the first {} rows and {} columns", sheet.rows.len(), w.min(crate::sheets::COLS)));
         }
         if book.total > book.sheets.len() {
-            note.push_str(&format!(" · {} of {} sheets", book.sheets.len(), book.total));
+            note.push_str(&format!(" · {} of {} {}", book.sheets.len(), book.total, book.noun));
         }
         ui.label(egui::RichText::new(note).size(11.5).color(pal.weak));
         let font = FontId::proportional(12.0);
         let cw = ui.fonts_mut(|f| f.glyph_width(&font, '0'));
-        let cols = sheet.rows.iter().map(|r| r.len()).max().unwrap_or(0);
-        let widths: Vec<f32> = (0..cols).map(|c| (sheet.rows.iter().map(|r| r.get(c).map_or(0, |s| s.chars().count())).max().unwrap_or(0).clamp(3, 32) as f32 * cw + 12.0).max(44.0)).collect();
+        let cols = sheet.rows.iter().map(|r| r.len()).max().unwrap_or(0).max(sheet.heads.len());
+        let widths: Vec<f32> = (0..cols)
+            .map(|c| {
+                let longest = sheet.rows.iter().chain(std::iter::once(&sheet.heads)).map(|r| r.get(c).map_or(0, |s| s.chars().count())).max().unwrap_or(0);
+                (longest.clamp(3, 32) as f32 * cw + 12.0).max(44.0)
+            })
+            .collect();
         let num_w = (group(sheet.rows.len() as u64).len() as f32 * cw + 14.0).max(30.0);
         let row_h = 20.0;
         let total_w = num_w + widths.iter().sum::<f32>();
@@ -1205,7 +1219,7 @@ fn sheet_view(ui: &mut egui::Ui, path: &Path, book: &crate::sheets::Book, size: 
                 let mut x = rect.left() + num_w;
                 for (c, cw) in widths.iter().enumerate() {
                     let cell = Rect::from_min_size(pos2(x, y), vec2(*cw, row_h));
-                    let (text, colour) = if head { (crate::sheets::column(c), pal.weak) } else { (sheet.rows[i - 1].get(c).cloned().unwrap_or_default(), pal.text) };
+                    let (text, colour) = if head { (sheet.heads.get(c).cloned().unwrap_or_else(|| crate::sheets::column(c)), if sheet.heads.is_empty() { pal.weak } else { pal.text }) } else { (sheet.rows[i - 1].get(c).cloned().unwrap_or_default(), pal.text) };
                     if !text.is_empty() {
                         // Numbers to the right, like a spreadsheet.
                         let numeric = !head && text.parse::<f64>().is_ok();
@@ -1586,6 +1600,8 @@ mod tests {
         assert_eq!(kind_of("logo.svg"), Kind::Drawing);
         assert_eq!(kind_of("Inter.otf"), Kind::Font);
         assert_eq!(kind_of("tune.mid"), Kind::Midi);
+        assert_eq!(kind_of("data.TSV"), Kind::Sheet);
+        assert_eq!(kind_of("History.sqlite"), Kind::Database);
         assert_eq!(kind_of("IMG_0001.CR3"), Kind::Raw);
         assert_eq!(kind_of("poster.psd"), Kind::Psd);
         assert_eq!(kind_of("Budget.XLSX"), Kind::Sheet);
