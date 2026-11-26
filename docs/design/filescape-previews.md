@@ -213,4 +213,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Email, contacts and calendars (eml, mbox, vcf, ics) | #75 | Merged |
 | Maps: GeoJSON, GPX, KML/KMZ | #76 | Merged |
 | CAD: DXF drawn; DWG, STEP, IGES details | #77 | Merged |
-| iWork and creative apps: saved pictures and details | #78 | In review |
+| iWork and creative apps: saved pictures and details | #78 | Merged |
+| Music projects: Ableton, REAPER, FL Studio, Cubase | #79 | In review |

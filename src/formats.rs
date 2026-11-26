@@ -90,6 +90,7 @@ impl Format {
             "ical" => ("An event's time, place and details, or a list of events and to-dos", "Filescape"),
             "jxl" => ("The picture; channels one by one", "jxl-oxide"),
             "dxf" => ("The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size", "Filescape"),
+            "daw" => ("The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones)", "Filescape"),
             "heif" => ("The picture", "The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg)"),
             _ => match self.category {
                 Category::Picture => ("The picture; channels one by one", "image"),
@@ -196,6 +197,7 @@ pub static FORMATS: &[Format] = &[
         category: Category::Saved,
         exts: &["sketch", "afdesign", "afphoto", "afpub", "aftemplate", "cdr", "skp", "blend", "c4d", "max", "ma", "mb", "hip", "hipnc", "hiplc"],
     },
+    Format { id: "daw", name: "Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo)", category: Category::Document, exts: &["als", "rpp", "flp", "cpr", "npr"] },
     Format { id: "map", name: "Map data (GeoJSON, GPX, KML)", category: Category::Map, exts: &["geojson", "gpx", "kml", "kmz"] },
     Format { id: "midi", name: "MIDI music", category: Category::Midi, exts: &["mid", "midi", "kar"] },
     Format { id: "pdf", name: "PDF document", category: Category::Pdf, exts: &["pdf"] },
@@ -264,6 +266,10 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "ical"
     } else if at(0, b"Return-Path: ") || at(0, b"Received: ") || at(0, b"MIME-Version: ") {
         "mail"
+    } else if at(0, b"FLhd") {
+        "daw"
+    } else if at(0, b"<REAPER_PROJECT") {
+        "daw"
     } else if at(0, b"BLENDER") {
         "creative"
     } else if at(0, b"ISO-10303-21;") {
