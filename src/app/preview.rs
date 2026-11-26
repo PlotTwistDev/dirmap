@@ -2005,7 +2005,9 @@ fn splat_tools(ui: &mut egui::Ui, r: Rect, view: &mut crate::splat::View, bounds
     }
     ui.painter().rect_filled(bar.expand(2.0), 6.0, Color32::from_black_alpha(if near { 175 } else { 110 }));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(vec2(6.0, 2.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    child.visuals_mut().override_text_color = Some(Color32::from_gray(230));
+    // Dark controls on the dark bar, whatever the app's theme: in the light theme the boxes
+    // would be light, and light text on them unreadable.
+    child.set_visuals(egui::Visuals::dark());
     egui::ComboBox::from_id_salt(("splat-look", r.min.x as i32, r.min.y as i32))
         .selected_text(view.look.name())
         .width(92.0)
