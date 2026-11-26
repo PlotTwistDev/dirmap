@@ -78,6 +78,10 @@ impl Format {
             "docx" | "odt" => ("Formatted text: headings, lists, tables", "Filescape"),
             "pptx" | "odp" => ("Each slide's title and points", "Filescape"),
             "epub" => ("Chapters, formatted; the cover in Icons view", "Filescape"),
+            "mail" => ("Sender, recipients, date, the text (HTML as plain text, nothing loaded) and a list of attachments", "Filescape"),
+            "mbox" => ("A list of the messages: date, sender and subject", "Filescape"),
+            "vcard" => ("A contact card, or a list of contacts", "Filescape"),
+            "ical" => ("An event's time, place and details, or a list of events and to-dos", "Filescape"),
             "jxl" => ("The picture; channels one by one", "jxl-oxide"),
             "heif" => ("The picture", "The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg)"),
             _ => match self.category {
@@ -181,6 +185,10 @@ pub static FORMATS: &[Format] = &[
     Format { id: "pptx", name: "PowerPoint presentation", category: Category::Document, exts: &["pptx", "pptm", "ppsx", "potx"] },
     Format { id: "odp", name: "OpenDocument presentation", category: Category::Document, exts: &["odp", "otp"] },
     Format { id: "epub", name: "EPUB book", category: Category::Document, exts: &["epub"] },
+    Format { id: "mail", name: "Email message", category: Category::Document, exts: &["eml", "emlx"] },
+    Format { id: "mbox", name: "Mailbox", category: Category::Document, exts: &["mbox", "mbx"] },
+    Format { id: "vcard", name: "Contact cards (vCard)", category: Category::Document, exts: &["vcf", "vcard"] },
+    Format { id: "ical", name: "Calendar (iCalendar)", category: Category::Document, exts: &["ics", "ical", "ifb"] },
 ];
 
 fn by_ext() -> &'static HashMap<&'static str, &'static Format> {
@@ -230,6 +238,12 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "model3d"
     } else if at(0, b"MThd") {
         "midi"
+    } else if at(0, b"BEGIN:VCARD") {
+        "vcard"
+    } else if at(0, b"BEGIN:VCALENDAR") {
+        "ical"
+    } else if at(0, b"Return-Path: ") || at(0, b"Received: ") || at(0, b"MIME-Version: ") {
+        "mail"
     } else if at(0, b"%PDF-") {
         "pdf"
     } else if at(4, b"ftyp") {
@@ -289,5 +303,7 @@ mod tests {
         assert_eq!(by_name("Inter.TTF").map(|f| f.category), Some(Category::Font));
         assert_eq!(by_name("tune.MID").map(|f| f.category), Some(Category::Midi));
         assert_eq!(sniff(b"MThd\0\0\0\x06").map(|f| f.id), Some("midi"));
+        assert_eq!(sniff(b"BEGIN:VCALENDAR\r\n").map(|f| f.id), Some("ical"));
+        assert_eq!(by_name("Inbox.mbox").map(|f| f.id), Some("mbox"));
     }
 }
