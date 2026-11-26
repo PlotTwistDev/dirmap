@@ -13,35 +13,83 @@
 // No console window behind the GUI on Windows; --cli attaches to the calling terminal instead.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod aepfile;
 mod asking;
 mod actions;
 mod app;
+mod archtree;
+mod cadview;
 mod camera;
+mod camraw;
 mod categories;
+mod cleanup;
+mod relocate;
+mod quantize;
 mod cloud;
 mod cloudops;
+mod craftfile;
+mod daw;
 mod drives;
 mod dupes;
+mod epub;
 mod elevate;
+mod fontview;
 mod formats;
 mod fsys;
 mod help;
+mod highlight;
 mod icons;
+mod imagelook;
 mod known;
+mod jpegx;
 mod kit;
 mod licence;
+mod lightcraft;
+mod geoview;
+mod gguf;
+mod fit;
+mod health;
+mod weights;
+mod vocab;
+mod modeldiff;
+mod llm;
+mod askabout;
+mod lab;
+mod probe;
+mod lens;
+mod getmodel;
+mod inspect;
+mod mailview;
+mod midiview;
+mod models;
 mod mapview;
+mod model3d;
+mod splat;
 mod netdrives;
+mod officedoc;
+mod packages;
+mod paintfile;
+mod pdfview;
 mod pattern;
 mod player;
+mod projrefs;
+mod psdview;
 mod settings;
+mod sheets;
+mod tables;
 mod shellmenu;
 mod subset;
+mod savedpic;
 mod scan;
+mod diskimage;
+mod sciimage;
 mod sequences;
 mod snapshot;
+mod soundinfo;
 mod sunburst;
+mod svg;
 mod templates;
+mod thumbcache;
 mod tilegpu;
 mod video;
 mod wave;
@@ -59,6 +107,15 @@ use std::sync::Arc;
 pub const APP_ID: &str = "Filescape";
 
 fn main() -> eframe::Result {
+    // A copy started only to convert one DWG drawing (see cadview): does that and nothing else.
+    // A copy started only to shrink a model (see quantize): the same.
+    quantize::serve_if_asked();
+    if let Some(code) = craft_dwg::serve_if_asked() {
+        std::process::exit(code);
+    }
+    craft_dwg::use_own_worker();
+    // JPEG XL through the image crate, everywhere pictures are read.
+    jxl_oxide::integration::register_image_decoding_hook();
     templates::migrate_old_folder();
     crash_log();
     let mut cli = false;
@@ -68,6 +125,7 @@ fn main() -> eframe::Result {
     let mut compare = None;
     let mut restarted = false;
     let mut manage = None;
+    let mut list_models = false;
     let mut opts = scan::Options { one_file_system: true, ..Default::default() };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -80,6 +138,7 @@ fn main() -> eframe::Result {
             "--cloud-mounts" => opts.cloud_mounts = true,
             "--free-up" => manage = Some(cloudops::Action::FreeUp),
             "--keep" => manage = Some(cloudops::Action::Keep),
+            "--models" => list_models = true,
             "--top" => top = args.next().and_then(|s| s.parse().ok()).unwrap_or(top),
             "--save-snapshot" => save_snapshot = args.next().map(PathBuf::from),
             "--compare" => compare = args.next().map(PathBuf::from),
@@ -89,6 +148,7 @@ fn main() -> eframe::Result {
                 println!("usage: filescape [--cli [--top N] [--logical | --cloud-only | --reclaimable] [--save-snapshot FILE]] [--cloud-mounts] [--compare FILE] [--all-fs] [PATH]");
                 println!("       filescape --cli --free-up PATH   free up the cloud files in PATH (they stay in the cloud)");
                 println!("       filescape --cli --keep PATH      keep the cloud files in PATH on this computer (downloads them)");
+                println!("       filescape --cli --models PATH    list the AI models in PATH and their copies");
                 return Ok(());
             }
             _ => path = Some(PathBuf::from(a)),
@@ -118,6 +178,15 @@ fn main() -> eframe::Result {
                 println!("  {}: {why}", p.display());
             }
             std::process::exit(if o.failed > 0 { 1 } else { 0 });
+        }
+        // Saving a snapshot is Pro in the app, so it is from the command line too.
+        if save_snapshot.is_some() && !licence::Licensing::load().allows(licence::Feature::Snapshots) {
+            eprintln!("--save-snapshot: saving snapshots needs a Filescape Pro licence. Enter one in the app under Settings > Licensing.");
+            std::process::exit(3);
+        }
+        if list_models {
+            models_report(&path, opts);
+            return Ok(());
         }
         report(&path, opts, top, save_snapshot);
         return Ok(());
@@ -177,6 +246,36 @@ fn main() -> eframe::Result {
             run(eframe::Renderer::Glow, path)
         }
         r => r,
+    }
+}
+
+/// `--cli --models`: the AI models in a folder, largest first.
+fn models_report(root: &std::path::Path, opts: scan::Options) {
+    let progress = Arc::new(scan::Progress::default());
+    let tree = scan::scan(root, &opts, &progress, &scan::new_live(root));
+    let Some(list) = models::find(&tree, root, &models::Progress::default()) else { return };
+    let total: u64 = list.iter().map(|m| m.size).sum();
+    println!("{}: {} AI models, {}", root.display(), list.iter().filter(|m| !m.orphan).count(), scan::human(total));
+    for m in &list {
+        let mut note = String::new();
+        if m.orphan {
+            note.push_str("  [not used by any Ollama model]");
+        } else if m.extra > 0 {
+            note.push_str("  [copy]");
+        } else if !m.copies.is_empty() {
+            note.push_str("  [has copies]");
+        }
+        if m.runnable() {
+            note.push_str("  [can run]");
+        }
+        println!("{:>10}  {}  ({} · {}){note}", scan::human(m.size), m.name, m.details(), m.source.label());
+        for f in &m.files {
+            println!("{:>10}    {}", "", f.path.display());
+        }
+    }
+    let extra: u64 = list.iter().map(|m| m.extra).sum();
+    if extra > 0 {
+        println!("{} in extra copies", scan::human(extra));
     }
 }
 

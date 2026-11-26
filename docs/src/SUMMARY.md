@@ -11,6 +11,9 @@
 - [Understanding the interface](getting-started/interface.md)
 - [The Files workspace](views/file-manager.md)
 - [The Remote workspace](views/remote.md)
+- [The AI Models workspace](views/ai-models.md)
+- [Ask AI](views/ask-ai.md)
+- [The Lab](views/model-lab.md)
 - [Scanning a drive or folder](getting-started/scanning.md)
 - [Interpreting scan results](getting-started/results.md)
 
@@ -62,6 +65,7 @@
 
 - [Keyboard shortcuts](reference/keyboard.md)
 - [Mouse controls](reference/mouse.md)
+- [Supported formats](reference/formats.md)
 - [Command line](reference/command-line.md)
 - [Glossary](reference/glossary.md)
 

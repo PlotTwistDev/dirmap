@@ -19,6 +19,10 @@ app and works offline.
 - **Right-click › What Is This?** in the file manager, the Storage Analysis list, the tree and
   on the map opens the explanation in a window, also for items inside a known folder.
 
+Home folders (`/home`, `/root`) and the places other drives appear (`/media`, `/mnt`,
+`/Volumes`) are explained only for themselves: your own files inside them get no note, unless
+they're in a known folder such as `~/.cache`.
+
 Turn the icons off with **⚙ Settings › General › Explain system files**. The preview box and the status
 bar note follow the same setting; the menu item is always there.
 

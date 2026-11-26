@@ -98,11 +98,17 @@ pub struct Item {
     pub size: u64,
     /// Seconds since the Unix epoch, 0 when unknown.
     pub modified: i64,
+    /// Its compressed size, where the format keeps one per file (zip).
+    pub packed: Option<u64>,
 }
 
 /// An archive's table of contents, folders included (also ones only implied by paths).
 pub struct Index {
     pub items: Vec<Item>,
+    /// Names left out because they would land outside the folder it's extracted to.
+    pub unsafe_names: usize,
+    /// Files that need a password.
+    pub encrypted: usize,
 }
 
 impl Index {
@@ -151,17 +157,18 @@ fn clean(name: &str) -> Option<String> {
 }
 
 /// Add the folders that are only implied by the paths of what's in them, and drop duplicates.
-fn complete(raw: Vec<Item>) -> Index {
+fn complete(raw: Raw) -> Index {
+    let Raw { items: raw, unsafe_names, encrypted } = raw;
     let mut map: BTreeMap<String, Item> = BTreeMap::new();
     for it in raw {
         let mut p = it.path.as_str();
         while let Some((parent, _)) = p.rsplit_once('/') {
-            map.entry(parent.to_string()).or_insert(Item { path: parent.to_string(), is_dir: true, size: 0, modified: 0 });
+            map.entry(parent.to_string()).or_insert(Item { path: parent.to_string(), is_dir: true, size: 0, modified: 0, packed: None });
             p = parent;
         }
         map.insert(it.path.clone(), it);
     }
-    Index { items: map.into_values().collect() }
+    Index { items: map.into_values().collect(), unsafe_names, encrypted }
 }
 
 fn zip_time(d: Option<zip::DateTime>) -> i64 {
@@ -184,24 +191,39 @@ fn tar_reader(archive: &Path, fmt: Format) -> io::Result<tar::Archive<Box<dyn Re
     Ok(tar::Archive::new(r))
 }
 
-fn read_items(archive: &Path, fmt: Format) -> Result<Vec<Item>, String> {
-    let mut out = Vec::new();
+#[derive(Default)]
+struct Raw {
+    items: Vec<Item>,
+    unsafe_names: usize,
+    encrypted: usize,
+}
+
+fn read_items(archive: &Path, fmt: Format) -> Result<Raw, String> {
+    let mut raw = Raw::default();
+    let out = &mut raw.items;
     match fmt {
         Format::Zip => {
             let mut z = zip::ZipArchive::new(io::BufReader::new(fs::File::open(archive).map_err(|e| e.to_string())?)).map_err(|e| e.to_string())?;
             for i in 0..z.len() {
                 let f = z.by_index_raw(i).map_err(|e| e.to_string())?;
-                let Some(path) = f.name().ok().and_then(|n| clean(&n)) else { continue };
-                out.push(Item { path, is_dir: f.is_dir(), size: f.size(), modified: zip_time(f.last_modified()) });
+                let Some(path) = f.name().ok().and_then(|n| clean(&n)) else {
+                    raw.unsafe_names += 1;
+                    continue;
+                };
+                raw.encrypted += usize::from(f.encrypted());
+                out.push(Item { path, is_dir: f.is_dir(), size: f.size(), modified: zip_time(f.last_modified()), packed: Some(f.compressed_size()) });
             }
         }
         Format::SevenZ => {
             let r = sevenz_rust2::ArchiveReader::new(fs::File::open(archive).map_err(|e| e.to_string())?, sevenz_rust2::Password::empty()).map_err(|e| e.to_string())?;
             for e in &r.archive().files {
-                let Some(path) = clean(e.name()) else { continue };
+                let Some(path) = clean(e.name()) else {
+                    raw.unsafe_names += 1;
+                    continue;
+                };
                 let t: std::time::SystemTime = e.last_modified_date().into();
                 let modified = t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
-                out.push(Item { path, is_dir: e.is_directory(), size: e.size(), modified });
+                out.push(Item { path, is_dir: e.is_directory(), size: e.size(), modified, packed: None });
             }
         }
         _ => {
@@ -213,12 +235,15 @@ fn read_items(archive: &Path, fmt: Format) -> Result<Vec<Item>, String> {
                 if !(kind.is_dir() || kind.is_file()) {
                     continue;
                 }
-                let Some(path) = e.path().ok().and_then(|p| clean(&p.to_string_lossy())) else { continue };
-                out.push(Item { path, is_dir: kind.is_dir(), size: h.size().unwrap_or(0), modified: h.mtime().unwrap_or(0) as i64 });
+                let Some(path) = e.path().ok().and_then(|p| clean(&p.to_string_lossy())) else {
+                    raw.unsafe_names += 1;
+                    continue;
+                };
+                out.push(Item { path, is_dir: kind.is_dir(), size: h.size().unwrap_or(0), modified: h.mtime().unwrap_or(0) as i64, packed: None });
             }
         }
     }
-    Ok(out)
+    Ok(raw)
 }
 
 /// What's directly inside `inner` ("" for the top) of an archive, as listing entries.

@@ -38,6 +38,8 @@ pub(super) enum TreeAction {
     KeepHere,
     /// The "What Is This?" window for a system file or folder.
     Explain,
+    /// Ask AI about the item, with what the scan knows about it.
+    AskAi,
 }
 
 /// Something to do with a row of the extension list.
@@ -267,6 +269,9 @@ impl App {
         if info.known && info.count <= 1 {
             set(item(ui, true, "What Is This?", ""), TreeAction::Explain);
         }
+        if info.count <= 1 {
+            set(item(ui, true, "Ask AI About This…", ""), TreeAction::AskAi);
+        }
         set(item(ui, !info.is_dir, "Compute Hash (SHA-256)", &k(M::COMMAND, Key::H)), TreeAction::Hash);
         set(item(ui, !info.is_root, "Add to Exclusion Filter", ""), TreeAction::Exclude);
         ui.separator();
@@ -412,6 +417,10 @@ impl App {
             TreeAction::Terminal(t) => actions::terminal(&disk, t),
             TreeAction::Explain => {
                 self.explain_path(disk.clone());
+                Ok(())
+            }
+            TreeAction::AskAi => {
+                self.ask_about_node(tree.clone(), path.clone(), disk.clone());
                 Ok(())
             }
             TreeAction::Properties => {
@@ -1251,7 +1260,7 @@ fn add_line(list: &mut String, line: &str) {
 }
 
 /// Read one item from disk again, as the scan would see it. `None` if it's gone.
-fn reread(path: &Path, opts: &Options) -> Option<Node> {
+pub(super) fn reread(path: &Path, opts: &Options) -> Option<Node> {
     if crate::fsys::remote::is_remote(path) {
         let m = crate::fsys::remote::meta(path).ok()?;
         return Some(if m.is_dir && !m.is_link {

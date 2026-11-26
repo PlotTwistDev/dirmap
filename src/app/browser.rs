@@ -255,11 +255,20 @@ pub(super) fn storage_state(n: &Node) -> Option<String> {
 
 pub(super) fn kind_for(name: &str, is_dir: bool) -> String {
     if is_dir {
-        return "Folder".into();
+        return crate::packages::kind(name).unwrap_or("Folder").into();
     }
     let ext = scan::ext_of(name);
     if ext.is_empty() {
         return "File".into();
+    }
+    if let Some(c) = crate::craftfile::of(name) {
+        return c.kind().into();
+    }
+    if let Some(p) = crate::paintfile::of(name) {
+        return p.kind().into();
+    }
+    if crate::aepfile::is_project(name) {
+        return "After Effects project".into();
     }
     let noun = match categories::of(name) {
         Category::Audio => "audio",

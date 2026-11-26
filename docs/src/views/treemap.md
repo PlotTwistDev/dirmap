@@ -62,7 +62,9 @@ by: Age** or **Change** only the totals line is shown, since the colours then me
 As you zoom in, a file's rectangle that grows big enough shows what's in the file instead of a
 plain colour: a picture fills it, a video shows a frame (rest the pointer on it and it plays,
 silently, until you move away), a sound shows its waveform, a PDF shows its first page, and text
-files, code and Word or OpenDocument documents show their first lines. The file's name and size
+files, code and Word or OpenDocument documents show their first lines. A Gaussian splat scene
+shows the splats drawn on the graphics chip, with its format and splat count (such as
+"SPZ · 1.2M splats") in the top corner. The file's name and size
 move to a dark strip along the bottom, and a thin edge of the type colour stays round it.
 Transparent parts of pictures show a grey check pattern, not the tile's colour. Bigger
 tiles get sharper pictures and bigger text.
@@ -85,6 +87,12 @@ it is and, for a cloud file, how it's stored. For a folder it lists the largest 
 click one to select it. **Open** opens the item and **Show in folder** (**Show in Finder** on macOS)
 shows it in your file manager. Hide or show the pane with **Preview pane** in the filter bar or
 **Alt+P** (**⌥P** on macOS).
+
+### Quick Look on the map
+
+Click a file's tile and press **Space** (or **Quick Look** in the preview pane) for a large
+preview over the map, the same as in the File Manager. Click another tile and it follows.
+**Full screen** (or **F**) fills the window with it, and **Space** or **Escape** closes it.
 
 ## Very small files
 

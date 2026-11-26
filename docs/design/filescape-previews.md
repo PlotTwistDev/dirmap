@@ -87,8 +87,8 @@ Checked on crates.io, 25 November 2026.
 | Fonts | `ttf-parser` 0.25 | MIT or Apache-2.0 | Names, axes, glyph outlines | **Use** |
 |  | `ab_glyph` 0.2 | Apache-2.0 | Rasterise sample text into a picture | **Use** (already in the tree via egui) |
 | Spreadsheets | `calamine` 0.38 | MIT | xlsx, xlsm, xlsb, xls, ods; cached values only, never runs formulas or macros | **Use** |
-| PDF pages | `hayro` 0.9 | MIT or Apache-2.0 | Pure-Rust renderer, young; would give every page on every system | Evaluate (Phase 1 spike) |
-|  | `pdfium-render` 0.9 | MIT or Apache-2.0 | Needs the PDFium library (BSD-3) shipped beside the app, ~5 MB a platform | Fallback if hayro falls short |
+| PDF pages | `hayro` 0.9 | MIT or Apache-2.0 | Pure-Rust renderer, young; would give every page on every system | **Use** (chosen 25 Nov) |
+|  | `pdfium-render` 0.9 | MIT or Apache-2.0 | Needs the PDFium library (BSD-3) shipped beside the app, ~5 MB a platform | Not needed |
 |  | System | n/a | Windows.Data.Pdf and `pdftoppm` already render any page; macOS needs CGPDFDocument | Use where there today |
 | Photoshop | `psd` 0.3 | MIT or Apache-2.0 | Flattened composite; plus the embedded JPEG thumbnail (resource 1036) as a cheap path | **Use**, guarded by limits |
 | Camera RAW | own reader + `kamadak-exif` 0.6 | BSD-2-Clause | Embedded JPEG previews from TIFF-based RAWs (CR2, NEF, ARW, DNG, PEF, ORF, RW2…) and CR3/ISO boxes; EXIF metadata | **Use** |
@@ -96,7 +96,7 @@ Checked on crates.io, 25 November 2026.
 | HEIC / HEIF | System | n/a | macOS ImageIO/Quick Look (built in); Windows shell (needs the free HEIF extension); Linux `heif-thumbnailer` if installed | **Use** |
 |  | `libheif-rs` 3 | MIT (binding) | libheif itself is LGPL-3 with HEVC patents: avoid bundling | Avoid |
 | AVIF | `image` `avif-native` | MIT/Apache + libdav1d BSD-2 | C dependency, cross-builds need care | Phase 1 via system first, then this |
-| JPEG XL | `jxl-oxide` 0.12 | MIT or Apache-2.0 | Pure Rust | Phase 2 |
+| JPEG XL | `jxl-oxide` 0.12 | MIT or Apache-2.0 | Pure Rust, through the `image` crate's decoding hook | **Use** |
 | Audio tags, cover art | `lofty` 0.25 | MIT or Apache-2.0 | Title/artist/album, embedded pictures, duration, sample rate, bit depth | **Use** |
 | Audio decode | `symphonia` 0.6 | MPL-2.0 | File-level copyleft (changes to its own files must be published), fine to ship. System decoders already cover playback | Not needed yet |
 | MIDI | `midly` 0.5 | Unlicense | Piano roll | Phase 2 |
@@ -175,8 +175,10 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 
 1. **Free or Professional**: decided 25 Nov, every preview is free for now.
 2. **Third-party notices** (finding 10): decided 25 Nov, yes, a generated page in Help > About.
-3. **PDF renderer**: pure-Rust hayro (no extra files) vs PDFium (more mature, ~5 MB extra per
-   platform). Decided after the Phase 1 spike.
+3. **PDF renderer**: decided 25 Nov, hayro. In the spike it drew a 14-page TeX paper and pdf.js
+   test files correctly in 1-20 ms a page at 1000 px wide, adds about 4 MB to the app and
+   needs nothing shipped beside it. PDFs it can't open (password-protected, damaged) fall back
+   to the system's first-page picture.
 
 ## 6. Tracker
 
@@ -184,4 +186,37 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 |---|---|---|
 | Review and roadmap (this doc) | #43 | Merged |
 | Format registry and file signatures | #44 | Merged |
-| Third-party licence notices in About | | In review |
+| Third-party licence notices in About | #45 | Merged |
+| SVG drawings (resvg) | #46 | Merged |
+| Syntax colouring (syntect + two-face) | #47 | Merged |
+| Font specimens | #48 | Merged |
+| Sound pane: tags, cover, waveform | #49 | Merged |
+| Camera RAW (embedded JPEG + EXIF) | #50 | Merged |
+| HEIC and AVIF through the system | #51 | Merged |
+| Photoshop PSD/PSB (own reader) | #52 | Merged |
+| Spreadsheets (calamine) | #53 | Merged |
+| Word, PowerPoint and OpenDocument formatted | #54 | Merged |
+| Every PDF page (hayro) | #55 | Merged |
+| EPUB books (own reader) | #56 | Merged |
+| Quick Look from Storage Analysis, full screen | #57 | Merged |
+| **Phase 2** | | |
+| JPEG XL (jxl-oxide) | #66 | Merged |
+| MIDI piano roll (midly) | #67 | Merged |
+| SQLite (rusqlite) and CSV tables | #68 | Merged |
+| Archive tree with sizes and ratios | #69 | Merged |
+| Image channels, HDR exposure, multilayer EXR | #70 | Merged |
+| Video filmstrips and representative frames | #71 | Merged |
+| 3D model viewer (STL, OBJ, PLY, glTF, 3MF) | #72 | Merged |
+| Disk thumbnail cache, Previews & thumbnails settings | #73 | Merged |
+| Supported formats directory | #74 | Merged |
+| **Phase 3** | | |
+| Email, contacts and calendars (eml, mbox, vcf, ics) | #75 | Merged |
+| Maps: GeoJSON, GPX, KML/KMZ | #76 | Merged |
+| CAD: DXF drawn; DWG, STEP, IGES details | #77 | Merged |
+| iWork and creative apps: saved pictures and details | #78 | Merged |
+| Music projects: Ableton, REAPER, FL Studio, Cubase | #79 | Merged |
+| DICOM and FITS images | #80 | Merged |
+| Disk images: ISO contents, virtual disks, DMG, WIM | #82 | Merged |
+| UDF disc listing (DVD, Blu-ray, Windows install) | #83 | Merged |
+| JPEG 2000, JPEG-LS and lossless JPEG (DICOM and .jp2) | #85 | Merged |
+| Logic Pro projects (.logicx packages) | #87 | In review |

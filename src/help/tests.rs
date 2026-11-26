@@ -274,6 +274,11 @@ fn system_files_list_is_current() {
 }
 
 #[test]
+fn supported_formats_list_is_current() {
+    check_generated_text(topics::FORMATS, &crate::formats::markdown());
+}
+
+#[test]
 fn filter_syntax_examples_behave_as_documented() {
     let d = docs();
     let mut checked = 0;

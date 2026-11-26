@@ -53,7 +53,12 @@ mod dialogs;
 mod views;
 mod summary;
 mod cloud;
+mod models;
+mod ask;
+mod lab;
+mod storage;
 mod explain;
+mod livescan;
 pub(crate) mod style;
 use files::Workspace;
 
@@ -223,6 +228,8 @@ pub struct App {
     /// Filters in effect for the tree on screen, to tell when a rescan is needed.
     scanned_with: Option<Settings>,
     job: Option<Job>,
+    /// Watches the analysis on screen for changes made after the scan (see `livescan`).
+    live: Option<livescan::LiveScan>,
     live_open: HashSet<usize>,
     /// Last order shown for each live folder's subfolders, reused while the mouse is over the
     /// list so rows don't jump around as sizes change.
@@ -280,6 +287,8 @@ pub struct App {
     shown: Option<Shown>,
     filter_job: Option<FilterJob>,
     seq: SeqState,
+    models: models::ModelsState,
+    ask: ask::AskState,
     /// Path and size of the treemap tile under the mouse, for the status bar.
     hover_status: Option<String>,
     wheel: f32,
@@ -379,6 +388,7 @@ impl App {
             scanned_path: PathBuf::new(),
             scanned_with: None,
             job: None,
+            live: None,
             live_open: HashSet::new(),
             live_order: HashMap::new(),
             tree: None,
@@ -418,6 +428,8 @@ impl App {
             shown: None,
             filter_job: None,
             seq: SeqState::default(),
+            models: Default::default(),
+            ask: Default::default(),
             hover_status: None,
             wheel: 0.0,
             color_mode: ColorMode::Type,
@@ -1024,6 +1036,7 @@ impl App {
                 ("Getting Started", "", topics::QUICK_START),
                 ("Keyboard Shortcuts", "", topics::KEYBOARD),
                 ("Mouse Controls", "", topics::MOUSE),
+                ("Supported Formats", "", topics::FORMATS),
                 ("Search and Filter Examples", "", topics::EXAMPLES),
                 ("Troubleshooting", "", topics::TROUBLESHOOTING),
                 ("What's New", "", topics::WHATS_NEW),
@@ -2876,6 +2889,7 @@ impl eframe::App for App {
             self.applied_scale = Some(self.settings.ui_scale);
         }
         scan::set_decimal_units(self.view().units == settings::SizeUnits::Decimal);
+        self.settings.apply_previews();
         scan::set_shown_metric(self.metric);
 
         self.help_keys(&ctx);
@@ -2884,6 +2898,18 @@ impl eframe::App for App {
             self.set_custom(&p);
         }
         self.help_regions.clear();
+        // A link in a preview to a file a project uses: show it in Files, or in Storage Analysis
+        // when that's where the preview is.
+        if let Some(p) = preview::take_show(&ctx)
+            && let (Some(dir), Some(name)) = (p.parent(), p.file_name())
+        {
+            let from = self.files.prefs.workspace;
+            self.set_workspace(Workspace::Files);
+            self.files.reveal(dir.to_path_buf(), vec![name.to_string_lossy().into()]);
+            if from == Workspace::Analysis {
+                self.set_workspace(Workspace::Analysis);
+            }
+        }
 
         self.licence.tick(&ctx);
         self.licence.update_tick(&ctx, self.settings.check_updates);
@@ -2965,6 +2991,9 @@ impl eframe::App for App {
             }
         }
 
+        // Changes made since the scan (a download landing, a file deleted elsewhere).
+        self.live_poll(&ctx);
+
         // A snapshot finished loading, or a duplicate search finished.
         if let Some(rx) = &self.snap_rx {
             match rx.try_recv() {
@@ -3007,6 +3036,9 @@ impl eframe::App for App {
         }
         self.drive_filter(&ctx);
         self.poll_sequences(&ctx);
+        self.poll_models(&ctx);
+        self.poll_storage(&ctx);
+        self.poll_ask(&ctx);
 
         self.licence.banner(ui);
         self.licence.update_notice(ui);
@@ -3014,12 +3046,18 @@ impl eframe::App for App {
             ui.add_space(2.0);
             if analysis {
                 self.toolbar(ui);
+            } else if self.files.prefs.workspace == Workspace::Models {
+                self.models_toolbar(ui);
             } else {
                 self.files_toolbar(ui);
             }
             ui.add_space(2.0);
         });
         self.help_regions.push((r.response.rect, if analysis { topics::TOOLBAR } else { topics::FILE_MANAGER }));
+        if self.files.prefs.workspace == Workspace::Models {
+            self.models_workspace(ui);
+            return;
+        }
         if !analysis {
             self.files_workspace(ui);
             return;
@@ -3161,6 +3199,11 @@ impl eframe::App for App {
             return;
         }
 
+        // Quick Look for the picked tile (Space), drawn over the map.
+        self.map_quick_look_key(&ctx);
+        if self.files.look.from_map {
+            self.quick_look(&ctx);
+        }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::P)) {
             self.files.prefs.map_preview = !self.files.prefs.map_preview;
         }

@@ -42,6 +42,7 @@ settings changed. Rescan**, and the Filtering page says **Rescan needed**.
 | **Size units** <!-- setting:units --> | Binary | **Binary** (1 KB = 1,024 bytes, like Explorer) or **Decimal** (1 kB = 1,000 bytes, like drive makers and macOS). An example underneath shows how a file's size would read. Also changes how typed sizes are read. See [Units](../disk-usage/sizes.md#units-binary-and-decimal). |
 | **Size shown** <!-- setting:size_metric --> | On disk | **On disk**, **Logical**, **Only in the cloud** or **Reclaimable**. Set with the **Size** switch above the map or on the [Cloud storage](#cloud-storage) page; Filescape remembers your last choice. See [Size on disk and logical size](../disk-usage/sizes.md#size-on-disk-and-logical-size). |
 | **Live scan results** <!-- setting:live_tree --> | On | Shows a tree of folders filling in during a scan. Off shows only the progress bar. |
+| **Keep up with changes** <!-- setting:watch_changes --> | On | Adds, updates and removes items in Storage Analysis as files change after the scan (a download finishing, a file deleted or moved in another app), without scanning again. Only the changed items are read; cloud files are never downloaded. See [Changes after the scan](../getting-started/scanning.md#changes-after-the-scan). |
 | **Check automatically** <!-- setting:check_updates --> | On | At each launch, asks filescape.app for the newest version number and shows a notice when there's a newer one, saying whether your licence covers it. Nothing about you or the computer is sent. See [Updates](licensing.md#updates). |
 
 The **Updates** section also shows the version you have, when the last check succeeded, and
@@ -90,7 +91,7 @@ too. See [Lighting and visual effects](../views/visual-effects.md).
 |---|---|---|
 | **Tile style** <!-- setting:tile_style --> | Modern | **Modern**: soft pastel tiles with names on them and dark name tags on the folders, the same look as the map on filescape.app. **Classic cushion**: shaded cushion tiles in strong colours, tuned by the **Classic cushion shading** section (which is only shown with Classic chosen). |
 | **File labels** <!-- setting:show_labels --> | On | Writes names (and sizes) on tiles with room for them, on the treemap and the sunburst. The same as **File names on tiles** in the filter bar. |
-| **Previews on tiles** <!-- setting:tile_previews --> | On | As you zoom in on the treemap, tiles big enough on screen show what's in the file: pictures, a frame of a video (which plays silently while the pointer rests on it), a sound's waveform, the first page of a PDF, and the first lines of text files and Word or OpenDocument documents. Previews load in the background and only for files on this computer: files only in the cloud, on mounted cloud drives or on servers are never read for them. The same as **Previews** in the filter bar. |
+| **Previews on tiles** <!-- setting:tile_previews --> | On | As you zoom in on the treemap, tiles big enough on screen show what's in the file: pictures, camera RAW photos, Photoshop documents, SVG drawings, fonts, a frame of a video (which plays silently while the pointer rests on it), a sound's waveform, the first page of a PDF, and the first lines of text files, spreadsheets and Word or OpenDocument documents. Previews load in the background and only for files on this computer: files only in the cloud, on mounted cloud drives or on servers are never read for them. The same as **Previews** in the filter bar. |
 | **Selection border** <!-- setting:selection_color --> | White | Colour of the outline around the selected item. |
 | **Presets** | | Classic cushion only, shown as pictures: **Classic** restores the shading settings below to their defaults, **Soft** gives gentler shading, and **Flat** turns shading off and the grid on. |
 | **Brightness** <!-- setting:brightness --> | 88 | Classic cushion only. Overall brightness of the tiles (0–100). |
@@ -128,6 +129,24 @@ How cloud files are counted and shown. See [Cloud files](../disk-usage/cloud-fil
 folders on this computer** section lists the cloud folders and drives Filescape found, with the
 service and how it keeps files here.
 
+
+## Previews & thumbnails
+
+How much work goes into previews and thumbnails, and what's kept on disk. See
+[Quick Look and the preview pane](../views/file-manager.md#quick-look-and-the-preview-pane).
+
+**Presets** sets everything below at once: **Light** keeps nothing on disk and makes only the
+pictures that are quick to make; **Balanced** (the default) shows everything and keeps up to
+512 MB of thumbnails; **Everything** keeps up to 2 GB. Changing a setting by hand shows the mix as
+your own.
+
+| Setting | Default | Effect |
+|---|---|---|
+| **Keep thumbnails on disk** <!-- setting:thumb_cache --> | On | Keeps the pictures made for Icons view and map tiles in the system's cache folder (`~/Library/Caches/Filescape` on macOS, `%LOCALAPPDATA%\Filescape\Cache` on Windows, `~/.cache/filescape` on Linux), so folders show their pictures at once next time, without reading the files again. A changed file gets a new picture. **Clear** removes them all. |
+| **Thumbnail cache size** <!-- setting:thumb_cache_mb --> | 512 MB | The most the kept thumbnails may take. When it's full, the least recently seen go first. |
+| **Filmstrip** <!-- setting:video_strip --> | On | Frames from across a video under its preview; click one to play from there. |
+| **Better video pictures** <!-- setting:video_better_poster --> | On | When a video's first frame is black or a fade, shows the most telling of a few frames from across it instead. |
+| **3D and MIDI pictures** <!-- setting:rich_thumbs --> | On | Draws 3D models and MIDI files for Icons view and map tiles. The preview pane always shows them. |
 ## Advanced
 
 | Setting | Default | Effect |

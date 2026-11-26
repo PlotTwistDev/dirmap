@@ -67,6 +67,7 @@ pub fn general(ui: &mut egui::Ui, cx: &mut PageCx, licence: &mut crate::licence:
 
     kit::section(ui, Icon::Drive, "Scanning", f.of("scanning"), |ui| {
         kit::toggle_row(ui, "Live scan results", Some("Fill in the folder list while a scan runs. Off shows only the progress until it finishes."), &mut d.live_tree);
+        kit::toggle_row(ui, "Keep up with changes", Some("Add, update and remove items in the analysis as files change after the scan (downloads, files deleted or moved in other apps), without scanning again. Only the changed items are read, and cloud files are never downloaded."), &mut d.watch_changes);
     });
 
     updates(ui, cx, licence);
@@ -755,6 +756,77 @@ pub fn cloud(ui: &mut egui::Ui, cx: &mut PageCx) {
             *help = Some(crate::help::topics::CLOUD_FILES);
         }
         ui.add_space(8.0);
+    });
+}
+
+pub fn previews(ui: &mut egui::Ui, cx: &mut PageCx) {
+    use super::PreviewPreset as P;
+    let f = cx.focuser();
+    let d = &mut *cx.d;
+    let def = Settings::default();
+    kit::section(ui, Icon::Sliders, "Presets", f.of("presets"), |ui| {
+        kit::stacked(ui, "Preview presets", Some("A starting point; the settings below can then be changed one by one."), |ui| {
+            let mut p = P::of(d);
+            let before = p;
+            kit::segmented(ui, &mut p, &[(P::Light, "Light"), (P::Balanced, "Balanced"), (P::Everything, "Everything")], true);
+            if p != before {
+                p.apply(d);
+            }
+            ui.add_space(8.0);
+            kit::note(ui, match P::of(d) {
+                P::Light => "Nothing is kept on disk, and only pictures that are quick to make: no filmstrips, no searching videos for a better frame, no drawing 3D models or music for icons.",
+                P::Balanced => "Everything shown, with up to 512 MB of thumbnails kept on disk so folders you've seen before show their pictures at once. Recommended.",
+                P::Everything => "Everything shown, with room for 2 GB of thumbnails on disk, for big photo, video and model libraries.",
+                P::Custom => "Your own mix of the settings below.",
+            });
+        });
+    });
+
+    kit::section(ui, Icon::Drive, "Thumbnails", f.of("thumbnails"), |ui| {
+        kit::toggle_row(ui, "Keep thumbnails on disk", Some("Keep the pictures made for Icons view and map tiles, so they show at once next time, even for files on servers or in the cloud. They're kept in the system's cache folder, which backups skip. Off keeps them only while Filescape is open."), &mut d.thumb_cache);
+        ui.add_enabled_ui(d.thumb_cache, |ui| {
+            SliderRow {
+                label: "Thumbnail cache size",
+                desc: Some("The most they may take. The least recently seen are removed first when it's full."),
+                value: &mut d.thumb_cache_mb,
+                range: 64.0..=8192.0,
+                default: def.thumb_cache_mb,
+                scale: (|v| v as f64, |v| v as f32),
+                suffix: " MB",
+                decimals: 0,
+                logarithmic: true,
+            }
+            .show(ui);
+        });
+        kit::divider(ui);
+        // The folder's size, looked at now and then rather than every frame.
+        let id = Id::new("settings-thumb-usage");
+        let now = ui.input(|i| i.time);
+        let (when, bytes, count) = ui.data(|m| m.get_temp::<(f64, u64, usize)>(id)).unwrap_or((-10.0, 0, 0));
+        let (bytes, count) = if now - when > 3.0 {
+            let (b, c) = crate::thumbcache::usage();
+            ui.data_mut(|m| m.insert_temp(id, (now, b, c)));
+            (b, c)
+        } else {
+            (bytes, count)
+        };
+        let folder = crate::thumbcache::folder().map(|p| p.display().to_string()).unwrap_or_default();
+        let what = if count == 0 { "No thumbnails kept.".to_string() } else { format!("{} in {} thumbnails.", crate::scan::human(bytes), count) };
+        kit::row(ui, "Kept now", Some(&format!("{what} {folder}")), |ui| {
+            if kit::button(ui, Kind::Secondary, Some(Icon::Trash), "Clear").on_hover_text("Remove every kept thumbnail. They're made again as they're needed.").clicked() {
+                crate::thumbcache::clear();
+                ui.data_mut(|m| m.remove::<(f64, u64, usize)>(id));
+            }
+        });
+    });
+
+    kit::section(ui, Icon::File, "Videos", f.of("videos"), |ui| {
+        kit::toggle_row(ui, "Filmstrip", Some("Under a video's preview, frames from across it; click one to play from there. Needs a system that can play videos here (on Linux, ffmpeg)."), &mut d.video_strip);
+        kit::toggle_row(ui, "Better video pictures", Some("When a video's first frame is black or a fade, look at a few frames from across it and show the most telling one instead, in the preview and in Icons view."), &mut d.video_better_poster);
+    });
+
+    kit::section(ui, Icon::Grid, "3D models and music", f.of("models"), |ui| {
+        kit::toggle_row(ui, "3D and MIDI pictures", Some("Draw 3D models (STL, OBJ, PLY, glTF, 3MF) and MIDI files for Icons view and map tiles. Big models take a moment each. The preview pane always shows them."), &mut d.rich_thumbs);
     });
 }
 

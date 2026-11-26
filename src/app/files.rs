@@ -30,6 +30,8 @@ pub(super) enum Workspace {
     /// Servers: the File Manager with its own panes (this computer beside a server), saved
     /// sites and quick connect (`remoteui.rs`).
     Remote,
+    /// The AI models on this computer (`models.rs`).
+    Models,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
@@ -85,6 +87,9 @@ pub(super) struct FilesPrefs {
     pub sequences: bool,
     /// Searches saved in the sidebar.
     pub searches: Vec<SavedSearch>,
+    /// Extra folders the AI Models workspace looks in (besides Ollama, LM Studio, Hugging Face
+    /// and Downloads).
+    pub model_folders: Vec<PathBuf>,
     /// Programs offered under Open With.
     pub apps: Vec<openwith::UserApp>,
     /// The sequence player's settings.
@@ -174,6 +179,7 @@ impl Default for FilesPrefs {
             sites: Vec::new(),
             sequences: true,
             searches: Vec::new(),
+            model_folders: Vec::new(),
             apps: Vec::new(),
             player: Default::default(),
             recent: Vec::new(),
@@ -1113,6 +1119,8 @@ pub(super) enum FAction {
     KeepHere,
     /// The "What Is This?" window for a system file or folder.
     Explain,
+    /// Ask AI about the items: their names, sizes and dates.
+    AskAi,
 }
 
 impl App {
@@ -1131,7 +1139,7 @@ impl App {
                 }
             }
             Workspace::Files if from == Workspace::Analysis => self.files_follow_analysis(),
-            Workspace::Files | Workspace::Remote => {}
+            Workspace::Files | Workspace::Remote | Workspace::Models => {}
         }
         self.files.prefs.workspace = to;
     }
@@ -1196,6 +1204,13 @@ impl App {
             {
                 to = Some(Workspace::Analysis);
             }
+            if ui
+                .add(egui::Button::selectable(ws == Workspace::Models, if narrow { "✨" } else { "✨ AI Models" }))
+                .on_hover_text(format!("The AI models on this computer: Ollama, LM Studio, Hugging Face and model files ({})", k(egui::Key::Num4)))
+                .clicked()
+            {
+                to = Some(Workspace::Models);
+            }
         });
         if let Some(w) = to {
             self.set_workspace(w);
@@ -1203,13 +1218,18 @@ impl App {
         ui.separator();
     }
 
-    /// Ctrl/⌘+1 and Ctrl/⌘+3 switch workspace from anywhere.
+    /// Ctrl/⌘+1 to 4 switch workspace from anywhere.
     pub(super) fn workspace_keys(&mut self, ctx: &egui::Context) {
         if self.ops.modal() {
             return;
         }
-        let (files, remote, analysis) = ctx.input_mut(|i| {
-            (i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num1), i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num2), i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num3))
+        let (files, remote, analysis, models) = ctx.input_mut(|i| {
+            (
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num1),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num2),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num3),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Num4),
+            )
         });
         if files {
             self.set_workspace(Workspace::Files);
@@ -1217,6 +1237,8 @@ impl App {
             self.set_workspace(Workspace::Remote);
         } else if analysis {
             self.set_workspace(Workspace::Analysis);
+        } else if models {
+            self.set_workspace(Workspace::Models);
         }
     }
 
@@ -1575,7 +1597,9 @@ impl App {
         self.dock_poll(&ctx);
         self.remote_frame(&ctx);
         self.connect_window(&ctx);
-        self.quick_look(&ctx);
+        if !self.files.look.from_map {
+            self.quick_look(&ctx);
+        }
         self.sequence_player(&ctx);
         self.compare_window(&ctx);
         self.mark_edit_window(&ctx);
@@ -3337,7 +3361,7 @@ impl App {
 
     /// Move the keyboard cursor to the row `to(current row, row count)` returns, selecting it
     /// (or, with Shift, everything from the anchor to it).
-    fn files_move_cursor(&mut self, to: impl Fn(Option<usize>, usize) -> i64, extend: bool) {
+    pub(super) fn files_move_cursor(&mut self, to: impl Fn(Option<usize>, usize) -> i64, extend: bool) {
         let t = self.files.tab();
         let Some(l) = t.listing.as_ref() else { return };
         let n = t.order.len();
@@ -3639,6 +3663,7 @@ impl App {
                     self.explain_path(p);
                 }
             }
+            FAction::AskAi => self.ask_about_paths(paths),
             FAction::CopyUnc => {
                 // Asking Windows can wait on the network, so it's done in the background.
                 let (tx, rx) = mpsc::channel();
@@ -3748,6 +3773,7 @@ impl App {
             FAction::QuickLook => {
                 if self.files.cursor_entry().is_some_and(|e| !e.is_dir) {
                     self.files.look.open = true;
+                    self.files.look.from_map = false;
                 } else if let Some(p) = paths.into_iter().next().filter(|p| self.listed_dir(p)) {
                     self.files.go(Location::Dir(p));
                 }
@@ -3968,6 +3994,9 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     }
     if m.known && !many {
         item(ui, true, "What Is This?", String::new(), FAction::Explain);
+    }
+    if !m.server {
+        item(ui, true, if many { "Ask AI About These…" } else { "Ask AI About This…" }, String::new(), FAction::AskAi);
     }
     if m.cloud {
         ui.separator();

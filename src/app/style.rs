@@ -228,6 +228,7 @@ const MENU_ICON_W: f32 = 20.0;
 /// The icon for a menu label, by what the item does. Checked in order, so longer phrases
 /// come before the words they contain.
 const MENU_ICONS: &[(&str, &str)] = &[
+    ("Ask AI", "💬"),
     // Opening and viewing.
     ("Open in New Tab", "🗗"),
     ("Open in Other Pane", "⬌"),

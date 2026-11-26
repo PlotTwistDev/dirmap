@@ -39,6 +39,45 @@ OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
 
+# Crates that build C or C++ sources they carry, whose own notices sit in subfolders. Listed by
+# hand because the script can't tell which of those sources end up linked in.
+BUNDLED = {
+    # llama.cpp itself (llama, ggml, common) and the vendored code common links in.
+    "llama-cpp-sys-2": [
+        "llama.cpp/LICENSE",
+        "llama.cpp/vendor/cpp-httplib/LICENSE",
+        "llama.cpp/vendor/hash/xxhash/LICENSE",
+        "llama.cpp/vendor/hash/rotate-bits/LICENSE.md",
+        "llama.cpp/vendor/hash/sha256/LICENSE",
+    ],
+}
+# Header-only code bundled the same way that carries its notice in the header, not a file.
+BUNDLED_TEXT = {
+    # The GPU radix sort shader the splat viewer carries, from the wgpu_sort crate.
+    "wgpu-3dgs-viewer": [
+        "GPU radix sort shader (radix_sort.wgsl, from wgpu_sort, bundled in wgpu-3dgs-viewer)\n"
+        "BSD 2-Clause License\n\nCopyright (c) 2024, Simon Niedermayr, Josef Stumpfegger\nAll rights reserved.\n\n"
+        "Redistribution and use in source and binary forms, with or without modification, are permitted provided\n"
+        "that the following conditions are met:\n\n"
+        "1. Redistributions of source code must retain the above copyright notice, this list of conditions and the\n"
+        "following disclaimer.\n\n"
+        "2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and\n"
+        "the following disclaimer in the documentation and/or other materials provided with the distribution.\n\n"
+        "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\" AND ANY EXPRESS OR IMPLIED\n"
+        "WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A\n"
+        "PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY\n"
+        "DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,\n"
+        "PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)\n"
+        "HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING\n"
+        "NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE\n"
+        "POSSIBILITY OF SUCH DAMAGE.",
+    ],
+    "llama-cpp-sys-2": [
+        "nlohmann/json (bundled in llama.cpp)\nCopyright (c) 2013-2025 Niels Lohmann <https://nlohmann.me>\n\n" + "MIT_PLACEHOLDER",
+    ],
+}
+
+
 def metadata():
     cmd = ["cargo", "metadata", "--format-version", "1", "--manifest-path", os.path.join(ROOT, "Cargo.toml")]
     for t in TARGETS:
@@ -74,6 +113,13 @@ def texts(p):
     # Bundled fonts carry their own licences (OFL, the Ubuntu font licence) beside them.
     if os.path.isdir(os.path.join(d, "fonts")):
         names += sorted("fonts/" + f for f in os.listdir(os.path.join(d, "fonts")) if f.lower().endswith(".txt"))
+    names += [n for n in BUNDLED.get(p["name"], []) if n not in names]
+    # A crate from a git workspace (craft-libs) keeps its licences at the workspace root.
+    if not names and (p.get("source") or "").startswith("git+"):
+        up = d
+        while os.path.dirname(up) != up and not os.path.isdir(os.path.join(up, ".git")) and not os.path.isfile(os.path.join(up, ".cargo-ok")):
+            up = os.path.dirname(up)
+        names = sorted(os.path.relpath(os.path.join(up, f), d) for f in os.listdir(up) if f.upper().startswith(("LICENSE", "LICENCE")))
     out = []
     for n in names:
         f = os.path.join(d, n)
@@ -89,7 +135,7 @@ def texts(p):
             out.append(f"Copyright (c) {authors}\n\n{MIT}")
         else:
             out.append(f"Copyright (c) {authors}\n\nLicensed under {lic}. The crate ships no licence file; see {p.get('repository') or 'crates.io'}.")
-    return out
+    return out + [t.replace("MIT_PLACEHOLDER", MIT) for t in BUNDLED_TEXT.get(p["name"], [])]
 
 
 def render(meta):
@@ -107,6 +153,18 @@ def render(meta):
     for p in pkgs:
         lines.append(f"{p['name']} {p['version']}\t{p.get('license') or 'see its licence text'}")
     lines.append("")
+    # MPL-2.0 asks that people can find the source of what's distributed in executable form.
+    mpl = [p for p in pkgs if "MPL" in (p.get("license") or "")]
+    for p in mpl:
+        lines += textwrap.wrap(
+            f"{p['name']} {p['version']} is used unmodified. Its source code is at "
+            f"https://crates.io/crates/{p['name']}/{p['version']}"
+            + (f" and {p['repository']}." if p.get("repository") else "."),
+            100,
+            break_on_hyphens=False,
+        )
+    if mpl:
+        lines.append("")
     for t, users in sorted(groups.items(), key=lambda g: g[1][0].lower()):
         lines.append("=" * 72)
         lines += textwrap.wrap("Used by: " + ", ".join(users), 100, break_on_hyphens=False)

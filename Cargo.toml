@@ -15,7 +15,12 @@ ring = "0.17"
 serde_json = "1"
 eframe = { version = "0.36.2", features = ["glow", "persistence"] }
 flate2 = "1"
-half = "2.7"
+half = "2"
+# zstd for SPZ v4 splat scenes (pure Rust; MIT).
+ruzstd = "0.9"
+# Gaussian splat rendering on the graphics chip (MIT or Apache-2.0); pinned, the API moves.
+wgpu-3dgs-viewer = "=0.8.0"
+pollster = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff", "bmp", "exr", "hdr", "tga", "ico", "qoi", "pnm"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "tokio", "crypto-rust"] }
 lzma-rust2 = "0.25.0"
@@ -38,6 +43,46 @@ tar = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "io-util"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs", "deflate64", "lzma", "xz", "bzip2", "ppmd"] }
+resvg = "0.50"
+syntect = { version = "5", default-features = false, features = ["parsing", "dump-load", "regex-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+ab_glyph = "0.2"
+ttf-parser = "0.25"
+lofty = "0.25.5"
+kamadak-exif = "0.6"
+calamine = { version = "0.38", features = ["dates"] }
+hayro = "0.9.0"
+# Runs GGUF models on this computer for Ask AI (llama.cpp, MIT). No OpenMP, so nothing extra ships.
+llama-cpp-2 = { version = "=0.1.161", default-features = false }
+# The raw bindings, for what the wrapper doesn't offer: reading each layer's output (the Lab).
+llama-cpp-sys-2 = { version = "=0.1.161", default-features = false }
+jxl-oxide = { version = "0.12.6", features = ["image"] }
+midly = "0.5"
+rusqlite = { version = "0.43.0", features = ["bundled", "hooks"] }
+csv = "1.4.0"
+encoding_rs = "0.8"
+exr = "1.74"
+gltf = { version = "1.4", default-features = false, features = ["import", "utils"] }
+hayro-jpeg2000 = { version = "0.5", default-features = false, features = ["std", "simd"] }
+jpeg-decoder = "0.3"
+pure_jpegls = "2.1"
+plist = "1"
+# Reads the Craft Apps' own documents (PhotoCraft, VectorCraft, EffectCraft): saved pictures,
+# pages and layers. From craft-libs (MIT or Apache-2.0), pinned to a tested commit: not on crates.io.
+craft-doc = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
+# After Effects projects (.aep, .aepx): a clean-room reader with no dependencies of its own.
+craft-aep = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
+# 12-bit and arithmetic-coded JPEGs, which the usual decoder can't read (no dependencies of its own).
+craft-jpeg = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
+# Photoshop layers (names, groups, text, smart objects), read-only.
+craft-psd = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
+# GIMP (.xcf) and Paint.NET (.pdn) layers, drawn into a picture. Read-only.
+craft-xcf = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
+# FBX, COLLADA and Alembic models (the formats glTF, OBJ and STL readers above don't cover).
+craft-mesh = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324", default-features = false, features = ["fbx", "dae", "abc"] }
+# DWG drawings, converted to DXF in a child process (with acadrust, MPL-2.0, unmodified).
+craft-dwg = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
+craft-pdn = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
 
 [features]
 default = []
@@ -67,5 +112,5 @@ objc2 = { version = "0.6", features = ["exception"] }
 debug = "line-tables-only"
 
 # Puts the app icon (packaging/filescape.ico) into filescape.exe.
-[target.'cfg(windows)'.build-dependencies]
+[target."cfg(windows)".build-dependencies]
 winresource = "0.1"

@@ -87,11 +87,28 @@ pub struct Known {
 }
 
 impl Known {
+    /// Whether its verdict also holds for what's inside it. Home folders and the places other
+    /// drives are mounted hold people's own files, so "Don't delete /home" or "/Volumes takes no
+    /// space" must not be repeated for every file below them.
+    pub fn covers_contents(&self) -> bool {
+        !HOLDS_OTHER_THINGS.iter().any(|(os, at)| *os == self.os && at.eq_ignore_ascii_case(self.at))
+    }
+
     /// Everything about it as plain text, for tooltips.
     pub fn text(&self) -> String {
         format!("{} · {}\n\n{}\n\n{}", self.title, self.verdict.label(), self.what, self.advice)
     }
 }
+
+/// Entries that describe only the folder itself, never what's inside it (see `covers_contents`).
+const HOLDS_OTHER_THINGS: &[(Os, &str)] = &[
+    (Os::Linux, "/home"),
+    (Os::Linux, "/root"),
+    (Os::Linux, "/mnt"),
+    (Os::Linux, "/media"),
+    (Os::Mac, "/Volumes"),
+    (Os::Mac, "/System/Volumes/Data"),
+];
 
 /// The entry for exactly this item, if it's one Filescape knows about.
 pub fn explain(path: &Path) -> Option<&'static Known> {
@@ -201,7 +218,7 @@ impl Index {
 
     pub fn inside(&self, path: &str) -> Option<&'static Known> {
         let p = parts(self.os, path);
-        (1..p.len()).rev().find_map(|n| self.at(&p[..n]))
+        (1..p.len()).rev().find_map(|n| self.at(&p[..n]).filter(|k| k.covers_contents()))
     }
 
     /// The best rule for a path given as lowercase parts: the most specific one.
@@ -862,6 +879,38 @@ mod tests {
         assert_eq!(w.inside("C:\\Windows").map(|k| k.title), None);
         assert_eq!(w.inside("D:\\work\\app\\node_modules\\react\\index.js").map(|k| k.title), Some("JavaScript packages"));
         assert!(w.inside("D:\\work\\notes.txt").is_none());
+    }
+
+    #[test]
+    fn home_folders_and_mounts_only_describe_themselves() {
+        let inside = |i: &Index, p: &str| i.inside(p).map(|k| k.title);
+        let l = Index::new(Os::Linux, Some("/home/rich"));
+        // The folders themselves still have their notes.
+        assert_eq!(title(&l, "/home"), Some("Home folders"));
+        assert_eq!(title(&l, "/root"), Some("Administrator's home"));
+        // But not everything inside them.
+        assert_eq!(inside(&l, "/home/rich/Documents/report.pdf"), None);
+        assert_eq!(inside(&l, "/home/rich"), None);
+        assert_eq!(inside(&l, "/root/notes.txt"), None);
+        assert_eq!(inside(&l, "/media/rich/USB/photo.jpg"), None);
+        assert_eq!(inside(&l, "/mnt/data/film.mov"), None);
+        // Known folders inside a home still count.
+        assert_eq!(inside(&l, "/home/rich/.cache/pip/http/a"), Some("Your caches"));
+        assert_eq!(inside(&l, "/media/rich/USB/.Trash-1000/files/a.jpg"), Some("Linux Trash for this drive"));
+        // Root is the real home here.
+        let r = Index::new(Os::Linux, Some("/root"));
+        assert_eq!(inside(&r, "/root/projects/app/main.rs"), None);
+
+        let m = Index::new(Os::Mac, Some("/Users/rich"));
+        assert_eq!(inside(&m, "/Users/rich/Documents/report.pdf"), None);
+        assert_eq!(inside(&m, "/System/Volumes/Data/Users/rich/Documents/report.pdf"), None);
+        assert_eq!(inside(&m, "/Volumes/Backup/film.mov"), None);
+        assert_eq!(inside(&m, "/System/Volumes/Data/stuff/a.txt"), None);
+        assert_eq!(inside(&m, "/Users/rich/Library/Caches/com.app/x"), Some("Your caches"));
+
+        let w = win();
+        assert_eq!(inside(&w, "C:\\Users\\rich\\Documents\\report.docx"), None);
+        assert_eq!(inside(&w, "C:\\Users\\rich\\AppData\\Local\\Temp\\x.tmp"), Some("Your temporary files"));
     }
 
     #[test]

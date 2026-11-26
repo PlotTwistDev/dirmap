@@ -273,6 +273,87 @@ fn run(path: &Path, rx: &mpsc::Receiver<Cmd>, shared: &Mutex<Shared>, repaint: &
     }
 }
 
+/// Frames from across a video, for a filmstrip: `n` of them, evenly spaced (the middle of each
+/// `n`th of the video), each `height` pixels high. Each is read by opening the video at its time,
+/// so a long video costs no more than a short one.
+pub fn filmstrip(path: &Path, n: usize, height: u32) -> Result<(Info, Vec<Frame>), String> {
+    let (_, info) = open(path, 0.0)?;
+    let dur = info.duration.filter(|d| *d > 0.0).ok_or("This video's length isn't known")?;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let at = dur * (i as f64 + 0.5) / n as f64;
+        let Ok((mut d, _)) = open(path, at) else { continue };
+        let Some(f) = d.next() else { continue };
+        let (sw, sh) = (f.size[0], f.size[1]);
+        if sw == 0 || sh == 0 {
+            continue;
+        }
+        let dh = (height as usize).min(sh).max(1);
+        let dw = (sw * dh / sh).max(1);
+        let rgba = resample(&f.rgba, sw, sh, (sw * 4) as isize, 0, dw, dh, false);
+        out.push(Frame { pts: at, size: [dw, dh], rgba });
+    }
+    if out.is_empty() {
+        return Err("No frames could be read from this video".into());
+    }
+    Ok((info, out))
+}
+
+/// How much there is to see in a frame: the spread of its brightness, with nearly black or
+/// nearly white frames (fades, title cards) counting for little.
+pub fn interest(rgba: &[u8]) -> f32 {
+    let n = (rgba.len() / 4).max(1) as f32;
+    let luma = |p: &[u8]| (0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32) / 255.0;
+    let mean = rgba.chunks_exact(4).map(luma).sum::<f32>() / n;
+    let var = rgba.chunks_exact(4).map(|p| (luma(p) - mean).powi(2)).sum::<f32>() / n;
+    let mid = 1.0 - ((mean - 0.5).abs() * 2.0).powi(4); // 1 for middling, 0 for black or white
+    var.sqrt() * mid
+}
+
+/// Whether a picture of a video says little: nearly all black (or white), or flat.
+pub fn is_dull(rgba: &[u8]) -> bool {
+    interest(rgba) < 0.03
+}
+
+/// A better picture of a video than a dull first frame: the most interesting of a few frames
+/// from across it, `max` pixels at most across or down. None when the video can't be read here.
+pub fn representative(path: &Path, max: u32) -> Option<(usize, usize, Vec<u8>)> {
+    if !supported() {
+        return None;
+    }
+    let (_, frames) = filmstrip(path, 5, max.min(MAX_W)).ok()?;
+    let best = frames.into_iter().max_by(|a, b| interest(&a.rgba).total_cmp(&interest(&b.rgba)))?;
+    if is_dull(&best.rgba) {
+        return None;
+    }
+    let [w, h] = best.size;
+    if w as u32 <= max {
+        return Some((w, h, best.rgba));
+    }
+    let dw = max as usize;
+    let dh = (h * dw / w).max(1);
+    Some((dw, dh, resample(&best.rgba, w, h, (w * 4) as isize, 0, dw, dh, false)))
+}
+
+static BETTER_POSTERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether `poster` looks for a better frame than a dull first one (Settings).
+pub fn set_better_posters(on: bool) {
+    BETTER_POSTERS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A picture of a video: the system's, unless that's dull (a fade from black, a title card), when
+/// the most interesting of a few frames from across the video is used instead.
+pub fn poster(path: &Path, max: u32) -> Result<(usize, usize, Vec<u8>), String> {
+    let sys = crate::media::thumbnail(path, max);
+    if let Ok((_, _, px)) = &sys
+        && (!BETTER_POSTERS.load(std::sync::atomic::Ordering::Relaxed) || !is_dull(px))
+    {
+        return sys;
+    }
+    representative(path, max).map(Ok).unwrap_or(sys)
+}
+
 /// Fit `w`×`h` inside `MAX_W` across, keeping the shape, in even numbers.
 pub fn scaled(w: u32, h: u32) -> (u32, u32) {
     if w == 0 || h == 0 {
@@ -738,6 +819,15 @@ mod tests {
     }
 
     #[test]
+    fn dull_frames() {
+        assert!(is_dull(&[0, 0, 0, 255].repeat(100)));
+        assert!(is_dull(&[250, 250, 250, 255].repeat(100)));
+        let mut checks = [0u8, 0, 0, 255].repeat(50);
+        checks.extend([200u8, 200, 200, 255].repeat(50));
+        assert!(!is_dull(&checks));
+    }
+
+    #[test]
     fn resample_swaps_and_flips() {
         // 2x2 BGRA, bottom-up (negative row, starting at the last row).
         let src = [1, 2, 3, 0, 4, 5, 6, 0, 7, 8, 9, 0, 10, 11, 12, 0];
@@ -770,6 +860,13 @@ mod tests {
         assert!((f.pts - 0.5).abs() < 1e-6);
         let n = std::iter::from_fn(|| d.next()).count();
         assert!((3..=6).contains(&n), "{n} frames after the first");
+        let (info, strip) = filmstrip(&p, 4, 60).unwrap();
+        assert!(info.duration.is_some_and(|d| (d - 1.0).abs() < 0.1));
+        assert_eq!(strip.len(), 4);
+        assert_eq!(strip[0].size, [80, 60]);
+        assert!((strip[1].pts - 0.375).abs() < 1e-6);
+        assert!(!is_dull(&strip[2].rgba)); // testsrc2 is colourful
+        assert!(representative(&p, 100).is_some_and(|(w, h, _)| (w, h) == (100, 75)));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

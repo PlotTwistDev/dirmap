@@ -2,6 +2,96 @@
 
 ## Next version
 
+### Storage Analysis keeps up with changes
+
+- Files added, changed or removed after a scan now show in Storage Analysis by themselves: a
+  download appears in the map a second or so after it finishes, and a file deleted in another
+  app disappears. Downloads still being written (.crdownload, .part, Safari's .download) are left
+  out until they're done. Turn it off under **Settings > General > Keep up with changes**. See
+  [Changes after the scan](../getting-started/scanning.md#changes-after-the-scan).
+
+### Gaussian splat scenes
+
+- **SPZ** files (every version) and **PLY** splat scenes now preview in Files and Storage
+  Analysis: the splats drawn for real on the graphics chip, to turn, move and zoom about, with
+  their view-dependent colour (points where the graphics can't), the splat count, colour detail, size and
+  the graphics memory it would need, and checks for invisible, oversized or stray splats. PLY
+  files are told apart by their header, so meshes still show as models, and PLY point clouds now
+  show their points instead of "no faces to show". See
+  [Quick Look and the preview pane](../views/file-manager.md#quick-look-and-the-preview-pane).
+- More splat formats: **compressed PLY** (PlayCanvas and SuperSplat), **SPLAT**, **KSPLAT**,
+  **SOG** (bundled or loose), **GLB** files with Gaussian splats, and **web pages exported
+  from SuperSplat**, whose embedded scene is read without running the page.
+- Splat thumbnails in Icons view and on map tiles are drawn as real splats on the graphics
+  chip, and map tiles show the format and splat count. Quick Look has **◀** and **▶** buttons
+  for the previous and next file, and a camera button on a splat scene saves the view as a PNG
+  of up to 4K.
+- A splat scene's preview can show its splats as outlines or centres, or in false colour by
+  opacity, size, crowding or distance; **Problems** picks out the splats the checks found,
+  including a new check for floaters. There's also a box round the main body, a field of view
+  control, and **W A S D** to move about. Turning a scene is smoother: pictures arrive while you
+  drag, at half size, instead of only when you stop.
+
+### The AI Models workspace
+
+- **🖴 Storage** shows how much space AI models take, by app, and finds what can be freed: Ollama
+  downloads no model uses, unfinished downloads, older Hugging Face versions and copies. Copies on
+  the same drive can be shared as one file (a hard link), so every app keeps working. Each item
+  lists what it changes, with one confirmation. Right-click a model and choose **Move
+  to Trash…** to remove it properly: for Ollama, as `ollama rm` would. See
+  [Freeing space](../views/ai-models.md#freeing-space). **Move to another drive…** moves an app's
+  whole model folder and leaves a link, so the app finds its models as before (Professional). See
+  [Moving models](../views/ai-models.md#moving-models-to-another-drive).
+  **Shrink (quantise)…** in a model's right-click menu makes a smaller copy (Q8_0 to Q2_K), keeping
+  the original (Professional). See [Shrinking a model](../views/ai-models.md#shrinking-a-model).
+
+- **🔬 Lab** shows what a model would write next and how sure it is: each token coloured by its
+  probability, the ten likeliest alternatives, and what temperature, top-k, top-p and min-p do to
+  them. Pick a different token to see where the text goes instead. **Inside** shows how much each
+  of the model's layers changes each word, and what each layer would predict if the model stopped
+  there. **Steer** pushes a model towards one idea and away from another while it writes, beside
+  what it writes unpushed. **Speed** tests how fast a
+  model reads and writes on this computer, and keeps the results to compare. Free. See
+  [The Lab](../views/model-lab.md).
+- **💬 Ask AI** chats with a model already on this computer, run by Filescape itself: no Ollama,
+  LM Studio or internet connection needed, and nothing you ask leaves the computer. It runs GGUF
+  models, on the graphics chip of a Mac with Apple silicon and on the processor elsewhere. Ask AI
+  is free. See [Ask AI](../views/ask-ai.md).
+- **Ask AI About This…** in the right-click menus of Files and Storage Analysis asks about a file or
+  folder: its size, dates and what it holds. Reading what's inside files is a tick box for each
+  question. See [Asking about files and folders](../views/ask-ai.md#asking-about-files-and-folders).
+- No model yet? **Get a small model…** in Ask AI downloads Qwen3 1.7B (1.7 GB) from Qwen's own
+  page, after showing you its size, licence and the memory it needs. Filescape checks the file
+  before using it, and a stopped download carries on where it left off.
+
+- A new **✨ AI Models** workspace (**Ctrl+4**) lists the AI models on this computer: what Ollama,
+  LM Studio and Hugging Face have downloaded, model files in Downloads and in folders you add, and
+  those in the Storage Analysis scan. Each shows its size, format, family, parameters, precision
+  and context length, read from the file without loading it. See
+  [The AI Models workspace](../views/ai-models.md).
+- Files that are byte-for-byte copies of another model are marked, as are Ollama downloads no
+  installed model uses.
+- `filescape --cli --models PATH` prints the same list.
+- Double-click a model to inspect it: its architecture, layers, heads, vocabulary, licence and
+  parameters, each tagged with where it comes from (the file, Filescape's own count, or the
+  publisher's notes), how its numbers are stored, and every tensor and metadata entry, searchable
+  and sortable. PyTorch checkpoints are never opened, since they can run code. See
+  [Inspecting a model](../views/ai-models.md#inspecting-a-model).
+- A model's **Health** finds missing parts, files cut short by a stopped download, damaged
+  files, unsafe formats and size labels that don't add up, and can verify Ollama and Hugging Face
+  downloads against their checksums.
+- **Will it run?** estimates the memory a model needs at any context length and says whether it
+  runs on this computer's graphics chip, split, on the processor, or not at all.
+- Click a tensor to see a histogram and statistics of its numbers, and **Check the numbers** in
+  Health samples every tensor for broken values or missing data.
+- A model's **Tokens** show its vocabulary: which languages and kinds of text it covers, its
+  special tokens and chat template, and every token, searchable.
+- **Compare with…** puts two models side by side: their facts, where their space goes, how their
+  numbers are stored, and which tensors and metadata differ, so you can tell two compressions of
+  one model from two different models.
+- A model's **Structure** shows its layers in order and draws the model as a map of its layers
+  and tensors, coloured by what each part does or by how its numbers are stored.
+
 ### See what's in files on the map
 
 - Zoom in on the treemap and tiles big enough show what's in the file: pictures, video frames,
@@ -17,6 +107,98 @@
 - Markdown files preview formatted, with headings, lists, tables and links. **Raw** shows the
   text as written, and the preview panes remember which one you picked.
 - Right-click any part of the path above the file list, or a tab, and choose **Copy Path**.
+- SVG drawings now preview as pictures, on map tiles, in icon views and in the preview panes,
+  sharp at any zoom, with **Source** to see the markup.
+- Code previews in syntax colours, for about 200 languages, and the details say which language.
+- Fonts preview as a specimen drawn in the font, with its family, style and glyph count; on
+  tiles and in icon views they show a large "Aa".
+- Sound previews show the album cover and the waveform, which fills in as it plays and jumps
+  where you click, and the details list the title, artist, album, length and format.
+- Camera RAW photos (CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 and more) preview on tiles, in icon
+  views and in the panes, from the preview the camera stores in the file, with the camera, lens
+  and exposure in the details.
+- HEIC (iPhone) and AVIF pictures preview through the system's own decoders.
+- Photoshop documents (PSD and PSB) preview from the flattened picture saved with them.
+- Spreadsheets (Excel and OpenDocument) preview as a table of their cells, sheet by sheet, and
+  their first rows show on map tiles. Formulas and macros are never run.
+- Word, PowerPoint and OpenDocument files preview formatted: headings, bold and italic, lists and
+  tables, and each slide's title and points. Icon views show the picture of the first page or
+  slide saved with them.
+- EPUB books preview as formatted text, chapter by chapter, with the title and author in the
+  details and the cover in icon views.
+- JPEG XL pictures (.jxl) preview everywhere pictures do.
+- SQLite databases preview as their tables, read-only, and CSV and TSV files as a table with
+  their column names.
+- Archives preview as a tree of folders, biggest first, with sizes, how much compression saved,
+  and warnings about password-protected files, unsafe names and archives that unpack to a huge size.
+- Pictures can be looked at channel by channel, HDR and OpenEXR pictures have an exposure
+  slider, and multilayer OpenEXR files show each layer (render pass).
+- Videos have a filmstrip under the picture (click a frame to play from there), and a video that
+  starts black or with a title card is shown by a more telling frame.
+- 3D models (STL, OBJ, PLY, glTF/GLB and 3MF) preview as a shaded model to turn about, and show
+  in Icons view.
+- Thumbnails are kept on disk between runs, so folders you've seen show their pictures at once.
+  A new **Previews & thumbnails** page in Settings has presets, the cache's size and **Clear**,
+  and switches for filmstrips, video pictures and 3D and MIDI thumbnails.
+- Emails (.eml, .emlx) preview with the sender, recipients, date, text and a list of
+  attachments. HTML mail is shown as plain text, so nothing in it is loaded (no tracking
+  pictures). Mailboxes (.mbox) list their messages, contact cards (.vcf) show the contact or a
+  list of contacts, and calendars (.ics) show the event or a list of events and to-dos.
+- Map files preview as a drawing of their shapes: GPS tracks (.gpx) with the distance, climb,
+  height, time and average speed; GeoJSON with its features and properties; and KML and KMZ
+  (Google Earth) with their placemarks. No map is drawn behind them, since that would mean
+  fetching it from the internet.
+- DXF drawings preview as the drawing itself (lines, curves, circles and blocks, in their
+  colours), with the AutoCAD version, units, layers and overall size. DWG, STEP and IGES files
+  show what they say about themselves: the program that made them, the units, the author and the
+  parts.
+- Pages, Numbers and Keynote documents, and files from Sketch, Affinity, CorelDRAW, SketchUp,
+  Blender, Cinema 4D and 3ds Max, preview from the picture the app saved inside them, with the
+  version that saved them. Maya and Houdini scenes show their version, units and what's in them.
+- Files from the Craft Apps (PhotoCraft, VectorCraft, EffectCraft, FigCraft, DesignCraft,
+  TextureCraft, DeckCraft, AniCraft, MaterialCraft, FilmCraft and SoundCraft) preview from the
+  picture or PDF the app saved inside them, with their pages, layers, size, length and the version
+  that saved them. Filescape reads them itself, without the apps.
+- Music projects, and FilmCraft, SoundCraft and EffectCraft projects, list the footage and sound
+  files they use: where each one is (this drive, another drive, a network drive or the cloud), which
+  are missing or only in the cloud, and their size together. Click one to show it in Files.
+- After Effects projects (.aep, .aepx) show the version that saved them, their compositions and
+  the footage files they use.
+- LightCraft library folders preview like a file: their photos and albums, what the catalogue,
+  thumbnail cache and imported photos take, and the photos used from other folders. PhotoCraft
+  documents saved as a folder preview like the single-file ones.
+- 12-bit and arithmetic-coded JPEGs now show, as do DICOM scans compressed with 12-bit JPEG.
+- Photoshop documents list their layers: groups, hidden layers, text layers, smart objects and
+  adjustments, and the names at the top of the stack.
+- Krita, OpenRaster and Figma files show the picture saved inside them, with their layers. GIMP
+  and Paint.NET pictures are drawn from their layers.
+- FBX, COLLADA (.dae) and Alembic (.abc) models show as shaded clay to turn about, like other 3D
+  models. AutoCAD DWG drawings are drawn, converted to DXF in a separate process first.
+- Music projects from Ableton Live (.als), REAPER (.rpp), FL Studio (.flp) and Cubase or Nuendo
+  (.cpr, .npr) show the version that saved them, the tempo, tracks, plugins and the sound files
+  they use, marking any that aren't on this computer.
+- DICOM medical scans and FITS astronomy images preview as pictures, with what they show
+  and how they were taken. Patient names, IDs and birth dates are never shown.
+- Disk images preview without being mounted: an ISO shows the files on the disc, virtual
+  machine disks show their size and type, and Windows images list their editions.
+- Disc images that use UDF (DVDs, Blu-ray discs and Windows install discs) list their files
+  too.
+- JPEG 2000 pictures (.jp2, .j2k) preview, and DICOM scans compressed with JPEG 2000,
+  JPEG-LS or lossless JPEG now show their picture.
+- Logic Pro projects preview with Logic's picture of the project window, tempo, key and
+  sound files.
+- **Steadier tile previews.** Previews on the Storage Analysis map no longer blink off and
+  fade back in as you pan and zoom: a tile keeps its preview while the map sharpens, and sound
+  waveforms hold their shape as tiles grow.
+- **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
+  shows and what reads it.
+- MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
+  details.
+- Quick Look works in Storage Analysis too: click a tile and press **Space**. **Full screen** (or
+  **F**) fills the window with the preview, in both workspaces.
+- PDFs preview every page, drawn by Filescape itself: scroll through them in the preview panes,
+  with the title, page count and paper size in the details. Thumbnails and map tiles of PDFs are
+  drawn the same way, so they no longer need a PDF tool installed on Linux.
 - Files with a missing or wrong extension, such as a download saved as `file`, now preview by
   what they really are when Filescape can tell from their first bytes.
 - **Help > About Filescape > Third-party licences** lists the open-source software Filescape is

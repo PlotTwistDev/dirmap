@@ -17,6 +17,7 @@ pub const PERCENTAGES: &str = "disk-usage/sizes.md#percentages";
 pub const SIZE_METRIC: &str = "disk-usage/sizes.md#size-on-disk-and-logical-size";
 pub const CLOUD_FILES: &str = "disk-usage/cloud-files.md";
 pub const SYSTEM_FILES: &str = "disk-usage/system-files.md";
+pub const FORMATS: &str = "reference/formats.md";
 pub const FILE_TYPES: &str = "disk-usage/file-types.md#the-file-types-list";
 pub const UNREADABLE: &str = "disk-usage/hidden-and-unreadable.md#unreadable-folders-and-files";
 pub const TREEMAP: &str = "views/treemap.md";
@@ -43,6 +44,9 @@ pub const HISTOGRAM: &str = "analysis/sizes.md";
 pub const DUPLICATES: &str = "analysis/duplicates.md";
 pub const DUPLICATES_HOW: &str = "analysis/duplicates.md#how-detection-works";
 pub const SNAPSHOTS: &str = "analysis/snapshots.md";
+pub const AI_MODELS: &str = "views/ai-models.md";
+pub const ASK_AI: &str = "views/ask-ai.md";
+pub const LAB: &str = "views/model-lab.md";
 pub const FILE_OPERATIONS: &str = "analysis/file-operations.md";
 pub const SETTINGS: &str = "settings/reference.md";
 pub const SETTINGS_GENERAL: &str = "settings/reference.md#general";
@@ -51,6 +55,7 @@ pub const SETTINGS_FOLDER_LIST: &str = "settings/reference.md#folder-list";
 pub const SETTINGS_TREEMAP: &str = "settings/reference.md#treemap";
 pub const SETTINGS_ADVANCED: &str = "settings/reference.md#advanced";
 pub const SETTINGS_CLOUD: &str = "settings/reference.md#cloud-storage";
+pub const SETTINGS_PREVIEWS: &str = "settings/reference.md#previews--thumbnails";
 pub const ADMINISTRATOR: &str = "settings/administrator.md";
 pub const LICENSING: &str = "settings/licensing.md";
 pub const KEYBOARD: &str = "reference/keyboard.md";
@@ -62,9 +67,9 @@ pub const ABOUT: &str = "about/about.md";
 /// Every constant above, for the tests.
 #[cfg(test)]
 pub const ALL: &[&str] = &[
-    HOME, QUICK_START, INTERFACE, TOOLBAR, SCANNING, WHILE_SCANNING, RESULTS, SIZES, PERCENTAGES, SIZE_METRIC, CLOUD_FILES, SYSTEM_FILES, FILE_TYPES, UNREADABLE,
+    HOME, QUICK_START, INTERFACE, TOOLBAR, SCANNING, WHILE_SCANNING, RESULTS, SIZES, PERCENTAGES, SIZE_METRIC, CLOUD_FILES, SYSTEM_FILES, FORMATS, FILE_TYPES, UNREADABLE,
     TREEMAP, MAP_SUMMARY, TREEMAP_NAV, ZOOM_TO_SELECTION, BACK_FORWARD, SUNBURST, TREE, BROWSER, FILE_MANAGER, WORKSPACES, ANALYSIS_DOCK, COLOR_MODES, FILTERING, HIGHLIGHT_OR_ONLY,
-    CATEGORIES, SYNTAX, EXAMPLES, SEQUENCES, PRESETS, SCAN_FILTERS, HISTOGRAM, DUPLICATES, DUPLICATES_HOW, SNAPSHOTS,
+    CATEGORIES, SYNTAX, EXAMPLES, SEQUENCES, PRESETS, SCAN_FILTERS, HISTOGRAM, DUPLICATES, DUPLICATES_HOW, SNAPSHOTS, AI_MODELS, ASK_AI, LAB,
     FILE_OPERATIONS, SETTINGS, SETTINGS_GENERAL, SETTINGS_FILTERING, SETTINGS_FOLDER_LIST, SETTINGS_TREEMAP,
-    SETTINGS_ADVANCED, SETTINGS_CLOUD, ADMINISTRATOR, LICENSING, KEYBOARD, MOUSE, TROUBLESHOOTING, WHATS_NEW, ABOUT,
+    SETTINGS_ADVANCED, SETTINGS_CLOUD, SETTINGS_PREVIEWS, ADMINISTRATOR, LICENSING, KEYBOARD, MOUSE, TROUBLESHOOTING, WHATS_NEW, ABOUT,
 ];

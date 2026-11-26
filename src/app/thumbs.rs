@@ -27,10 +27,16 @@ pub(super) fn stamp(size: u64, modified: i64) -> u64 {
     size.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ modified as u64
 }
 
-/// Whether a file of this name gets a thumbnail: images, and videos, PDFs and sound (album
-/// covers) where the system can make a picture of them.
+/// Whether a file of this name gets a thumbnail: images, drawings, fonts, Office documents (the
+/// picture saved with them), and videos, PDFs and sound (album covers) where the system can make
+/// a picture of them.
 pub(super) fn wants_thumb(name: &str) -> bool {
-    matches!(preview::kind_of(name), Kind::Image | Kind::LinearImage | Kind::Media(_))
+    match preview::kind_of(name) {
+        Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Saved | Kind::Science | Kind::Media(_) => true,
+        Kind::Midi | Kind::Model | Kind::Map | Kind::Splat => crate::thumbcache::rich(),
+        Kind::Cad => crate::thumbcache::rich() && name.to_ascii_lowercase().ends_with(".dxf"),
+        _ => false,
+    }
 }
 
 struct Job {
@@ -81,13 +87,14 @@ const SNIPPET_COLS: usize = 160;
 
 enum Slot {
     Pending(u64),
-    Ready { pic: Pic, stamp: u64, bytes: usize, used: Cell<u64> },
+    Ready { pic: Pic, stamp: u64, bytes: usize, used: Cell<u64>, badge: Option<Arc<str>> },
     /// Couldn't be read: the type icon is drawn instead, and it isn't tried again until the
     /// file changes.
     Failed(u64),
 }
 
-type Done = (PathBuf, u64, Option<Decoded>);
+/// A finished job: the picture, and for splat scenes a short label (format and splat count).
+type Done = (PathBuf, u64, Option<Decoded>, Option<String>);
 
 #[derive(Default)]
 pub(super) struct Thumbs {
@@ -138,6 +145,25 @@ impl Thumbs {
         }
     }
 
+    /// The thumbnail for this version of a file if it's ready, without asking for it.
+    pub(super) fn ready(&self, path: &Path, stamp: u64) -> Option<&Pic> {
+        match self.cache.get(path) {
+            Some(Slot::Ready { pic, stamp: s, used, .. }) if *s == stamp => {
+                used.set(self.frame);
+                Some(pic)
+            }
+            _ => None,
+        }
+    }
+
+    /// The short label of a ready thumbnail of a splat scene ("SPZ · 1.2M splats").
+    pub(super) fn badge(&self, path: &Path) -> Option<Arc<str>> {
+        match self.cache.get(path) {
+            Some(Slot::Ready { badge, .. }) => badge.clone(),
+            _ => None,
+        }
+    }
+
     /// Once a frame, after drawing: queue what was asked for and drop queued work for files no
     /// longer on screen.
     pub(super) fn flush(&mut self) {
@@ -178,7 +204,8 @@ impl Thumbs {
         self.frame += 1;
         let Some(rx) = &self.rx else { return false };
         for _ in 0..UPLOADS_PER_FRAME {
-            let Ok((path, stamp, img)) = rx.try_recv() else { break };
+            let Ok((path, stamp, img, badge)) = rx.try_recv() else { break };
+            let badge: Option<Arc<str>> = badge.map(Into::into);
             // Only if it's still wanted for this version of the file.
             if !matches!(self.cache.get(&path), Some(Slot::Pending(s)) if *s == stamp) {
                 continue;
@@ -188,17 +215,17 @@ impl Thumbs {
                     let bytes = img.pixels.len() * 4;
                     self.bytes += bytes;
                     let tex = ctx.load_texture(format!("thumb:{}", path.display()), img, egui::TextureOptions::LINEAR);
-                    Slot::Ready { pic: Pic::Tex(tex), stamp, bytes, used: Cell::new(self.frame) }
+                    Slot::Ready { pic: Pic::Tex(tex), stamp, bytes, used: Cell::new(self.frame), badge }
                 }
                 Some(Decoded::Text(t)) => {
                     let bytes = t.len();
                     self.bytes += bytes;
-                    Slot::Ready { pic: Pic::Text(t.into()), stamp, bytes, used: Cell::new(self.frame) }
+                    Slot::Ready { pic: Pic::Text(t.into()), stamp, bytes, used: Cell::new(self.frame), badge }
                 }
                 Some(Decoded::Wave(w)) => {
                     let bytes = w.len() * 4;
                     self.bytes += bytes;
-                    Slot::Ready { pic: Pic::Wave(w.into()), stamp, bytes, used: Cell::new(self.frame) }
+                    Slot::Ready { pic: Pic::Wave(w.into()), stamp, bytes, used: Cell::new(self.frame), badge }
                 }
                 None => Slot::Failed(stamp),
             };
@@ -256,7 +283,8 @@ impl Thumbs {
                         }
                     };
                     let img = std::panic::catch_unwind(|| decode(&job, config)).ok().flatten();
-                    if tx.send((job.path, job.stamp, img)).is_err() {
+                    let badge = if img.is_some() { std::panic::catch_unwind(|| splat_badge(&job.path)).ok().flatten() } else { None };
+                    if tx.send((job.path, job.stamp, img, badge)).is_err() {
                         return;
                     }
                 }
@@ -285,9 +313,54 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
         }
         return snippet(&job.path, doc).map(Decoded::Text);
     }
+    // Made before (in this run or an earlier one): from the disk cache, without reading the file.
+    if let Some((w, h, rgba)) = crate::thumbcache::get(&job.path, job.stamp, config.max) {
+        return Some(Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)));
+    }
+    let made = picture(job, config, kind, &name)?;
+    if let Decoded::Image(img) = &made {
+        let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+        crate::thumbcache::put(&job.path, job.stamp, config.max, img.size[0], img.size[1], &rgba);
+    }
+    Some(made)
+}
+
+/// The label for a splat scene's thumbnail, from its header (never the whole file). Runs on a
+/// worker thread.
+fn splat_badge(path: &Path) -> Option<String> {
+    // Never from a server or a cloud file that isn't on this computer (reading the header would
+    // download it), even when the picture came from the disk cache.
+    if !is_local(path) {
+        return None;
+    }
+    let name = path.file_name()?.to_string_lossy();
+    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let splat = preview::kind_of(&name) == Kind::Splat || ((ext == "ply" || ext == "glb") && crate::splat::claims(path));
+    if splat { crate::splat::badge(path) } else { None }
+}
+
+/// How long a thumbnail waits for the graphics chip before drawing points instead.
+const SPLAT_GPU_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// A splat scene drawn as real splats on the graphics chip from a sample of them, or as
+/// points where the chip can't be used (and for point clouds, which have no splat shapes).
+fn splat_thumb(path: &std::path::Path, max: u32) -> Option<Decoded> {
+    use crate::splat::{Limits, SceneKind, View, gpu};
+    let scene = std::sync::Arc::new(crate::splat::read(path, Limits::THUMB).ok()?);
+    let n = max.min(512) as usize;
+    if scene.kind == SceneKind::Splat {
+        if let Some(pic) = gpu::picture_now(scene.clone(), None, View::default(), [n as u32, n as u32], SPLAT_GPU_WAIT) {
+            return Some(Decoded::Image(egui::ColorImage::from_rgba_premultiplied(pic.size, &pic.rgba)));
+        }
+    }
+    Some(Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &scene.draw(n, n, &View::default(), 1))))
+}
+
+/// Make a thumbnail picture from the file.
+fn picture(job: &Job, config: Config, kind: Kind, name: &str) -> Option<Decoded> {
     let local = if crate::fsys::remote::is_remote(&job.path) {
         // On a server: only pictures, fetched when they're small enough (never for the map).
-        if !config.local_only && matches!(kind, Kind::Image | Kind::LinearImage) && job.size <= REMOTE_MAX { crate::fsys::remote::fetch(&job.path, REMOTE_MAX).ok()? } else { return None }
+        if !config.local_only && matches!(kind, Kind::Image | Kind::LinearImage | Kind::Drawing) && job.size <= REMOTE_MAX { crate::fsys::remote::fetch(&job.path, REMOTE_MAX).ok()? } else { return None }
     } else if config.local_only && !is_local(&job.path) {
         return None;
     } else {
@@ -295,8 +368,57 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
     };
     let max = config.max;
     match kind {
+        Kind::Media(crate::media::Media::Video) => crate::video::poster(&local, max).ok().map(|(w, h, rgba)| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba))),
         Kind::Media(_) => crate::media::thumbnail(&local, max).ok().map(|(w, h, rgba)| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba))),
         Kind::Image | Kind::LinearImage => preview::decode_image(&local, kind == Kind::LinearImage, job.size, max).ok().map(|r| Decoded::Image(r.0)),
+        Kind::Psd => crate::psdview::picture(&local, max).ok().map(|p| {
+            let img = image::DynamicImage::ImageRgba8(p.image);
+            let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };
+            let rgba = img.to_rgba8();
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
+        }),
+        Kind::Raw => crate::camraw::preview(&local, max).ok().map(|r| {
+            let img = if r.image.width() > max || r.image.height() > max { r.image.thumbnail(max, max) } else { r.image };
+            let rgba = img.to_rgba8();
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
+        }),
+        Kind::Splat => splat_thumb(&local, max),
+        Kind::Model if local.extension().is_some_and(|x| x.eq_ignore_ascii_case("ply") || x.eq_ignore_ascii_case("glb")) && crate::splat::claims(&local) => splat_thumb(&local, max),
+        Kind::Model => crate::model3d::read(&local).ok().map(|m| {
+            let n = max.min(512) as usize;
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &m.draw(n, n, crate::model3d::Angle::default(), 1)))
+        }),
+        Kind::Cad => crate::cadview::read_dxf(&local).ok().map(|d| {
+            let (w, h) = d.fit(max.min(512));
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &d.draw(w, h)))
+        }),
+        Kind::Science => crate::sciimage::read(&local).ok().and_then(|s| image::RgbaImage::from_raw(s.width, s.height, s.rgba)).map(|img| {
+            let img = image::DynamicImage::ImageRgba8(img);
+            let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };
+            let rgba = img.to_rgba8();
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
+        }),
+        Kind::Saved => crate::savedpic::read(&local).ok().and_then(|s| s.picture).map(|img| {
+            let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };
+            let rgba = img.to_rgba8();
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
+        }),
+        Kind::Map => crate::geoview::read(&local).ok().map(|g| {
+            let (w, h) = g.fit(max.min(512));
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &g.draw(w, h)))
+        }),
+        Kind::Midi => crate::midiview::read(&local).ok().map(|song| {
+            let (w, h) = (max, (max * 2 / 3).max(1));
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &song.roll(w, h)))
+        }),
+        Kind::Font => crate::fontview::specimen(&local, max.min(512)).ok().map(|s| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([s.width as usize, s.height as usize], &s.rgba))),
+        Kind::Drawing => crate::svg::render(&local, max).ok().map(|d| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([d.width as usize, d.height as usize], &d.rgba))),
+        // The picture Office and LibreOffice save of the first page or slide.
+        Kind::Doc => if name.to_ascii_lowercase().ends_with(".epub") { crate::epub::cover(&local) } else { crate::officedoc::saved_thumbnail(&local) }.map(|img| {
+            let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };
+            let rgba = img.to_rgba8();
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
+        }),
         _ => None,
     }
 }
@@ -313,15 +435,32 @@ pub(super) enum TextKind {
     /// Word (.docx), or OpenDocument text (.odt): the text from inside the zip.
     Docx,
     Odt,
+    /// A spreadsheet: its first rows.
+    Sheet,
+    /// PowerPoint or OpenDocument slides: their titles and points.
+    Slides,
+    /// An EPUB book: its first lines.
+    Book,
+    /// A SQLite database: its first table's first rows.
+    Database,
+    /// An email, mailbox, contact card or calendar: who, what and when.
+    Mail,
+    /// A music project: its tempo and tracks.
+    Project,
 }
 
 pub(super) fn text_kind(name: &str) -> Option<TextKind> {
     let f = crate::formats::by_name(name)?;
     match f.id {
         "docx" => Some(TextKind::Docx),
+        "sheet" => Some(TextKind::Sheet),
+        "csv" => Some(TextKind::Plain),
+        "sqlite" => Some(TextKind::Database),
         "odt" => Some(TextKind::Odt),
-        // SVG is drawn as text in previews, but as a tile its markup isn't worth reading.
-        "svg" => None,
+        "pptx" | "odp" => Some(TextKind::Slides),
+        "epub" => Some(TextKind::Book),
+        "mail" | "mbox" | "vcard" | "ical" => Some(TextKind::Mail),
+        "daw" => Some(TextKind::Project),
         _ => (f.category == crate::formats::Category::Text).then_some(TextKind::Plain),
     }
 }
@@ -336,6 +475,15 @@ fn snippet(path: &Path, kind: TextKind) -> Option<String> {
             preview::decode_text(&buf)?
         }
         TextKind::Docx | TextKind::Odt => doc_text(path, kind)?,
+        TextKind::Sheet => crate::sheets::snippet(&crate::sheets::read(path, 40, 12).ok()?),
+        TextKind::Slides => {
+            let k = crate::officedoc::kind_of(&path.file_name()?.to_string_lossy())?;
+            crate::officedoc::plain_text(&crate::officedoc::read(path, k).ok()?)
+        }
+        TextKind::Database => crate::sheets::snippet(&crate::tables::read_sqlite(path, 40, 12).ok()?),
+        TextKind::Book => crate::officedoc::plain_text(&crate::epub::open(path, 40).ok()?.blocks),
+        TextKind::Mail => crate::mailview::snippet(path)?,
+        TextKind::Project => crate::officedoc::plain_text(&crate::daw::read(path).ok()?.0),
     };
     let mut out = String::new();
     for line in raw.lines().take(SNIPPET_LINES) {
