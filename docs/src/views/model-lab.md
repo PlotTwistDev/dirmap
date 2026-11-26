@@ -49,6 +49,29 @@ top-k 40, top-p 0.95, min-p 0.05).
 
 The Lab works out these probabilities itself, so what it shows is exactly what it picks from.
 
+## Looking inside the model
+
+A model reads text in *layers*, one after another: a small model has a dozen or so, a large one
+eighty or more. Each layer adjusts every token's meaning a little, using the tokens before it, and
+the last layer's result decides what comes next. Press **Inside** at the top of the Lab, type some
+text and press **Look inside** to watch this happen. The Lab reads up to 256 tokens at a time.
+
+The map shows a column for each token and a row for each layer, the first at the top. The brighter
+a square, the more that layer changed the token: a small nudge is dark, a big rewrite is bright
+orange. Hover over a square for the exact amount. The first row stays dark, because it is where
+each token's meaning starts. Look for the layers where many tokens change at once, and for tokens
+that keep changing late (often the ones the next word depends on).
+
+Click a token to see **what each layer would predict** after it. The Lab takes that layer's result
+and finishes it the way the model's last layer does, so you see what the model would write if it
+stopped there, with the five likeliest tokens and their probabilities. Early layers often guess
+something vague, such as a space or "the"; the right answer tends to appear partway through and
+grow more certain. The line above the table says from which layer the final answer stays on top.
+Researchers call this a *logit lens*.
+
+The last layer's prediction is the model's own: it matches what **Next token** shows. Looking
+inside reads the model's file to work out the predictions and changes nothing in it.
+
 ## Testing a model's speed
 
 Press **Speed** at the top of the Lab to see how fast the loaded model runs on this computer.

@@ -51,6 +51,8 @@ mod modeldiff;
 mod llm;
 mod askabout;
 mod lab;
+mod probe;
+mod lens;
 mod getmodel;
 mod inspect;
 mod mailview;

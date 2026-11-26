@@ -188,6 +188,12 @@ impl App {
                     self.ask.answering = None;
                     self.ask.phase = Phase::Idle;
                 }
+                // The layers' guesses follow a look straight away, so it stays busy until then.
+                Event::Looked(inside) => self.ask.lab_state.inside = Some(inside),
+                Event::Lensed { token, layers } => {
+                    self.ask.lab_state.lensed = Some((token, layers));
+                    self.ask.phase = Phase::Idle;
+                }
                 Event::Benching(run, of) => self.ask.lab_state.bench_progress = Some((run, of)),
                 Event::Benched { read_speed, write_speed, first_token, threads } => {
                     self.ask.phase = Phase::Idle;

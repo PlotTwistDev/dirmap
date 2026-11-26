@@ -4,6 +4,8 @@
 //! changes the model or anything on disk.
 
 use super::*;
+
+mod inside;
 use crate::kit::{self, Tone};
 use crate::lab::{BenchResult, BenchSettings, Run, Settings, Step};
 use crate::llm::Request;
@@ -23,8 +25,11 @@ pub(super) struct LabState {
     asked: Option<(String, bool, String, u32, Settings)>,
     /// The step whose choices are shown.
     pub shown: usize,
-    /// The speed test is on screen instead of Next token.
-    speed: bool,
+    /// Which of the Lab's pages is on screen.
+    page: Page,
+    /// The last look inside, and the token whose layers' guesses are shown.
+    pub inside: Option<crate::lens::Inside>,
+    pub lensed: Option<(usize, Vec<Vec<(String, f32)>>)>,
     bench: BenchSettings,
     /// The speed test running: (run, of runs).
     pub bench_progress: Option<(u32, u32)>,
@@ -45,13 +50,22 @@ impl Default for LabState {
             run: None,
             asked: None,
             shown: 0,
-            speed: false,
+            page: Page::Next,
+            inside: None,
+            lensed: None,
             bench: BenchSettings::default(),
             bench_progress: None,
             bench_asked: BenchSettings::default(),
             results: None,
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Page {
+    Next,
+    Inside,
+    Speed,
 }
 
 /// Green for a confident choice, through amber, to red for an unlikely one.
@@ -102,12 +116,13 @@ impl App {
             ui.add_space(8.0);
             let busy = self.ask.phase != super::ask::Phase::Idle;
             ui.add_enabled_ui(!busy, |ui| {
-                kit::segmented(ui, &mut self.ask.lab_state.speed, &[(false, "Next token"), (true, "Speed")], false);
+                kit::segmented(ui, &mut self.ask.lab_state.page, &[(Page::Next, "Next token"), (Page::Inside, "Inside"), (Page::Speed, "Speed")], false);
             });
         });
-        if self.ask.lab_state.speed {
-            self.lab_speed(ui, name);
-            return;
+        match self.ask.lab_state.page {
+            Page::Speed => return self.lab_speed(ui, name),
+            Page::Inside => return self.lab_inside(ui, name),
+            Page::Next => {}
         }
         ui.weak("What the model would write next, and how sure it is.");
         ui.add_space(4.0);

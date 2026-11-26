@@ -49,6 +49,8 @@ calamine = { version = "0.38", features = ["dates"] }
 hayro = "0.9.0"
 # Runs GGUF models on this computer for Ask AI (llama.cpp, MIT). No OpenMP, so nothing extra ships.
 llama-cpp-2 = { version = "=0.1.161", default-features = false }
+# The raw bindings, for what the wrapper doesn't offer: reading each layer's output (the Lab).
+llama-cpp-sys-2 = { version = "=0.1.161", default-features = false }
 jxl-oxide = { version = "0.12.6", features = ["image"] }
 midly = "0.5"
 rusqlite = { version = "0.43.0", features = ["bundled", "hooks"] }
