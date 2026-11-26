@@ -8,7 +8,8 @@
   probability, the ten likeliest alternatives, and what temperature, top-k, top-p and min-p do to
   them. Pick a different token to see where the text goes instead. **Inside** shows how much each
   of the model's layers changes each word, and what each layer would predict if the model stopped
-  there. **Speed** tests how fast a
+  there. **Steer** pushes a model towards one idea and away from another while it writes, beside
+  what it writes unpushed. **Speed** tests how fast a
   model reads and writes on this computer, and keeps the results to compare. Free. See
   [The Lab](../views/model-lab.md).
 - **💬 Ask AI** chats with a model already on this computer, run by Filescape itself: no Ollama,
