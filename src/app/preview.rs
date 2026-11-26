@@ -181,6 +181,8 @@ pub(super) enum Kind {
     Cad,
     /// An app's own format: the picture it saved inside.
     Saved,
+    /// DICOM or FITS: decoded here.
+    Science,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -212,6 +214,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Map => Kind::Map,
         C::Cad => Kind::Cad,
         C::Saved => Kind::Saved,
+        C::Science => Kind::Science,
         C::Database => Kind::Database,
         C::Model => Kind::Model,
     }
@@ -350,6 +353,19 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
         },
         Kind::Cad => match crate::cadview::read_info(path) {
             Ok(i) => Content::Doc { blocks: Arc::new(i.blocks), facts: i.facts },
+            Err(e) => Content::Error(e),
+        },
+        Kind::Science => match crate::sciimage::read(path) {
+            Ok(s) => Content::Image {
+                look: None,
+                pixels: Some(egui::ColorImage::from_rgba_unmultiplied([s.width as usize, s.height as usize], &s.rgba)),
+                tex: None,
+                size: [s.width, s.height],
+                info: String::new(),
+                poster: false,
+                source: None,
+                facts: s.facts,
+            },
             Err(e) => Content::Error(e),
         },
         Kind::Saved => match crate::savedpic::read(path) {

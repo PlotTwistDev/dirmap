@@ -64,6 +64,7 @@ mod shellmenu;
 mod subset;
 mod savedpic;
 mod scan;
+mod sciimage;
 mod sequences;
 mod snapshot;
 mod soundinfo;

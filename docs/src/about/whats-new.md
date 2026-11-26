@@ -98,6 +98,8 @@
 - Music projects from Ableton Live (.als), REAPER (.rpp), FL Studio (.flp) and Cubase or Nuendo
   (.cpr, .npr) show the version that saved them, the tempo, tracks, plugins and the sound files
   they use, marking any that aren't on this computer.
+- DICOM medical scans and FITS astronomy images preview as pictures, with what they show
+  and how they were taken. Patient names, IDs and birth dates are never shown.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
