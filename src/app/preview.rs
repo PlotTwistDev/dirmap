@@ -408,7 +408,8 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                         blocks.push(Block::Para(vec![Span { text: format!("{k}: "), bold: true, ..Default::default() }, Span { text: v.clone(), ..Default::default() }]));
                     }
                     blocks.push(Block::Rule);
-                    blocks.push(Block::Para(plain(format!("There's no picture saved inside it, and Filescape can't draw {app} files itself."))));
+                    let note = s.note.clone().unwrap_or_else(|| format!("There's no picture saved inside it, and Filescape can't draw {app} files itself."));
+                    blocks.push(Block::Para(plain(note)));
                     Content::Doc { blocks: Arc::new(blocks), facts: s.facts }
                 }
             },

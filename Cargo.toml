@@ -60,6 +60,9 @@ hayro-jpeg2000 = { version = "0.5", default-features = false, features = ["std",
 jpeg-decoder = "0.3"
 pure_jpegls = "2.1"
 plist = "1"
+# Reads the Craft Apps' own documents (PhotoCraft, VectorCraft, EffectCraft): saved pictures,
+# pages and layers. From craft-libs (MIT or Apache-2.0), pinned to a tested commit: not on crates.io.
+craft-doc = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
 
 [features]
 default = []

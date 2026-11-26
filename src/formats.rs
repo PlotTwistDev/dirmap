@@ -83,6 +83,7 @@ impl Format {
         match self.id {
             "markdown" => ("Formatted text, with the source a click away", "Filescape"),
             "text" => ("The text, in syntax colours for code (about 200 languages)", "Filescape (syntect, two-face)"),
+            "craft" => ("The picture the app saved inside the file, with its pages, layers, size, length and the version that saved it", "Filescape (craft-doc)"),
             "csv" => ("A table, with column names from the first row", "Filescape (csv)"),
             "sheet" => ("Each sheet's cells, as last saved", "calamine"),
             "docx" | "odt" => ("Formatted text: headings, lists, tables", "Filescape"),
@@ -206,6 +207,12 @@ pub static FORMATS: &[Format] = &[
         name: "Design and 3D app files (Sketch, Affinity, CorelDRAW, SketchUp, Blender, Cinema 4D, 3ds Max, Maya, Houdini)",
         category: Category::Saved,
         exts: &["sketch", "afdesign", "afphoto", "afpub", "aftemplate", "cdr", "skp", "blend", "c4d", "max", "ma", "mb", "hip", "hipnc", "hiplc"],
+    },
+    Format {
+        id: "craft",
+        name: "Craft Apps files (PhotoCraft, VectorCraft, EffectCraft, FigCraft, DesignCraft, TextureCraft, DeckCraft, AniCraft, MaterialCraft, FilmCraft, SoundCraft)",
+        category: Category::Saved,
+        exts: &["pcraft", "vectorcraft", "drawcraft", "vctemplate", "ecproj", "ectemplate", "figcraft", "designcraft", "tcraft", "deckcraft", "anicraft", "mcraft", "fcproj", "scraft", "scraftz"],
     },
     Format { id: "daw", name: "Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo, Logic Pro)", category: Category::Document, exts: &["als", "rpp", "flp", "cpr", "npr", "logicx"] },
     Format { id: "dicom", name: "DICOM medical image", category: Category::Science, exts: &["dcm", "dicom"] },

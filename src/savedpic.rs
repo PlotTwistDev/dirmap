@@ -71,9 +71,14 @@ pub fn app_of(name: &str) -> Option<App> {
 pub struct Saved {
     pub picture: Option<image::DynamicImage>,
     pub facts: Vec<(&'static str, String)>,
+    /// Said instead of the usual line when there's no picture (why there isn't one).
+    pub note: Option<String>,
 }
 
 pub fn read(path: &Path) -> Result<Saved, String> {
+    if path.file_name().is_some_and(|n| crate::craftfile::of(&n.to_string_lossy()).is_some()) {
+        return crate::craftfile::read(path);
+    }
     let app = path.file_name().and_then(|n| app_of(&n.to_string_lossy())).ok_or("Not a file Filescape knows")?;
     if path.is_dir() {
         return Err(format!("A {} package (a folder); open it to see inside", app.name()));
@@ -104,14 +109,14 @@ pub fn read(path: &Path) -> Result<Saved, String> {
     if let Some(p) = &picture {
         facts.push(("Saved picture", format!("{} × {}", p.width(), p.height())));
     }
-    Ok(Saved { picture, facts })
+    Ok(Saved { picture, facts, note: None })
 }
 
-fn zip_open(path: &Path) -> Option<zip::ZipArchive<std::fs::File>> {
+pub(crate) fn zip_open(path: &Path) -> Option<zip::ZipArchive<std::fs::File>> {
     zip::ZipArchive::new(std::fs::File::open(path).ok()?).ok()
 }
 
-fn zip_bytes(zip: &mut zip::ZipArchive<std::fs::File>, name: &str, max: usize) -> Option<Vec<u8>> {
+pub(crate) fn zip_bytes(zip: &mut zip::ZipArchive<std::fs::File>, name: &str, max: usize) -> Option<Vec<u8>> {
     let f = zip.by_name(name).ok()?;
     if f.size() as usize > max {
         return None;
@@ -121,7 +126,7 @@ fn zip_bytes(zip: &mut zip::ZipArchive<std::fs::File>, name: &str, max: usize) -
     Some(b)
 }
 
-fn decode(b: &[u8]) -> Option<image::DynamicImage> {
+pub(crate) fn decode(b: &[u8]) -> Option<image::DynamicImage> {
     image::load_from_memory(b).ok().filter(|i| i.width() >= 16 && i.height() >= 16)
 }
 
