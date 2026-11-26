@@ -63,6 +63,28 @@ pub struct Tensor {
     pub offset: u64,
 }
 
+/// The model's dimensions, for memory estimates. Per-layer values take the largest.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Shape {
+    pub layers: Option<u64>,
+    pub hidden: Option<u64>,
+    pub heads: Option<u64>,
+    pub kv_heads: Option<u64>,
+    /// Size of each key (and value) head.
+    pub head_dim: Option<u64>,
+    /// The longest context it was trained for.
+    pub context: Option<u64>,
+}
+
+impl Shape {
+    /// Bytes of key/value cache per token of context, at `bytes` per number (2 for F16).
+    pub fn kv_per_token(&self, bytes: f64) -> Option<f64> {
+        let heads = self.kv_heads.or(self.heads)?;
+        let dim = self.head_dim.or_else(|| Some(self.hidden? / self.heads?))?;
+        Some(2.0 * self.layers? as f64 * heads as f64 * dim as f64 * bytes)
+    }
+}
+
 /// How one of the model's files is laid out, for the health checks.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Layout {
@@ -102,6 +124,8 @@ pub struct Inspection {
     pub tensors: Vec<Tensor>,
     /// Largest share first.
     pub kinds: Vec<KindShare>,
+    /// The numbers that decide how much memory running the model takes.
+    pub shape: Shape,
     /// How each file that was read is laid out.
     pub layouts: Vec<Layout>,
     /// Every metadata entry, as (key, value text), in file order.
@@ -208,6 +232,20 @@ fn gguf_model(m: &Model, out: &mut Inspection) {
             x => x.as_u64().map(group),
         }
     };
+    let biggest = |key: &str| -> Option<u64> {
+        match h.get(&format!("{}.{key}", arch.as_deref()?))? {
+            gguf::Value::Array(xs) => xs.iter().filter_map(gguf::Value::as_u64).max(),
+            x => x.as_u64(),
+        }
+    };
+    let shape = Shape {
+        layers: h.arch_u64("block_count"),
+        hidden: h.arch_u64("embedding_length"),
+        heads: biggest("attention.head_count"),
+        kv_heads: biggest("attention.head_count_kv"),
+        head_dim: h.arch_u64("attention.key_length"),
+        context: h.arch_u64("context_length"),
+    };
     fact("Name", h.str("general.name").map(str::to_string));
     fact("Made by", h.str("general.organization").map(str::to_string));
     fact("Architecture", arch.clone());
@@ -233,6 +271,7 @@ fn gguf_model(m: &Model, out: &mut Inspection) {
     if m.files.len() > 1 {
         fact("Parts", Some(format!("{} files", m.files.len())));
     }
+    out.shape = shape;
 }
 
 fn licence_of(h: &gguf::Header) -> Option<String> {
@@ -359,6 +398,14 @@ fn documented(dir: &Path, out: &mut Inspection) {
         let text = c.get("text_config").filter(|t| t.is_object()).unwrap_or(&c);
         let num = |k: &str| text.get(k).or_else(|| c.get(k)).and_then(|v| v.as_u64()).map(group);
         let s = |k: &str| c.get(k).and_then(|v| v.as_str()).map(str::to_string);
+        let raw = |k: &str| text.get(k).or_else(|| c.get(k)).and_then(|v| v.as_u64());
+        let sh = &mut out.shape;
+        sh.layers = sh.layers.or(raw("num_hidden_layers"));
+        sh.hidden = sh.hidden.or(raw("hidden_size"));
+        sh.heads = sh.heads.or(raw("num_attention_heads"));
+        sh.kv_heads = sh.kv_heads.or(raw("num_key_value_heads"));
+        sh.head_dim = sh.head_dim.or(raw("head_dim"));
+        sh.context = sh.context.or(raw("max_position_embeddings"));
         let arch = s("model_type").or_else(|| c["architectures"].get(0).and_then(|v| v.as_str()).map(str::to_string));
         let rows: [(&'static str, Option<String>); 8] = [
             ("Architecture", arch),

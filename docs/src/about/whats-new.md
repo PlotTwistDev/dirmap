@@ -20,6 +20,8 @@
 - A model's **Health** finds missing parts, files cut short by a stopped download, damaged
   files, unsafe formats and size labels that don't add up, and can verify Ollama and Hugging Face
   downloads against their checksums.
+- **Will it run?** estimates the memory a model needs at any context length and says whether it
+  runs on this computer's graphics chip, split, on the processor, or not at all.
 - A model's **Structure** shows its layers in order and draws the model as a map of its layers
   and tensors, coloured by what each part does or by how its numbers are stored.
 
