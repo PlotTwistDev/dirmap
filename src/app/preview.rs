@@ -1834,6 +1834,12 @@ fn doc_blocks(ui: &mut egui::Ui, blocks: &[crate::help::doc::Block]) {
 /// A Word, PowerPoint or OpenDocument file: formatted, or the picture saved with it when its
 /// words can't be read.
 fn load_doc(path: &Path) -> Content {
+    if path.file_name().is_some_and(|n| crate::daw::is_project(&n.to_string_lossy())) {
+        return match crate::daw::read(path) {
+            Ok((blocks, facts)) => Content::Doc { blocks: Arc::new(blocks), facts },
+            Err(e) => Content::Error(e),
+        };
+    }
     if path.file_name().is_some_and(|n| crate::mailview::kind_of(&n.to_string_lossy()).is_some()) {
         return match crate::mailview::read(path) {
             Ok(m) => Content::Doc { blocks: Arc::new(m.blocks), facts: m.facts },

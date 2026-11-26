@@ -23,6 +23,7 @@ mod camraw;
 mod categories;
 mod cloud;
 mod cloudops;
+mod daw;
 mod drives;
 mod dupes;
 mod epub;
