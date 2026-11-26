@@ -77,6 +77,8 @@ use std::sync::Arc;
 pub const APP_ID: &str = "Filescape";
 
 fn main() -> eframe::Result {
+    // JPEG XL through the image crate, everywhere pictures are read.
+    jxl_oxide::integration::register_image_decoding_hook();
     templates::migrate_old_folder();
     crash_log();
     let mut cli = false;

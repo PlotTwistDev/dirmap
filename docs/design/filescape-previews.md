@@ -96,7 +96,7 @@ Checked on crates.io, 25 November 2026.
 | HEIC / HEIF | System | n/a | macOS ImageIO/Quick Look (built in); Windows shell (needs the free HEIF extension); Linux `heif-thumbnailer` if installed | **Use** |
 |  | `libheif-rs` 3 | MIT (binding) | libheif itself is LGPL-3 with HEVC patents: avoid bundling | Avoid |
 | AVIF | `image` `avif-native` | MIT/Apache + libdav1d BSD-2 | C dependency, cross-builds need care | Phase 1 via system first, then this |
-| JPEG XL | `jxl-oxide` 0.12 | MIT or Apache-2.0 | Pure Rust | Phase 2 |
+| JPEG XL | `jxl-oxide` 0.12 | MIT or Apache-2.0 | Pure Rust, through the `image` crate's decoding hook | **Use** |
 | Audio tags, cover art | `lofty` 0.25 | MIT or Apache-2.0 | Title/artist/album, embedded pictures, duration, sample rate, bit depth | **Use** |
 | Audio decode | `symphonia` 0.6 | MPL-2.0 | File-level copyleft (changes to its own files must be published), fine to ship. System decoders already cover playback | Not needed yet |
 | MIDI | `midly` 0.5 | Unlicense | Piano roll | Phase 2 |
@@ -198,4 +198,6 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Word, PowerPoint and OpenDocument formatted | #54 | Merged |
 | Every PDF page (hayro) | #55 | Merged |
 | EPUB books (own reader) | #56 | Merged |
-| Quick Look from Storage Analysis, full screen | | In review |
+| Quick Look from Storage Analysis, full screen | #57 | Merged |
+| **Phase 2** | | |
+| JPEG XL (jxl-oxide) | | In review |

@@ -70,6 +70,7 @@ pub static FORMATS: &[Format] = &[
     Format { id: "jpeg", name: "JPEG image", category: Category::Picture, exts: &["jpg", "jpeg", "jpe"] },
     Format { id: "gif", name: "GIF image", category: Category::Picture, exts: &["gif"] },
     Format { id: "webp", name: "WebP image", category: Category::Picture, exts: &["webp"] },
+    Format { id: "jxl", name: "JPEG XL image", category: Category::Picture, exts: &["jxl"] },
     Format { id: "tiff", name: "TIFF image", category: Category::Picture, exts: &["tif", "tiff"] },
     Format { id: "bmp", name: "BMP image", category: Category::Picture, exts: &["bmp"] },
     Format { id: "tga", name: "Targa image", category: Category::Picture, exts: &["tga"] },
@@ -152,6 +153,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "gif"
     } else if at(0, b"RIFF") && at(8, b"WEBP") {
         "webp"
+    } else if at(0, b"\xff\x0a") || at(0, b"\0\0\0\x0cJXL \r\n\x87\n") {
+        "jxl"
     } else if at(0, b"II*\0") || at(0, b"MM\0*") {
         "tiff"
     } else if at(0, b"qoif") {
