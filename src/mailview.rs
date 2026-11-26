@@ -484,7 +484,8 @@ fn entities(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         rest = &rest[i..];
-        let end = rest[..rest.len().min(12)].find(';');
+        // Byte search: slicing the text at 12 could land inside a character such as '•'.
+        let end = rest.bytes().take(12).position(|b| b == b';');
         let Some(end) = end else {
             out.push('&');
             rest = &rest[1..];
@@ -1090,8 +1091,8 @@ fn calendar(text: &str) -> Mail {
                 facts.push(("Events", group(many.len() as u64)));
                 let dated: Vec<&Event> = many.iter().filter(|e| !e.key.is_empty()).collect();
                 if let (Some(a), Some(b)) = (dated.first(), dated.last()) {
-                    facts.push(("First", pretty_ical(&a.key[..8.min(a.key.len())], None).unwrap_or_default()));
-                    facts.push(("Last", pretty_ical(&b.key[..8.min(b.key.len())], None).unwrap_or_default()));
+                    facts.push(("First", pretty_ical(a.key.get(..8).unwrap_or(&a.key), None).unwrap_or_default()));
+                    facts.push(("Last", pretty_ical(b.key.get(..8).unwrap_or(&b.key), None).unwrap_or_default()));
                 }
                 let recurring = many.iter().filter(|e| !e.repeats.is_empty()).count();
                 if recurring > 0 {
@@ -1122,6 +1123,15 @@ mod tests {
 
     fn all_text(m: &Mail) -> String {
         crate::officedoc::plain_text(&m.blocks)
+    }
+
+    #[test]
+    fn an_ampersand_before_wide_characters_does_not_crash() {
+        // Twelve bytes after the '&' end inside the '•': this used to panic.
+        assert_eq!(entities("& a b c d •• &amp;"), "& a b c d •• &");
+        assert_eq!(entities("&bull;&#8226;&nope"), "••&nope");
+        let html = "<ul><li>Tom &amp; Jerry</li><li>R&D • costs</li></ul>";
+        assert!(html_text(html).contains("R&D • costs"));
     }
 
     #[test]
