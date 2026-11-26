@@ -203,4 +203,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | JPEG XL (jxl-oxide) | #66 | Merged |
 | MIDI piano roll (midly) | #67 | Merged |
 | SQLite (rusqlite) and CSV tables | #68 | Merged |
-| Archive tree with sizes and ratios | | In review |
+| Archive tree with sizes and ratios | #69 | Merged |
+| Image channels, HDR exposure, multilayer EXR | | In review |

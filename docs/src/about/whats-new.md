@@ -71,6 +71,8 @@
   their column names.
 - Archives preview as a tree of folders, biggest first, with sizes, how much compression saved,
   and warnings about password-protected files, unsafe names and archives that unpack to a huge size.
+- Pictures can be looked at channel by channel, HDR and OpenEXR pictures have an exposure
+  slider, and multilayer OpenEXR files show each layer (render pass).
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
   details.
 - Quick Look works in Storage Analysis too: click a tile and press **Space**. **Full screen** (or
