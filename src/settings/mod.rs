@@ -139,6 +139,18 @@ pub struct Settings {
     /// Very slight bevel on tile edges.
     pub depth_effect: bool,
 
+    // Previews & thumbnails
+    /// Keep thumbnails on disk between runs (the system's cache folder).
+    pub thumb_cache: bool,
+    /// The most the thumbnail folder may hold, in MB.
+    pub thumb_cache_mb: f32,
+    /// A filmstrip of frames from across a video under its preview.
+    pub video_strip: bool,
+    /// When a video's first frame is dull (black, a fade), look for a better one.
+    pub video_better_poster: bool,
+    /// Draw 3D models and MIDI files for Icons view and map tiles.
+    pub rich_thumbs: bool,
+
     // Advanced
     pub one_file_system: bool,
     pub skip_hidden: bool,
@@ -193,6 +205,11 @@ impl Default for Settings {
             lighting: true,
             light_level: LightLevel::Normal,
             depth_effect: true,
+            thumb_cache: true,
+            thumb_cache_mb: 512.0,
+            video_strip: true,
+            video_better_poster: true,
+            rich_thumbs: true,
             one_file_system: true,
             skip_hidden: false,
             threads: 0,
@@ -292,7 +309,58 @@ impl Settings {
                 (self.size_metric, self.cloud_icons, self.cloud_breakdown, self.cloud_column, self.cloud_fade, self.cloud_confirm, self.cloud_mounts) =
                     (def.size_metric, def.cloud_icons, def.cloud_breakdown, def.cloud_column, def.cloud_fade, def.cloud_confirm, def.cloud_mounts);
             }
+            Tab::Previews => {
+                (self.thumb_cache, self.thumb_cache_mb, self.video_strip, self.video_better_poster, self.rich_thumbs) =
+                    (def.thumb_cache, def.thumb_cache_mb, def.video_strip, def.video_better_poster, def.rich_thumbs);
+            }
             Tab::Licensing => {}
+        }
+    }
+
+    /// Send the preview settings to the parts that make thumbnails and pictures of videos (they
+    /// run on worker threads, away from the settings).
+    pub fn apply_previews(&self) {
+        crate::thumbcache::set_enabled(self.thumb_cache);
+        crate::thumbcache::set_limit((self.thumb_cache_mb.max(16.0) as u64) << 20);
+        crate::video::set_better_posters(self.video_better_poster);
+        crate::thumbcache::set_rich(self.rich_thumbs);
+    }
+}
+
+/// Ready-made choices for the Previews & thumbnails page.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PreviewPreset {
+    /// Nothing kept on disk, and only the pictures that are quick to make.
+    Light,
+    Balanced,
+    /// Everything, with room for many more thumbnails on disk.
+    Everything,
+    /// The settings match none of the above.
+    Custom,
+}
+
+impl PreviewPreset {
+    /// (disk cache, its size in MB, filmstrip, better video pictures, 3D and MIDI pictures)
+    fn values(self) -> Option<(bool, f32, bool, bool, bool)> {
+        match self {
+            PreviewPreset::Light => Some((false, 512.0, false, false, false)),
+            PreviewPreset::Balanced => Some((true, 512.0, true, true, true)),
+            PreviewPreset::Everything => Some((true, 2048.0, true, true, true)),
+            PreviewPreset::Custom => None,
+        }
+    }
+
+    pub fn of(s: &Settings) -> PreviewPreset {
+        let now = (s.thumb_cache, s.thumb_cache_mb, s.video_strip, s.video_better_poster, s.rich_thumbs);
+        [PreviewPreset::Light, PreviewPreset::Balanced, PreviewPreset::Everything]
+            .into_iter()
+            .find(|p| p.values().is_some_and(|v| v.0 == now.0 && (!v.0 || v.1 == now.1) && (v.2, v.3, v.4) == (now.2, now.3, now.4)))
+            .unwrap_or(PreviewPreset::Custom)
+    }
+
+    pub fn apply(self, s: &mut Settings) {
+        if let Some(v) = self.values() {
+            (s.thumb_cache, s.thumb_cache_mb, s.video_strip, s.video_better_poster, s.rich_thumbs) = v;
         }
     }
 }
@@ -306,12 +374,13 @@ pub enum Tab {
     FolderList,
     Treemap,
     Cloud,
+    Previews,
     Advanced,
     Licensing,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 7] = [Tab::General, Tab::Filtering, Tab::FolderList, Tab::Treemap, Tab::Cloud, Tab::Advanced, Tab::Licensing];
+    pub const ALL: [Tab; 8] = [Tab::General, Tab::Filtering, Tab::FolderList, Tab::Treemap, Tab::Cloud, Tab::Previews, Tab::Advanced, Tab::Licensing];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -320,6 +389,7 @@ impl Tab {
             Tab::FolderList => "Folder list",
             Tab::Treemap => "Treemap",
             Tab::Cloud => "Cloud storage",
+            Tab::Previews => "Previews & thumbnails",
             Tab::Advanced => "Advanced",
             Tab::Licensing => "Licensing",
         }
@@ -332,6 +402,7 @@ impl Tab {
             Tab::FolderList => Icon::List,
             Tab::Treemap => Icon::Grid,
             Tab::Cloud => Icon::Cloud,
+            Tab::Previews => Icon::File,
             Tab::Advanced => Icon::Sliders,
             Tab::Licensing => Icon::Key,
         }
@@ -344,6 +415,7 @@ impl Tab {
             Tab::FolderList => "Choose the columns of the folder list in Storage Analysis.",
             Tab::Treemap => "How the treemap looks and moves. Every change previews live in the main window.",
             Tab::Cloud => "How sizes are counted for cloud files, how their state is shown, and keeping them in the cloud.",
+            Tab::Previews => "How much work goes into previews and thumbnails, and what's kept on disk.",
             Tab::Advanced => "Scanner behaviour, performance, permissions and diagnostics.",
             Tab::Licensing => "Your Filescape licence, its activation on this computer, and buying one.",
         }
@@ -486,6 +558,7 @@ impl Dialog {
             Tab::FolderList => topics::SETTINGS_FOLDER_LIST,
             Tab::Treemap => topics::SETTINGS_TREEMAP,
             Tab::Cloud => topics::SETTINGS_CLOUD,
+            Tab::Previews => topics::SETTINGS_PREVIEWS,
             Tab::Advanced => topics::SETTINGS_ADVANCED,
             Tab::Licensing => topics::LICENSING,
         }
@@ -626,6 +699,7 @@ impl Dialog {
                                 Tab::FolderList => pages::folder_list(ui, &mut cx),
                                 Tab::Treemap => pages::treemap(ui, &mut cx),
                                 Tab::Cloud => pages::cloud(ui, &mut cx),
+                                Tab::Previews => pages::previews(ui, &mut cx),
                                 Tab::Advanced => pages::advanced(ui, &mut cx),
                                 Tab::Licensing => licence.panel(ui, &|id| cx.focus(id)),
                             }

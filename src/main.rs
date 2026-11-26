@@ -65,6 +65,7 @@ mod soundinfo;
 mod sunburst;
 mod svg;
 mod templates;
+mod thumbcache;
 mod tilegpu;
 mod video;
 mod wave;

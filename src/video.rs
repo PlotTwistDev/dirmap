@@ -335,12 +335,19 @@ pub fn representative(path: &Path, max: u32) -> Option<(usize, usize, Vec<u8>)> 
     Some((dw, dh, resample(&best.rgba, w, h, (w * 4) as isize, 0, dw, dh, false)))
 }
 
+static BETTER_POSTERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether `poster` looks for a better frame than a dull first one (Settings).
+pub fn set_better_posters(on: bool) {
+    BETTER_POSTERS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// A picture of a video: the system's, unless that's dull (a fade from black, a title card), when
 /// the most interesting of a few frames from across the video is used instead.
 pub fn poster(path: &Path, max: u32) -> Result<(usize, usize, Vec<u8>), String> {
     let sys = crate::media::thumbnail(path, max);
     if let Ok((_, _, px)) = &sys
-        && !is_dull(px)
+        && (!BETTER_POSTERS.load(std::sync::atomic::Ordering::Relaxed) || !is_dull(px))
     {
         return sys;
     }

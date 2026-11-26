@@ -952,6 +952,7 @@ impl App {
             && !crate::fsys::remote::is_remote(path)
             && !crate::fsys::archive::inside(path)
             && size.y > 240.0
+            && self.settings.video_strip
             && crate::video::supported();
         if !strip {
             if self.files.look.strip.as_ref().is_some_and(|s| s.path != path) {

@@ -77,6 +77,9 @@
   starts black or with a title card is shown by a more telling frame.
 - 3D models (STL, OBJ, PLY, glTF/GLB and 3MF) preview as a shaded model to turn about, and show
   in Icons view.
+- Thumbnails are kept on disk between runs, so folders you've seen show their pictures at once.
+  A new **Previews & thumbnails** page in Settings has presets, the cache's size and **Clear**,
+  and switches for filmstrips, video pictures and 3D and MIDI thumbnails.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
   details.
 - Quick Look works in Storage Analysis too: click a tile and press **Space**. **Full screen** (or
