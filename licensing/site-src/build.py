@@ -28,6 +28,9 @@ PADDLE_TAG = '<script src="/config.js"></script>\n<script src="https://cdn.paddl
 # The Pro price search engines show comes from the price the checkout uses (../site/config.js).
 PRICE = re.search(r'priceLabel:\s*"\$([\d.]+)"', (DIST / "config.js").read_text()).group(1)
 
+# The version shown on the homepage is the app's own, from Cargo.toml, so the two always match.
+VERSION = re.search(r'^version\s*=\s*"([^"]+)"', (REPO / "Cargo.toml").read_text(), re.M).group(1)
+
 HOME_DESCRIPTION = ("See where your disk space went: a zoomable map of every file, previews of 300+ "
                     "file types and a full file manager. Windows, macOS and Linux.")
 
@@ -123,7 +126,8 @@ for path, out, src, title, og_title, desc, key, priority in PAGES:
     body = (SRC / src).read_text()
     body = (body.replace("{{formats_table}}", table)
                 .replace("{{formats_count}}", str(n_formats))
-                .replace("{{extensions_count}}", str(n_exts)))
+                .replace("{{extensions_count}}", str(n_exts))
+                .replace("{{version}}", VERSION))
     page_head = (head.replace("{{title}}", html.escape(title))
                      .replace("{{og_title}}", html.escape(og_title))
                      .replace("{{description}}", html.escape(desc))
@@ -173,5 +177,5 @@ if len(sys.argv) > 1:
     for k, v in (("title", PAGES[0][3]), ("og_title", PAGES[0][4]), ("description", HOME_DESCRIPTION), ("path", "/")):
         preview = preview.replace("{{" + k + "}}", html.escape(v))
     pathlib.Path(sys.argv[1]).write_text(
-        preview + re.sub(r"\{\{cur:[\w-]+\}\}", "", nav) + IMG.sub(inline_img, home) + foot)
+        preview + re.sub(r"\{\{cur:[\w-]+\}\}", "", nav) + IMG.sub(inline_img, home.replace("{{version}}", VERSION)) + foot)
     print("wrote", sys.argv[1])
