@@ -52,7 +52,7 @@ a line of details:
 Click a model to see what's known about it on the right, with the full path of each of its files.
 Right-click it and choose **Show in Files**, or press **Show in Files** on the right, to open the
 folder it's in with the file selected. **Copy path** copies the path of its first file. For a
-GGUF model, **💬 Ask AI** opens [Ask AI](ask-ai.md) with that model picked, to chat with it.
+GGUF model, **💬 Ask AI** opens [Ask AI](ask-ai.md) with that model picked, to chat with it. **🔬 Lab** in the toolbar shows what it would write next and how sure it is: see [The Lab](model-lab.md).
 
 ## Inspecting a model
 

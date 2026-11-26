@@ -203,10 +203,13 @@ impl App {
             style::roomy(ui);
             self.workspace_switch(ui);
             ui.add_space(6.0);
-            let mut ask = self.ask.open;
-            kit::segmented(ui, &mut ask, &[(false, "Library"), (true, "💬 Ask AI")], false)
-                .on_hover_text("Library: the models on this computer. Ask AI: chat with one of them, run by Filescape on this computer.");
-            self.ask.open = ask;
+            // 0 Library, 1 Ask AI, 2 Lab.
+            let mut view = if !self.ask.open { 0 } else if self.ask.lab { 2 } else { 1 };
+            kit::segmented(ui, &mut view, &[(0, "Library"), (1, "💬 Ask AI"), (2, "🔬 Lab")], false).on_hover_text(
+                "Library: the models on this computer. Ask AI: chat with one of them. Lab: see what a model would write next and how sure it is. Both run on this computer.",
+            );
+            self.ask.open = view != 0;
+            self.ask.lab = view == 2;
             ui.add_space(6.0);
             let busy = self.models.job.is_some();
             if ui.add_enabled(!busy, egui::Button::new("⟳ Look again")).on_hover_text("Look for models again in every place on the left").clicked() {

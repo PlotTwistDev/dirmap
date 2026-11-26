@@ -47,6 +47,7 @@ mod vocab;
 mod modeldiff;
 mod llm;
 mod askabout;
+mod lab;
 mod getmodel;
 mod inspect;
 mod mailview;

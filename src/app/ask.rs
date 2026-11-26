@@ -18,12 +18,15 @@ running entirely on the user's own computer. Answer clearly and briefly. If you 
 pub(super) struct AskState {
     /// Ask AI is on screen instead of the model library.
     pub open: bool,
-    engine: Option<llm::Engine>,
+    /// The Lab is on screen instead of the chat (with `open`).
+    pub lab: bool,
+    pub lab_state: super::lab::LabState,
+    pub(super) engine: Option<llm::Engine>,
     /// The model picked on the left: (file, name).
     picked: Option<(PathBuf, String)>,
     /// The model the engine has loaded, and its context length.
-    loaded: Option<(PathBuf, String, u32)>,
-    phase: Phase,
+    pub(super) loaded: Option<(PathBuf, String, u32)>,
+    pub(super) phase: Phase,
     /// Checking a model fits in memory before loading it.
     check: Option<mpsc::Receiver<Result<llm::LoadRequest, String>>>,
     conversation: Vec<Message>,
@@ -44,7 +47,7 @@ pub(super) struct AskState {
     /// The context the loaded model has: the one asked for, or less when the model is shorter.
     actual_context: u32,
     /// The last thing that went wrong.
-    problem: Option<String>,
+    pub(super) problem: Option<String>,
     /// "Get a small model" is on screen.
     offer: bool,
     fetch: Option<Fetch>,
@@ -70,7 +73,7 @@ struct Fetch {
 }
 
 #[derive(Default, PartialEq)]
-enum Phase {
+pub(super) enum Phase {
     #[default]
     Idle,
     Loading,
@@ -176,6 +179,12 @@ impl App {
                     let text = self.ask.answering.take().unwrap_or_default();
                     self.ask.conversation.push(Message { role: Role::Assistant, text });
                     self.ask.last = Some(s);
+                    self.ask.phase = Phase::Idle;
+                }
+                Event::Predicted(r) => {
+                    self.ask.lab_state.shown = 0;
+                    self.ask.lab_state.run = Some(r);
+                    self.ask.answering = None;
                     self.ask.phase = Phase::Idle;
                 }
                 Event::Unloaded => {
@@ -343,10 +352,10 @@ impl App {
         let r = egui::Panel::left("ask-models").default_size(280.0).min_size(200.0).resizable(true).frame(side).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.ask_side(ui));
         });
-        self.help_regions.push((r.response.rect, topics::ASK_AI));
+        self.help_regions.push((r.response.rect, if self.ask.lab { topics::LAB } else { topics::ASK_AI }));
         let frame = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::same(10));
-        let r = egui::CentralPanel::default().frame(frame).show(ui, |ui| self.ask_chat(ui));
-        self.help_regions.push((r.response.rect, topics::ASK_AI));
+        let r = egui::CentralPanel::default().frame(frame).show(ui, |ui| if self.ask.lab { self.lab_chat(ui) } else { self.ask_chat(ui) });
+        self.help_regions.push((r.response.rect, if self.ask.lab { topics::LAB } else { topics::ASK_AI }));
     }
 
     /// Left: the models Filescape can run, and the settings.
@@ -433,14 +442,17 @@ impl App {
         .response
         .on_hover_text("How much of the conversation the model keeps in mind. Longer needs more memory. Applies when a model is loaded.");
         self.ask.context = ctx_len;
-        let mut t = self.ask.temperature();
-        ui.horizontal(|ui| {
-            ui.label("Creativity");
-            ui.add(egui::Slider::new(&mut t, 0.01..=1.2).show_value(false));
-        })
-        .response
-        .on_hover_text("Low: the likeliest words, the same answer each time. High: more varied, and more likely to wander.");
-        self.ask.temperature = t;
+        // The Lab has its own sampling settings.
+        if !self.ask.lab {
+            let mut t = self.ask.temperature();
+            ui.horizontal(|ui| {
+                ui.label("Creativity");
+                ui.add(egui::Slider::new(&mut t, 0.01..=1.2).show_value(false));
+            })
+            .response
+            .on_hover_text("Low: the likeliest words, the same answer each time. High: more varied, and more likely to wander.");
+            self.ask.temperature = t;
+        }
         ui.add_space(10.0);
         let picked = self.ask.picked.clone().and_then(|(p, _)| models.iter().find(|(_, m)| m.files.first().is_some_and(|f| f.path == p)).map(|(_, m)| (*m).clone()));
         let busy = self.ask.phase != Phase::Idle || self.ask.check.is_some();

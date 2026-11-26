@@ -68,6 +68,9 @@ pub enum Request {
     Load(LoadRequest),
     /// Answer the last message of a conversation.
     Ask { conversation: Vec<Message>, sampling: Sampling },
+    /// The Lab: write up to `steps` tokens after `text` (as a chat message when `chat`, then
+    /// `continuation`), one at a time, reporting each token's probabilities.
+    Predict { text: String, chat: bool, continuation: String, steps: u32, settings: crate::lab::Settings },
     Unload,
 }
 
@@ -79,6 +82,8 @@ pub enum Event {
     /// More of the answer.
     Text(String),
     Done(Stats),
+    /// A Lab run.
+    Predicted(crate::lab::Run),
     Unloaded,
     Error(String),
 }
@@ -154,7 +159,7 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
             Some(r) => r,
             None => match rx.recv() {
                 Ok(Request::Load(r)) => r,
-                Ok(Request::Ask { .. }) => {
+                Ok(Request::Ask { .. } | Request::Predict { .. }) => {
                     let _ = tx.send(Event::Error("No model is loaded.".into()));
                     continue;
                 }
@@ -207,6 +212,18 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
                     let ev = answer(&model, &mut ctx, template.as_ref(), &conversation, sampling, &mut cached, &stop, &tx);
                     let _ = tx.send(match ev {
                         Ok(s) => Event::Done(s),
+                        Err(e) => {
+                            cached.clear();
+                            ctx.clear_kv_cache();
+                            Event::Error(e)
+                        }
+                    });
+                }
+                Ok(Request::Predict { text, chat, continuation, steps, settings }) => {
+                    let full = if chat { prompt(&model, template.as_ref(), &[Message { role: Role::User, text }]) } else { text };
+                    let ev = predict(&model, &mut ctx, &(full + &continuation), steps, &settings, &mut cached, &stop);
+                    let _ = tx.send(match ev {
+                        Ok(r) => Event::Predicted(r),
                         Err(e) => {
                             cached.clear();
                             ctx.clear_kv_cache();
@@ -288,33 +305,11 @@ fn answer(
         conv.remove(first);
         trimmed = true;
     };
-    // Keep what the previous turn already read.
-    let mut same = cached.iter().zip(&tokens).take_while(|(a, b)| a == b).count().min(tokens.len().saturating_sub(1));
-    if same < cached.len() {
-        // Some models (recurrent ones) can't forget part of what they read: start again.
-        if !ctx.clear_kv_cache_seq(Some(0), Some(same as u32), None).map_err(|e| e.to_string())? {
-            ctx.clear_kv_cache();
-            same = 0;
-        }
-        cached.truncate(same);
-    }
     let batch_size = ctx.n_batch() as usize;
     let mut batch = LlamaBatch::new(batch_size.max(1), 1);
-    let mut pos = same;
-    while pos < tokens.len() {
-        if stop.load(Ordering::Relaxed) {
-            return Ok(Stats { prompt_tokens: tokens.len(), reused: same, cut_short: true, trimmed, ..Default::default() });
-        }
-        batch.clear();
-        let end = (pos + batch_size).min(tokens.len());
-        for (i, tok) in tokens[pos..end].iter().enumerate() {
-            let p = pos + i;
-            batch.add(*tok, p as i32, &[0], p == tokens.len() - 1).map_err(|e| e.to_string())?;
-        }
-        ctx.decode(&mut batch).map_err(|e| format!("The model couldn't read the question: {e}"))?;
-        cached.extend_from_slice(&tokens[pos..end]);
-        pos = end;
-    }
+    let Some(same) = feed(ctx, &mut batch, &tokens, cached, stop)? else {
+        return Ok(Stats { prompt_tokens: tokens.len(), cut_short: true, trimmed, ..Default::default() });
+    };
     let prompt_seconds = t.elapsed().as_secs_f32();
     let mut sampler = if sampling.temperature <= 0.0 {
         LlamaSampler::greedy()
@@ -363,6 +358,87 @@ fn answer(
         cut_short,
         trimmed,
     })
+}
+
+/// Reads `tokens` into the context, keeping what's already there from an earlier turn. The last
+/// token's scores are ready in `batch` afterwards. Returns how many tokens were kept, or None if
+/// stopped.
+fn feed(ctx: &mut llama_cpp_2::context::LlamaContext, batch: &mut LlamaBatch, tokens: &[LlamaToken], cached: &mut Vec<LlamaToken>, stop: &AtomicBool) -> Result<Option<usize>, String> {
+    let mut same = cached.iter().zip(tokens).take_while(|(a, b)| a == b).count().min(tokens.len().saturating_sub(1));
+    if same < cached.len() {
+        // Some models (recurrent ones) can't forget part of what they read: start again.
+        if !ctx.clear_kv_cache_seq(Some(0), Some(same as u32), None).map_err(|e| e.to_string())? {
+            ctx.clear_kv_cache();
+            same = 0;
+        }
+        cached.truncate(same);
+    }
+    let batch_size = ctx.n_batch() as usize;
+    let mut pos = same;
+    while pos < tokens.len() {
+        if stop.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        batch.clear();
+        let end = (pos + batch_size).min(tokens.len());
+        for (i, tok) in tokens[pos..end].iter().enumerate() {
+            let p = pos + i;
+            batch.add(*tok, p as i32, &[0], p == tokens.len() - 1).map_err(|e| e.to_string())?;
+        }
+        ctx.decode(batch).map_err(|e| format!("The model couldn't read the text: {e}"))?;
+        cached.extend_from_slice(&tokens[pos..end]);
+        pos = end;
+    }
+    Ok(Some(same))
+}
+
+/// The Lab: writes up to `steps` tokens after `text`, choosing each with the Lab's own sampling
+/// (`crate::lab`) so the probabilities shown are the ones picked from.
+fn predict(
+    model: &LlamaModel,
+    ctx: &mut llama_cpp_2::context::LlamaContext,
+    text: &str,
+    steps: u32,
+    settings: &crate::lab::Settings,
+    cached: &mut Vec<LlamaToken>,
+    stop: &AtomicBool,
+) -> Result<crate::lab::Run, String> {
+    use crate::lab::{Choice, Rng, Step};
+    let t = Instant::now();
+    let n_ctx = ctx.n_ctx() as usize;
+    let tokens = model.vocab().tokenize(text.as_bytes(), true, true);
+    if tokens.is_empty() {
+        return Err("Type some text first.".into());
+    }
+    if tokens.len() + steps as usize > n_ctx {
+        return Err(format!("The text is too long for this model's context ({n_ctx} tokens). Shorten it, or choose a longer context."));
+    }
+    let mut batch = LlamaBatch::new((ctx.n_batch() as usize).max(1), 1);
+    if feed(ctx, &mut batch, &tokens, cached, stop)?.is_none() {
+        return Ok(crate::lab::Run { prompt_tokens: tokens.len(), ..Default::default() });
+    }
+    let piece = |id: i32| String::from_utf8_lossy(&model.vocab().token_to_piece(LlamaToken(id), false, None)).into_owned();
+    let mut rng = Rng::new(settings.seed);
+    let mut out = Vec::new();
+    for _ in 0..steps {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        let logits = ctx.get_logits_ith(batch.n_tokens() - 1);
+        let (chosen, raw, adjusted, top, kept) = crate::lab::step(logits, settings, &mut rng, 10);
+        let choice = |i: usize, raw: f32, adjusted: f32| Choice { id: i as i32, text: piece(i as i32), raw, adjusted };
+        let tok = LlamaToken(chosen as i32);
+        let end = model.vocab().is_eog(tok);
+        out.push(Step { chosen: choice(chosen, raw, adjusted), top: top.into_iter().map(|(i, r, a)| choice(i, r, a)).collect(), kept, end });
+        if end || cached.len() + 1 >= n_ctx {
+            break;
+        }
+        batch.clear();
+        batch.add(tok, cached.len() as i32, &[0], true).map_err(|e| e.to_string())?;
+        ctx.decode(&mut batch).map_err(|e| format!("The model stopped: {e}"))?;
+        cached.push(tok);
+    }
+    Ok(crate::lab::Run { steps: out, prompt_tokens: tokens.len(), seconds: t.elapsed().as_secs_f32() })
 }
 
 fn rand_seed() -> u32 {
@@ -437,6 +513,38 @@ mod tests {
     fn chatml_layout() {
         let c = [Message { role: Role::System, text: "Be brief.".into() }, Message { role: Role::User, text: "Hi".into() }];
         assert_eq!(chatml(&c), "<|im_start|>system\nBe brief.<|im_end|>\n<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n");
+    }
+
+    /// The Lab's step-by-step writing, on a real model. FILESCAPE_TEST_GGUF=path cargo test --release -- --ignored llm
+    #[test]
+    #[ignore]
+    fn predicts_with_probabilities() {
+        let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
+        let e = Engine::start();
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 512, gpu: false }));
+        let settings = crate::lab::Settings { temperature: 0.0, ..Default::default() };
+        let run = |e: &Engine, continuation: &str, steps| {
+            e.send(Request::Predict { text: "Hello there".into(), chat: false, continuation: continuation.into(), steps, settings });
+            loop {
+                match e.rx.recv_timeout(std::time::Duration::from_secs(120)).unwrap() {
+                    Event::Predicted(r) => return r,
+                    Event::Error(err) => panic!("{err}"),
+                    _ => {}
+                }
+            }
+        };
+        let a = run(&e, "", 5);
+        assert!(!a.steps.is_empty() && a.prompt_tokens > 0);
+        for s in &a.steps {
+            // Greedy: the chosen token is the likeliest, and the probabilities are sane.
+            assert_eq!(s.chosen.id, s.top[0].id);
+            assert!(s.top.windows(2).all(|w| w[0].raw >= w[1].raw));
+            assert!(s.chosen.raw > 0.0 && s.chosen.raw <= 1.0 && s.chosen.adjusted == 1.0);
+        }
+        // The same again gives the same tokens, and carrying on from the first token matches.
+        assert_eq!(run(&e, "", 5).steps.iter().map(|s| s.chosen.id).collect::<Vec<_>>(), a.steps.iter().map(|s| s.chosen.id).collect::<Vec<_>>());
+        let b = run(&e, &a.steps[0].chosen.text, 1);
+        assert_eq!(b.steps.len(), 1);
     }
 
     /// Runs a real GGUF model end to end. FILESCAPE_TEST_GGUF=path cargo test --release -- --ignored llm
