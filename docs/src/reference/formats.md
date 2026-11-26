@@ -49,7 +49,7 @@ for the settings.
 | Design and 3D app files (Sketch, Affinity, CorelDRAW, SketchUp, Blender, Cinema 4D, 3ds Max, Maya, Houdini) | `.sketch` `.afdesign` `.afphoto` `.afpub` `.aftemplate` `.cdr` `.skp` `.blend` `.c4d` `.max` `.ma` `.mb` `.hip` `.hipnc` `.hiplc` | The picture the app saved inside the file, and the version that saved it | Filescape |
 | Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo) | `.als` `.rpp` `.flp` `.cpr` `.npr` | The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones) | Filescape |
 | DICOM medical image | `.dcm` `.dicom` | The scan (uncompressed or baseline JPEG) in its window, and what kind of scan it is; patient details are never shown | Filescape |
-| Disk image | `.iso` `.img` `.dmg` `.vhd` `.vhdx` `.avhdx` `.vmdk` `.qcow2` `.qcow` `.vdi` `.wim` `.esd` | A disc's files and folders with sizes; a virtual disk's size, type and partitions; a Windows image's editions | Filescape |
+| Disk image | `.iso` `.img` `.dmg` `.vhd` `.vhdx` `.avhdx` `.vmdk` `.qcow2` `.qcow` `.vdi` `.wim` `.esd` | A disc's files and folders with sizes (ISO 9660 and UDF); a virtual disk's size, type and partitions; a Windows image's editions | Filescape |
 | FITS astronomy image | `.fits` `.fit` `.fts` | The first picture, stretched so faint detail shows, with the object, telescope and exposure | Filescape |
 | Map data (GeoJSON, GPX, KML) | `.geojson` `.gpx` `.kml` `.kmz` | The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks | Filescape |
 | MIDI music | `.mid` `.midi` `.kar` | A piano roll, with tempo and instruments | midly |

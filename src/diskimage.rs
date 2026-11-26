@@ -26,7 +26,7 @@ pub fn read(path: &Path) -> Result<Disk, String> {
     let len = f.metadata().map_err(|e| e.to_string())?.len();
     let head = at(&mut f, 0, 4096);
     let tail = if len >= 512 { at(&mut f, len - 512, 512) } else { Vec::new() };
-    if at(&mut f, 32769, 5) == b"CD001" {
+    if at(&mut f, 32769, 5) == b"CD001" || is_udf(&mut f) {
         return iso(&mut f, len);
     }
     if head.starts_with(b"vhdxfile") {
@@ -56,9 +56,6 @@ pub fn read(path: &Path) -> Result<Disk, String> {
     }
     if tail.starts_with(b"koly") {
         return Ok(dmg(&mut f, &tail, len));
-    }
-    if is_udf(&mut f) {
-        return Ok(details("Disc image (UDF)", vec![("Format", "UDF disc image".into()), ("Size", crate::scan::human(len))], "This disc uses only the UDF file system, which Filescape can't list yet."));
     }
     // A raw disk: its partition table, if it has one.
     if let Some((scheme, parts)) = partitions(&mut f, 0, len) {
@@ -185,11 +182,33 @@ fn iso(f: &mut File, len: u64) -> Result<Disk, String> {
             (b"CD001", 0) => boot |= d[7..30].starts_with(b"EL TORITO SPECIFICATION"),
             (b"CD001", 1) => pvd = pvd.or(Some(d)),
             (b"CD001", 2) if d[88] == b'%' && d[89] == b'/' && matches!(d[90], b'@' | b'C' | b'E') => joliet = joliet.or(Some(d)),
-            (b"CD001", 255) => {}
+            (b"CD001", _) => {}
             (b"NSR02" | b"NSR03", _) => udf = true,
             (b"BEA01" | b"TEA01" | b"BOOT2" | b"CDW02", _) => {}
             _ if d[0] == 255 => {}
             _ => break,
+        }
+    }
+    // UDF, where there is one, is the disc's real file system (the ISO 9660 part of a Windows
+    // or Blu-ray disc is often just a note saying so).
+    if udf {
+        match self::udf(f) {
+            Ok((items, label, rev)) if !items.is_empty() || pvd.is_none() => {
+                let mut facts = vec![("Format", if rev.is_empty() { "Disc image (UDF)".to_string() } else { format!("Disc image (UDF {rev})") })];
+                if !label.is_empty() {
+                    facts.push(("Volume name", label));
+                }
+                facts.push(("Disc size", crate::scan::human(len)));
+                if boot {
+                    facts.push(("Bootable", "Yes".into()));
+                }
+                if items.len() >= ITEMS_MAX {
+                    facts.push(("Note", format!("Only the first {} items are listed", crate::inspect::group(ITEMS_MAX as u64))));
+                }
+                return Ok(Disk::Listing { index: Index { items, unsafe_names: 0, encrypted: 0 }, facts });
+            }
+            Err(e) if pvd.is_none() => return Err(e),
+            _ => {}
         }
     }
     let pvd = pvd.ok_or("No volume descriptor in it")?;
@@ -281,17 +300,296 @@ fn iso(f: &mut File, len: u64) -> Result<Disk, String> {
     if boot {
         facts.push(("Bootable", "Yes".into()));
     }
-    let listed: u64 = items.iter().map(|i| i.size).sum();
-    if udf && (listed < vsize / 10 || items.len() <= 2) {
-        facts.push(("Note", "Its full contents are in a UDF file system, which Filescape can't list yet; what's shown is the small ISO 9660 part".into()));
-    } else if udf {
-        facts.push(("Also", "A UDF file system with the same files".into()));
+    if udf {
+        facts.push(("Note", "It also has a UDF file system that Filescape couldn't read; what's shown is the ISO 9660 part".into()));
     }
     if items.len() >= ITEMS_MAX {
         facts.push(("Note", format!("Only the first {} items are listed", crate::inspect::group(ITEMS_MAX as u64))));
     }
     let _ = len;
     Ok(Disk::Listing { index: Index { items, unsafe_names: 0, encrypted: 0 }, facts })
+}
+
+// ---- UDF (DVD, Blu-ray and Windows install discs) ----
+
+enum PartMap {
+    /// Blocks counted from this sector.
+    Phys(u64),
+    /// UDF 2.50+: blocks found through the metadata file's extents (lengths and starts, in blocks).
+    Meta { start: u64, extents: Vec<(u64, u64)> },
+    /// Recordable discs: each block's place in the physical partition, from the VAT.
+    Virt { start: u64, table: Vec<u32> },
+}
+
+struct Udf<'a> {
+    f: &'a mut File,
+    bs: u64,
+    maps: Vec<PartMap>,
+}
+
+/// An OSTA compressed-Unicode name: a compression id (8 for Latin-1, 16 for UTF-16) then the text.
+fn osta(b: &[u8]) -> String {
+    match b.split_first() {
+        Some((8, rest)) => rest.iter().map(|&c| c as char).collect(),
+        Some((16, rest)) => utf16be(rest),
+        _ => String::new(),
+    }
+}
+
+/// A fixed-size UDF string: its used length is in its last byte.
+fn dstring(b: &[u8]) -> String {
+    let Some(&n) = b.last() else { return String::new() };
+    osta(&b[..(n as usize).min(b.len() - 1)]).trim().to_string()
+}
+
+/// A UDF timestamp (12 bytes) as seconds since the Unix epoch.
+fn udf_time(b: &[u8]) -> i64 {
+    if b.len() < 12 {
+        return 0;
+    }
+    let tz = le16(b, 0);
+    // The low 12 bits are the offset from UTC in minutes, signed; -2047 means none.
+    let off = ((tz & 0x0FFF) as i16) << 4 >> 4;
+    let off = if tz >> 12 == 1 && off != -2047 { off as i64 * 60 } else { 0 };
+    chrono::NaiveDate::from_ymd_opt(le16(b, 2) as i32, b[4] as u32, b[5] as u32)
+        .and_then(|d| d.and_hms_opt(b[6] as u32, b[7] as u32, b[8] as u32))
+        .map_or(0, |t| t.and_utc().timestamp() - off)
+}
+
+struct Entry {
+    size: u64,
+    modified: i64,
+    /// Where its data is: (partition, block, bytes), or the data itself when it's kept in the entry.
+    extents: Vec<(u16, u32, u64)>,
+    inline: Option<Vec<u8>>,
+}
+
+impl Udf<'_> {
+    /// Where block `lbn` of partition `part` is in the file.
+    fn offset(&self, part: u16, lbn: u32) -> Option<u64> {
+        match self.maps.get(part as usize)? {
+            PartMap::Phys(start) => Some((start + lbn as u64) * self.bs),
+            PartMap::Virt { start, table } => table.get(lbn as usize).filter(|&&p| p != u32::MAX).map(|&p| (start + p as u64) * self.bs),
+            PartMap::Meta { start, extents } => {
+                let mut left = lbn as u64;
+                for &(n, at) in extents {
+                    if left < n {
+                        return Some((start + at + left) * self.bs);
+                    }
+                    left -= n;
+                }
+                None
+            }
+        }
+    }
+
+    fn block(&mut self, part: u16, lbn: u32) -> Option<Vec<u8>> {
+        let off = self.offset(part, lbn)?;
+        let b = at(self.f, off, self.bs as usize);
+        (b.len() == self.bs as usize).then_some(b)
+    }
+
+    /// A file entry (or extended file entry): what it is, and where its data is.
+    fn entry(&mut self, part: u16, lbn: u32) -> Option<Entry> {
+        let b = self.block(part, lbn)?;
+        parse_entry(&b, part)
+    }
+
+    /// A directory's bytes.
+    fn data(&mut self, e: &Entry) -> Vec<u8> {
+        if let Some(d) = &e.inline {
+            return d.clone();
+        }
+        let mut out = Vec::new();
+        for &(part, lbn, len) in &e.extents {
+            let blocks = len.div_ceil(self.bs);
+            for i in 0..blocks {
+                if out.len() as u64 >= DIR_MAX.min(e.size) {
+                    break;
+                }
+                match self.block(part, lbn + i as u32) {
+                    Some(b) => out.extend_from_slice(&b),
+                    None => break,
+                }
+            }
+        }
+        out.truncate(e.size.min(DIR_MAX) as usize);
+        out
+    }
+}
+
+/// A file entry (or extended file entry) read from its block.
+fn parse_entry(b: &[u8], part: u16) -> Option<Entry> {
+    let (info, lea, lad, ads, mtime) = match le16(&b, 0) {
+        261 => (le64(&b, 56), le32(&b, 168) as usize, le32(&b, 172) as usize, 176, 84),
+        266 => (le64(&b, 56), le32(&b, 208) as usize, le32(&b, 212) as usize, 216, 92),
+        _ => return None,
+    };
+    let ad = b.get(ads + lea..ads + lea + lad)?;
+    let mut e = Entry { size: info, modified: udf_time(b.get(mtime..mtime + 12)?), extents: Vec::new(), inline: None };
+    match le16(&b, 34) & 7 {
+        0 => {
+            for s in ad.chunks_exact(8) {
+                let len = le32(s, 0);
+                if len >> 30 == 0 && len & 0x3FFF_FFFF > 0 {
+                    e.extents.push((part, le32(s, 4), (len & 0x3FFF_FFFF) as u64));
+                }
+            }
+        }
+        1 => {
+            for l in ad.chunks_exact(16) {
+                let len = le32(l, 0);
+                if len >> 30 == 0 && len & 0x3FFF_FFFF > 0 {
+                    e.extents.push((le16(l, 8), le32(l, 4), (len & 0x3FFF_FFFF) as u64));
+                }
+            }
+        }
+        3 => e.inline = Some(ad.to_vec()),
+        _ => {}
+    }
+    Some(e)
+}
+
+/// A UDF disc's files, its volume name and UDF revision.
+fn udf(f: &mut File) -> Result<(Vec<Item>, String, String), String> {
+    // The anchor is at sector 256, in the disc's own sector size.
+    let (sec, anchor) = [2048u64, 512, 4096]
+        .into_iter()
+        .map(|sec| (sec, at(f, 256 * sec, sec as usize)))
+        .find(|(sec, a)| le16(a, 0) == 2 && le32(a, 12) == 256 && a.len() == *sec as usize)
+        .ok_or("No UDF anchor")?;
+    let (vlen, vloc) = (le32(&anchor, 16) as u64, le32(&anchor, 20) as u64);
+    let vds = at(f, vloc * sec, vlen.min(1 << 20) as usize);
+    let mut starts = std::collections::HashMap::new();
+    let mut lvd = None;
+    let mut label = String::new();
+    for d in vds.chunks_exact(sec as usize) {
+        match le16(d, 0) {
+            1 => label = dstring(&d[24..56]),
+            5 => {
+                starts.insert(le16(d, 22), le32(d, 188) as u64);
+            }
+            6 => lvd = lvd.or(Some(d.to_vec())),
+            8 => break,
+            _ => {}
+        }
+    }
+    let lvd = lvd.ok_or("No UDF logical volume")?;
+    let bs = (le32(&lvd, 212) as u64).clamp(512, 65536);
+    let name = dstring(&lvd[84..212]);
+    if !name.is_empty() {
+        label = name;
+    }
+    let rev = le16(&lvd, 216 + 24);
+    let rev = if rev > 0 { format!("{}.{:02x}", rev >> 8, rev & 0xFF) } else { String::new() };
+    let (fsd_lbn, fsd_part) = (le32(&lvd, 252), le16(&lvd, 256));
+    // Partition maps: which partition each reference number means.
+    let mut raw = Vec::new();
+    let (mt_len, n_maps) = (le32(&lvd, 264) as usize, le32(&lvd, 268) as usize);
+    let table = lvd.get(440..440 + mt_len.min(lvd.len() - 440)).unwrap_or(&[]);
+    let mut i = 0;
+    for _ in 0..n_maps.min(64) {
+        let Some(m) = table.get(i..i + 2) else { break };
+        let (ty, ml) = (m[0], m[1] as usize);
+        let Some(m) = table.get(i..i + ml) else { break };
+        i += ml.max(2);
+        match ty {
+            1 => raw.push((le16(m, 4), None)),
+            2 => {
+                let id = String::from_utf8_lossy(&m[5..28]).trim_end_matches('\0').to_string();
+                if id.starts_with("*UDF Metadata Partition") {
+                    raw.push((le16(m, 38), Some(le32(m, 40))));
+                } else if id.starts_with("*UDF Sparable Partition") {
+                    raw.push((le16(m, 38), None));
+                } else if id.starts_with("*UDF Virtual Partition") {
+                    raw.push((le16(m, 38), Some(u32::MAX)));
+                } else {
+                    return Err(format!("Its UDF layout ({}) isn't one Filescape can list yet", id.trim_start_matches('*')));
+                }
+            }
+            _ => break,
+        }
+    }
+    let mut u = Udf { f, bs, maps: Vec::new() };
+    // Physical partitions first, so the metadata file can be found through them.
+    for (num, _) in &raw {
+        u.maps.push(PartMap::Phys(*starts.get(num).ok_or("A UDF partition is missing")? * sec / bs));
+    }
+    for (k, (num, meta)) in raw.iter().enumerate() {
+        let Some(loc) = meta else { continue };
+        let start = starts[num] * sec / bs;
+        if *loc == u32::MAX {
+            // The VAT is the last file written: look back from the end for it.
+            let end = u.f.metadata().map(|m| m.len()).unwrap_or(0) / bs;
+            let vat = (end.saturating_sub(64)..end).rev().find_map(|s| {
+                let b = at(u.f, s * bs, bs as usize);
+                (matches!(le16(&b, 0), 261 | 266) && b.get(27) == Some(&248)).then(|| parse_entry(&b, k as u16)).flatten()
+            });
+            let vat = vat.ok_or("The disc's allocation table (VAT) is missing")?;
+            let phys = raw.iter().position(|(n, m)| n == num && m.is_none()).unwrap_or(k);
+            let data = {
+                let mut v = vat;
+                for e in &mut v.extents {
+                    e.0 = phys as u16;
+                }
+                u.data(&v)
+            };
+            let head = le16(&data, 0) as usize;
+            let table = data.get(head..).unwrap_or(&[]).chunks_exact(4).map(|c| le32(c, 0)).collect();
+            u.maps[k] = PartMap::Virt { start, table };
+            continue;
+        }
+        let phys = raw.iter().position(|(n, m)| n == num && m.is_none()).unwrap_or(k);
+        // The metadata file is an entry in the physical partition; its extents hold the metadata.
+        let e = u.entry(phys as u16, *loc).ok_or("The UDF metadata file is missing")?;
+        let extents = e.extents.iter().map(|&(_, at, len)| (len.div_ceil(bs), at as u64)).collect();
+        u.maps[k] = PartMap::Meta { start, extents };
+    }
+    let fsd = u.block(fsd_part, fsd_lbn).ok_or("The UDF file set is missing")?;
+    if le16(&fsd, 0) != 256 {
+        return Err("The UDF file set is missing".into());
+    }
+    let mut items = Vec::new();
+    let mut seen = HashSet::new();
+    let mut todo = vec![(le16(&fsd, 408), le32(&fsd, 404), String::new(), 0u32)];
+    while let Some((part, lbn, dir, depth)) = todo.pop() {
+        if depth > 32 || !seen.insert((part, lbn)) || items.len() >= ITEMS_MAX {
+            continue;
+        }
+        let Some(e) = u.entry(part, lbn) else { continue };
+        let data = u.data(&e);
+        let mut i = 0;
+        while i + 38 <= data.len() && items.len() < ITEMS_MAX {
+            let fid = &data[i..];
+            if le16(fid, 0) != 257 {
+                break;
+            }
+            let (ch, lfi, liu) = (fid[18], fid[19] as usize, le16(fid, 36) as usize);
+            let total = (38 + liu + lfi + 3) & !3;
+            let raw_name = fid.get(38 + liu..38 + liu + lfi).unwrap_or(&[]);
+            i += total;
+            // Parent links and deleted entries.
+            if ch & 8 != 0 || ch & 4 != 0 {
+                continue;
+            }
+            let name = osta(raw_name);
+            if name.is_empty() || name == "." || name == ".." || name.contains('/') {
+                continue;
+            }
+            let (cpart, clbn) = (le16(fid, 28), le32(fid, 24));
+            let child = u.entry(cpart, clbn);
+            let is_dir = ch & 2 != 0;
+            let path = if dir.is_empty() { name } else { format!("{dir}/{name}") };
+            let (size, modified) = child.as_ref().map_or((0, 0), |c| (if is_dir { 0 } else { c.size }, c.modified));
+            items.push(Item { path: path.clone(), is_dir, size, modified, packed: None });
+            if is_dir {
+                todo.push((cpart, clbn, path, depth + 1));
+            }
+        }
+    }
+    items.sort_by(|a, b| a.path.cmp(&b.path));
+    items.dedup_by(|a, b| a.path == b.path);
+    Ok((items, label, rev))
 }
 
 fn is_udf(f: &mut File) -> bool {
@@ -772,6 +1070,91 @@ mod tests {
         assert!(facts.iter().any(|f| f == &("Partitions", "1 (MBR)".to_string())), "{facts:?}");
         assert!(blocks.iter().any(|b| matches!(b, Block::Table { rows, .. } if rows.len() == 1)));
         let _ = std::fs::remove_file(p);
+    }
+
+    fn fid(name: &str, dir: bool, parent: bool, lbn: u32) -> Vec<u8> {
+        let n: Vec<u8> = if name.is_empty() { Vec::new() } else { std::iter::once(8u8).chain(name.bytes()).collect() };
+        let mut f = vec![0u8; (38 + n.len() + 3) & !3];
+        f[0..2].copy_from_slice(&257u16.to_le_bytes());
+        f[18] = if parent { 10 } else if dir { 2 } else { 0 };
+        f[19] = n.len() as u8;
+        f[24..28].copy_from_slice(&lbn.to_le_bytes());
+        f[28..30].copy_from_slice(&1u16.to_le_bytes());
+        f[38..38 + n.len()].copy_from_slice(&n);
+        f
+    }
+
+    /// A file entry: a directory with its FIDs inside it, or a file of `size` bytes.
+    fn fe(b: &mut [u8], dir: Option<Vec<u8>>, size: u64, ads: &[u8]) {
+        b[0..2].copy_from_slice(&261u16.to_le_bytes());
+        b[27] = if dir.is_some() { 4 } else { 5 };
+        let (inline, size) = match &dir {
+            Some(d) => (d.as_slice(), d.len() as u64),
+            None => (ads, size),
+        };
+        b[34] = if dir.is_some() { 3 } else { 0 };
+        b[56..64].copy_from_slice(&size.to_le_bytes());
+        b[172..176].copy_from_slice(&(inline.len() as u32).to_le_bytes());
+        b[176..176 + inline.len()].copy_from_slice(inline);
+    }
+
+    /// UDF 2.50 with a metadata partition, the layout Blu-ray discs use.
+    #[test]
+    fn lists_udf_with_a_metadata_partition() {
+        let mut b = vec![0u8; 2048 * 300];
+        for (s, id) in [(16, b"BEA01"), (17, b"NSR03"), (18, b"TEA01")] {
+            b[s * 2048 + 1..s * 2048 + 6].copy_from_slice(id);
+        }
+        let sec = |s: usize| s * 2048..(s + 1) * 2048;
+        let r = sec(256);
+        let a = &mut b[r];
+        a[0] = 2;
+        a[12..16].copy_from_slice(&256u32.to_le_bytes());
+        a[16..20].copy_from_slice(&(4 * 2048u32).to_le_bytes());
+        a[20..24].copy_from_slice(&32u32.to_le_bytes());
+        let r = sec(33);
+        let pd = &mut b[r];
+        pd[0] = 5;
+        pd[188..192].copy_from_slice(&100u32.to_le_bytes());
+        let r = sec(34);
+        let l = &mut b[r];
+        l[0] = 6;
+        l[84] = 8;
+        l[85..92].copy_from_slice(b"MYMOVIE");
+        l[211] = 8;
+        l[212..216].copy_from_slice(&2048u32.to_le_bytes());
+        l[240..242].copy_from_slice(&0x0250u16.to_le_bytes());
+        l[256..258].copy_from_slice(&1u16.to_le_bytes());
+        l[268..272].copy_from_slice(&2u32.to_le_bytes());
+        l[264..268].copy_from_slice(&70u32.to_le_bytes());
+        l[440..446].copy_from_slice(&[1, 6, 1, 0, 0, 0]);
+        l[446] = 2;
+        l[447] = 64;
+        l[451..474].copy_from_slice(b"*UDF Metadata Partition");
+        b[35 * 2048] = 8;
+        // The metadata file (physical block 0): metadata blocks are physical blocks 10-19.
+        let mut ad = (10 * 2048u32).to_le_bytes().to_vec();
+        ad.extend(10u32.to_le_bytes());
+        fe(&mut b[100 * 2048..101 * 2048], None, 10 * 2048, &ad);
+        // Metadata block 0: the file set; 1: root; 2: BDMV; 3, 4: files.
+        let fsd = &mut b[110 * 2048..111 * 2048];
+        fsd[0..2].copy_from_slice(&256u16.to_le_bytes());
+        fsd[404..408].copy_from_slice(&1u32.to_le_bytes());
+        fsd[408..410].copy_from_slice(&1u16.to_le_bytes());
+        let root = [fid("", true, true, 1), fid("BDMV", true, false, 2), fid("movie.m2ts", false, false, 3)].concat();
+        fe(&mut b[111 * 2048..112 * 2048], Some(root), 0, &[]);
+        let bdmv = [fid("", true, true, 1), fid("index.bdmv", false, false, 4)].concat();
+        fe(&mut b[112 * 2048..113 * 2048], Some(bdmv), 0, &[]);
+        fe(&mut b[113 * 2048..114 * 2048], None, 5_000_000_000, &[]);
+        fe(&mut b[114 * 2048..115 * 2048], None, 120, &[]);
+        let p = tmp("bd.iso", &b);
+        let got = read(&p);
+        let _ = std::fs::remove_file(&p);
+        let Ok(Disk::Listing { index, facts }) = got else { panic!("not listed: {:?}", got.err()) };
+        let paths: Vec<_> = index.items.iter().map(|i| (i.path.as_str(), i.is_dir, i.size)).collect();
+        assert_eq!(paths, vec![("BDMV", true, 0), ("BDMV/index.bdmv", false, 120), ("movie.m2ts", false, 5_000_000_000)]);
+        assert!(facts.iter().any(|f| f == &("Format", "Disc image (UDF 2.50)".to_string())), "{facts:?}");
+        assert!(facts.iter().any(|f| f == &("Volume name", "MYMOVIE".to_string())), "{facts:?}");
     }
 
     #[test]

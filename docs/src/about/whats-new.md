@@ -102,6 +102,8 @@
   and how they were taken. Patient names, IDs and birth dates are never shown.
 - Disk images preview without being mounted: an ISO shows the files on the disc, virtual
   machine disks show their size and type, and Windows images list their editions.
+- Disc images that use UDF (DVDs, Blu-ray discs and Windows install discs) list their files
+  too.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
