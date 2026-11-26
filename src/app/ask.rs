@@ -168,7 +168,8 @@ impl App {
             got = true;
             match ev {
                 Event::Loading => self.ask.phase = Phase::Loading,
-                Event::Loaded { context, seconds } => {
+                Event::Loaded { context, seconds, layers } => {
+                    self.ask.lab_state.loaded_layers(layers as usize);
                     self.ask.phase = Phase::Idle;
                     self.ask.load_seconds = seconds;
                     self.ask.actual_context = context;
@@ -190,6 +191,10 @@ impl App {
                 }
                 // The layers' guesses follow a look straight away, so it stays busy until then.
                 Event::Looked(inside) => self.ask.lab_state.inside = Some(inside),
+                Event::Steered { plain, steered, push } => {
+                    self.ask.lab_state.steered = Some((plain, steered, push));
+                    self.ask.phase = Phase::Idle;
+                }
                 Event::Lensed { token, layers } => {
                     self.ask.lab_state.lensed = Some((token, layers));
                     self.ask.phase = Phase::Idle;
