@@ -49,6 +49,27 @@ top-k 40, top-p 0.95, min-p 0.05).
 
 The Lab works out these probabilities itself, so what it shows is exactly what it picks from.
 
+## Testing a model's speed
+
+Press **Speed** at the top of the Lab to see how fast the loaded model runs on this computer.
+Choose how much text it reads first (**Read**), how much it writes (**Write**) and how many times
+to run the test (**Runs**: the middle result is kept, so one slow run doesn't count), then press
+**Run speed test**. **■ Stop** stops it.
+
+The result shows:
+
+- **Tokens a second written**: how fast answers appear. A token is about ¾ of a word, and people
+  read about 4 words a second, so 6 tokens a second or more keeps ahead of you.
+- **Tokens a second read**: how fast the model takes in a question or a document before it
+  answers. This is usually much faster than writing.
+- **To the first word**: how long you'd wait for an answer to start after sending that much text.
+
+Every result is kept, with the model, where it ran (the graphics chip, or the processor and how
+many threads), the context length and the date, so you can compare models and settings in the
+**All results** table. The results are kept in `lab-speed.json` in Filescape's settings folder.
+
+Other busy apps slow the test down, and the test slows them down while it runs.
+
 ## What to expect
 
 A model's probabilities say how sure it is of the next token, not whether it's right: a model can

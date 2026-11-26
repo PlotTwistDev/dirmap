@@ -45,7 +45,7 @@ pub(super) struct AskState {
     last: Option<llm::Stats>,
     load_seconds: f32,
     /// The context the loaded model has: the one asked for, or less when the model is shorter.
-    actual_context: u32,
+    pub(super) actual_context: u32,
     /// The last thing that went wrong.
     pub(super) problem: Option<String>,
     /// "Get a small model" is on screen.
@@ -99,7 +99,7 @@ fn runnable(list: &[Model]) -> Vec<(usize, &Model)> {
 }
 
 /// Whether to put the model on the graphics chip: on Apple silicon, where llama.cpp uses Metal.
-fn use_gpu() -> bool {
+pub(super) fn use_gpu() -> bool {
     cfg!(all(target_os = "macos", target_arch = "aarch64"))
 }
 
@@ -163,6 +163,7 @@ impl App {
         }
         let Some(e) = &self.ask.engine else { return };
         let mut got = false;
+        let mut benched = None;
         while let Ok(ev) = e.rx.try_recv() {
             got = true;
             match ev {
@@ -187,11 +188,17 @@ impl App {
                     self.ask.answering = None;
                     self.ask.phase = Phase::Idle;
                 }
+                Event::Benching(run, of) => self.ask.lab_state.bench_progress = Some((run, of)),
+                Event::Benched { read_speed, write_speed, first_token, threads } => {
+                    self.ask.phase = Phase::Idle;
+                    benched = Some((read_speed, write_speed, first_token, threads));
+                }
                 Event::Unloaded => {
                     self.ask.loaded = None;
                     self.ask.phase = Phase::Idle;
                 }
                 Event::Error(err) => {
+                    self.ask.lab_state.bench_progress = None;
                     // A failed load leaves nothing loaded; a failed answer keeps what was written.
                     if self.ask.phase == Phase::Loading {
                         self.ask.loaded = None;
@@ -203,6 +210,9 @@ impl App {
                     self.ask.problem = Some(err);
                 }
             }
+        }
+        if let Some((r, w, f, t)) = benched {
+            self.lab_benched(r, w, f, t);
         }
         if got || self.ask.phase != Phase::Idle {
             ctx.request_repaint_after(Duration::from_millis(30));
