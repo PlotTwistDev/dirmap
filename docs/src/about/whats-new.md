@@ -22,6 +22,8 @@
   [Freeing space](../views/ai-models.md#freeing-space). **Move to another drive…** moves an app's
   whole model folder and leaves a link, so the app finds its models as before (Professional). See
   [Moving models](../views/ai-models.md#moving-models-to-another-drive).
+  **Shrink (quantise)…** in a model's right-click menu makes a smaller copy (Q8_0 to Q2_K), keeping
+  the original (Professional). See [Shrinking a model](../views/ai-models.md#shrinking-a-model).
 
 - **🔬 Lab** shows what a model would write next and how sure it is: each token coloured by its
   probability, the ten likeliest alternatives, and what temperature, top-k, top-p and min-p do to

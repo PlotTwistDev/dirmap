@@ -262,6 +262,24 @@ which needs no special rights.
 
 A folder that has already been moved shows where its link leads.
 
+## Shrinking a model
+
+Right-click a GGUF model in the list and choose **Shrink (quantise)…** to make a smaller copy with
+less precise weights: it loads faster, needs less memory, and writes slightly worse. This is part
+of model quantisation (Professional).
+
+Pick a size, from **Q8_0** (barely different from the original) to **Q2_K** (smallest, for trying
+out only); each shows roughly how big the new file will be, and sizes that wouldn't be smaller are
+greyed out. **Q4_K_M** is the usual choice. The new file goes beside the original, or, for a model
+in Ollama's or Hugging Face's own folder, in Filescape's models folder; choose another with
+**Choose…**.
+
+The original is only ever read. The new file is written under a temporary name and named only once
+it's finished, so stopping or a failure leaves nothing half-written behind. Shrinking an
+already-shrunk model is allowed with a warning: it loses more than shrinking the original would.
+llama.cpp does the work in a separate copy of Filescape, so a model it can't handle can't take the
+app down with it.
+
 ## On the command line
 
 `filescape --cli --models PATH` prints the models in a folder without opening a window. See

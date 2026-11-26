@@ -24,6 +24,7 @@ mod camraw;
 mod categories;
 mod cleanup;
 mod relocate;
+mod quantize;
 mod cloud;
 mod cloudops;
 mod craftfile;
@@ -107,6 +108,8 @@ pub const APP_ID: &str = "Filescape";
 
 fn main() -> eframe::Result {
     // A copy started only to convert one DWG drawing (see cadview): does that and nothing else.
+    // A copy started only to shrink a model (see quantize): the same.
+    quantize::serve_if_asked();
     if let Some(code) = craft_dwg::serve_if_asked() {
         std::process::exit(code);
     }

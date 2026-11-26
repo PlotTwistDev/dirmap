@@ -241,6 +241,7 @@ impl App {
         }
         self.storage_confirm(ui.ctx());
         self.storage_moving(ui.ctx());
+        self.storage_shrink(ui.ctx());
         if self.ask.open {
             self.ask_workspace(ui);
             return;
@@ -378,6 +379,7 @@ impl App {
         let mut open = None;
         let mut inspect = None;
         let mut remove = None;
+        let mut shrink = None;
         ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW, list.len(), |ui, range| {
             for (k, m) in list[range.clone()].iter().enumerate() {
@@ -433,6 +435,10 @@ impl App {
                         }
                         ui.close();
                     }
+                    if m.runnable() && ui.button("Shrink (quantise)…").on_hover_text("Make a smaller copy of this model. The original is kept. Professional.").clicked() {
+                        shrink = Some(i);
+                        ui.close();
+                    }
                     ui.separator();
                     if ui.button(if cfg!(windows) { "Move to Recycle Bin…" } else { "Move to Trash…" }).on_hover_text("Remove this model. You see everything it removes first.").clicked() {
                         remove = Some(i);
@@ -446,6 +452,9 @@ impl App {
         }
         if let Some(m) = remove.and_then(|i| list.get(i)) {
             self.ask_remove_model(m);
+        }
+        if let Some(m) = shrink.and_then(|i| list.get(i)) {
+            self.ask_shrink(m);
         }
         if let Some(i) = inspect
             && let Some(m) = list.get(i)
@@ -2375,7 +2384,10 @@ fn search(
         *status.lock().unwrap() = format!("Looking in {}…", root.shown());
         let sp = Arc::new(scan::Progress::default());
         *scan_slot.lock().unwrap() = Some(sp.clone());
-        let tree = scan::scan(&root, &opts, &sp, &scan::new_live(&root));
+        // A folder moved to another drive (Storage) is a link now: look where it leads, keeping
+        // the paths through the link, as the apps see them.
+        let real = if crate::relocate::is_link(&root) { std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone()) } else { root.clone() };
+        let tree = scan::scan(&real, &opts, &sp, &scan::new_live(&real));
         if sp.cancel.load(Ordering::Relaxed) {
             return None;
         }

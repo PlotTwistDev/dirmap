@@ -13,6 +13,7 @@ use crate::models::{Model, Source};
 use std::collections::BTreeSet;
 
 mod moving;
+mod shrink;
 
 #[derive(Default)]
 pub(super) struct StorageState {
@@ -28,6 +29,8 @@ pub(super) struct StorageState {
     pub outcome: Option<(Tone, String)>,
     /// Moving an app's folder to another drive.
     moving: Option<moving::Moving>,
+    /// Shrinking one model into a new file.
+    shrink: Option<shrink::Shrink>,
 }
 
 struct Confirm {
