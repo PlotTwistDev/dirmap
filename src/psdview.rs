@@ -196,6 +196,83 @@ pub fn picture(path: &Path, max: u32) -> Result<PsdPicture, String> {
     picture_data(&data, max)
 }
 
+/// For the preview pane: the picture, and what the layers are (from `craft-psd`, MIT or
+/// Apache-2.0), read from one copy of the file.
+pub fn preview(path: &Path) -> Result<(PsdPicture, Vec<(&'static str, String)>), String> {
+    let data = std::fs::read(path).map_err(|e| format!("Couldn't open it: {e}"))?;
+    let p = picture_data(&data, 0)?;
+    let facts = if data.len() as u64 <= LAYERS_MAX_FILE { layer_facts(&data) } else { Vec::new() };
+    Ok((p, facts))
+}
+
+/// Layers aren't read from documents larger than this (the reader holds them in memory).
+const LAYERS_MAX_FILE: u64 = 512 << 20;
+/// Layer names listed.
+const NAMES: usize = 12;
+
+/// How many layers, which are hidden, groups, text, smart objects and adjustments, and the names
+/// of the top ones. Nothing when the layers can't be read.
+pub fn layer_facts(data: &[u8]) -> Vec<(&'static str, String)> {
+    use craft_psd::SectionType;
+    let Ok(file) = craft_psd::PsdFile::from_bytes(data) else { return Vec::new() };
+    let layers = file.layers();
+    // Group ends (bounding dividers) aren't layers.
+    let real: Vec<&craft_psd::LayerRecord> = layers.iter().filter(|l| l.section_type() != SectionType::BoundingDivider).collect();
+    if real.is_empty() {
+        return Vec::new();
+    }
+    let groups = real.iter().filter(|l| matches!(l.section_type(), SectionType::OpenFolder | SectionType::ClosedFolder)).count();
+    let hidden = real.iter().filter(|l| !l.is_visible()).count();
+    let text = real.iter().filter(|l| l.type_layer().is_some()).count();
+    let smart = real.iter().filter(|l| l.smart_object().is_some()).count();
+    let adjust = real.iter().filter(|l| l.adjustment().is_some()).count();
+    let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
+    let mut s = n(real.len() - groups, "layer", "layers");
+    let mut parts = Vec::new();
+    if groups > 0 {
+        parts.push(n(groups, "group", "groups"));
+    }
+    if hidden > 0 {
+        parts.push(format!("{hidden} hidden"));
+    }
+    if !parts.is_empty() {
+        s.push_str(&format!(" ({})", parts.join(", ")));
+    }
+    let mut facts = vec![("Layers", s)];
+    let mut kinds = Vec::new();
+    if text > 0 {
+        kinds.push(n(text, "text layer", "text layers"));
+    }
+    if smart > 0 {
+        kinds.push(n(smart, "smart object", "smart objects"));
+    }
+    if adjust > 0 {
+        kinds.push(n(adjust, "adjustment", "adjustments"));
+    }
+    if !kinds.is_empty() {
+        facts.push(("Special layers", kinds.join(", ")));
+    }
+    // The top of the stack: the tree's top level, top first (the file stores it bottom up).
+    let tree = file.layer_tree_max_depth(64);
+    let top: Vec<String> = tree
+        .iter()
+        .rev()
+        .filter_map(|node| layers.get(node.index()))
+        .map(|l| {
+            let name = l.name();
+            if name.trim().is_empty() { "(unnamed)".to_string() } else { name.trim().to_string() }
+        })
+        .collect();
+    if !top.is_empty() {
+        let mut list = top.iter().take(NAMES).cloned().collect::<Vec<_>>().join(", ");
+        if top.len() > NAMES {
+            list.push_str(&format!(" and {} more", top.len() - NAMES));
+        }
+        facts.push(("Top layers", list));
+    }
+    facts
+}
+
 pub fn picture_data(data: &[u8], max: u32) -> Result<PsdPicture, String> {
     let h = header(data).ok_or(if data.starts_with(b"8BPS") { "This document is damaged." } else { "Not a Photoshop document." })?;
     let size = [h.width as u32, h.height as u32];
@@ -219,6 +296,31 @@ pub fn picture_data(data: &[u8], max: u32) -> Result<PsdPicture, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layers_groups_and_hidden_ones() {
+        use craft_psd::{GroupSpec, LayerSpec, PixelData, PsdBuilder};
+        let px = || PixelData::Rgba8([255u8, 0, 0, 255].repeat(4));
+        let mut b = PsdBuilder::new(2, 2);
+        b.push_layer(LayerSpec::new("Background", 0, 0, 2, 2, px()));
+        let mut hidden = LayerSpec::new("Sketch", 0, 0, 2, 2, px());
+        hidden.visible = false;
+        b.push_layer(hidden);
+        b.begin_group(GroupSpec::new("Title"));
+        b.push_layer(LayerSpec::new("Shadow", 0, 0, 2, 2, px()));
+        b.end_group().unwrap();
+        b.composite(px());
+        let bytes = b.to_bytes().unwrap();
+        let facts = layer_facts(&bytes);
+        let f = |k: &str| facts.iter().find(|x| x.0 == k).map(|x| x.1.as_str());
+        assert_eq!(f("Layers"), Some("3 layers (1 group, 1 hidden)"));
+        assert_eq!(f("Top layers"), Some("Title, Sketch, Background"));
+        assert!(f("Special layers").is_none());
+        // The picture still comes from Filescape's own reader.
+        assert_eq!(picture_data(&bytes, 0).unwrap().size, [2, 2]);
+        let _ = layer_facts(&bytes[..bytes.len() / 2]); // cut short: nothing or what could be read, never a panic
+        assert!(layer_facts(b"8BPS").is_empty());
+    }
 
     /// A 2×1 RGB, 8-bit PSD: red, blue; raw or PackBits; with an optional thumbnail.
     fn tiny_psd(rle: bool, with_thumb: Option<&[u8]>) -> Vec<u8> {

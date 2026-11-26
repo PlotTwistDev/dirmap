@@ -81,6 +81,9 @@ pub fn read(path: &Path) -> Result<Saved, String> {
     if path.file_name().is_some_and(|n| crate::craftfile::of(&n.to_string_lossy()).is_some()) {
         return crate::craftfile::read(path);
     }
+    if path.file_name().is_some_and(|n| crate::paintfile::of(&n.to_string_lossy()).is_some()) {
+        return crate::paintfile::read(path);
+    }
     if path.file_name().is_some_and(|n| crate::aepfile::is_project(&n.to_string_lossy())) {
         return crate::aepfile::read(path);
     }

@@ -53,6 +53,7 @@ pub fn read(path: &Path) -> Result<Mesh, String> {
                 "stl" => stl(&data)?,
                 "obj" => obj(&data)?,
                 "ply" => ply(&data)?,
+                "fbx" | "dae" | "abc" => scene(&data, &e)?,
                 _ => return Err("Not a 3D model Filescape can read.".into()),
             }
         }
@@ -439,6 +440,70 @@ fn gltf_mesh(path: &Path) -> Result<Parsed, String> {
     Ok((pts, tris, facts))
 }
 
+/// FBX, COLLADA (.dae) and Alembic (.abc), read with `craft-mesh` (from craft-libs, MIT or
+/// Apache-2.0): every mesh where the scene places it, turned so the file's up is up. Texture
+/// files the scene names are listed, never opened.
+fn scene(data: &[u8], kind: &str) -> Result<Parsed, String> {
+    use craft_mesh::{Limits, mat_mul, transform_point};
+    let limits = Limits { max_triangles: MAX_TRIS, ..Limits::default() };
+    let failed = |e: craft_mesh::Error| match e {
+        craft_mesh::Error::Unsupported(what) => format!("This kind of file isn't supported: {what}"),
+        craft_mesh::Error::TooLarge(_) => too_many(),
+        _ => "This model couldn't be read (the file may be damaged).".to_string(),
+    };
+    let (scene, up, mut facts) = match kind {
+        "fbx" => {
+            let doc = craft_mesh::fbx::read_document(data, &limits).map_err(failed)?;
+            let mut none = craft_mesh::no_external;
+            let scene = doc.scene(&limits, &mut none).map_err(failed)?;
+            let mut what = if craft_mesh::fbx::is_binary(data) { "FBX (binary)".to_string() } else { "FBX (text)".to_string() };
+            if doc.version >= 6000 {
+                what = format!("{what}, version {}.{}", doc.version / 1000, doc.version % 1000 / 100);
+            }
+            (scene, doc.axes_to_y_up(), vec![("Format", what)])
+        }
+        "dae" => {
+            let doc = craft_mesh::dae::read_document(data, &limits).map_err(failed)?;
+            (doc.scene, doc.up_axis.to_y_up(), vec![("Format", "COLLADA".to_string())])
+        }
+        _ => (craft_mesh::abc::read(data, &limits).map_err(failed)?, craft_mesh::IDENTITY, vec![("Format", "Alembic".to_string())]),
+    };
+    let mut pts = Vec::new();
+    let mut tris = Vec::new();
+    for (i, m) in scene.instances(&limits).map_err(failed)? {
+        let Some(mesh) = scene.meshes.get(i) else { continue };
+        let u = mesh.unified();
+        let m = mat_mul(&up, &m);
+        let start = pts.len() as u32;
+        let n = u.positions.len() as u32;
+        pts.extend(u.positions.iter().map(|p| transform_point(&m, *p).map(|v| v as f32)));
+        for t in u.parts.iter().flatten() {
+            if t.iter().all(|&k| k < n) {
+                tris.push([start + t[0], start + t[1], start + t[2]]);
+            }
+        }
+        if tris.len() > MAX_TRIS {
+            return Err(too_many());
+        }
+    }
+    if scene.meshes.len() > 1 {
+        facts.push(("Meshes", group(scene.meshes.len())));
+    }
+    if !scene.materials.is_empty() {
+        facts.push(("Materials", group(scene.materials.len())));
+    }
+    if !scene.external.is_empty() {
+        facts.push(("Textures", format!("{} (not shown)", group(scene.external.len()))));
+    }
+    if !scene.animations.is_empty() {
+        facts.push(("Animations", group(scene.animations.len())));
+    }
+    if !scene.cameras.is_empty() || !scene.lights.is_empty() {
+        facts.push(("Cameras and lights", format!("{} and {}", group(scene.cameras.len()), group(scene.lights.len()))));
+    }
+    Ok((pts, tris, facts))
+}
+
 /// 3MF: a zip with the model as XML (3D/3dmodel.model), as 3D printers' software saves it.
 fn threemf(path: &Path) -> Result<Parsed, String> {
     let f = std::fs::File::open(path).map_err(|e| format!("Couldn't read it: {e}"))?;
@@ -674,6 +739,41 @@ mod tests {
         assert!(read(&p).err().unwrap().contains("aren't beside it"));
         std::fs::write(&p, doc("file:///dev/zero")).unwrap();
         assert!(read(&p).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn fbx_collada_and_alembic() {
+        let dir = std::env::temp_dir().join(format!("filescape-3d-scene-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A Z-up FBX: one quad standing 3 units tall along Z, which is drawn standing up (Y).
+        let fbx = "; FBX 7.4.0 project file\nFBXHeaderExtension:  {\n\tFBXVersion: 7400\n}\nGlobalSettings:  {\n\tProperties70:  {\n\t\tP: \"UpAxis\", \"int\", \"Integer\", \"\",2\n\t\tP: \"UpAxisSign\", \"int\", \"Integer\", \"\",1\n\t\tP: \"FrontAxis\", \"int\", \"Integer\", \"\",1\n\t\tP: \"FrontAxisSign\", \"int\", \"Integer\", \"\",-1\n\t\tP: \"CoordAxis\", \"int\", \"Integer\", \"\",0\n\t\tP: \"CoordAxisSign\", \"int\", \"Integer\", \"\",1\n\t}\n}\nObjects:  {\n\tGeometry: 100, \"Geometry::Wall\", \"Mesh\" {\n\t\tVertices: *12 {\n\t\t\ta: 0,0,0,1,0,0,1,0,3,0,0,3\n\t\t}\n\t\tPolygonVertexIndex: *4 {\n\t\t\ta: 0,1,2,-4\n\t\t}\n\t}\n\tModel: 300, \"Model::Wall\", \"Mesh\" {\n\t}\n\tMaterial: 400, \"Material::Red\", \"\" {\n\t}\n}\nConnections:  {\n\tC: \"OO\",300,0\n\tC: \"OO\",100,300\n\tC: \"OO\",400,300\n}\n";
+        let p = dir.join("wall.fbx");
+        std::fs::write(&p, fbx).unwrap();
+        let m = read(&p).unwrap();
+        assert_eq!(m.tris.len(), 2);
+        assert!((m.extent[1] - 3.0).abs() < 1e-4, "{:?}", m.extent);
+        let f = |m: &Mesh, k: &str| m.facts.iter().find(|x| x.0 == k).map(|x| x.1.clone());
+        assert_eq!(f(&m, "Format").as_deref(), Some("FBX (text), version 7.4"));
+        assert_eq!(f(&m, "Materials").as_deref(), Some("1"));
+        // COLLADA: a triangle, Y up.
+        let dae = r##"<?xml version="1.0"?><COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1"><asset><up_axis>Y_UP</up_axis></asset>
+<library_geometries><geometry id="t"><mesh><source id="p"><float_array id="pa" count="9">0 0 0 2 0 0 0 1 0</float_array><technique_common><accessor source="#pa" count="3" stride="3"/></technique_common></source>
+<vertices id="v"><input semantic="POSITION" source="#p"/></vertices><triangles count="1"><input semantic="VERTEX" source="#v" offset="0"/><p>0 1 2</p></triangles></mesh></geometry></library_geometries>
+<library_visual_scenes><visual_scene id="s"><node id="n"><instance_geometry url="#t"/></node></visual_scene></library_visual_scenes><scene><instance_visual_scene url="#s"/></scene></COLLADA>"##;
+        let p = dir.join("tri.dae");
+        std::fs::write(&p, dae).unwrap();
+        let m = read(&p).unwrap();
+        assert_eq!(m.tris.len(), 1);
+        assert_eq!(m.extent, [2.0, 1.0, 0.0]);
+        // Not Alembic, or damaged: an error, never a panic.
+        let p = dir.join("junk.abc");
+        std::fs::write(&p, b"\x89HDF\r\n\x1a\nnot really").unwrap();
+        assert!(read(&p).is_err());
+        std::fs::write(&p, b"Ogawa\xff\0\0\0\0\0\0\0\0\0\0\0\0\0\0").unwrap();
+        assert!(read(&p).is_err());
+        std::fs::write(dir.join("cut.fbx"), &fbx.as_bytes()[..200]).unwrap();
+        assert!(read(&dir.join("cut.fbx")).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 }
