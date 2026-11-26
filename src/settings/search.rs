@@ -26,6 +26,7 @@ pub const ENTRIES: &[Entry] = &[
     e(Tab::General, "appearance", "Appearance", "Explain system files", "system files folders explain what is this pagefile hiberfil winsxs spotlight proc swap safe to delete info badge"),
     e(Tab::General, "sizes", "File sizes", "Size units", "binary decimal kb kib mb gb 1024 1000 units bytes format"),
     e(Tab::General, "scanning", "Scanning", "Live scan results", "live tree progress scanning while found"),
+    e(Tab::General, "scanning", "Scanning", "Keep up with changes", "watch live update changes new files downloads refresh automatic rescan deleted moved"),
     e(Tab::General, "updates", "Updates", "Check for updates", "update updates version new release notes automatic download latest"),
     e(Tab::Filtering, "summary", "Active rules", "Active filter rules", "filters summary rescan exclusions rules"),
     e(Tab::Filtering, "folders", "Skipped folders", "Folders to skip", "exclude ignore folder directory path skip browse"),

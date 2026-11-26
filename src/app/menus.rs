@@ -1260,7 +1260,7 @@ fn add_line(list: &mut String, line: &str) {
 }
 
 /// Read one item from disk again, as the scan would see it. `None` if it's gone.
-fn reread(path: &Path, opts: &Options) -> Option<Node> {
+pub(super) fn reread(path: &Path, opts: &Options) -> Option<Node> {
     if crate::fsys::remote::is_remote(path) {
         let m = crate::fsys::remote::meta(path).ok()?;
         return Some(if m.is_dir && !m.is_link {

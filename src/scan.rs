@@ -331,7 +331,7 @@ pub struct Options {
 }
 
 impl Options {
-    fn folder_excluded(&self, path: &Path) -> bool {
+    pub(crate) fn folder_excluded(&self, path: &Path) -> bool {
         if self.exclude_folders.is_empty() {
             return false;
         }
@@ -342,7 +342,7 @@ impl Options {
         })
     }
 
-    fn file_excluded(&self, name: &str, size: u64, modified: i64) -> bool {
+    pub(crate) fn file_excluded(&self, name: &str, size: u64, modified: i64) -> bool {
         size < self.min_file_size
             || (self.min_modified != 0 && modified < self.min_modified)
             || self.exclude_files.iter().any(|g| glob(g, name))

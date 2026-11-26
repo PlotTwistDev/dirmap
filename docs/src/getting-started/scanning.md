@@ -33,6 +33,23 @@ drives aren't listed, but you can still type their path.
 When the walk is done the bar shows **Sorting and building the map…** for a moment, then the
 result appears.
 
+## Changes after the scan
+
+While a scan is on screen, Filescape watches the scanned folder. When files are added, changed or
+removed by other apps (a download finishing, a file deleted in Finder or Explorer, a folder moved
+in), only those items are read again and the map, the folder list and the totals update by
+themselves, a second or so later. Nothing is opened, so cloud files stay in the cloud, and the
+scan's own rules (skipped folders, hidden files, file filters) still apply.
+
+- Downloads still being written (Chrome's `.crdownload`, Firefox's `.part`, Safari's `.download`)
+  are left out, and appear under their real name once they finish.
+- While duplicate results are showing, changes wait until you clear them, so the results stay valid.
+- Servers (SFTP, FTP, WebDAV) send no change notices, so a scan of one doesn't update.
+- On Linux each scanned folder needs a watch of its own, so in a scan of more than about 30,000
+  folders only the first 30,000 (the ones nearest the top) are watched.
+
+Turn it off under **Settings > General > Keep up with changes**.
+
 ## Scanning again
 
 Press **⟳ Scan** to scan the same folder again. To refresh just one folder after you've changed
