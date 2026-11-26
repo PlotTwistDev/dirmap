@@ -34,6 +34,7 @@ pub(super) fn wants_thumb(name: &str) -> bool {
     match preview::kind_of(name) {
         Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Media(_) => true,
         Kind::Midi | Kind::Model | Kind::Map => crate::thumbcache::rich(),
+        Kind::Cad => crate::thumbcache::rich() && name.to_ascii_lowercase().ends_with(".dxf"),
         _ => false,
     }
 }
@@ -331,6 +332,10 @@ fn picture(job: &Job, config: Config, kind: Kind, name: &str) -> Option<Decoded>
         Kind::Model => crate::model3d::read(&local).ok().map(|m| {
             let n = max.min(512) as usize;
             Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &m.draw(n, n, crate::model3d::Angle::default(), 1)))
+        }),
+        Kind::Cad => crate::cadview::read_dxf(&local).ok().map(|d| {
+            let (w, h) = d.fit(max.min(512));
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &d.draw(w, h)))
         }),
         Kind::Map => crate::geoview::read(&local).ok().map(|g| {
             let (w, h) = g.fit(max.min(512));
