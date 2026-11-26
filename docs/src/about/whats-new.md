@@ -203,6 +203,12 @@
 - **Steadier tile previews.** Previews on the Storage Analysis map no longer blink off and
   fade back in as you pan and zoom: a tile keeps its preview while the map sharpens, and sound
   waveforms hold their shape as tiles grow.
+- **Roomier preview pane.** In Storage Analysis the preview takes all the room the details
+  leave, and the details sit at the bottom of the pane.
+- **Video timeline.** A video's filmstrip is a timeline: click it to play from there, or drag
+  along it to scrub, the picture following back and forth. The video's sound is drawn under it
+  when it has some. Dragging the time slider scrubs too.
+- **Line numbers** beside the text of text files and scripts in previews.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the

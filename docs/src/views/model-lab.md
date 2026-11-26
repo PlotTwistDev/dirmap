@@ -10,7 +10,7 @@ Ask AI share the loaded model, so switching between them doesn't load it again.
 
 ## Seeing what comes next
 
-Type some text, such as "The capital of France is", and press **Next token**. A model writes in
+Type some text, such as "The capital of France is", and press **Show next token**. A model writes in
 *tokens*: whole words, parts of words, spaces or punctuation. The Lab shows the token it picked and
 the ten tokens the model thought likeliest:
 
@@ -22,7 +22,7 @@ the ten tokens the model thought likeliest:
 **Use this** writes a different token in its place and shows what the model would write after it,
 so you can follow a road the model didn't take. **Start again** forgets the tokens you've chosen.
 
-**Write 30** (or 10, 100 or 300) writes several tokens at once. Each is coloured by how sure the
+**Write 30 tokens** (or 10, 100 or 300) writes several tokens at once. Each is coloured by how sure the
 model was of it: green for confident, amber, then red for unlikely. Click a token to see its
 alternatives. **Keep these** adds what was written to the text, to carry on from there. The line
 under the text gives the average confidence and the speed.
@@ -43,7 +43,7 @@ These decide which token is picked from the model's probabilities, in this order
 | **Temperature** | How adventurous the pick is among what's left. 0 always picks the likeliest. 1 picks as often as the model says. Higher gives unlikely tokens more of a chance. |
 | **Seed** | The same seed and settings pick the same tokens again. **🎲** chooses another. |
 
-Change a setting after **Next token** and the Lab works out the next token again straight away, so
+Change a setting after **Show next token** and the Lab works out the next token again straight away, so
 you can watch the effect. **Ask AI's settings** puts back the ones Ask AI uses (temperature 0.6,
 top-k 40, top-p 0.95, min-p 0.05).
 

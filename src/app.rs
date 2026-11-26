@@ -3022,7 +3022,8 @@ impl eframe::App for App {
                 .size_range(200.0..=520.0)
                 .frame(egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 8 }))
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical().id_salt("map-preview-scroll").auto_shrink(false).show(ui, |ui| self.map_preview_pane(ui));
+                    let tall = ui.available_height();
+                    egui::ScrollArea::vertical().id_salt("map-preview-scroll").auto_shrink(false).show(ui, |ui| self.map_preview_pane(ui, tall));
                 });
             self.help_regions.push((r.response.rect, topics::TREEMAP_NAV));
         }
