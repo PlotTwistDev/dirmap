@@ -45,6 +45,7 @@ mod health;
 mod weights;
 mod vocab;
 mod modeldiff;
+mod llm;
 mod inspect;
 mod mailview;
 mod midiview;

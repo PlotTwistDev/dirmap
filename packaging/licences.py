@@ -39,6 +39,26 @@ OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
 
+# Crates that build C or C++ sources they carry, whose own notices sit in subfolders. Listed by
+# hand because the script can't tell which of those sources end up linked in.
+BUNDLED = {
+    # llama.cpp itself (llama, ggml, common) and the vendored code common links in.
+    "llama-cpp-sys-2": [
+        "llama.cpp/LICENSE",
+        "llama.cpp/vendor/cpp-httplib/LICENSE",
+        "llama.cpp/vendor/hash/xxhash/LICENSE",
+        "llama.cpp/vendor/hash/rotate-bits/LICENSE.md",
+        "llama.cpp/vendor/hash/sha256/LICENSE",
+    ],
+}
+# Header-only code bundled the same way that carries its notice in the header, not a file.
+BUNDLED_TEXT = {
+    "llama-cpp-sys-2": [
+        "nlohmann/json (bundled in llama.cpp)\nCopyright (c) 2013-2025 Niels Lohmann <https://nlohmann.me>\n\n" + "MIT_PLACEHOLDER",
+    ],
+}
+
+
 def metadata():
     cmd = ["cargo", "metadata", "--format-version", "1", "--manifest-path", os.path.join(ROOT, "Cargo.toml")]
     for t in TARGETS:
@@ -74,6 +94,7 @@ def texts(p):
     # Bundled fonts carry their own licences (OFL, the Ubuntu font licence) beside them.
     if os.path.isdir(os.path.join(d, "fonts")):
         names += sorted("fonts/" + f for f in os.listdir(os.path.join(d, "fonts")) if f.lower().endswith(".txt"))
+    names += [n for n in BUNDLED.get(p["name"], []) if n not in names]
     out = []
     for n in names:
         f = os.path.join(d, n)
@@ -89,7 +110,7 @@ def texts(p):
             out.append(f"Copyright (c) {authors}\n\n{MIT}")
         else:
             out.append(f"Copyright (c) {authors}\n\nLicensed under {lic}. The crate ships no licence file; see {p.get('repository') or 'crates.io'}.")
-    return out
+    return out + [t.replace("MIT_PLACEHOLDER", MIT) for t in BUNDLED_TEXT.get(p["name"], [])]
 
 
 def render(meta):

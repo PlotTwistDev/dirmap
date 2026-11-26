@@ -1,0 +1,9 @@
+# Builds llama.cpp (Ask AI) for x86-64 processors with AVX2, FMA and F16C: nearly every PC since
+# 2015 and every Intel Mac that runs a current macOS. Without these it is built for the oldest
+# processors and runs models several times slower. ARM builds ignore them. Filescape checks for
+# AVX2 before loading a model, so older processors get a message rather than a crash.
+[env]
+GGML_AVX = "ON"
+GGML_AVX2 = "ON"
+GGML_FMA = "ON"
+GGML_F16C = "ON"

@@ -4,6 +4,11 @@
 
 ### The AI Models workspace
 
+- **💬 Ask AI** chats with a model already on this computer, run by Filescape itself: no Ollama,
+  LM Studio or internet connection needed, and nothing you ask leaves the computer. It runs GGUF
+  models, on the graphics chip of a Mac with Apple silicon and on the processor elsewhere. Ask AI
+  is free. See [Ask AI](../views/ask-ai.md).
+
 - A new **✨ AI Models** workspace (**Ctrl+4**) lists the AI models on this computer: what Ollama,
   LM Studio and Hugging Face have downloaded, model files in Downloads and in folders you add, and
   those in the Storage Analysis scan. Each shows its size, format, family, parameters, precision

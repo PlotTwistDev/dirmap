@@ -12,6 +12,7 @@
 - [The Files workspace](views/file-manager.md)
 - [The Remote workspace](views/remote.md)
 - [The AI Models workspace](views/ai-models.md)
+- [Ask AI](views/ask-ai.md)
 - [Scanning a drive or folder](getting-started/scanning.md)
 - [Interpreting scan results](getting-started/results.md)
 
