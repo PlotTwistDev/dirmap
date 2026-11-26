@@ -38,10 +38,6 @@ pub(super) fn paint_stored(ui: &egui::Ui, rect: Rect, s: Stored, id: egui::Id, t
 }
 
 /// The states in a filter's set, in words: "Online only, Partly downloaded".
-pub(super) fn stored_names(set: u8) -> String {
-    Stored::ALL.iter().filter(|s| set & s.bit() != 0).map(|s| s.label()).collect::<Vec<_>>().join(", ")
-}
-
 /// The tooltip for a cloud status icon: the state, what it means, and the provider.
 pub(super) fn stored_tip(s: Stored, detail: Option<String>, path: Option<&Path>) -> String {
     let mut t = match detail {
@@ -270,38 +266,6 @@ impl App {
         v
     }
 
-    /// "Stored:" chips in the filter bar, when the scan has cloud files: show only files that
-    /// are online only, downloaded, pinned… Choosing is part of the Pro filters.
-    pub(super) fn stored_filter_row(&mut self, ui: &mut egui::Ui) {
-        let has = self.tree.as_ref().is_some_and(|t| t.flags & (scan::store::CLOUD | scan::store::NOT_LOCAL) != 0);
-        if !has && self.filter.stored == 0 {
-            return;
-        }
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Stored:").on_hover_text("Where each file's data is. Only files in cloud folders are anything but \"Not in the cloud\".");
-            if ui.selectable_label(self.filter.stored == 0, "Anywhere").clicked() {
-                self.filter.stored = 0;
-            }
-            for s in Stored::ALL {
-                let on = self.filter.stored & s.bit() != 0;
-                let resp = ui.selectable_label(on, s.label()).on_hover_text(s.explain());
-                if resp.clicked() && (on || self.premium(crate::licence::Feature::Filters)) {
-                    self.filter.stored ^= s.bit();
-                    // Online-only files take no space on disk, so sized by what's on disk they
-                    // have no area on the maps and the filter would show nothing. Size them by
-                    // their logical size instead.
-                    if !on && self.filter.stored & AWAY != 0 && self.metric == scan::Metric::Disk {
-                        self.set_metric(scan::Metric::Logical);
-                    }
-                }
-            }
-            if self.filter.stored & AWAY != 0 && self.metric == scan::Metric::Disk {
-                ui.weak("· online-only files take no space on disk, so they don't show at Size: On disk. Choose Logical to see them.");
-            } else if self.filter.stored & AWAY != 0 && self.metric == scan::Metric::Logical {
-                ui.weak("· sizes are logical, since online-only files take no space on disk");
-            }
-        });
-    }
 }
 
 /// Stored states whose data is (mostly) not on this computer.

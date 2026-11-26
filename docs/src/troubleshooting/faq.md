@@ -27,13 +27,13 @@ can't see. See [Why is free space lower than expected?](../tutorials/missing-spa
 
 ## Can I see the size on disk instead of the file size?
 
-Yes, it's the default. The **Size** switch above the map changes between **On disk** and
+Yes, it's the default. The **Size** menu above the map changes between **On disk** and
 **Logical**. See [How sizes are calculated](../disk-usage/sizes.md).
 
 ## Why is my Google Drive (or OneDrive, iCloud, Dropbox) folder so small?
 
 Its files are online only: they show their full size in Finder or Explorer but are stored in
-the cloud, so they take almost no space on this computer. Switch the **Size** switch to
+the cloud, so they take almost no space on this computer. Switch the **Size** menu to
 **Logical** to see their full size. See [Cloud files](../disk-usage/cloud-files.md).
 
 ## Is it safe to delete what Filescape shows?
@@ -64,7 +64,7 @@ No; a scan is a picture of one moment. Refresh a folder with **F5**, or compare 
 
 ## Why are some rectangles grey?
 
-Grey tiles are files whose extension has no colour assigned (rare) or, with **Color by: Change**,
+Grey tiles are files whose extension has no colour assigned (rare) or, with **Colour: Change**,
 files that haven't changed. Files hidden by a filter leave empty dark background instead.
 
 ## Where are my settings stored, and how do I reset them?

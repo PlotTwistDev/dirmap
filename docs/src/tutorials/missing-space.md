@@ -27,7 +27,7 @@ Likely causes, most common first:
 
 | Cause | How to check |
 |---|---|
-| You're looking at **Logical** sizes | Set the **Size** switch above the map to **On disk**. Logical sizes count cloud files that are only online, and compressed and sparse files, in full. See [Size on disk and logical size](../disk-usage/sizes.md#size-on-disk-and-logical-size). |
+| You're looking at **Logical** sizes | Set the **Size** menu above the map to **On disk**. Logical sizes count cloud files that are only online, and compressed and sparse files, in full. See [Size on disk and logical size](../disk-usage/sizes.md#size-on-disk-and-logical-size). |
 | Hard links on Windows, especially `C:\Windows\WinSxS` | Very large WinSxS or backup folders. See [Windows system storage](../advanced/windows-storage.md). (On macOS and Linux, sizes on disk count each hard-linked file once.) |
 | Drives mounted inside the folder (Linux, macOS) | Only if **Stay on the scanned drive** is off. |
 
@@ -35,13 +35,13 @@ Likely causes, most common first:
 
 1. Look at the largest folders in the file manager, and the largest tiles on the map.
 2. Check the usual suspects:
-   - Virtual disks: **Show: 💿 Disk images** (WSL, Docker, virtual machines). See
+   - Virtual disks: **Filters › Disk images** (WSL, Docker, virtual machines). See
      [Investigate WSL virtual disks](wsl-disks.md).
    - `pagefile.sys`, `hiberfil.sys` and `swapfile.sys` at the top of `C:\`.
    - Caches and temporary files: `AppData\Local\Temp`, browser caches, `~/.cache`.
    - Downloads, old installers (`*.iso, *.msi, *.exe` in a Custom filter) and duplicate files.
    - Large logs and crash dumps: `*.log, *.dmp`.
-3. **Color by: Age** to spot data that hasn't been touched in years.
+3. **Colour: Age** to spot data that hasn't been touched in years.
 4. Save a snapshot now, and compare with a new scan next week to see what keeps growing. See
    [Comparing with a snapshot](../analysis/snapshots.md).
 

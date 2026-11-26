@@ -17,7 +17,7 @@ version.
 | File manager | Finder/Explorer-style browsing above the map in List, Icons, Columns and Tree layouts: tabs, sizes and share of folder, sorting, path bar, Back/Forward, keyboard navigation, type to select, multi-select, rename, new folder, copy/cut/paste, drag and drop, filters, right-click menu; moves with the map. |
 | Colour by type, age, and change since a snapshot | |
 | File types list | Highlight, find all files of a type, copy, exclude. |
-| Category, size and Custom name filters | Highlight or Show matches only; wildcards, exclusions, AND/OR, frame numbers, padding and ranges; presets and recent patterns. |
+| Category, size and Custom name filters | Highlight or Only matches; wildcards, exclusions, AND/OR, frame numbers, padding and ranges; presets and recent patterns. |
 | Numbered sequence detection | Frame ranges, steps, missing frames. |
 | Size histogram | Click a range to filter. |
 | Snapshots and comparison | Save, compare, colour by change; from the command line too. |

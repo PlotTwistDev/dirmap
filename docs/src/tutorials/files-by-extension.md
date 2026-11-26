@@ -14,12 +14,12 @@ are.
 
 ## Method 2: with the Custom filter
 
-1. Press **Ctrl+F** (or click **🔍 Custom**).
+1. Press **Ctrl+F** (or click the search box).
 2. Type the extension, for example `iso` or `*.iso`. As you type, Filescape suggests extensions found
    in the scan; press **Tab** to complete one.
-3. The count next to **Highlight** / **Show matches only** shows how many files match and how
+3. The count next to **Highlight** / **Only matches** shows how many files match and how
    much space they use.
-4. Choose **Show matches only** to see just those files on the map and in the file manager, with
+4. Choose **Only matches** to see just those files on the map and in the file manager, with
    the folders that hold them.
 
 Several types at once: `*.iso, *.img, *.dmg`.

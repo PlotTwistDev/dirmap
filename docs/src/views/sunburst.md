@@ -1,6 +1,6 @@
 # The sunburst
 
-Choose **View: Sunburst** in the filter bar to see the same scan as a ring chart.
+Choose **View: Sunburst** above the map to see the same scan as a ring chart.
 
 ![The sunburst view](../images/sunburst.png)
 
@@ -12,7 +12,7 @@ Choose **View: Sunburst** in the filter bar to see the same scan as a ring chart
 - Each segment's **angle is proportional to its size**: a folder using a quarter of the space
   takes a quarter of the ring.
 - **Files** are coloured by the current colour mode (by type, unless you choose otherwise).
-- With **Color by: Type**, **folders** are coloured by which top-level folder they belong to,
+- With **Colour: Type**, **folders** are coloured by which top-level folder they belong to,
   getting darker further out, so you can follow one branch outwards. With **Age** they are grey,
   so the files stand out; with **Change** they take a darker version of their change colour.
 - Segments too thin to see (under about a fifth of a degree) are left out.
@@ -30,7 +30,7 @@ Choose **View: Sunburst** in the filter bar to see the same scan as a ring chart
 | Click the middle, or right-click | Goes up one level. |
 
 **Zoom to selection** makes the selected folder (or the folder of the selected file) the
-centre, **Zoom out** goes up one level and **⟲ Whole map** returns to the whole scan. Back and
+centre, **↑** goes up one level and **Whole map** (⌂) returns to the whole scan. Back and
 Forward work on the treemap and in the file manager only.
 
 The treemap and the sunburst share the same position: the folder you open in one is the folder

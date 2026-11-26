@@ -1,7 +1,7 @@
 # Custom filter syntax
 
-The **🔍 Custom** filter limits the map to files whose **names** match a pattern. Open it by
-clicking **🔍 Custom** at the end of the **Show:** row, or press **Ctrl+F** (**⌘F** on a Mac).
+The search box on the toolbar above the map limits the map to files whose **names** match a
+pattern. Click in it, or press **Ctrl+F** (**⌘F** on a Mac).
 Type a pattern; the map updates as you type.
 
 ![The Custom filter with its examples](../images/custom-filter.png)

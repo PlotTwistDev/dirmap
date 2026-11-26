@@ -351,34 +351,9 @@ impl App {
         }
     }
 
-    /// The "Custom" toggle at the end of the Show: row. Shows the active pattern when the row
-    /// is closed, so a filter in effect is never hidden.
-    pub(super) fn custom_button(&mut self, ui: &mut egui::Ui) {
-        ui.separator();
-        let active = self.filter.custom.is_some();
-        let label = match &self.filter.custom {
-            Some(f) if !self.custom.open => {
-                let s = f.source().trim();
-                let short: String = s.chars().take(28).collect();
-                format!("🔍 Custom: {short}{}", if s.chars().count() > 28 { "…" } else { "" })
-            }
-            _ => "🔍 Custom".to_string(),
-        };
-        let shortcut = ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F));
-        let resp = ui
-            .selectable_label(self.custom.open || active, label)
-            .on_hover_text(format!("Filter by file name, extension or frame number ({shortcut})"));
-        if resp.clicked() {
-            self.custom.open = !self.custom.open;
-            self.custom.focus = self.custom.open;
-        }
-    }
-
-    /// The input row under the Show: row, when Custom is open.
-    pub(super) fn custom_row(&mut self, ui: &mut egui::Ui) {
-        if !self.custom.open {
-            return;
-        }
+    /// The search box on the Storage Analysis toolbar: names, extensions and patterns, with
+    /// completions while typing and the ⏷ menu of presets, examples and options.
+    pub(super) fn custom_search(&mut self, ui: &mut egui::Ui, width: f32) {
         let id = egui::Id::new("custom-filter-input");
         let had_focus = ui.memory(|m| m.has_focus(id));
         let suggestions = if had_focus { self.suggestions() } else { Vec::new() };
@@ -403,46 +378,60 @@ impl App {
             });
         }
 
-        let mut input_rect = None;
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Custom:");
-            let edit = egui::TextEdit::singleline(&mut self.custom.text)
+        let input_rect;
+        let shortcut = ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F));
+        let t = crate::kit::tokens(ui);
+        let (rect, _) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
+        let focused = ui.memory(|m| m.has_focus(id));
+        let active = self.filter.custom.is_some();
+        let stroke = if focused {
+            egui::Stroke::new(1.5, t.accent)
+        } else if self.custom.error.is_some() {
+            egui::Stroke::new(1.0, t.warn)
+        } else if active {
+            egui::Stroke::new(1.0, style::blend(t.card_border, t.accent, 0.6))
+        } else {
+            egui::Stroke::new(1.0, t.card_border)
+        };
+        ui.painter().rect(rect, crate::kit::CONTROL_RADIUS, t.pal.well, stroke, egui::StrokeKind::Inside);
+        crate::kit::icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.left() + 14.0, rect.center().y), vec2(14.0, 14.0)), crate::kit::Icon::Search, t.weak);
+        let inner = Rect::from_min_max(rect.min + vec2(28.0, 5.0), rect.max - vec2(48.0, 5.0));
+        let resp = ui.put(
+            inner,
+            egui::TextEdit::singleline(&mut self.custom.text)
                 .id(id)
-                .desired_width(300.0)
-                .hint_text("*.exr, shot_####.exr, !*preview*");
-            let resp = ui.add(edit);
-            input_rect = Some(resp.rect);
-            if std::mem::take(&mut self.custom.focus) {
-                resp.request_focus();
-            }
-            if resp.changed() {
-                self.custom.edited = Some(Instant::now());
-                // Validate right away so the warning keeps up with typing; apply after a pause.
-                self.custom.error = Filter::compile(&self.custom.text, self.custom.options()).err();
-            }
-            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if enter {
-                self.apply_custom();
-                self.remember_recent();
-            } else if resp.lost_focus() && self.custom.edited.is_none() {
-                self.remember_recent();
-            }
-            if ui.add_enabled(!self.custom.text.is_empty(), egui::Button::new("✖").small()).on_hover_text("Clear the custom filter").clicked() {
+                .frame(egui::Frame::NONE)
+                .desired_width(inner.width())
+                .hint_text("Search names, *.ext, patterns"),
+        );
+        let resp = resp.on_hover_text(format!("Find files by name, extension or pattern ({shortcut}): they are highlighted on the map, or shown alone with Only matches. Examples: *.psd, render_####.exr, !*cache*"));
+        input_rect = Some(rect);
+        if std::mem::take(&mut self.custom.focus) {
+            resp.request_focus();
+        }
+        if resp.changed() {
+            self.custom.edited = Some(Instant::now());
+            // Validate right away so the warning keeps up with typing; apply after a pause.
+            self.custom.error = Filter::compile(&self.custom.text, self.custom.options()).err();
+        }
+        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if enter {
+            self.apply_custom();
+            self.remember_recent();
+        } else if resp.lost_focus() && self.custom.edited.is_none() {
+            self.remember_recent();
+        }
+        if !self.custom.text.is_empty() {
+            let c = Rect::from_center_size(pos2(rect.right() - 36.0, rect.center().y), vec2(18.0, 18.0));
+            let r = ui.interact(c, id.with("clear"), Sense::click()).on_hover_text("Clear the search");
+            crate::kit::icons::paint(ui.painter(), c.shrink(4.0), crate::kit::Icon::Close, if r.hovered() { t.strong } else { t.weak });
+            if r.clicked() {
                 self.clear_custom();
             }
-            let mut case = self.custom.prefs.case_sensitive;
-            if ui.toggle_value(&mut case, "Aa").on_hover_text("Match upper/lower case exactly").changed() {
-                self.custom.prefs.case_sensitive = case;
-                self.apply_custom();
-            }
-            self.custom_menu(ui);
-            if crate::help::link_button(ui, "Filter syntax: wildcards, frame numbers, ranges") {
-                self.help.show_topic(crate::help::topics::SYNTAX);
-            }
-            if let Some(e) = &self.custom.error {
-                ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {e}"));
-            }
-        });
+        }
+        // The ⏷ menu sits inside the box's right end.
+        let menu_rect = Rect::from_min_max(pos2(rect.right() - 24.0, rect.top() + 2.0), rect.max - vec2(2.0, 2.0));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(menu_rect), |ui| self.custom_menu(ui));
 
         // Suggestions (or, with an empty box, examples) right under the input.
         if let (Some(rect), false) = (input_rect, suggestions.is_empty()) {
@@ -510,7 +499,7 @@ impl App {
     }
 
     /// The ▾ dropdown: examples, recent filters, presets, options and syntax help.
-    fn custom_menu(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn custom_menu(&mut self, ui: &mut egui::Ui) {
         let config = MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
         let mut pick: Option<String> = None;
         MenuButton::new("⏷").config(config).ui(ui, |ui| {
@@ -609,38 +598,6 @@ impl App {
         });
         if let Some(p) = pick {
             self.set_custom(&p);
-        }
-    }
-
-    /// Below the size boxes when a filter is on: Highlight / Show matches only, and the count.
-    pub(super) fn filter_summary(&mut self, ui: &mut egui::Ui, total: u64) {
-        ui.separator();
-        let mut mode = self.custom.prefs.mode;
-        ui.selectable_value(&mut mode, FilterMode::Highlight, "Highlight")
-            .on_hover_text("Keep the layout; dim everything that doesn't match");
-        ui.selectable_value(&mut mode, FilterMode::Only, "Show matches only")
-            .on_hover_text("Rebuild the maps and folder list from the matching files alone");
-        self.custom.prefs.mode = mode;
-        ui.separator();
-        let current = self.filter_stats.as_ref().filter(|(f, _, _)| *f == self.filter);
-        match current {
-            Some((_, 0, _)) => {
-                ui.colored_label(ui.visuals().warn_fg_color, "No files match");
-            }
-            Some((_, files, bytes)) => {
-                let pct = *bytes as f64 * 100.0 / total.max(1) as f64;
-                ui.strong(format!("{} files match · {} ({pct:.1}% of the scan)", group(*files), scan::human(*bytes)));
-                if *bytes == 0 {
-                    // Nothing for the maps to draw: say why rather than leave them looking empty.
-                    let why = if self.metric == scan::Metric::Disk { "· they take no space on disk, so the maps can't show them (try Size: Logical)" } else { "· they're all empty, so the maps can't show them" };
-                    ui.weak(why);
-                }
-            }
-            None => {}
-        }
-        if self.filtering_busy() || self.custom.edited.is_some() {
-            ui.spinner();
-            ui.weak(if mode == FilterMode::Only { "Filtering…" } else { "Counting…" });
         }
     }
 

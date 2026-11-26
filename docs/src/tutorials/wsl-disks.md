@@ -10,7 +10,7 @@ when you delete files inside Linux, so they are a common cause of disappearing s
 ## Steps
 
 1. Scan your system drive (usually `C:\`), ideally as administrator so nothing is left out.
-2. Click **Show: 💿 Disk images** in the filter bar. Every virtual disk lights up on the map.
+2. Click **Filters › Disk images** above the map. Every virtual disk lights up on the map.
 3. Hover over each bright rectangle to see its path and size. Typical locations:
    - `C:\Users\<you>\AppData\Local\Packages\<distribution>\LocalState\ext4.vhdx` (WSL distributions
      from the Microsoft Store)

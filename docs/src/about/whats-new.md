@@ -2,6 +2,19 @@
 
 ## Next version
 
+### A calmer Storage Analysis toolbar
+
+- The controls above the map are one row now: **Treemap** / **Sunburst**, a **Size** menu, a
+  **Colour** menu, **Filters**, a search box and a **Display** menu. Back, Forward, Up, Whole map
+  and Zoom to selection sit beside a breadcrumb of the folder on the map, whose last part opens
+  the scan controls. In a narrow window, menus fold into **⋯** instead of wrapping.
+- Filters moved into a **Filters** panel that stays open while you use the map: file types,
+  where files are stored, size presets and ranges, and a new **Last changed** filter (last 7 or
+  30 days, last year, or untouched for over a year or five years).
+- Each filter that's on shows as a removable chip under the toolbar, with **Highlight** /
+  **Only matches**, the match count and **Clear all**. With no filter on, the row is hidden.
+  See [Filtering overview](../filtering/overview.md).
+
 ### Storage Analysis keeps up with changes
 
 - Files added, changed or removed after a scan now show in Storage Analysis by themselves: a
