@@ -134,6 +134,27 @@ Filescape reads a sample from across it, which takes a moment. It reads full and
 (F32, F16, BF16) and the common compressed types (Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q4_K, Q5_K and
 Q6_K); for other types only the facts are shown.
 
+**Tokens** shows the model's vocabulary: the pieces of text, called tokens, that it reads and
+writes. Filescape reads it from a GGUF file, or from `tokenizer.json` beside a Hugging Face model.
+
+- The summary gives the number of tokens, the kind of tokenizer, how many tokens start a new word,
+  and the special tokens that mark the start and end of text and of each turn in a conversation.
+- **What the tokens are** sorts every token by its first letter: Latin, Chinese and Japanese,
+  Cyrillic, Arabic and so on, numbers, punctuation and indentation. It's a quick guide to which
+  languages a model handles well, since a language with few tokens takes many more of them to
+  write, which is slower and fills the context sooner. Click a line to list only those tokens.
+- **How long the tokens are** is a histogram of their lengths in characters, and **Longest**
+  shows the longest ones.
+- **Chat template** shows how a conversation is laid out for the model, and says which format it
+  uses (such as ChatML or Llama 3) and whether it mentions tool calls, a thinking mode or images.
+- On the right, every token is listed with its number. A space is shown as `·`, a new line as `↵`
+  and a tab as `⇥`. Type in the box to find tokens, or `#` and a number to find one by its number.
+  Right-click a token to copy it. Letters the app's fonts can't show, such as Chinese, are shown
+  by their code points (`U+4E2D`); copy the token to see it elsewhere.
+
+Some tokens are only part of a character: a Chinese character or an emoji takes several bytes,
+and a model joins these pieces to spell anything its vocabulary lacks.
+
 **Metadata** lists every entry the model file carries, such as its training settings and
 tokenizer, with a box to find one.
 

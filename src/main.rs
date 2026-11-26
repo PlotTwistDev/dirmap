@@ -38,6 +38,7 @@ mod gguf;
 mod fit;
 mod health;
 mod weights;
+mod vocab;
 mod inspect;
 mod models;
 mod mapview;

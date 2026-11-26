@@ -149,7 +149,18 @@ pub fn read(path: &Path, tensors: bool) -> Result<Header, Error> {
     read_from(BufReader::with_capacity(256 * 1024, f), tensors)
 }
 
-pub fn read_from<R: Read + Seek>(mut r: BufReader<R>, tensors: bool) -> Result<Header, Error> {
+pub fn read_from<R: Read + Seek>(r: BufReader<R>, tensors: bool) -> Result<Header, Error> {
+    read_keeping(r, tensors, &[])
+}
+
+/// Reads the metadata keeping the whole of the arrays named in `full` (such as a vocabulary),
+/// however long.
+pub fn read_full(path: &Path, full: &[&str]) -> Result<Header, Error> {
+    let f = std::fs::File::open(path).map_err(|e| Error::Io(e.to_string()))?;
+    read_keeping(BufReader::with_capacity(256 * 1024, f), false, full)
+}
+
+fn read_keeping<R: Read + Seek>(mut r: BufReader<R>, tensors: bool, full: &[&str]) -> Result<Header, Error> {
     let mut magic = [0u8; 4];
     r.read_exact(&mut magic).map_err(|_| Error::NotGguf)?;
     if &magic != b"GGUF" {
@@ -168,7 +179,7 @@ pub fn read_from<R: Read + Seek>(mut r: BufReader<R>, tensors: bool) -> Result<H
     for _ in 0..n_meta {
         let key = string(&mut r)?;
         let ty = u32_(&mut r)?;
-        let v = value(&mut r, ty, 0)?;
+        let v = value(&mut r, ty, 0, full.contains(&key.as_str()))?;
         h.meta.push((key, v));
     }
     if !tensors {
@@ -261,7 +272,10 @@ fn type_label(ty: u32) -> &'static str {
     }
 }
 
-fn value<R: Read + Seek>(r: &mut BufReader<R>, ty: u32, depth: u32) -> Result<Value, Error> {
+/// Most items a whole array kept by `read_full` may have.
+const MAX_FULL: u64 = 1 << 24;
+
+fn value<R: Read + Seek>(r: &mut BufReader<R>, ty: u32, depth: u32, full: bool) -> Result<Value, Error> {
     let mut b = [0u8; 8];
     let mut fixed = |r: &mut BufReader<R>, n: usize| -> Result<[u8; 8], Error> {
         b = [0u8; 8];
@@ -290,10 +304,10 @@ fn value<R: Read + Seek>(r: &mut BufReader<R>, ty: u32, depth: u32) -> Result<Va
             if n > 1 << 32 {
                 return Err(Error::Damaged("array too long"));
             }
-            if n <= KEEP_ARRAY {
-                let mut v = Vec::with_capacity(n as usize);
+            if n <= KEEP_ARRAY || (full && n <= MAX_FULL) {
+                let mut v = Vec::with_capacity(n.min(1 << 20) as usize);
                 for _ in 0..n {
-                    v.push(value(r, item, depth + 1)?);
+                    v.push(value(r, item, depth + 1, false)?);
                 }
                 Value::Array(v)
             } else {
@@ -305,7 +319,7 @@ fn value<R: Read + Seek>(r: &mut BufReader<R>, ty: u32, depth: u32) -> Result<Va
                     }
                     9 => {
                         for _ in 0..n {
-                            value(r, 9, depth + 1)?;
+                            value(r, 9, depth + 1, false)?;
                         }
                     }
                     t => {
@@ -458,6 +472,45 @@ pub(crate) fn write_test(path: &Path, strings: &[(&str, &str)], numbers: &[(&str
     // Sparse data, so tests use no disk.
     f.set_len(start + off + pad).unwrap();
     start
+}
+
+/// Writes a GGUF file holding only a vocabulary, its token types, an end-of-text id and a chat
+/// template, for tests.
+#[cfg(test)]
+pub(crate) fn write_vocab_test(path: &Path, tokens: &[String], types: &[u32], eos: u32, template: &str) {
+    let mut b = Vec::new();
+    let s = |b: &mut Vec<u8>, x: &str| {
+        b.extend((x.len() as u64).to_le_bytes());
+        b.extend(x.as_bytes());
+    };
+    b.extend(b"GGUF");
+    b.extend(3u32.to_le_bytes());
+    b.extend(0u64.to_le_bytes());
+    b.extend(5u64.to_le_bytes());
+    s(&mut b, "tokenizer.ggml.model");
+    b.extend(8u32.to_le_bytes());
+    s(&mut b, "gpt2");
+    s(&mut b, "tokenizer.ggml.tokens");
+    b.extend(9u32.to_le_bytes());
+    b.extend(8u32.to_le_bytes());
+    b.extend((tokens.len() as u64).to_le_bytes());
+    for t in tokens {
+        s(&mut b, t);
+    }
+    s(&mut b, "tokenizer.ggml.token_type");
+    b.extend(9u32.to_le_bytes());
+    b.extend(5u32.to_le_bytes());
+    b.extend((types.len() as u64).to_le_bytes());
+    for t in types {
+        b.extend(t.to_le_bytes());
+    }
+    s(&mut b, "tokenizer.ggml.eos_token_id");
+    b.extend(4u32.to_le_bytes());
+    b.extend(eos.to_le_bytes());
+    s(&mut b, "tokenizer.chat_template");
+    b.extend(8u32.to_le_bytes());
+    s(&mut b, template);
+    std::fs::write(path, b).unwrap();
 }
 
 #[cfg(test)]

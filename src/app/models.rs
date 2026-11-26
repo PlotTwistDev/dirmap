@@ -61,6 +61,20 @@ struct ModelPage {
     /// Tensors to show, in order (indexes into `data.tensors`), for `shown_for`.
     shown: Vec<usize>,
     shown_for: Option<(String, TensorCol, bool)>,
+    /// Tokens: whether the model has a vocabulary, and the vocabulary once read.
+    has_vocab: bool,
+    vocab: Option<VocabState>,
+    vocab_filter: String,
+    vocab_script: Option<crate::vocab::Script>,
+    /// Tokens to show (ids), for `vocab_shown_for`.
+    vocab_shown: Vec<u32>,
+    vocab_shown_for: Option<(String, Option<crate::vocab::Script>)>,
+}
+
+enum VocabState {
+    Reading(mpsc::Receiver<Result<crate::vocab::Vocab, String>>),
+    Read(Arc<crate::vocab::Vocab>, Arc<crate::vocab::Summary>),
+    Failed(String),
 }
 
 struct WeightScan {
@@ -97,6 +111,7 @@ enum PageTab {
     Fit,
     Structure,
     Tensors,
+    Tokens,
     Metadata,
 }
 
@@ -521,6 +536,12 @@ impl App {
             verified: Vec::new(),
             zoom: None,
             colour: ColourBy::Part,
+            has_vocab: false,
+            vocab: None,
+            vocab_filter: String::new(),
+            vocab_script: None,
+            vocab_shown: Vec::new(),
+            vocab_shown_for: None,
         });
     }
 
@@ -542,6 +563,7 @@ impl App {
                         page.structure = Some(Arc::new(inspect::structure(&d)));
                     }
                     page.health = crate::health::checks(m, &d);
+                    page.has_vocab = !m.info.companion && crate::vocab::present(&d.meta, inspect::publisher_dir(m).as_deref());
                     page.data = Some(Arc::new(d));
                     page.rx = None;
                 }
@@ -579,6 +601,9 @@ impl App {
         if tensors > 0 {
             tabs.push((PageTab::Structure, "Structure"));
             tabs.push((PageTab::Tensors, tensors_label.as_str()));
+        }
+        if page.has_vocab {
+            tabs.push((PageTab::Tokens, "Tokens"));
         }
         if metas > 0 {
             tabs.push((PageTab::Metadata, meta_label.as_str()));
@@ -626,6 +651,7 @@ impl App {
                 let d = d.clone();
                 page_tensors(ui, &mut page, m, &d);
             }
+            (Some(_), PageTab::Tokens) => page_tokens(ui, &mut page, m),
             (Some(d), PageTab::Metadata) => {
                 let d = d.clone();
                 page_metadata(ui, &mut page.filter, &d);
@@ -1658,6 +1684,303 @@ fn tensor_order(d: &Inspection, filter: &str, col: TensorCol, descending: bool) 
 }
 
 /// Metadata: every key and value in the file, filterable.
+/// Tokens: what the model's vocabulary is made of, its special tokens and chat template, and
+/// every token, searchable.
+fn page_tokens(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model) {
+    if page.vocab.is_none() {
+        let (tx, rx) = mpsc::channel();
+        let m = m.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::vocab::read(&m, inspect::publisher_dir(&m).as_deref()));
+        });
+        page.vocab = Some(VocabState::Reading(rx));
+    }
+    if let Some(VocabState::Reading(rx)) = &page.vocab {
+        match rx.try_recv() {
+            Ok(Ok(v)) => {
+                let s = crate::vocab::summarise(&v);
+                page.vocab = Some(VocabState::Read(Arc::new(v), Arc::new(s)));
+            }
+            Ok(Err(e)) => page.vocab = Some(VocabState::Failed(e)),
+            Err(mpsc::TryRecvError::Empty) => ui.ctx().request_repaint_after(Duration::from_millis(50)),
+            Err(mpsc::TryRecvError::Disconnected) => page.vocab = Some(VocabState::Failed("The vocabulary couldn't be read.".into())),
+        }
+    }
+    let (v, s) = match &page.vocab {
+        Some(VocabState::Read(v, s)) => (v.clone(), s.clone()),
+        Some(VocabState::Failed(e)) => {
+            kit::callout(ui, Tone::Warn, e.clone());
+            return;
+        }
+        _ => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Reading the vocabulary…");
+            });
+            return;
+        }
+    };
+    egui::Panel::left("vocab-summary").default_size(430.0).min_size(320.0).resizable(true).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt(("vocab-summary", page.model)).auto_shrink(false).show(ui, |ui| {
+            ui.set_max_width(ui.available_width() - 12.0);
+            vocab_summary(ui, page, &v, &s);
+        });
+    });
+    vocab_list(ui, page, &v);
+}
+
+fn tokenizer_words(v: &crate::vocab::Vocab) -> String {
+    let family = match v.model.as_deref() {
+        Some("gpt2") | Some("BPE") => "byte-pair encoding (BPE)",
+        Some("llama") | Some("Unigram") => "SentencePiece",
+        Some("bert") | Some("WordPiece") => "WordPiece",
+        Some("t5") => "SentencePiece (T5)",
+        Some("rwkv") => "RWKV",
+        Some(other) => other,
+        None => "an unnamed tokenizer",
+    };
+    match v.spelling {
+        crate::vocab::Spelling::ByteLevel => format!("{family}, byte level: it can spell any text"),
+        _ => family.to_string(),
+    }
+}
+
+fn vocab_summary(ui: &mut egui::Ui, page: &mut ModelPage, v: &crate::vocab::Vocab, s: &crate::vocab::Summary) {
+    use crate::vocab::{Kind, Script};
+    let t = kit::tokens(ui);
+    egui::Grid::new("vocab-facts").num_columns(2).spacing([14.0, 5.0]).striped(true).show(ui, |ui| {
+        ui.weak("Tokens");
+        ui.label(group(v.tokens.len() as u64));
+        ui.end_row();
+        ui.weak("Tokenizer");
+        ui.add(egui::Label::new(tokenizer_words(v)).wrap());
+        ui.end_row();
+        if let Some(p) = &v.pre {
+            ui.weak("Text splitting");
+            ui.label(p).on_hover_text("How text is split into words before it's tokenized (llama.cpp's name for it)");
+            ui.end_row();
+        }
+        if let Some(n) = v.merges {
+            ui.weak("Merge rules");
+            ui.label(group(n)).on_hover_text("Pairs of pieces the tokenizer joins, most common first");
+            ui.end_row();
+        }
+        ui.weak("Start new words");
+        ui.label(format!("{} tokens ({:.0}%)", group(s.word_starts as u64), s.word_starts as f64 * 100.0 / v.tokens.len().max(1) as f64))
+            .on_hover_text("Tokens that begin with a space, so they start a word");
+        ui.end_row();
+        for (k, n) in &s.kinds {
+            if *k != Kind::Normal {
+                ui.weak(match k {
+                    Kind::Control => "Special tokens",
+                    Kind::Added => "Added tokens",
+                    Kind::Byte => "Byte tokens",
+                    Kind::Unused => "Unused slots",
+                    _ => "Unknown token",
+                });
+                ui.label(group(*n as u64));
+                ui.end_row();
+            }
+        }
+        if let Some(b) = v.add_bos {
+            ui.weak("Adds a start token");
+            ui.label(if b { "yes" } else { "no" });
+            ui.end_row();
+        }
+        ui.weak("Read from");
+        ui.label(v.from);
+        ui.end_row();
+    });
+    if !v.special.is_empty() {
+        ui.add_space(12.0);
+        ui.strong("Special tokens");
+        ui.weak("Markers the model reads and writes to begin and end text and turns.");
+        ui.add_space(4.0);
+        egui::Grid::new("vocab-special").num_columns(3).spacing([14.0, 4.0]).show(ui, |ui| {
+            for (role, id) in &v.special {
+                ui.weak(*role);
+                ui.add(egui::Label::new(egui::RichText::new(&v.shown[*id as usize]).monospace().size(12.0)).selectable(true));
+                ui.weak(format!("#{id}"));
+                ui.end_row();
+            }
+        });
+    }
+    // Languages and kinds of text.
+    ui.add_space(12.0);
+    ui.strong("What the tokens are");
+    ui.weak("Each token by its first letter. Click one to list only those.");
+    ui.add_space(4.0);
+    let total = v.tokens.len().max(1) as f32;
+    let top = s.scripts.iter().map(|(_, n)| *n).max().unwrap_or(1) as f32;
+    let label_w = 190.0;
+    for (sc, n) in &s.scripts {
+        let picked = page.vocab_script == Some(*sc);
+        let w = ui.available_width();
+        let (rect, resp) = ui.allocate_exact_size(vec2(w, 20.0), Sense::click());
+        if picked {
+            ui.painter().rect_filled(rect, 3.0, ui.visuals().selection.bg_fill);
+        } else if resp.hovered() {
+            ui.painter().rect_filled(rect, 3.0, ui.visuals().widgets.hovered.weak_bg_fill);
+        }
+        let y = rect.center().y;
+        ui.painter().with_clip_rect(rect).text(pos2(rect.left() + 4.0, y), Align2::LEFT_CENTER, sc.label(), FontId::proportional(12.5), ui.visuals().text_color());
+        let bar_left = rect.left() + label_w;
+        let bar_w = (rect.right() - 60.0 - bar_left).max(10.0);
+        let colour = match sc {
+            Script::Partial | Script::Special | Script::Spaces => ui.visuals().weak_text_color(),
+            _ => t.accent,
+        };
+        let bar = Rect::from_min_size(pos2(bar_left, y - 5.0), vec2((bar_w * *n as f32 / top).max(1.5), 10.0));
+        ui.painter().rect_filled(bar, 2.0, colour);
+        ui.painter().text(pos2(rect.right() - 4.0, y), Align2::RIGHT_CENTER, format!("{:.1}%", *n as f32 * 100.0 / total), FontId::proportional(12.0), ui.visuals().weak_text_color());
+        let resp = resp.on_hover_text(format!("{}: {} tokens", sc.label(), group(*n as u64)));
+        if resp.clicked() {
+            page.vocab_script = if picked { None } else { Some(*sc) };
+        }
+    }
+    if s.scripts.iter().any(|(sc, _)| *sc == Script::Partial) {
+        ui.add_space(2.0);
+        ui.weak("Parts of characters are pieces of letters and emoji that take several bytes; the model joins them to spell anything else.");
+    }
+    // Lengths.
+    ui.add_space(12.0);
+    ui.strong("How long the tokens are");
+    ui.add_space(4.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 90.0), Sense::hover());
+    let painter = ui.painter_at(rect.expand(2.0));
+    painter.rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
+    let top = *s.lengths.iter().max().unwrap_or(&1).max(&1) as f32;
+    let bw = rect.width() / s.lengths.len() as f32;
+    for (i, &n) in s.lengths.iter().enumerate() {
+        let h = (rect.height() - 4.0) * n as f32 / top;
+        let r = Rect::from_min_max(pos2(rect.left() + i as f32 * bw + 1.0, rect.bottom() - h), pos2(rect.left() + (i + 1) as f32 * bw - 1.0, rect.bottom()));
+        painter.rect_filled(r, 0.0, t.accent);
+    }
+    if let Some(p) = resp.hover_pos() {
+        let i = (((p.x - rect.left()) / bw) as usize).min(s.lengths.len() - 1);
+        let len = if i == 15 { "16 or more".to_string() } else { (i + 1).to_string() };
+        resp.on_hover_text(format!("{len} characters: {} tokens", group(s.lengths[i] as u64)));
+    }
+    ui.horizontal(|ui| {
+        ui.weak("1 character");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.weak("16+"));
+    });
+    if !s.longest.is_empty() {
+        ui.add_space(6.0);
+        ui.weak("Longest");
+        ui.horizontal_wrapped(|ui| {
+            for &i in &s.longest {
+                ui.add(egui::Label::new(egui::RichText::new(&v.shown[i as usize]).monospace().size(12.0)).selectable(true)).on_hover_text(format!("#{i}"));
+            }
+        });
+    }
+    // Chat templates.
+    for (name, tpl) in &v.templates {
+        ui.add_space(12.0);
+        ui.strong(if name.is_empty() { "Chat template".to_string() } else { format!("Chat template: {name}") });
+        let (format, has) = crate::vocab::template_traits(tpl);
+        let mut words = Vec::new();
+        if let Some(f) = format {
+            words.push(format!("Uses the {f} format."));
+        }
+        if !has.is_empty() {
+            let mut list = has.join(", ");
+            if let Some(i) = list.rfind(", ") {
+                list.replace_range(i..i + 2, " and ");
+            }
+            words.push(format!("Mentions {list}."));
+        }
+        if !words.is_empty() {
+            ui.label(words.join(" "));
+        }
+        ui.weak("How a conversation is laid out for the model. Apps fill it in before each reply.");
+        egui::CollapsingHeader::new(format!("Show the template ({} lines)", tpl.lines().count())).id_salt(("tpl", name)).show(ui, |ui| {
+            let mut text = tpl.as_str();
+            ui.add(egui::TextEdit::multiline(&mut text).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY).desired_rows(4));
+        });
+    }
+}
+
+/// Every token, filtered by the search and the script picked.
+fn vocab_list(ui: &mut egui::Ui, page: &mut ModelPage, v: &crate::vocab::Vocab) {
+    ui.horizontal(|ui| {
+        ui.push_id("vocab-search", |ui| {
+            ui.set_max_width(320.0);
+            kit::search_field(ui, &mut page.vocab_filter, "Find a token, or #id");
+        });
+        if let Some(sc) = page.vocab_script {
+            ui.add_space(6.0);
+            if ui.button(format!("{}  ×", sc.label())).on_hover_text("Show every kind").clicked() {
+                page.vocab_script = None;
+            }
+        }
+    });
+    let key = (page.vocab_filter.clone(), page.vocab_script);
+    if page.vocab_shown_for.as_ref() != Some(&key) {
+        let f = page.vocab_filter.trim();
+        let id = f.strip_prefix('#').and_then(|n| n.parse::<u32>().ok());
+        // Spaces typed in the search match the marks tokens are shown with.
+        let f = crate::vocab::visible_query(f);
+        let lower = f.to_lowercase();
+        page.vocab_shown = (0..v.tokens.len() as u32)
+            .filter(|&i| {
+                let i_ = i as usize;
+                page.vocab_script.is_none_or(|s| v.scripts[i_] == s)
+                    && match id {
+                        Some(n) => i == n,
+                        None => lower.is_empty() || v.shown[i_].to_lowercase().contains(&lower),
+                    }
+            })
+            .collect();
+        page.vocab_shown_for = Some(key);
+    }
+    ui.weak(format!("{} of {} tokens", group(page.vocab_shown.len() as u64), group(v.tokens.len() as u64)));
+    ui.add_space(4.0);
+    let w = ui.available_width();
+    ui.spacing_mut().item_spacing.y = 0.0;
+    let mono = FontId::monospace(12.5);
+    let small = FontId::proportional(12.0);
+    egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW_H, page.vocab_shown.len(), |ui, range| {
+        for row in range {
+            let i = page.vocab_shown[row] as usize;
+            let (rect, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::click());
+            let vis = ui.visuals();
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, 3.0, vis.widgets.hovered.weak_bg_fill);
+            } else if row % 2 == 1 {
+                ui.painter().rect_filled(rect, 0.0, vis.faint_bg_color);
+            }
+            let y = rect.center().y;
+            ui.painter().text(pos2(rect.left() + 64.0, y), Align2::RIGHT_CENTER, i.to_string(), small.clone(), vis.weak_text_color());
+            let text_clip = Rect::from_min_max(pos2(rect.left() + 76.0, rect.top()), pos2(rect.right() - 150.0, rect.bottom())).intersect(ui.clip_rect());
+            let colour = if v.kinds[i] == crate::vocab::Kind::Normal { vis.text_color() } else { kit::tokens(ui).accent };
+            // Letters the app's fonts can't draw are shown by their code points instead of boxes.
+            let drawable = v.kinds[i] != crate::vocab::Kind::Normal || v.scripts[i].drawable();
+            let shown = if drawable { v.shown[i].clone() } else { v.shown[i].chars().map(|c| format!("U+{:04X}", c as u32)).collect::<Vec<_>>().join(" ") };
+            if drawable {
+                ui.painter().with_clip_rect(text_clip).text(pos2(rect.left() + 80.0, y), Align2::LEFT_CENTER, &shown, mono.clone(), colour);
+            } else {
+                ui.painter().with_clip_rect(text_clip).text(pos2(rect.left() + 80.0, y), Align2::LEFT_CENTER, &shown, small.clone(), vis.weak_text_color());
+            }
+            let what = if v.kinds[i] == crate::vocab::Kind::Normal { v.scripts[i].short() } else { v.kinds[i].label() };
+            ui.painter().text(pos2(rect.right() - 8.0, y), Align2::RIGHT_CENTER, what, small.clone(), vis.weak_text_color());
+            let raw = if v.tokens[i] != v.shown[i] { format!("\nIn the file: {}", v.tokens[i]) } else { String::new() };
+            let note = if drawable { "" } else { "\nThe app's fonts can't show these letters, so their code points are shown. Copy the token to see it elsewhere." };
+            let resp = resp.on_hover_text(format!("#{i}  {shown}{raw}\n{}{note}", v.kinds[i].label()));
+            resp.context_menu(|ui| {
+                if ui.button("Copy token").clicked() {
+                    ui.ctx().copy_text(v.text(i));
+                    ui.close();
+                }
+                if ui.button("Copy id").clicked() {
+                    ui.ctx().copy_text(i.to_string());
+                    ui.close();
+                }
+            });
+        }
+    });
+}
+
 fn page_metadata(ui: &mut egui::Ui, filter: &mut String, d: &Inspection) {
     ui.push_id("meta-search", |ui| {
         ui.set_max_width(420.0);
