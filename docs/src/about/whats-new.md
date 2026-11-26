@@ -174,6 +174,9 @@
   JPEG-LS or lossless JPEG now show their picture.
 - Logic Pro projects preview with Logic's picture of the project window, tempo, key and
   sound files.
+- **Steadier tile previews.** Previews on the Storage Analysis map no longer blink off and
+  fade back in as you pan and zoom: a tile keeps its preview while the map sharpens, and sound
+  waveforms hold their shape as tiles grow.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
