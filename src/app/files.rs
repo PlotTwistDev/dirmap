@@ -1119,6 +1119,8 @@ pub(super) enum FAction {
     KeepHere,
     /// The "What Is This?" window for a system file or folder.
     Explain,
+    /// Ask AI about the items: their names, sizes and dates.
+    AskAi,
 }
 
 impl App {
@@ -3661,6 +3663,7 @@ impl App {
                     self.explain_path(p);
                 }
             }
+            FAction::AskAi => self.ask_about_paths(paths),
             FAction::CopyUnc => {
                 // Asking Windows can wait on the network, so it's done in the background.
                 let (tx, rx) = mpsc::channel();
@@ -3991,6 +3994,9 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     }
     if m.known && !many {
         item(ui, true, "What Is This?", String::new(), FAction::Explain);
+    }
+    if !m.server {
+        item(ui, true, if many { "Ask AI About These…" } else { "Ask AI About This…" }, String::new(), FAction::AskAi);
     }
     if m.cloud {
         ui.separator();

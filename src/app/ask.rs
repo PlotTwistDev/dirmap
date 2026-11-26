@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::fsys::PathShow;
+use crate::askabout;
 use crate::getmodel::{self, STARTER};
 use crate::kit::{self, Tone};
 use crate::llm::{self, Event, Message, Request, Role};
@@ -26,6 +27,13 @@ pub(super) struct AskState {
     /// Checking a model fits in memory before loading it.
     check: Option<mpsc::Receiver<Result<llm::LoadRequest, String>>>,
     conversation: Vec<Message>,
+    /// What was attached to a question, by its index in `conversation`: (label, what the model
+    /// was told). Sent ahead of the question, shown only as a line above it.
+    attached: HashMap<usize, (String, String)>,
+    /// Files or folders to ask about with the next question.
+    about: Option<About>,
+    /// Reading files' contents for the question just sent, before it goes to the model.
+    reading: Option<mpsc::Receiver<String>>,
     /// The answer being written.
     answering: Option<String>,
     draft: String,
@@ -44,6 +52,15 @@ pub(super) struct AskState {
     fetch_problem: Option<(Tone, String)>,
     /// A model just downloaded, to load once the library has found it.
     fetched: Option<PathBuf>,
+}
+
+/// Files or folders the next question is about.
+struct About {
+    /// Gathering the facts, off the UI thread.
+    rx: Option<mpsc::Receiver<askabout::Facts>>,
+    facts: Option<askabout::Facts>,
+    /// The user ticked "Include contents" for this question.
+    read: bool,
 }
 
 /// The starter model downloading.
@@ -94,6 +111,35 @@ impl App {
 
     pub(super) fn poll_ask(&mut self, ctx: &egui::Context) {
         self.poll_fetch(ctx);
+        if let Some(a) = &mut self.ask.about
+            && let Some(rx) = &a.rx
+        {
+            match rx.try_recv() {
+                Ok(f) => {
+                    a.facts = Some(f);
+                    a.rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(50)),
+                Err(mpsc::TryRecvError::Disconnected) => self.ask.about = None,
+            }
+        }
+        if let Some(rx) = &self.ask.reading {
+            match rx.try_recv() {
+                Ok(text) => {
+                    self.ask.reading = None;
+                    let i = self.ask.conversation.len().saturating_sub(1);
+                    if let Some((_, t)) = self.ask.attached.get_mut(&i) {
+                        t.push_str(&text);
+                    }
+                    self.dispatch();
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(50)),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.ask.reading = None;
+                    self.dispatch();
+                }
+            }
+        }
         if let Some(rx) = &self.ask.check {
             match rx.try_recv() {
                 Ok(Ok(req)) => {
@@ -201,6 +247,29 @@ impl App {
         self.ask.fetch = Some(Fetch { progress, rx });
     }
 
+    /// Opens Ask AI with files or folders from Files attached to the next question.
+    pub(super) fn ask_about_paths(&mut self, paths: Vec<PathBuf>) {
+        let budget = self.ask.context() as usize * 3 / 4;
+        self.ask_about_with(move || askabout::from_disk(&paths, budget));
+    }
+
+    /// Opens Ask AI with an item from the Storage Analysis scan attached: its sizes include
+    /// everything inside, and folders come with a breakdown by type.
+    pub(super) fn ask_about_node(&mut self, tree: Arc<crate::scan::Node>, at: Vec<u32>, disk: PathBuf) {
+        let budget = self.ask.context() as usize * 3 / 4;
+        self.ask_about_with(move || tree.at(&at).map(|n| askabout::from_tree(&[(disk.clone(), n)], budget)).unwrap_or_else(|| askabout::from_disk(&[disk], budget)));
+    }
+
+    fn ask_about_with(&mut self, gather: impl FnOnce() -> askabout::Facts + Send + 'static) {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(gather());
+        });
+        self.ask.about = Some(About { rx: Some(rx), facts: None, read: false });
+        self.ask.open = true;
+        self.set_workspace(Workspace::Models);
+    }
+
     /// Checks the picked model fits in memory, then loads it.
     fn load_model(&mut self, m: &Model) {
         let Some(f) = m.files.first() else { return };
@@ -208,6 +277,7 @@ impl App {
         self.ask.problem = None;
         self.ask.phase = Phase::Loading;
         self.ask.conversation.clear();
+        self.ask.attached.clear();
         self.ask.answering = None;
         self.ask.last = None;
         let (tx, rx) = mpsc::channel();
@@ -220,22 +290,46 @@ impl App {
 
     fn send_question(&mut self) {
         let q = self.ask.draft.trim().to_string();
-        if q.is_empty() || self.ask.phase != Phase::Idle || self.ask.loaded.is_none() {
+        // Wait for the list of what the question is about.
+        let gathering = self.ask.about.as_ref().is_some_and(|a| a.facts.is_none());
+        if q.is_empty() || self.ask.phase != Phase::Idle || self.ask.loaded.is_none() || gathering {
             return;
         }
         self.ask.draft.clear();
         self.ask.problem = None;
         self.ask.conversation.push(Message { role: Role::User, text: q });
+        self.ask.answering = Some(String::new());
+        self.ask.phase = Phase::Answering;
+        // What the question is about goes with it, once; the files' contents only when ticked.
+        if let Some(About { facts: Some(f), read, .. }) = self.ask.about.take() {
+            let i = self.ask.conversation.len() - 1;
+            self.ask.attached.insert(i, (f.label.clone(), f.text.clone()));
+            if read && !f.readable.is_empty() {
+                let budget = self.ask.actual_context.max(2048) as usize * 5 / 4;
+                let (tx, rx) = mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(askabout::contents(&f.readable, budget));
+                });
+                self.ask.reading = Some(rx);
+                return;
+            }
+        }
+        self.dispatch();
+    }
+
+    /// Sends the conversation to the model.
+    fn dispatch(&mut self) {
         let mut conv = vec![Message { role: Role::System, text: SYSTEM.into() }];
-        conv.extend(self.ask.conversation.iter().cloned().map(|mut m| {
+        conv.extend(self.ask.conversation.iter().cloned().enumerate().map(|(i, mut m)| {
             // Earlier thinking isn't sent back: models are trained without it.
             if m.role == Role::Assistant {
                 m.text = llm::split_thinking(&m.text).1.to_string();
             }
+            if let Some((_, about)) = self.ask.attached.get(&i) {
+                m.text = format!("{about}\nQuestion: {}", m.text);
+            }
             m
         }));
-        self.ask.answering = Some(String::new());
-        self.ask.phase = Phase::Answering;
         let sampling = llm::Sampling { temperature: self.ask.temperature(), ..Default::default() };
         if let Some(e) = &self.ask.engine {
             e.send(Request::Ask { conversation: conv, sampling });
@@ -401,6 +495,7 @@ impl App {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add_enabled(!self.ask.conversation.is_empty() && self.ask.phase == Phase::Idle, egui::Button::new("New chat")).clicked() {
                     self.ask.conversation.clear();
+                    self.ask.attached.clear();
                     self.ask.last = None;
                     self.ask.problem = None;
                 }
@@ -413,7 +508,7 @@ impl App {
             ui.add_space(6.0);
         }
         // The question box, at the bottom.
-        let input_h = 92.0;
+        let input_h = if self.ask.about.is_some() { 124.0 } else { 92.0 };
         let avail = ui.available_height();
         let mut send = false;
         let mut stop = false;
@@ -433,6 +528,13 @@ impl App {
             }
             let model = name.clone().unwrap_or_else(|| "Model".into());
             for (i, m) in self.ask.conversation.iter().enumerate() {
+                if let Some((label, text)) = self.ask.attached.get(&i) {
+                    ui.weak(format!("📎 About {label}")).on_hover_ui(|ui| {
+                        ui.set_max_width(520.0);
+                        ui.label("What the model was told with this question:");
+                        ui.weak(text.chars().take(1500).collect::<String>() + if text.chars().count() > 1500 { "…" } else { "" });
+                    });
+                }
                 message(ui, i, m.role, &m.text, &model, false);
                 ui.add_space(10.0);
             }
@@ -456,11 +558,42 @@ impl App {
             }
         });
         ui.add_space(4.0);
+        let mut drop_about = false;
+        if let Some(a) = &mut self.ask.about {
+            ui.horizontal(|ui| {
+                match &a.facts {
+                    None => {
+                        ui.spinner();
+                        ui.weak("Listing what's there…");
+                    }
+                    Some(f) => {
+                        ui.label(format!("📎 About {}", f.label)).on_hover_text("Sent with your next question: names, sizes and dates, not what's inside the files");
+                        ui.weak(&f.summary);
+                        if !f.readable.is_empty() {
+                            let what = if f.readable.len() == 1 { "Include the file's contents" } else { "Include the files' contents" };
+                            ui.checkbox(&mut a.read, what).on_hover_text(
+                                "Off: the model sees only names, sizes and dates.\nOn: Filescape reads the start of the chosen text files, for this question only. Files that are only in the cloud aren't read.",
+                            );
+                        }
+                    }
+                }
+                drop_about = ui.small_button("×").on_hover_text("Don't ask about it").clicked();
+            });
+            ui.add_space(4.0);
+        }
+        if drop_about {
+            self.ask.about = None;
+        }
         let ready = name.is_some();
         let answering = self.ask.phase == Phase::Answering;
+        let about_label = self.ask.about.as_ref().and_then(|a| a.facts.as_ref()).map(|f| f.label.clone());
         ui.horizontal(|ui| {
             let w = ui.available_width() - 90.0;
-            let hint = if ready { "Ask a question…" } else { "Load a model to ask a question" };
+            let hint = match (&about_label, ready) {
+                (Some(l), true) => format!("Ask about {l}…"),
+                (_, true) => "Ask a question…".to_string(),
+                (_, false) => "Load a model to ask a question".to_string(),
+            };
             let r = ui.add_enabled(
                 ready,
                 egui::TextEdit::multiline(&mut self.ask.draft).hint_text(hint).desired_rows(3).desired_width(w).return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))),
@@ -476,7 +609,11 @@ impl App {
                 }
             });
         });
-        if stop && let Some(e) = &self.ask.engine {
+        if stop && self.ask.reading.take().is_some() {
+            // Still reading the files: nothing has gone to the model yet.
+            self.ask.answering = None;
+            self.ask.phase = Phase::Idle;
+        } else if stop && let Some(e) = &self.ask.engine {
             e.stop.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         if send {

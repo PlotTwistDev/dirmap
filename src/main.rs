@@ -46,6 +46,7 @@ mod weights;
 mod vocab;
 mod modeldiff;
 mod llm;
+mod askabout;
 mod getmodel;
 mod inspect;
 mod mailview;

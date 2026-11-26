@@ -8,6 +8,9 @@
   LM Studio or internet connection needed, and nothing you ask leaves the computer. It runs GGUF
   models, on the graphics chip of a Mac with Apple silicon and on the processor elsewhere. Ask AI
   is free. See [Ask AI](../views/ask-ai.md).
+- **Ask AI About This…** in the right-click menus of Files and Storage Analysis asks about a file or
+  folder: its size, dates and what it holds. Reading what's inside files is a tick box for each
+  question. See [Asking about files and folders](../views/ask-ai.md#asking-about-files-and-folders).
 - No model yet? **Get a small model…** in Ask AI downloads Qwen3 1.7B (1.7 GB) from Qwen's own
   page, after showing you its size, licence and the memory it needs. Filescape checks the file
   before using it, and a stopped download carries on where it left off.
