@@ -84,6 +84,8 @@ impl Format {
             "markdown" => ("Formatted text, with the source a click away", "Filescape"),
             "text" => ("The text, in syntax colours for code (about 200 languages)", "Filescape (syntect, two-face)"),
             "aep" => ("The version that saved it, its compositions and the footage files it uses, marking any missing", "craft-aep"),
+            "paint" => ("The picture the app saved inside the file, with its size, colours and layers", "Filescape"),
+            "layered" => ("The picture, drawn from its layers, with its size, colours and layers", "craft-xcf, craft-pdn"),
             "craft" => ("The picture the app saved inside the file, with its pages, layers, size, length and the version that saved it", "Filescape (craft-doc)"),
             "csv" => ("A table, with column names from the first row", "Filescape (csv)"),
             "sheet" => ("Each sheet's cells, as last saved", "calamine"),
@@ -218,6 +220,8 @@ pub static FORMATS: &[Format] = &[
         exts: &["pcraft", "vectorcraft", "drawcraft", "vctemplate", "ecproj", "ectemplate", "figcraft", "designcraft", "tcraft", "deckcraft", "anicraft", "mcraft", "fcproj", "scraft", "scraftz"],
     },
     Format { id: "aep", name: "After Effects project", category: Category::Saved, exts: &["aep", "aepx"] },
+    Format { id: "paint", name: "Painting app files (Krita, OpenRaster, Figma export)", category: Category::Saved, exts: &["kra", "krz", "ora", "fig"] },
+    Format { id: "layered", name: "GIMP and Paint.NET pictures", category: Category::Saved, exts: &["xcf", "xcf.gz", "pdn"] },
     Format { id: "daw", name: "Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo, Logic Pro)", category: Category::Document, exts: &["als", "rpp", "flp", "cpr", "npr", "logicx"] },
     Format { id: "dicom", name: "DICOM medical image", category: Category::Science, exts: &["dcm", "dicom"] },
     Format { id: "diskimage", name: "Disk image", category: Category::DiskImage, exts: &["iso", "img", "dmg", "vhd", "vhdx", "avhdx", "vmdk", "qcow2", "qcow", "vdi", "wim", "esd"] },
@@ -245,6 +249,9 @@ fn by_ext() -> &'static HashMap<&'static str, &'static Format> {
 /// The format of a file, from its name alone.
 pub fn by_name(name: &str) -> Option<&'static Format> {
     let ext = crate::scan::ext_of(name).to_ascii_lowercase();
+    if ext == "gz" && name.to_ascii_lowercase().ends_with(".xcf.gz") {
+        return Some(Format::get("layered"));
+    }
     if ext.is_empty() {
         let lower = name.to_ascii_lowercase();
         return TEXT_NAMES.contains(&lower.as_str()).then(|| Format::get("text"));

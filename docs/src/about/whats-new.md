@@ -128,6 +128,8 @@
 - 12-bit and arithmetic-coded JPEGs now show, as do DICOM scans compressed with 12-bit JPEG.
 - Photoshop documents list their layers: groups, hidden layers, text layers, smart objects and
   adjustments, and the names at the top of the stack.
+- Krita, OpenRaster and Figma files show the picture saved inside them, with their layers. GIMP
+  and Paint.NET pictures are drawn from their layers.
 - Music projects from Ableton Live (.als), REAPER (.rpp), FL Studio (.flp) and Cubase or Nuendo
   (.cpr, .npr) show the version that saved them, the tempo, tracks, plugins and the sound files
   they use, marking any that aren't on this computer.

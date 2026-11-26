@@ -64,6 +64,7 @@ mod model3d;
 mod netdrives;
 mod officedoc;
 mod packages;
+mod paintfile;
 mod pdfview;
 mod pattern;
 mod player;

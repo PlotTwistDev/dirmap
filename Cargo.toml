@@ -71,6 +71,9 @@ craft-aep = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a5
 craft-jpeg = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
 # Photoshop layers (names, groups, text, smart objects), read-only.
 craft-psd = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
+# GIMP (.xcf) and Paint.NET (.pdn) layers, drawn into a picture. Read-only.
+craft-xcf = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
+craft-pdn = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
 
 [features]
 default = []

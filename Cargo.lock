@@ -1211,6 +1211,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-pdn"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=3b09a644a560ca526dfd0c7d8a1d107cdde26324#3b09a644a560ca526dfd0c7d8a1d107cdde26324"
+dependencies = [
+ "flate2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-psd"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=3b09a644a560ca526dfd0c7d8a1d107cdde26324#3b09a644a560ca526dfd0c7d8a1d107cdde26324"
@@ -1229,6 +1238,15 @@ dependencies = [
  "flate2",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-xcf"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=3b09a644a560ca526dfd0c7d8a1d107cdde26324#3b09a644a560ca526dfd0c7d8a1d107cdde26324"
+dependencies = [
+ "flate2",
  "thiserror 2.0.21",
 ]
 
@@ -2048,7 +2066,9 @@ dependencies = [
  "craft-aep",
  "craft-doc",
  "craft-jpeg",
+ "craft-pdn",
  "craft-psd",
+ "craft-xcf",
  "csv",
  "data-encoding",
  "eframe",
