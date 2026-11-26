@@ -10,6 +10,7 @@ pub mod facts;
 pub mod glb;
 pub mod gpu;
 pub mod html;
+pub mod inspect;
 pub mod ply;
 #[allow(clippy::module_inception)]
 pub mod splat;
@@ -113,6 +114,8 @@ pub struct Scene {
     pub said: Vec<(&'static str, String)>,
     /// Filled in by [`facts::describe`].
     pub facts: Vec<(&'static str, String)>,
+    /// The checks and measures per splat, also filled in by [`facts::describe`].
+    pub analysis: inspect::Analysis,
 }
 
 impl Scene {
@@ -133,6 +136,7 @@ impl Scene {
             notes: Vec::new(),
             said: Vec::new(),
             facts: Vec::new(),
+            analysis: Default::default(),
         }
     }
 
@@ -317,22 +321,33 @@ pub struct View {
     pub zoom: f32,
     /// Sideways and up, in units of the scene's framed radius.
     pub pan: [f32; 2],
+    /// How the splats are drawn.
+    pub look: inspect::Look,
+    /// Vertical field of view, in degrees. The camera moves in or out as it changes, so the
+    /// scene stays the same size on screen and only the perspective changes.
+    pub fov: f32,
 }
 
 impl Default for View {
     fn default() -> Self {
         let a = crate::model3d::Angle::default();
-        View { yaw: a.yaw, pitch: a.pitch, zoom: 1.0, pan: [0.0, 0.0] }
+        View { yaw: a.yaw, pitch: a.pitch, zoom: 1.0, pan: [0.0, 0.0], look: inspect::Look::Splats, fov: FOV_DEGREES }
     }
 }
 
-/// Vertical field of view of the preview camera.
-pub const FOV: f32 = 50.0 * std::f32::consts::PI / 180.0;
+/// The preview camera's starting vertical field of view, and the range it can be set to.
+pub const FOV_DEGREES: f32 = 50.0;
+pub const FOV_RANGE: std::ops::RangeInclusive<f32> = 10.0..=120.0;
 
 impl View {
+    /// The vertical field of view in radians.
+    pub fn fov_radians(&self) -> f32 {
+        self.fov.clamp(*FOV_RANGE.start(), *FOV_RANGE.end()).to_radians()
+    }
+
     /// Camera distance for a scene framed with radius `r`.
     pub fn distance(&self, r: f32) -> f32 {
-        r / (FOV / 2.0).tan() * 1.35 * self.zoom
+        r / (self.fov_radians() / 2.0).tan() * 1.35 * self.zoom
     }
 
     /// The rotation from the scene (y up, middle at the origin) to the camera's axes, as
@@ -376,7 +391,40 @@ impl Scene {
     /// The scene drawn `w` × `h` as soft round points, back to front, on transparent (RGBA,
     /// not premultiplied). A stand-in for real splatting: it shows what's there and where.
     /// `step` > 1 draws only every `step`th point (quicker while turning).
+    /// Where points of the scene land in a picture `w` by `h` pixels from `view` (as
+    /// [`Scene::draw`] and the graphics chip put them), or `None` behind the camera.
+    pub fn projector(&self, view: &View, w: f32, h: f32) -> impl Fn([f32; 3]) -> Option<[f32; 2]> + use<> {
+        let (c, r) = framing(self);
+        let flip = if self.frame == Frame::RightDownForward { -1.0 } else { 1.0 };
+        let m = view.rotation();
+        let dist = view.distance(r);
+        let focal = 0.5 * h / (view.fov_radians() / 2.0).tan();
+        let near = dist * 0.02;
+        let (px0, py0) = (view.pan[0] * r, view.pan[1] * r);
+        move |p: [f32; 3]| {
+            let v = [p[0] - c[0], flip * (p[1] - c[1]), flip * (p[2] - c[2])];
+            let x = m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2] - px0;
+            let y = m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2] - py0;
+            let z = m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2];
+            let depth = dist - z;
+            (depth >= near).then(|| [w / 2.0 + x * focal / depth, h / 2.0 - y * focal / depth])
+        }
+    }
+
+    /// Draw with other colours for the splats (`paint`, one per splat), as a false-colour
+    /// look does.
+    pub fn draw_painted(&self, w: usize, h: usize, view: &View, step: usize, paint: Option<&[[u8; 4]]>) -> Vec<u8> {
+        match paint {
+            Some(p) if p.len() == self.len() => self.draw_colours(w, h, view, step, p),
+            _ => self.draw(w, h, view, step),
+        }
+    }
+
     pub fn draw(&self, w: usize, h: usize, view: &View, step: usize) -> Vec<u8> {
+        self.draw_colours(w, h, view, step, &self.color)
+    }
+
+    fn draw_colours(&self, w: usize, h: usize, view: &View, step: usize, colours: &[[u8; 4]]) -> Vec<u8> {
         let mut out = vec![0u8; w * h * 4];
         if w == 0 || h == 0 || self.pos.is_empty() {
             return out;
@@ -386,7 +434,7 @@ impl Scene {
         let flip = if self.frame == Frame::RightDownForward { -1.0 } else { 1.0 };
         let m = view.rotation();
         let dist = view.distance(r);
-        let focal = 0.5 * h as f32 / (FOV / 2.0).tan();
+        let focal = 0.5 * h as f32 / (view.fov_radians() / 2.0).tan();
         let (cx, cyc) = (w as f32 / 2.0, h as f32 / 2.0);
         let near = dist * 0.02;
         let (px0, py0) = (view.pan[0] * r, view.pan[1] * r);
@@ -416,7 +464,7 @@ impl Scene {
         // Premultiplied colour and coverage, composited back to front.
         let mut acc = vec![[0f32; 4]; w * h];
         for (sx, syy, _, rad, i) in pts {
-            let col = self.color[i as usize];
+            let col = colours[i as usize];
             let alpha = if self.kind == SceneKind::PointCloud { 1.0 } else { (col[3] as f32 / 255.0).min(0.99) };
             if alpha < 0.02 {
                 continue;

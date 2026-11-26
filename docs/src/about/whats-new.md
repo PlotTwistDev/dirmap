@@ -18,6 +18,11 @@
   chip, and map tiles show the format and splat count. Quick Look has **◀** and **▶** buttons
   for the previous and next file, and a camera button on a splat scene saves the view as a PNG
   of up to 4K.
+- A splat scene's preview can show its splats as outlines or centres, or in false colour by
+  opacity, size, crowding or distance; **Problems** picks out the splats the checks found,
+  including a new check for floaters. There's also a box round the main body, a field of view
+  control, and **W A S D** to move about. Turning a scene is smoother: pictures arrive while you
+  drag, at half size, instead of only when you stop.
 
 ### The AI Models workspace
 

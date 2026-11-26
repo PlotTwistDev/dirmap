@@ -49,35 +49,14 @@ pub struct Checks {
     pub huge: usize,
     /// Far outside the scene's main body (over 10 times its radius from the middle).
     pub far: usize,
+    /// Visible splats near the subject (within 3 radii of the middle) with no others close by:
+    /// floaters.
+    pub alone: usize,
 }
 
-pub fn checks(scene: &Scene) -> Checks {
-    let mut c = Checks::default();
-    if scene.kind == SceneKind::PointCloud || scene.pos.is_empty() {
-        return c;
-    }
-    let (mid, r) = super::framing(scene);
-    let mut sizes: Vec<f32> = scene.scale.iter().step_by((scene.scale.len() / 100_000).max(1)).map(|s| s[0].max(s[1]).max(s[2])).collect();
-    sizes.sort_unstable_by(f32::total_cmp);
-    let median = sizes.get(sizes.len() / 2).copied().unwrap_or(0.0);
-    let far2 = (10.0 * r) * (10.0 * r);
-    for i in 0..scene.pos.len() {
-        if scene.color[i][3] < 5 {
-            c.faint += 1;
-        }
-        let p = scene.pos[i];
-        let d2 = (p[0] - mid[0]).powi(2) + (p[1] - mid[1]).powi(2) + (p[2] - mid[2]).powi(2);
-        if d2 > far2 {
-            c.far += 1;
-        } else if let Some(s) = scene.scale.get(i) {
-            // Far-out splats are big on purpose (sky, distant walls), so only those in the main
-            // body count.
-            if median > 0.0 && s[0].max(s[1]).max(s[2]) > 200.0 * median {
-                c.huge += 1;
-            }
-        }
-    }
-    c
+pub fn checks(a: &super::inspect::Analysis) -> Checks {
+    use super::inspect::{ALONE, FAINT, FAR, HUGE, count};
+    Checks { faint: count(a, FAINT), huge: count(a, HUGE), far: count(a, FAR), alone: count(a, ALONE) }
 }
 
 /// Fill `scene.facts`.
@@ -122,7 +101,8 @@ pub fn describe(scene: &mut Scene, path: &Path) {
         let (lo, hi) = bounds(scene);
         f.push(("Size (main body)", format!("{} × {} × {} in the scene's units (calculated)", num(hi[0] - lo[0]), num(hi[1] - lo[1]), num(hi[2] - lo[2]))));
     }
-    let c = checks(scene);
+    scene.analysis = super::inspect::analyse(scene);
+    let c = checks(&scene.analysis);
     let pct = |n: usize| 100.0 * n as f64 / scene.len().max(1) as f64;
     if scene.bad > 0 {
         f.push(("Unreadable", format!("{} splats have numbers that aren't valid (skipped)", group(scene.bad))));
@@ -132,6 +112,9 @@ pub fn describe(scene: &mut Scene, path: &Path) {
     }
     if c.huge > 0 {
         f.push(("Oversized", format!("{} ({:.2}%) in the main body, over 200 times the typical size", group(c.huge), pct(c.huge))));
+    }
+    if c.alone > 0 {
+        f.push(("Floaters", format!("{} ({:.2}%) on their own near the subject, with no other splats close by", group(c.alone), pct(c.alone))));
     }
     if c.far > 0 {
         f.push(("Far out", format!("{} ({:.2}%) far from the main body: often sky or floaters", group(c.far), pct(c.far))));

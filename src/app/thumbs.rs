@@ -338,7 +338,7 @@ fn splat_thumb(path: &std::path::Path, max: u32) -> Option<Decoded> {
     let scene = std::sync::Arc::new(crate::splat::read(path, Limits::THUMB).ok()?);
     let n = max.min(512) as usize;
     if scene.kind == SceneKind::Splat {
-        if let Some(pic) = gpu::picture_now(scene.clone(), View::default(), [n as u32, n as u32], SPLAT_GPU_WAIT) {
+        if let Some(pic) = gpu::picture_now(scene.clone(), None, View::default(), [n as u32, n as u32], SPLAT_GPU_WAIT) {
             return Some(Decoded::Image(egui::ColorImage::from_rgba_premultiplied(pic.size, &pic.rgba)));
         }
     }
