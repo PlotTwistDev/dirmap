@@ -62,7 +62,7 @@ impl Format {
         }
     }
 
-    fn of_ext(ext: &str) -> Option<Format> {
+    pub fn of_ext(ext: &str) -> Option<Format> {
         Some(match ext {
             "gguf" | "llamafile" => Format::Gguf,
             "safetensors" => Format::Safetensors,
@@ -502,6 +502,7 @@ fn ollama_models(store: &Path, blobs: Vec<File>, cancel: &AtomicBool) -> Option<
     manifests.sort();
     let mut out: Vec<Model> = Vec::new();
     let mut used: HashMap<String, usize> = HashMap::new();
+    let mut referenced = std::collections::HashSet::new();
     for m in manifests {
         if cancel.load(Ordering::Relaxed) {
             return None;
@@ -509,6 +510,10 @@ fn ollama_models(store: &Path, blobs: Vec<File>, cancel: &AtomicBool) -> Option<
         let Some(name) = ollama_name(&store.join("manifests"), &m) else { continue };
         let Ok(text) = std::fs::read_to_string(&m) else { continue };
         let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+        // Every blob a manifest names is in use, whatever its kind.
+        for d in json["layers"].as_array().into_iter().flatten().chain([&json["config"]]).filter_map(|l| l["digest"].as_str()) {
+            referenced.insert(d.replace(':', "-"));
+        }
         let mut files = Vec::new();
         let mut main = None;
         for layer in json["layers"].as_array().into_iter().flatten() {
@@ -548,12 +553,13 @@ fn ollama_models(store: &Path, blobs: Vec<File>, cancel: &AtomicBool) -> Option<
         out.push(Model { name, source: Source::Ollama, format: Format::Gguf, info, files, size, copies: Vec::new(), extra: 0, orphan: false });
     }
     // Large blobs no manifest mentions.
-    let mut left: Vec<File> = by_digest.into_values().collect();
+    let mut left: Vec<File> = by_digest.into_iter().filter(|(k, _)| !referenced.contains(k)).map(|(_, f)| f).collect();
     left.sort_by(|a, b| b.size.cmp(&a.size));
     for f in left {
         let format = format_of(&f);
         let info = if format == Format::Gguf && !f.not_local { gguf_info(&f.path).unwrap_or_default() } else { Info::default() };
-        let name = info.name.clone().unwrap_or_else(|| "Unused Ollama download".into());
+        let partial = f.path.file_name().is_some_and(|n| n.to_string_lossy().contains("-partial"));
+        let name = info.name.clone().unwrap_or_else(|| if partial { "Unfinished Ollama download" } else { "Unused Ollama download" }.into());
         let size = f.size;
         out.push(Model { name, source: Source::Ollama, format, info, files: vec![f], size, copies: Vec::new(), extra: 0, orphan: true });
     }

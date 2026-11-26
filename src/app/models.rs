@@ -24,6 +24,8 @@ pub(super) struct ModelsState {
     pub places: Vec<(String, PathBuf)>,
     /// The model being inspected, shown instead of the list.
     page: Option<ModelPage>,
+    /// The Storage view: space by app, and what can be freed.
+    pub storage: super::storage::StorageState,
 }
 
 /// A model's own page: what's inside it.
@@ -172,7 +174,9 @@ impl App {
         std::thread::spawn(move || {
             let _ = tx.send(search(roots, analysis, &progress, &slot, &status));
         });
-        self.models = ModelsState { job: Some(job), list: None, chosen: None, places, page: None };
+        let mut storage = std::mem::take(&mut self.models.storage);
+        storage.forget();
+        self.models = ModelsState { job: Some(job), list: None, chosen: None, places, page: None, storage };
     }
 
     pub(super) fn poll_models(&mut self, ctx: &egui::Context) {
@@ -203,13 +207,14 @@ impl App {
             style::roomy(ui);
             self.workspace_switch(ui);
             ui.add_space(6.0);
-            // 0 Library, 1 Ask AI, 2 Lab.
-            let mut view = if !self.ask.open { 0 } else if self.ask.lab { 2 } else { 1 };
-            kit::segmented(ui, &mut view, &[(0, "Library"), (1, "💬 Ask AI"), (2, "🔬 Lab")], false).on_hover_text(
-                "Library: the models on this computer. Ask AI: chat with one of them. Lab: see what a model would write next and how sure it is. Both run on this computer.",
+            // 0 Library, 1 Ask AI, 2 Lab, 3 Storage.
+            let mut view = if self.models.storage.open { 3 } else if !self.ask.open { 0 } else if self.ask.lab { 2 } else { 1 };
+            kit::segmented(ui, &mut view, &[(0, "Library"), (1, "💬 Ask AI"), (2, "🔬 Lab"), (3, "🖴 Storage")], false).on_hover_text(
+                "Library: the models on this computer. Ask AI: chat with one of them. Lab: see what a model would write next and how sure it is. Storage: how much space models take, and what can be freed.",
             );
-            self.ask.open = view != 0;
+            self.ask.open = view == 1 || view == 2;
             self.ask.lab = view == 2;
+            self.models.storage.open = view == 3;
             ui.add_space(6.0);
             let busy = self.models.job.is_some();
             if ui.add_enabled(!busy, egui::Button::new("⟳ Look again")).on_hover_text("Look for models again in every place on the left").clicked() {
@@ -234,11 +239,18 @@ impl App {
         if self.models.list.is_none() && self.models.job.is_none() && self.models.places.is_empty() {
             self.start_models();
         }
+        self.storage_confirm(ui.ctx());
         if self.ask.open {
             self.ask_workspace(ui);
             return;
         }
         let pal = style::pal(ui);
+        if self.models.storage.open {
+            let frame = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::same(12));
+            let r = egui::CentralPanel::default().frame(frame).show(ui, |ui| self.storage_view(ui));
+            self.help_regions.push((r.response.rect, topics::AI_MODELS));
+            return;
+        }
         let side = egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 8, right: 6, top: 8, bottom: 6 });
         let r = egui::Panel::left("model-places").default_size(230.0).min_size(160.0).resizable(true).frame(side).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.models_places(ui));
@@ -353,11 +365,18 @@ impl App {
                     .on_hover_text("Left behind by removed models or stopped downloads. Ollama doesn't need them.");
             }
         });
+        if let Some((tone, text)) = self.models.storage.outcome.clone() {
+            kit::callout(ui, tone, text);
+            if ui.small_button("Hide").clicked() {
+                self.models.storage.outcome = None;
+            }
+        }
         ui.add_space(6.0);
 
         let mut chosen = None;
         let mut open = None;
         let mut inspect = None;
+        let mut remove = None;
         ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW, list.len(), |ui, range| {
             for (k, m) in list[range.clone()].iter().enumerate() {
@@ -413,11 +432,19 @@ impl App {
                         }
                         ui.close();
                     }
+                    ui.separator();
+                    if ui.button(if cfg!(windows) { "Move to Recycle Bin…" } else { "Move to Trash…" }).on_hover_text("Remove this model. You see everything it removes first.").clicked() {
+                        remove = Some(i);
+                        ui.close();
+                    }
                 });
             }
         });
         if let Some(i) = chosen {
             self.models.chosen = Some(i);
+        }
+        if let Some(m) = remove.and_then(|i| list.get(i)) {
+            self.ask_remove_model(m);
         }
         if let Some(i) = inspect
             && let Some(m) = list.get(i)

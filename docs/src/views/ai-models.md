@@ -195,12 +195,48 @@ uses**.
 - **not used by any Ollama model** marks an Ollama file that none of Ollama's installed models
   needs, usually left behind by a removed model or a stopped download.
 
-Filescape doesn't delete anything by itself. To free space, delete a copy in the Files workspace
-as you would any file. For Ollama, removing a model with `ollama rm` is the safest way, since
-Ollama keeps its own list of the files each model uses.
+Filescape doesn't delete anything by itself. To free space, use [Storage](#freeing-space), or
+right-click a model and choose **Move to Trash…** (see [Removing a model](#removing-a-model)).
 
 Files that are only in the cloud are listed but not read, so their details are missing and they
 aren't checked for copies. Reading them would download them.
+
+## Freeing space
+
+Press **🖴 Storage** in the toolbar to see how much space models take, by app (Ollama, LM Studio,
+Hugging Face and other folders), and what can be freed:
+
+- **Downloads no model uses**: Ollama files none of its models needs, usually left behind by a
+  removed model or a stopped download.
+- **Unfinished downloads**: Ollama, Hugging Face and browser downloads of model files that stopped
+  part way (such as `model.gguf.crdownload`). Anything written to in the last ten minutes may
+  still be downloading, so it's left out.
+- **Older Hugging Face versions**: Hugging Face keeps every version of a model a program
+  downloaded. Programs use the current one (the one its `refs` point to); the older ones, and
+  files no version uses, can go.
+- **Extra copies**: a loose model file (in Downloads, say) that's byte-for-byte the same as one an
+  app or another folder keeps. The other copy stays.
+
+Each item says why it can go. **Move to Trash…** shows every file, folder and link it removes, and
+asks once. Choose **Move to Trash** to be able to put it back (the space comes back when the Trash
+is emptied), or **Delete for good** to get the space back straight away. Removing one item at a
+time is free; ticking several and pressing **Remove N items…** is part of managing models in bulk,
+in Filescape Professional.
+
+Filescape only calls something unused when the app's own records say so. If Ollama's list of
+models or Hugging Face's version records can't be read, nothing in that folder is offered.
+
+## Removing a model
+
+Right-click a model in the list and choose **Move to Trash…**. Filescape shows everything that
+goes before anything happens:
+
+- **Ollama**: the model's entries in Ollama's list, and the files only it uses, as `ollama rm`
+  would. Files other models share are kept.
+- **Hugging Face**: its files in the cache, and the links to them in each version.
+- **LM Studio and other folders**: its files.
+
+If Ollama is downloading a model, let it finish first.
 
 ## On the command line
 
