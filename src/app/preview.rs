@@ -982,7 +982,8 @@ impl App {
         ui.add_space(4.0);
         let w = ui.available_width();
         let h = (ui.available_height() * 0.55).clamp(120.0, w * 1.2);
-        if e.is_dir {
+        // Folders get an icon; a Logic project (a folder package) gets a preview like a file.
+        if e.is_dir && !crate::daw::is_logic(&e.name) {
             let (r, _) = ui.allocate_exact_size(vec2(w, 96.0), Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(64.0, 64.0)), true, "", Color32::GRAY);
         } else {
@@ -1154,7 +1155,7 @@ impl App {
 
     fn preview_main(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
         let pal = style::pal(ui);
-        if e.is_dir {
+        if e.is_dir && !crate::daw::is_logic(&e.name) {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), true, "", Color32::GRAY);
             return;
@@ -1876,6 +1877,24 @@ fn doc_blocks(ui: &mut egui::Ui, blocks: &[crate::help::doc::Block]) {
 /// words can't be read.
 fn load_doc(path: &Path) -> Content {
     if path.file_name().is_some_and(|n| crate::daw::is_project(&n.to_string_lossy())) {
+        // Logic saves a picture of the project's window: shown with the project's details.
+        if path.file_name().is_some_and(|n| crate::daw::is_logic(&n.to_string_lossy()))
+            && let Some(img) = crate::daw::logic_window(path)
+        {
+            return match crate::daw::read(path) {
+                Ok((_, facts)) => Content::Image {
+                    look: None,
+                    size: [img.width(), img.height()],
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw())),
+                    tex: None,
+                    info: "Logic's picture of the project window, saved with the project".into(),
+                    poster: true,
+                    source: None,
+                    facts,
+                },
+                Err(e) => Content::Error(e),
+            };
+        }
         return match crate::daw::read(path) {
             Ok((blocks, facts)) => Content::Doc { blocks: Arc::new(blocks), facts },
             Err(e) => Content::Error(e),

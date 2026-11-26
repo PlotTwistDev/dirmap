@@ -207,7 +207,7 @@ pub static FORMATS: &[Format] = &[
         category: Category::Saved,
         exts: &["sketch", "afdesign", "afphoto", "afpub", "aftemplate", "cdr", "skp", "blend", "c4d", "max", "ma", "mb", "hip", "hipnc", "hiplc"],
     },
-    Format { id: "daw", name: "Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo)", category: Category::Document, exts: &["als", "rpp", "flp", "cpr", "npr"] },
+    Format { id: "daw", name: "Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo, Logic Pro)", category: Category::Document, exts: &["als", "rpp", "flp", "cpr", "npr", "logicx"] },
     Format { id: "dicom", name: "DICOM medical image", category: Category::Science, exts: &["dcm", "dicom"] },
     Format { id: "diskimage", name: "Disk image", category: Category::DiskImage, exts: &["iso", "img", "dmg", "vhd", "vhdx", "avhdx", "vmdk", "qcow2", "qcow", "vdi", "wim", "esd"] },
     Format { id: "fits", name: "FITS astronomy image", category: Category::Science, exts: &["fits", "fit", "fts"] },
