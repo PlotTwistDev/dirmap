@@ -1979,7 +1979,9 @@ dependencies = [
  "gltf",
  "half",
  "hayro",
+ "hayro-jpeg2000",
  "image",
+ "jpeg-decoder",
  "jxl-oxide",
  "kamadak-exif",
  "keyring",
@@ -1991,6 +1993,7 @@ dependencies = [
  "notify",
  "objc2 0.6.5",
  "pulldown-cmark",
+ "pure_jpegls",
  "raw-window-handle",
  "rayon",
  "regex",
@@ -3163,6 +3166,15 @@ checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
 dependencies = [
  "getrandom 0.4.3",
  "libc",
+]
+
+[[package]]
+name = "jpeg-decoder"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]
@@ -4932,6 +4944,15 @@ dependencies = [
  "bitflags 2.13.2",
  "memchr",
  "unicase",
+]
+
+[[package]]
+name = "pure_jpegls"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25845b51a1d28590e77644c36b2dc131d85aa4c49c53cff06d70807f60c83413"
+dependencies = [
+ "thiserror 2.0.21",
 ]
 
 [[package]]

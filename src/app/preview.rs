@@ -643,6 +643,17 @@ fn open_image(path: &Path, size: u64) -> Result<image::DynamicImage, String> {
     }
     // JPEG XL is read through a hook (done once; also at start-up).
     jxl_oxide::integration::register_image_decoding_hook();
+    // JPEG 2000 is decoded here (hayro-jpeg2000), its size checked before anything is decoded.
+    if path.extension().is_some_and(|e| matches!(e.to_string_lossy().to_ascii_lowercase().as_str(), "jp2" | "j2k" | "j2c" | "jpc" | "jpf" | "jpg2"))
+        || std::fs::File::open(path).ok().and_then(|mut f| {
+            let mut head = [0u8; 12];
+            std::io::Read::read_exact(&mut f, &mut head).ok()?;
+            crate::formats::sniff(&head).filter(|f| f.id == "jp2")
+        }).is_some()
+    {
+        let bytes = std::fs::read(path).map_err(|e| format!("Couldn't open it: {e}"))?;
+        return crate::sciimage::jpeg2000(&bytes, 16_384).map(image::DynamicImage::ImageRgba8);
+    }
     let mut reader = image::ImageReader::open(path).and_then(|r| r.with_guessed_format()).map_err(|e| format!("Couldn't open it: {e}"))?;
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(16_384);
