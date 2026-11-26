@@ -201,4 +201,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Quick Look from Storage Analysis, full screen | #57 | Merged |
 | **Phase 2** | | |
 | JPEG XL (jxl-oxide) | #66 | Merged |
-| MIDI piano roll (midly) | | In review |
+| MIDI piano roll (midly) | #67 | Merged |
+| SQLite (rusqlite) and CSV tables | | In review |

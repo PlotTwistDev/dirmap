@@ -52,6 +52,7 @@ mod player;
 mod psdview;
 mod settings;
 mod sheets;
+mod tables;
 mod shellmenu;
 mod subset;
 mod scan;

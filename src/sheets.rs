@@ -20,6 +20,11 @@ pub struct Sheet {
     pub rows: Vec<Vec<String>>,
     /// The sheet's full size (rows, columns).
     pub size: (usize, usize),
+    /// Column names, where the file has them (databases, CSV with a header row); otherwise the
+    /// columns are lettered.
+    pub heads: Vec<String>,
+    /// Whether `size` counts every row (a huge CSV is only read as far as shown).
+    pub rows_known: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +32,10 @@ pub struct Book {
     pub sheets: Vec<Sheet>,
     /// Sheets in the file (some may not have been read).
     pub total: usize,
+    /// What they're called: "sheets", or "tables" in a database.
+    pub noun: &'static str,
+    /// For the details (a database's tables, views and indexes).
+    pub facts: Vec<(&'static str, String)>,
 }
 
 /// A cell's value in words.
@@ -54,6 +63,9 @@ fn text(d: &Data) -> String {
 
 /// Read a workbook. Runs on worker threads.
 pub fn read(path: &Path, rows: usize, cols: usize) -> Result<Book, String> {
+    if crate::tables::is_csv(path) {
+        return crate::tables::read_csv(path, rows, cols);
+    }
     let size = std::fs::metadata(path).map_err(|e| format!("Couldn't open it: {e}"))?.len();
     if size > MAX_FILE {
         return Err(format!("Too big to preview ({}).", crate::scan::human(size)));
@@ -65,12 +77,12 @@ pub fn read(path: &Path, rows: usize, cols: usize) -> Result<Book, String> {
         let Ok(range) = wb.worksheet_range(name) else { continue };
         let (h, w) = range.get_size();
         let rows: Vec<Vec<String>> = range.rows().take(rows).map(|r| r.iter().take(cols).map(text).collect()).collect();
-        sheets.push(Sheet { name: name.clone(), rows, size: (h, w) });
+        sheets.push(Sheet { name: name.clone(), rows, size: (h, w), heads: Vec::new(), rows_known: true });
     }
     if sheets.is_empty() {
         return Err("This workbook has no sheets Filescape can read.".into());
     }
-    Ok(Book { sheets, total: names.len() })
+    Ok(Book { sheets, total: names.len(), noun: "sheets", facts: Vec::new() })
 }
 
 /// A spreadsheet column's letters: 0 → A, 26 → AA.
@@ -90,7 +102,8 @@ pub fn column(mut i: usize) -> String {
 /// The first rows as text for a tile: cells joined by two spaces.
 pub fn snippet(book: &Book) -> String {
     let s = &book.sheets[0];
-    s.rows.iter().take(40).map(|r| r.iter().map(|c| c.replace(['\n', '\t'], " ")).collect::<Vec<_>>().join("  ").trim_end().to_string()).collect::<Vec<_>>().join("\n")
+    let heads = (!s.heads.is_empty()).then_some(&s.heads);
+    heads.into_iter().chain(s.rows.iter()).take(40).map(|r| r.iter().map(|c| c.replace(['\n', '\t'], " ")).collect::<Vec<_>>().join("  ").trim_end().to_string()).collect::<Vec<_>>().join("\n")
 }
 
 #[cfg(test)]
