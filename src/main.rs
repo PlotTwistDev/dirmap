@@ -37,6 +37,7 @@ mod licence;
 mod gguf;
 mod fit;
 mod health;
+mod weights;
 mod inspect;
 mod models;
 mod mapview;

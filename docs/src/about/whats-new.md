@@ -22,6 +22,8 @@
   downloads against their checksums.
 - **Will it run?** estimates the memory a model needs at any context length and says whether it
   runs on this computer's graphics chip, split, on the processor, or not at all.
+- Click a tensor to see a histogram and statistics of its numbers, and **Check the numbers** in
+  Health samples every tensor for broken values or missing data.
 - A model's **Structure** shows its layers in order and draws the model as a map of its layers
   and tensors, coloured by what each part does or by how its numbers are stored.
 
