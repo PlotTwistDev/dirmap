@@ -79,6 +79,14 @@ fn f16_at(b: &[u8], o: usize) -> f32 {
     half::f16::from_bits(u16_at(b, o)).to_f32()
 }
 
+/// How many splats a `.ksplat` file says it has, from its header alone.
+pub fn ksplat_count(path: &std::path::Path) -> Option<u64> {
+    let (mut f, _) = open(path).ok()?;
+    let mut h = [0u8; 20];
+    f.read_exact(&mut h).ok()?;
+    (h[0] == 0 && h[1] >= 1).then(|| u32_at(&h, 16) as u64)
+}
+
 /// `.ksplat`: a 4 KB header, 1 KB per section header, then each section's bucket table and
 /// splats.
 pub fn read_ksplat(path: &std::path::Path, limits: Limits) -> Result<Scene, String> {

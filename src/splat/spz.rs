@@ -86,6 +86,25 @@ fn exact(mut r: impl Read, want: usize, what: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// How many splats an SPZ file says it has, from its header alone.
+pub(super) fn count(path: &Path) -> Option<u64> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut h = [0u8; 16];
+    f.read_exact(&mut h).ok()?;
+    if h.starts_with(b"NGSP") {
+        // Version 4, or a legacy file without its gzip: the count follows the version.
+        return Some(u32le(&h, 8) as u64);
+    }
+    if !h.starts_with(&[0x1f, 0x8b]) {
+        return None;
+    }
+    use std::io::Seek;
+    f.seek(std::io::SeekFrom::Start(0)).ok()?;
+    let mut gz = flate2::read::GzDecoder::new(f);
+    gz.read_exact(&mut h).ok()?;
+    (u32le(&h, 0) == MAGIC).then(|| u32le(&h, 8) as u64)
+}
+
 pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
     let data = std::fs::read(path).map_err(|e| format!("Couldn't read it: {e}"))?;
     parse(&data, limits)

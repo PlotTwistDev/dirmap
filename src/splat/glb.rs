@@ -113,11 +113,24 @@ fn accessor(f: &mut std::fs::File, g: &Glb, index: Option<u64>, comps: usize, co
     Ok(Accessor { data, stride, comps, ty, normalized: a["normalized"].as_bool().unwrap_or(false) })
 }
 
+/// How many splats a GLB file's splat scene has, from its description alone.
+pub fn count(path: &Path) -> Option<u64> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let g = read_glb(&mut f, len).ok()?;
+    let p = splat_prims(&g.json).into_iter().next()?;
+    g.json["accessors"][p["attributes"]["POSITION"].as_u64()? as usize]["count"].as_u64()
+}
+
+fn splat_prims(json: &Value) -> Vec<&Value> {
+    json["meshes"].as_array().into_iter().flatten().flat_map(|m| m["primitives"].as_array().into_iter().flatten()).filter(|p| p["extensions"].get(EXT).is_some()).collect()
+}
+
 pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
     let mut f = std::fs::File::open(path).map_err(|e| format!("Couldn't read it: {e}"))?;
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     let g = read_glb(&mut f, len)?;
-    let prims: Vec<&Value> = g.json["meshes"].as_array().into_iter().flatten().flat_map(|m| m["primitives"].as_array().into_iter().flatten()).filter(|p| p["extensions"].get(EXT).is_some()).collect();
+    let prims = splat_prims(&g.json);
     let p = match prims.as_slice() {
         [p] => *p,
         [] => return Err("This GLB file has no Gaussian splats.".into()),

@@ -56,6 +56,9 @@ struct Shared {
     status: Mutex<Status>,
     /// When the job being drawn started; a job that runs past [`STUCK`] means the driver hung.
     busy_since: Mutex<Option<Instant>>,
+    /// Pictures wanted by thumbnails, drawn when the preview wants nothing, each answered on
+    /// its own channel. Guarded by `wish`'s lock too, so the worker never misses one.
+    side: Mutex<std::collections::VecDeque<(Wish, std::sync::mpsc::SyncSender<Picture>)>>,
 }
 
 /// How long one picture (with opening the device and loading the scene) may take before the
@@ -74,7 +77,7 @@ static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1)
 
 fn shared() -> &'static Arc<Shared> {
     SHARED.get_or_init(|| {
-        let s = Arc::new(Shared { wish: Mutex::new(None), ready: Condvar::new(), done: Mutex::new(None), status: Mutex::new(Status::Unknown), busy_since: Mutex::new(None) });
+        let s = Arc::new(Shared { wish: Mutex::new(None), ready: Condvar::new(), done: Mutex::new(None), status: Mutex::new(Status::Unknown), busy_since: Mutex::new(None), side: Mutex::new(Default::default()) });
         let w = s.clone();
         let _ = std::thread::Builder::new().name("splat-gpu".into()).spawn(move || worker(w));
         s
@@ -123,6 +126,31 @@ pub fn wait_for(id: u64, limit: Duration) -> Option<Picture> {
         std::thread::sleep(Duration::from_millis(5));
     }
     None
+}
+
+/// Thumbnail pictures waiting at most; more are drawn with points instead.
+const SIDE_MAX: usize = 8;
+
+/// Draw a picture for a thumbnail or a saved picture, waiting up to `limit`. The preview's pictures go first, and
+/// the preview's scene stays loaded; `None` when the graphics chip can't be used or is busy for
+/// too long (the caller draws points instead).
+pub fn picture_now(scene: Arc<Scene>, view: View, size: [u32; 2], limit: Duration) -> Option<Picture> {
+    if matches!(status(), Status::Unavailable(_)) {
+        return None;
+    }
+    let s = shared();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    {
+        let _w = s.wish.lock().unwrap();
+        let mut side = s.side.lock().unwrap();
+        if side.len() >= SIDE_MAX {
+            return None;
+        }
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        side.push_back((Wish { id, scene, view, size, ctx: None }, tx));
+        s.ready.notify_one();
+    }
+    rx.recv_timeout(limit).ok()
 }
 
 /// The two GPU layouts we use: with view-dependent colour (half precision, 128 bytes a splat)
@@ -261,10 +289,15 @@ fn worker(s: Arc<Shared>) {
     let mut dev: Option<Device> = None;
     let mut cur: Option<Current> = None;
     loop {
+        let mut answer = None;
         let wish = {
             let mut w = s.wish.lock().unwrap();
             loop {
                 if let Some(x) = w.take() {
+                    break Some(x);
+                }
+                if let Some((x, tx)) = s.side.lock().unwrap().pop_front() {
+                    answer = Some(tx);
                     break Some(x);
                 }
                 let (g, t) = s.ready.wait_timeout(w, Duration::from_secs(60)).unwrap();
@@ -285,7 +318,13 @@ fn worker(s: Arc<Shared>) {
         }
         let ctx = wish.ctx.clone();
         *s.busy_since.lock().unwrap() = Some(Instant::now());
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| draw(&mut dev, &mut cur, &wish)));
+        // A thumbnail's scene is loaded beside the preview's and let go straight after (unless
+        // it is the preview's, as for a saved picture of the view).
+        let mut aside = None;
+        let same = cur.as_ref().is_some_and(|c| Arc::ptr_eq(&c.scene, &wish.scene));
+        let slot = if answer.is_some() && !same { &mut aside } else { &mut cur };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| draw(&mut dev, slot, &wish)));
+        drop(aside);
         *s.busy_since.lock().unwrap() = None;
         if matches!(*s.status.lock().unwrap(), Status::Unavailable(_)) {
             // Given up on while it was stuck; stay with points.
@@ -300,7 +339,12 @@ fn worker(s: Arc<Shared>) {
                 if let Some(d) = &dev {
                     *s.status.lock().unwrap() = Status::Ready(d.name.clone());
                 }
-                *s.done.lock().unwrap() = Some(pic);
+                match answer {
+                    Some(tx) => {
+                        let _ = tx.try_send(pic);
+                    }
+                    None => *s.done.lock().unwrap() = Some(pic),
+                }
             }
             Err(e) => {
                 cur = None;

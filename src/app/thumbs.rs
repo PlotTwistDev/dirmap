@@ -87,13 +87,14 @@ const SNIPPET_COLS: usize = 160;
 
 enum Slot {
     Pending(u64),
-    Ready { pic: Pic, stamp: u64, bytes: usize, used: Cell<u64> },
+    Ready { pic: Pic, stamp: u64, bytes: usize, used: Cell<u64>, badge: Option<Arc<str>> },
     /// Couldn't be read: the type icon is drawn instead, and it isn't tried again until the
     /// file changes.
     Failed(u64),
 }
 
-type Done = (PathBuf, u64, Option<Decoded>);
+/// A finished job: the picture, and for splat scenes a short label (format and splat count).
+type Done = (PathBuf, u64, Option<Decoded>, Option<String>);
 
 #[derive(Default)]
 pub(super) struct Thumbs {
@@ -144,6 +145,14 @@ impl Thumbs {
         }
     }
 
+    /// The short label of a ready thumbnail of a splat scene ("SPZ · 1.2M splats").
+    pub(super) fn badge(&self, path: &Path) -> Option<Arc<str>> {
+        match self.cache.get(path) {
+            Some(Slot::Ready { badge, .. }) => badge.clone(),
+            _ => None,
+        }
+    }
+
     /// Once a frame, after drawing: queue what was asked for and drop queued work for files no
     /// longer on screen.
     pub(super) fn flush(&mut self) {
@@ -184,7 +193,8 @@ impl Thumbs {
         self.frame += 1;
         let Some(rx) = &self.rx else { return false };
         for _ in 0..UPLOADS_PER_FRAME {
-            let Ok((path, stamp, img)) = rx.try_recv() else { break };
+            let Ok((path, stamp, img, badge)) = rx.try_recv() else { break };
+            let badge: Option<Arc<str>> = badge.map(Into::into);
             // Only if it's still wanted for this version of the file.
             if !matches!(self.cache.get(&path), Some(Slot::Pending(s)) if *s == stamp) {
                 continue;
@@ -194,17 +204,17 @@ impl Thumbs {
                     let bytes = img.pixels.len() * 4;
                     self.bytes += bytes;
                     let tex = ctx.load_texture(format!("thumb:{}", path.display()), img, egui::TextureOptions::LINEAR);
-                    Slot::Ready { pic: Pic::Tex(tex), stamp, bytes, used: Cell::new(self.frame) }
+                    Slot::Ready { pic: Pic::Tex(tex), stamp, bytes, used: Cell::new(self.frame), badge }
                 }
                 Some(Decoded::Text(t)) => {
                     let bytes = t.len();
                     self.bytes += bytes;
-                    Slot::Ready { pic: Pic::Text(t.into()), stamp, bytes, used: Cell::new(self.frame) }
+                    Slot::Ready { pic: Pic::Text(t.into()), stamp, bytes, used: Cell::new(self.frame), badge }
                 }
                 Some(Decoded::Wave(w)) => {
                     let bytes = w.len() * 4;
                     self.bytes += bytes;
-                    Slot::Ready { pic: Pic::Wave(w.into()), stamp, bytes, used: Cell::new(self.frame) }
+                    Slot::Ready { pic: Pic::Wave(w.into()), stamp, bytes, used: Cell::new(self.frame), badge }
                 }
                 None => Slot::Failed(stamp),
             };
@@ -262,7 +272,8 @@ impl Thumbs {
                         }
                     };
                     let img = std::panic::catch_unwind(|| decode(&job, config)).ok().flatten();
-                    if tx.send((job.path, job.stamp, img)).is_err() {
+                    let badge = if img.is_some() { std::panic::catch_unwind(|| splat_badge(&job.path)).ok().flatten() } else { None };
+                    if tx.send((job.path, job.stamp, img, badge)).is_err() {
                         return;
                     }
                 }
@@ -303,11 +314,35 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
     Some(made)
 }
 
-/// A splat scene or point cloud drawn from a sample of its points.
+/// The label for a splat scene's thumbnail, from its header (never the whole file). Runs on a
+/// worker thread.
+fn splat_badge(path: &Path) -> Option<String> {
+    // Never from a server or a cloud file that isn't on this computer (reading the header would
+    // download it), even when the picture came from the disk cache.
+    if !is_local(path) {
+        return None;
+    }
+    let name = path.file_name()?.to_string_lossy();
+    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let splat = preview::kind_of(&name) == Kind::Splat || ((ext == "ply" || ext == "glb") && crate::splat::claims(path));
+    if splat { crate::splat::badge(path) } else { None }
+}
+
+/// How long a thumbnail waits for the graphics chip before drawing points instead.
+const SPLAT_GPU_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// A splat scene drawn as real splats on the graphics chip from a sample of them, or as
+/// points where the chip can't be used (and for point clouds, which have no splat shapes).
 fn splat_thumb(path: &std::path::Path, max: u32) -> Option<Decoded> {
-    let scene = crate::splat::read(path, crate::splat::Limits::THUMB).ok()?;
+    use crate::splat::{Limits, SceneKind, View, gpu};
+    let scene = std::sync::Arc::new(crate::splat::read(path, Limits::THUMB).ok()?);
     let n = max.min(512) as usize;
-    Some(Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &scene.draw(n, n, &crate::splat::View::default(), 1))))
+    if scene.kind == SceneKind::Splat {
+        if let Some(pic) = gpu::picture_now(scene.clone(), View::default(), [n as u32, n as u32], SPLAT_GPU_WAIT) {
+            return Some(Decoded::Image(egui::ColorImage::from_rgba_premultiplied(pic.size, &pic.rgba)));
+        }
+    }
+    Some(Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &scene.draw(n, n, &View::default(), 1))))
 }
 
 /// Make a thumbnail picture from the file.

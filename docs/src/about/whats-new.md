@@ -14,6 +14,10 @@
 - More splat formats: **compressed PLY** (PlayCanvas and SuperSplat), **SPLAT**, **KSPLAT**,
   **SOG** (bundled or loose), **GLB** files with Gaussian splats, and **web pages exported
   from SuperSplat**, whose embedded scene is read without running the page.
+- Splat thumbnails in Icons view and on map tiles are drawn as real splats on the graphics
+  chip, and map tiles show the format and splat count. Quick Look has **◀** and **▶** buttons
+  for the previous and next file, and a camera button on a splat scene saves the view as a PNG
+  of up to 4K.
 
 ### The AI Models workspace
 
