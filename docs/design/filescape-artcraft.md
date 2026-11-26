@@ -304,5 +304,8 @@ rows there and to the tracker below.
 | Stage | PR | State |
 |---|---|---|
 | Phase 1 audit (this doc) | #89 | Merged |
-| Stage A: Craft documents with saved pictures | #91 | In review |
-| Stage B: files a project uses, After Effects projects, LightCraft libraries, PhotoCraft bundles | (this PR) | In review |
+| Stage A: Craft documents with saved pictures | #91 | Merged |
+| Stage B: files a project uses, After Effects projects, LightCraft libraries, PhotoCraft bundles | #94 | Merged |
+| Stage C1: 12-bit and arithmetic JPEG, Photoshop layers | (this PR) | In review |
+| Stage C2: Krita, OpenRaster, Figma, GIMP and Paint.NET | (this PR) | In review |
+| Stage C3: FBX, COLLADA, Alembic models; DWG drawings | (this PR) | In review |

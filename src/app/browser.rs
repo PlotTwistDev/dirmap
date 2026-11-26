@@ -264,6 +264,9 @@ pub(super) fn kind_for(name: &str, is_dir: bool) -> String {
     if let Some(c) = crate::craftfile::of(name) {
         return c.kind().into();
     }
+    if let Some(p) = crate::paintfile::of(name) {
+        return p.kind().into();
+    }
     if crate::aepfile::is_project(name) {
         return "After Effects project".into();
     }

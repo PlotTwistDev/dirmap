@@ -38,6 +38,7 @@ mod highlight;
 mod icons;
 mod imagelook;
 mod known;
+mod jpegx;
 mod kit;
 mod licence;
 mod lightcraft;
@@ -64,6 +65,7 @@ mod splat;
 mod netdrives;
 mod officedoc;
 mod packages;
+mod paintfile;
 mod pdfview;
 mod pattern;
 mod player;
@@ -102,6 +104,11 @@ use std::sync::Arc;
 pub const APP_ID: &str = "Filescape";
 
 fn main() -> eframe::Result {
+    // A copy started only to convert one DWG drawing (see cadview): does that and nothing else.
+    if let Some(code) = craft_dwg::serve_if_asked() {
+        std::process::exit(code);
+    }
+    craft_dwg::use_own_worker();
     // JPEG XL through the image crate, everywhere pictures are read.
     jxl_oxide::integration::register_image_decoding_hook();
     templates::migrate_old_folder();

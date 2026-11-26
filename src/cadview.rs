@@ -1,7 +1,8 @@
 //! CAD files: DXF drawings drawn (lines, polylines, circles, arcs, ellipses, splines and blocks),
-//! and what DWG, STEP and IGES files say about themselves: the program and version that wrote
-//! them, units, author and parts. Those three can't be drawn without large, mostly proprietary
-//! libraries, so only their details are shown.
+//! DWG drawings converted to DXF first, and what STEP and IGES files say about themselves: the
+//! program and version that wrote them, units, author and parts. DWG is converted by `craft-dwg`
+//! (craft-libs, MIT or Apache-2.0, with acadrust, MPL-2.0) in a copy of Filescape started for the
+//! one file (see `main`), so a damaged drawing that makes the converter fail can't end the app.
 
 use crate::help::doc::{Block, Span};
 use resvg::tiny_skia;
@@ -140,6 +141,25 @@ pub fn read_dxf(path: &Path) -> Result<Drawing, String> {
     }
     dxf(&String::from_utf8_lossy(&raw))
 }
+
+pub fn is_dwg(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("dwg"))
+}
+
+/// A DWG drawing, converted to DXF in a separate process and drawn like one.
+pub fn read_dwg(path: &Path) -> Result<Drawing, String> {
+    let raw = slurp(path)?;
+    let Some(v) = craft_dwg::version(&raw) else { return Err("Not a DWG drawing".into()) };
+    let limits = craft_dwg::Limits { max_dwg_bytes: FILE_MAX as usize, max_dxf_bytes: DWG_DXF_MAX };
+    let (text, _notes) = craft_dwg::decode(&raw, limits).map_err(|_| "Filescape couldn't convert this DWG drawing to draw it".to_string())?;
+    let mut d = dxf(&String::from_utf8_lossy(&text))?;
+    d.facts.retain(|f| f.0 != "Format");
+    d.facts.insert(0, ("Format", format!("DWG, {}", acad_version(&v))));
+    Ok(d)
+}
+
+/// The DXF a DWG converts to, at most (it's several times the DWG's size).
+const DWG_DXF_MAX: usize = 512 << 20;
 
 fn dxf(text: &str) -> Result<Drawing, String> {
     let pairs = pairs(text);
@@ -526,7 +546,7 @@ pub fn read_info(path: &Path) -> Result<Info, String> {
                 return Err("Not a DWG drawing".into());
             }
             let v = String::from_utf8_lossy(&head).to_string();
-            Ok(info("AutoCAD drawing (DWG)", vec![("Format", acad_version(&v))], "DWG is AutoCAD's own format. Filescape can't draw it; save a DXF copy from your CAD program to see the drawing here."))
+            Ok(info("AutoCAD drawing (DWG)", vec![("Format", acad_version(&v))], "Filescape couldn't draw this DWG drawing. Saving a DXF copy from your CAD program may help."))
         }
         "step" | "stp" | "p21" => step(&String::from_utf8_lossy(&slurp(path)?)),
         "iges" | "igs" => iges(&String::from_utf8_lossy(&slurp(path)?)),
@@ -716,6 +736,37 @@ mod tests {
 
     fn dxf_text(body: &[(&str, &str)]) -> String {
         body.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect()
+    }
+
+    #[test]
+    fn dwg_is_converted_and_drawn() {
+        // A DWG made from a DXF here (trusted input, so converted in this process; the app
+        // converts files from disk in a separate one).
+        craft_dwg::allow_in_process();
+        let t = dxf_text(&[
+            ("0", "SECTION"), ("2", "HEADER"), ("9", "$ACADVER"), ("1", "AC1018"), ("0", "ENDSEC"),
+            ("0", "SECTION"), ("2", "ENTITIES"),
+            ("0", "LINE"), ("8", "0"), ("10", "0"), ("20", "0"), ("30", "0"), ("11", "100"), ("21", "50"), ("31", "0"),
+            ("0", "CIRCLE"), ("8", "0"), ("10", "50"), ("20", "25"), ("30", "0"), ("40", "10"),
+            ("0", "ENDSEC"), ("0", "EOF"),
+        ]);
+        let dwg = craft_dwg::dxf_to_dwg_as(t.as_bytes(), "AC1018").unwrap();
+        let dir = std::env::temp_dir().join(format!("filescape-dwg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("plan.dwg");
+        std::fs::write(&p, &dwg).unwrap();
+        assert!(is_dwg(&p));
+        let d = read_dwg(&p).unwrap();
+        assert_eq!(fact(&d.facts, "Format"), Some("DWG, AutoCAD 2004 format (AC1018)"));
+        assert!(d.paths.len() >= 2, "{}", d.paths.len());
+        let (w, h) = d.fit(200);
+        assert!(d.draw(w, h).chunks(4).any(|px| px[3] > 0));
+        // Not a DWG, or a damaged one: an error, never a crash.
+        std::fs::write(&p, b"AC1018 and then nothing useful").unwrap();
+        assert!(read_dwg(&p).is_err());
+        std::fs::write(&p, b"hello").unwrap();
+        assert!(read_dwg(&p).is_err());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

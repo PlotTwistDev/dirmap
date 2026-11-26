@@ -86,6 +86,9 @@ impl Format {
             "markdown" => ("Formatted text, with the source a click away", "Filescape"),
             "text" => ("The text, in syntax colours for code (about 200 languages)", "Filescape (syntect, two-face)"),
             "aep" => ("The version that saved it, its compositions and the footage files it uses, marking any missing", "craft-aep"),
+            "cad" => ("DWG: the drawing (lines, curves and blocks; text isn't drawn). STEP and IGES: the program that made it, units, author and parts (not drawn)", "Filescape (craft-dwg with acadrust for DWG)"),
+            "paint" => ("The picture the app saved inside the file, with its size, colours and layers", "Filescape"),
+            "layered" => ("The picture, drawn from its layers, with its size, colours and layers", "craft-xcf, craft-pdn"),
             "craft" => ("The picture the app saved inside the file, with its pages, layers, size, length and the version that saved it", "Filescape (craft-doc)"),
             "csv" => ("A table, with column names from the first row", "Filescape (csv)"),
             "sheet" => ("Each sheet's cells, as last saved", "calamine"),
@@ -100,9 +103,11 @@ impl Format {
             "jp2" => ("The picture; channels one by one", "hayro-jpeg2000"),
             "dxf" => ("The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size", "Filescape"),
             "daw" => ("The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones)", "Filescape"),
-            "dicom" => ("The scan (uncompressed, RLE, JPEG, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown", "Filescape"),
+            "dicom" => ("The scan (uncompressed, RLE, JPEG including 12-bit, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown", "Filescape (craft-jpeg for 12-bit JPEG)"),
+            "jpeg" => ("The picture, including 12-bit and arithmetic-coded JPEGs; channels one by one", "image (craft-jpeg for 12-bit and arithmetic-coded)"),
+            "psd" => ("The flattened picture, with its layers, groups, text and smart objects listed", "Filescape (craft-psd for the layers)"),
             "fits" => ("The first picture, stretched so faint detail shows, with the object, telescope and exposure", "Filescape"),
-            "model3d" => ("A shaded model to turn about; PLY point clouds and Gaussian splat scenes are drawn as points, with their details", "Filescape (gltf for glTF)"),
+            "model3d" => ("A shaded model to turn about; PLY point clouds and Gaussian splat scenes are drawn as points, with their details", "Filescape (gltf for glTF, craft-mesh for FBX, COLLADA and Alembic)"),
             "heif" => ("The picture", "The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg)"),
             _ => match self.category {
                 Category::Picture => ("The picture; channels one by one", "image"),
@@ -203,7 +208,7 @@ pub static FORMATS: &[Format] = &[
     },
     Format { id: "csv", name: "CSV or TSV table", category: Category::Spreadsheet, exts: &["csv", "tsv", "tab"] },
     Format { id: "sqlite", name: "SQLite database", category: Category::Database, exts: &["sqlite", "sqlite3", "db", "db3", "s3db", "sl3"] },
-    Format { id: "model3d", name: "3D model", category: Category::Model, exts: &["stl", "obj", "ply", "gltf", "glb", "3mf"] },
+    Format { id: "model3d", name: "3D model", category: Category::Model, exts: &["stl", "obj", "ply", "gltf", "glb", "3mf", "fbx", "dae", "abc"] },
     Format { id: "spz", name: "Gaussian splat scene (SPZ)", category: Category::Splat, exts: &["spz"] },
     Format { id: "dxf", name: "DXF drawing", category: Category::Cad, exts: &["dxf"] },
     Format { id: "cad", name: "CAD model (DWG, STEP, IGES)", category: Category::Cad, exts: &["dwg", "step", "stp", "p21", "iges", "igs"] },
@@ -221,6 +226,8 @@ pub static FORMATS: &[Format] = &[
         exts: &["pcraft", "vectorcraft", "drawcraft", "vctemplate", "ecproj", "ectemplate", "figcraft", "designcraft", "tcraft", "deckcraft", "anicraft", "mcraft", "fcproj", "scraft", "scraftz"],
     },
     Format { id: "aep", name: "After Effects project", category: Category::Saved, exts: &["aep", "aepx"] },
+    Format { id: "paint", name: "Painting app files (Krita, OpenRaster, Figma export)", category: Category::Saved, exts: &["kra", "krz", "ora", "fig"] },
+    Format { id: "layered", name: "GIMP and Paint.NET pictures", category: Category::Saved, exts: &["xcf", "xcf.gz", "pdn"] },
     Format { id: "daw", name: "Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo, Logic Pro)", category: Category::Document, exts: &["als", "rpp", "flp", "cpr", "npr", "logicx"] },
     Format { id: "dicom", name: "DICOM medical image", category: Category::Science, exts: &["dcm", "dicom"] },
     Format { id: "diskimage", name: "Disk image", category: Category::DiskImage, exts: &["iso", "img", "dmg", "vhd", "vhdx", "avhdx", "vmdk", "qcow2", "qcow", "vdi", "wim", "esd"] },
@@ -248,6 +255,9 @@ fn by_ext() -> &'static HashMap<&'static str, &'static Format> {
 /// The format of a file, from its name alone.
 pub fn by_name(name: &str) -> Option<&'static Format> {
     let ext = crate::scan::ext_of(name).to_ascii_lowercase();
+    if ext == "gz" && name.to_ascii_lowercase().ends_with(".xcf.gz") {
+        return Some(Format::get("layered"));
+    }
     if ext.is_empty() {
         let lower = name.to_ascii_lowercase();
         return TEXT_NAMES.contains(&lower.as_str()).then(|| Format::get("text"));
