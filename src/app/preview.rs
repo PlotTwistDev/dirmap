@@ -179,6 +179,8 @@ pub(super) enum Kind {
     Map,
     /// DXF drawn; DWG, STEP and IGES described.
     Cad,
+    /// An app's own format: the picture it saved inside.
+    Saved,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -209,6 +211,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Midi => Kind::Midi,
         C::Map => Kind::Map,
         C::Cad => Kind::Cad,
+        C::Saved => Kind::Saved,
         C::Database => Kind::Database,
         C::Model => Kind::Model,
     }
@@ -347,6 +350,38 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
         },
         Kind::Cad => match crate::cadview::read_info(path) {
             Ok(i) => Content::Doc { blocks: Arc::new(i.blocks), facts: i.facts },
+            Err(e) => Content::Error(e),
+        },
+        Kind::Saved => match crate::savedpic::read(path) {
+            Ok(s) => match s.picture {
+                Some(img) => {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let app = s.facts.first().map(|f| f.1.clone()).unwrap_or_default();
+                    Content::Image {
+                        look: None,
+                        pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba)),
+                        tex: None,
+                        size: [w, h],
+                        info: format!("The picture {app} saved inside the file"),
+                        poster: true,
+                        source: None,
+                        facts: s.facts,
+                    }
+                }
+                None => {
+                    use crate::help::doc::{Block, Span};
+                    let plain = |t: String| vec![Span { text: t, ..Default::default() }];
+                    let app = s.facts.first().map(|f| f.1.clone()).unwrap_or_default();
+                    let mut blocks = vec![Block::Heading { level: 1, spans: plain(format!("{app} file")), id: String::new() }];
+                    for (k, v) in s.facts.iter().skip(1) {
+                        blocks.push(Block::Para(vec![Span { text: format!("{k}: "), bold: true, ..Default::default() }, Span { text: v.clone(), ..Default::default() }]));
+                    }
+                    blocks.push(Block::Rule);
+                    blocks.push(Block::Para(plain(format!("There's no picture saved inside it, and Filescape can't draw {app} files itself."))));
+                    Content::Doc { blocks: Arc::new(blocks), facts: s.facts }
+                }
+            },
             Err(e) => Content::Error(e),
         },
         Kind::Map => match crate::geoview::read(path) {

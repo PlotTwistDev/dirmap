@@ -45,6 +45,8 @@ for the settings.
 | 3D model | `.stl` `.obj` `.ply` `.gltf` `.glb` `.3mf` | A shaded model to turn about | Filescape (gltf for glTF) |
 | DXF drawing | `.dxf` | The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size | Filescape |
 | CAD model (DWG, STEP, IGES) | `.dwg` `.step` `.stp` `.p21` `.iges` `.igs` | What the file says: the program that made it, units, author and parts (not drawn) | Filescape |
+| Pages, Numbers and Keynote | `.pages` `.numbers` `.key` | The picture the app saved inside the file, and the version that saved it | Filescape |
+| Design and 3D app files (Sketch, Affinity, CorelDRAW, SketchUp, Blender, Cinema 4D, 3ds Max, Maya, Houdini) | `.sketch` `.afdesign` `.afphoto` `.afpub` `.aftemplate` `.cdr` `.skp` `.blend` `.c4d` `.max` `.ma` `.mb` `.hip` `.hipnc` `.hiplc` | The picture the app saved inside the file, and the version that saved it | Filescape |
 | Map data (GeoJSON, GPX, KML) | `.geojson` `.gpx` `.kml` `.kmz` | The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks | Filescape |
 | MIDI music | `.mid` `.midi` `.kar` | A piano roll, with tempo and instruments | midly |
 | PDF document | `.pdf` | Every page | hayro (the system for protected PDFs) |

@@ -92,6 +92,9 @@
   colours), with the AutoCAD version, units, layers and overall size. DWG, STEP and IGES files
   show what they say about themselves: the program that made them, the units, the author and the
   parts.
+- Pages, Numbers and Keynote documents, and files from Sketch, Affinity, CorelDRAW, SketchUp,
+  Blender, Cinema 4D and 3ds Max, preview from the picture the app saved inside them, with the
+  version that saved them. Maya and Houdini scenes show their version, units and what's in them.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
