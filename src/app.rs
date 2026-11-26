@@ -55,6 +55,7 @@ mod summary;
 mod cloud;
 mod models;
 mod ask;
+mod lab;
 mod explain;
 pub(crate) mod style;
 use files::Workspace;

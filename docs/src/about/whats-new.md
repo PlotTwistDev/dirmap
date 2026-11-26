@@ -4,6 +4,10 @@
 
 ### The AI Models workspace
 
+- **🔬 Lab** shows what a model would write next and how sure it is: each token coloured by its
+  probability, the ten likeliest alternatives, and what temperature, top-k, top-p and min-p do to
+  them. Pick a different token to see where the text goes instead. Free. See
+  [The Lab](../views/model-lab.md).
 - **💬 Ask AI** chats with a model already on this computer, run by Filescape itself: no Ollama,
   LM Studio or internet connection needed, and nothing you ask leaves the computer. It runs GGUF
   models, on the graphics chip of a Mac with Apple silicon and on the processor elsewhere. Ask AI
