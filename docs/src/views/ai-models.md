@@ -88,6 +88,11 @@ downloaded file by its SHA-256 checksum. For those, **Verify checksum** reads th
 compares, which proves not a single byte has changed since it was downloaded. It takes a while for
 a large model; **Cancel** stops it.
 
+**Check the numbers** reads a small sample of every tensor (about 128 KB of each) and looks for
+broken values (NaN or infinite, which make a model give wrong answers) and tensors that are all
+zeros, which usually means their data was damaged or left out. Click a tensor it lists to see it
+in **Tensors**.
+
 **Will it run?** estimates how much memory the model needs on this computer, and where it would
 run:
 
@@ -122,6 +127,12 @@ little of its own.
 values and size. Type in the box to show only some, such as `attn` for the attention tensors or
 `Q6_K` for one type. Click a column heading to sort by it, and again to reverse. Right-click a
 tensor to copy its name.
+
+Click a tensor to see more about it on the right, with its numbers: their average, spread,
+smallest and largest, how many are zero, and a histogram of their values. For a large tensor
+Filescape reads a sample from across it, which takes a moment. It reads full and half precision
+(F32, F16, BF16) and the common compressed types (Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q4_K, Q5_K and
+Q6_K); for other types only the facts are shown.
 
 **Metadata** lists every entry the model file carries, such as its training settings and
 tokenizer, with a box to find one.

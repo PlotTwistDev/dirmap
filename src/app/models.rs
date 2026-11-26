@@ -46,6 +46,13 @@ struct ModelPage {
     context: u64,
     cache_q8: bool,
     vram_typed: f32,
+    /// The tensor picked in Tensors, and its weight statistics (being read, or read).
+    picked: Option<usize>,
+    stats_job: Option<(usize, mpsc::Receiver<Result<crate::weights::Stats, String>>)>,
+    stats: Option<(usize, Result<crate::weights::Stats, String>)>,
+    /// Checking every tensor's numbers, from Health.
+    scan_all: Option<WeightScan>,
+    scanned: Option<Vec<WeightFinding>>,
     /// The model as layers, for the Structure tab.
     structure: Option<Arc<inspect::Structure>>,
     /// The group (index into `structure.groups`) the map is zoomed into.
@@ -54,6 +61,20 @@ struct ModelPage {
     /// Tensors to show, in order (indexes into `data.tensors`), for `shown_for`.
     shown: Vec<usize>,
     shown_for: Option<(String, TensorCol, bool)>,
+}
+
+struct WeightScan {
+    done: Arc<std::sync::atomic::AtomicU64>,
+    total: u64,
+    cancel: Arc<AtomicBool>,
+    rx: mpsc::Receiver<Vec<WeightFinding>>,
+}
+
+/// What checking every tensor's numbers found: one entry per tensor read.
+#[derive(Clone)]
+struct WeightFinding {
+    tensor: usize,
+    stats: Result<crate::weights::Stats, String>,
 }
 
 struct Verify {
@@ -490,6 +511,11 @@ impl App {
             health: Vec::new(),
             context: 0,
             cache_q8: false,
+            picked: None,
+            stats_job: None,
+            stats: None,
+            scan_all: None,
+            scanned: None,
             vram_typed: 0.0,
             verify: None,
             verified: Vec::new(),
@@ -576,8 +602,15 @@ impl App {
                     }
                 });
             }
-            (Some(_), PageTab::Health) => {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| page_health(ui, &mut page, m));
+            (Some(d), PageTab::Health) => {
+                let d = d.clone();
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    page_health(ui, &mut page, m);
+                    if !d.tensors.is_empty() {
+                        ui.add_space(10.0);
+                        weight_scan(ui, &mut page, m, &d);
+                    }
+                });
             }
             (Some(d), PageTab::Fit) => {
                 let d = d.clone();
@@ -977,6 +1010,243 @@ fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) 
     ui.weak("These are estimates for llama.cpp-based apps such as Ollama and LM Studio; each app adds a little of its own.");
 }
 
+/// The picked tensor: its facts, and a sample of its numbers as statistics and a histogram.
+fn tensor_detail(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection, t: usize) {
+    let tt = &d.tensors[t];
+    ui.horizontal(|ui| {
+        ui.add(egui::Label::new(egui::RichText::new(&tt.name).monospace().strong()).wrap());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+            if ui.small_button("✖").on_hover_text("Close").clicked() {
+                page.picked = None;
+            }
+        });
+    });
+    ui.weak(format!("{} · {}", inspect::part_of(&tt.name).label(), precision_words(&tt.kind)));
+    ui.add_space(6.0);
+    egui::Grid::new("tensor-facts").num_columns(2).spacing([12.0, 3.0]).show(ui, |ui| {
+        for (k, v) in [
+            ("Type", tt.kind.clone()),
+            ("Shape", tt.shape_text()),
+            ("Values", group(tt.elements)),
+            ("Size", scan::human(tt.bytes)),
+            ("Starts at", format!("byte {}", group(tt.offset))),
+        ] {
+            ui.weak(k);
+            ui.label(v);
+            ui.end_row();
+        }
+    });
+    ui.add_space(10.0);
+    ui.strong("Its numbers");
+    let Some(file) = m.files.get(tt.file) else { return };
+    if file.not_local {
+        ui.weak("This file is only in the cloud. Reading it would download it, so Filescape hasn't.");
+        return;
+    }
+    if !crate::weights::readable(&tt.kind) {
+        ui.weak(format!("Filescape can't read {} numbers yet.", tt.kind));
+        return;
+    }
+    // Start reading when picked; take the result when it's ready.
+    if page.stats.as_ref().is_none_or(|(i, _)| *i != t) && page.stats_job.as_ref().is_none_or(|(i, _)| *i != t) {
+        let (tx, rx) = mpsc::channel();
+        let (path, tensor, ctx) = (file.path.clone(), tt.clone(), ui.ctx().clone());
+        std::thread::spawn(move || {
+            let r = crate::weights::sample(&path, &tensor, 32, 64 << 10).map(|v| crate::weights::Stats::of(&v, tensor.elements, 60));
+            let _ = tx.send(r);
+            ctx.request_repaint();
+        });
+        page.stats_job = Some((t, rx));
+    }
+    if let Some((i, rx)) = &page.stats_job
+        && let Ok(r) = rx.try_recv()
+    {
+        page.stats = Some((*i, r));
+        page.stats_job = None;
+    }
+    match &page.stats {
+        Some((i, Ok(s))) if *i == t => stats_view(ui, s),
+        Some((i, Err(e))) if *i == t => {
+            ui.colored_label(ui.visuals().warn_fg_color, format!("Couldn't read them: {e}."));
+        }
+        _ => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Reading…");
+            });
+        }
+    }
+}
+
+/// Statistics and a histogram of a sample of numbers.
+fn stats_view(ui: &mut egui::Ui, s: &crate::weights::Stats) {
+    let t = kit::tokens(ui);
+    if s.sampled < s.total {
+        ui.weak(format!("A sample of {} of its {} values, from across the tensor.", group(s.sampled), group(s.total)));
+    } else {
+        ui.weak(format!("All {} values.", group(s.total)));
+    }
+    if s.nan + s.inf > 0 {
+        ui.colored_label(t.tone(Tone::Danger), format!("✖ {} broken values (NaN or infinite). The model will give wrong answers.", group(s.nan + s.inf)));
+    }
+    ui.add_space(4.0);
+    let fmt = |v: f64| if v != 0.0 && (v.abs() < 1e-3 || v.abs() >= 1e4) { format!("{v:.3e}") } else { format!("{v:.4}") };
+    egui::Grid::new("tensor-stats").num_columns(2).spacing([12.0, 3.0]).show(ui, |ui| {
+        let zero_pct = s.zeros as f64 * 100.0 / s.sampled.max(1) as f64;
+        for (k, v, tip) in [
+            ("Average", fmt(s.mean), "The mean of the values."),
+            ("Spread", fmt(s.std), "Standard deviation: how far values typically are from the average."),
+            ("Smallest", fmt(s.min as f64), ""),
+            ("Largest", fmt(s.max as f64), ""),
+            ("Zeros", format!("{zero_pct:.1}%"), "Values that are exactly 0. A tensor of nothing but zeros has usually been damaged or left out."),
+        ] {
+            ui.weak(k).on_hover_text(tip);
+            ui.label(v);
+            ui.end_row();
+        }
+    });
+    if s.bins.is_empty() {
+        return;
+    }
+    ui.add_space(8.0);
+    let w = ui.available_width().min(420.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 110.0), Sense::hover());
+    let painter = ui.painter_at(rect.expand(2.0));
+    painter.rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
+    let top = *s.bins.iter().max().unwrap_or(&1) as f32;
+    let bw = rect.width() / s.bins.len() as f32;
+    for (i, &b) in s.bins.iter().enumerate() {
+        let h = (rect.height() - 4.0) * b as f32 / top.max(1.0);
+        let r = Rect::from_min_max(pos2(rect.left() + i as f32 * bw + 0.5, rect.bottom() - h), pos2(rect.left() + (i + 1) as f32 * bw - 0.5, rect.bottom()));
+        painter.rect_filled(r, 0.0, t.accent);
+    }
+    let (lo, hi) = s.range;
+    if lo < 0.0 && hi > 0.0 {
+        let x = rect.left() + rect.width() * (-lo) / (hi - lo);
+        painter.vline(x, rect.y_range(), Stroke::new(1.0, ui.visuals().weak_text_color()));
+    }
+    if let Some(p) = resp.hover_pos() {
+        let i = (((p.x - rect.left()) / bw) as usize).min(s.bins.len() - 1);
+        let step = (hi - lo) / s.bins.len() as f32;
+        let a = lo + step * i as f32;
+        resp.on_hover_text(format!("{} to {}: {} values", fmt(a as f64), fmt((a + step) as f64), group(s.bins[i] as u64)));
+    }
+    ui.horizontal(|ui| {
+        ui.weak(fmt(lo as f64));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.weak(fmt(hi as f64)));
+    });
+    if s.outside > 0 {
+        ui.weak(format!("{} extreme values lie outside the chart.", group(s.outside)));
+    }
+}
+
+/// Checking a sample of every tensor's numbers, from Health.
+fn weight_scan(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) {
+    use crate::weights;
+    ui.add_space(6.0);
+    ui.strong("Numbers");
+    if let Some(job) = &page.scan_all {
+        match job.rx.try_recv() {
+            Ok(f) => {
+                page.scanned = Some(f);
+                page.scan_all = None;
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                let done = job.done.load(Ordering::Relaxed);
+                let mut stop = false;
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(format!("Reading tensor {} of {}…", done.min(job.total), job.total));
+                    stop = ui.small_button("Cancel").clicked();
+                });
+                kit::progress(ui, done as f32 / job.total.max(1) as f32, Tone::Accent);
+                if stop {
+                    job.cancel.store(true, Ordering::Relaxed);
+                }
+                ui.ctx().request_repaint_after(Duration::from_millis(100));
+                return;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => page.scan_all = None,
+        }
+    }
+    let readable: Vec<usize> = (0..d.tensors.len()).filter(|&i| weights::readable(&d.tensors[i].kind) && m.files.get(d.tensors[i].file).is_some_and(|f| !f.not_local)).collect();
+    let Some(found) = &page.scanned else {
+        if readable.is_empty() {
+            ui.weak("Filescape can't read this model's numbers yet.");
+            return;
+        }
+        ui.label("Filescape can read a sample of every tensor's numbers to look for broken values (NaN or infinite) and tensors left empty. It reads about 128 KB of each tensor, not the whole model.");
+        ui.add_space(4.0);
+        if ui.button("Check the numbers").clicked() {
+            let done = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let cancel = Arc::new(AtomicBool::new(false));
+            let (tx, rx) = mpsc::channel();
+            let jobs: Vec<(usize, PathBuf, inspect::Tensor)> = readable.iter().map(|&i| (i, m.files[d.tensors[i].file].path.clone(), d.tensors[i].clone())).collect();
+            let (dn, c) = (done.clone(), cancel.clone());
+            std::thread::spawn(move || {
+                let mut out = Vec::new();
+                for (i, path, t) in jobs {
+                    if c.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let stats = weights::sample(&path, &t, 8, 16 << 10).map(|v| weights::Stats::of(&v, t.elements, 1));
+                    out.push(WeightFinding { tensor: i, stats });
+                    dn.fetch_add(1, Ordering::Relaxed);
+                }
+                let _ = tx.send(out);
+            });
+            page.scan_all = Some(WeightScan { done, total: readable.len() as u64, cancel, rx });
+        }
+        let skipped = d.tensors.len() - readable.len();
+        if skipped > 0 {
+            ui.weak(format!("{} tensor{} in number types Filescape can't read yet will be skipped.", group(skipped as u64), if skipped == 1 { "" } else { "s" }));
+        }
+        return;
+    };
+    let t = kit::tokens(ui);
+    let broken: Vec<&WeightFinding> = found.iter().filter(|f| f.stats.as_ref().is_ok_and(|s| s.nan + s.inf > 0)).collect();
+    let empty: Vec<&WeightFinding> = found.iter().filter(|f| f.stats.as_ref().is_ok_and(|s| s.sampled > 0 && s.zeros == s.sampled && s.total > 64)).collect();
+    let failed: Vec<&WeightFinding> = found.iter().filter(|f| f.stats.is_err()).collect();
+    let values: u64 = found.iter().filter_map(|f| f.stats.as_ref().ok()).map(|s| s.sampled).sum();
+    let mut pick = None;
+    let mut list = |ui: &mut egui::Ui, fs: &[&WeightFinding]| {
+        for f in fs.iter().take(12) {
+            if ui.link(&d.tensors[f.tensor].name).clicked() {
+                pick = Some(f.tensor);
+            }
+        }
+        if fs.len() > 12 {
+            ui.weak(format!("and {} more", fs.len() - 12));
+        }
+    };
+    if broken.is_empty() && empty.is_empty() && failed.is_empty() {
+        ui.colored_label(t.tone(Tone::Success), format!("✔ No broken numbers in {} values sampled from {} tensors.", group(values), group(found.len() as u64)));
+    }
+    if !broken.is_empty() {
+        ui.colored_label(t.tone(Tone::Danger), format!("✖ {} tensor{} with broken values (NaN or infinite). The model will give wrong answers.", broken.len(), if broken.len() == 1 { "" } else { "s" }));
+        list(ui, &broken);
+    }
+    if !empty.is_empty() {
+        ui.colored_label(t.tone(Tone::Warn), format!("⚠ In {} tensor{}, every value sampled is zero, which usually means the data was damaged or left out.", empty.len(), if empty.len() == 1 { "" } else { "s" }));
+        list(ui, &empty);
+    }
+    if !failed.is_empty() {
+        ui.colored_label(t.tone(Tone::Warn), format!("⚠ {} tensor{} couldn't be read.", failed.len(), if failed.len() == 1 { "" } else { "s" }));
+        list(ui, &failed);
+    }
+    if found.len() < readable.len() {
+        ui.weak("Stopped before every tensor was read.");
+    }
+    if ui.small_button("Check again").clicked() {
+        page.scanned = None;
+    }
+    if let Some(i) = pick {
+        page.picked = Some(i);
+        page.filter.clear();
+        page.tab = PageTab::Tensors;
+    }
+}
+
 /// Colours for the parts of a model, readable in both themes.
 fn part_colour(p: inspect::Part) -> Color32 {
     use inspect::Part::*;
@@ -1262,6 +1532,12 @@ fn paint_model_map(ui: &mut egui::Ui, rect: Rect, page: &ModelPage, d: &Inspecti
 
 /// Tensors: a searchable list, sorted by any column.
 fn page_tensors(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) {
+    if let Some(t) = page.picked.filter(|&t| t < d.tensors.len()) {
+        egui::Panel::right("tensor-detail").default_size(320.0).min_size(260.0).resizable(true).show(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| tensor_detail(ui, page, m, d, t));
+        });
+    }
+    let mut clicked = None;
     ui.push_id("tensor-search", |ui| {
         ui.set_max_width(420.0);
         kit::search_field(ui, &mut page.filter, "Filter by name or type, such as attn or Q6_K");
@@ -1319,7 +1595,9 @@ fn page_tensors(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspecti
             let t = &d.tensors[page.shown[row]];
             let (rect, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::click());
             let vis = ui.visuals();
-            if resp.hovered() {
+            if page.picked == Some(page.shown[row]) {
+                ui.painter().rect_filled(rect, 3.0, vis.selection.bg_fill);
+            } else if resp.hovered() {
                 ui.painter().rect_filled(rect, 3.0, vis.widgets.hovered.weak_bg_fill);
             } else if row % 2 == 1 {
                 ui.painter().rect_filled(rect, 0.0, vis.faint_bg_color);
@@ -1334,6 +1612,9 @@ fn page_tensors(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspecti
             ui.painter().text(pos2(cell(4).right() - 8.0, y), Align2::RIGHT_CENTER, scan::human(t.bytes), plain.clone(), vis.text_color());
             let file = if m.files.len() > 1 { m.files.get(t.file).and_then(|f| f.path.file_name()).map(|n| format!("\nIn {}", n.to_string_lossy())).unwrap_or_default() } else { String::new() };
             let resp = resp.on_hover_text(format!("{}\n{} · {} · {} values · {}{file}", t.name, t.kind, t.shape_text(), group(t.elements), scan::human(t.bytes)));
+            if resp.clicked() {
+                clicked = Some(page.shown[row]);
+            }
             resp.context_menu(|ui| {
                 if ui.button("Copy name").clicked() {
                     ui.ctx().copy_text(t.name.clone());
@@ -1342,6 +1623,9 @@ fn page_tensors(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspecti
             });
         }
     });
+    if let Some(t) = clicked {
+        page.picked = if page.picked == Some(t) { None } else { Some(t) };
+    }
 }
 
 /// A number of values: exact below a million, then 17M, 8.2B.
