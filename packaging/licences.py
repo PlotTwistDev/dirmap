@@ -134,6 +134,18 @@ def render(meta):
     for p in pkgs:
         lines.append(f"{p['name']} {p['version']}\t{p.get('license') or 'see its licence text'}")
     lines.append("")
+    # MPL-2.0 asks that people can find the source of what's distributed in executable form.
+    mpl = [p for p in pkgs if "MPL" in (p.get("license") or "")]
+    for p in mpl:
+        lines += textwrap.wrap(
+            f"{p['name']} {p['version']} is used unmodified. Its source code is at "
+            f"https://crates.io/crates/{p['name']}/{p['version']}"
+            + (f" and {p['repository']}." if p.get("repository") else "."),
+            100,
+            break_on_hyphens=False,
+        )
+    if mpl:
+        lines.append("")
     for t, users in sorted(groups.items(), key=lambda g: g[1][0].lower()):
         lines.append("=" * 72)
         lines += textwrap.wrap("Used by: " + ", ".join(users), 100, break_on_hyphens=False)

@@ -43,9 +43,9 @@ for the settings.
 | Sound | `.mp3` `.wav` `.flac` `.m4a` `.aac` `.ogg` `.oga` `.opus` `.wma` `.aif` `.aiff` `.alac` | Cover, waveform, tags and playback | The system, with lofty for tags |
 | CSV or TSV table | `.csv` `.tsv` `.tab` | A table, with column names from the first row | Filescape (csv) |
 | SQLite database | `.sqlite` `.sqlite3` `.db` `.db3` `.s3db` `.sl3` | Each table's columns and first rows, read-only | SQLite (rusqlite) |
-| 3D model | `.stl` `.obj` `.ply` `.gltf` `.glb` `.3mf` | A shaded model to turn about | Filescape (gltf for glTF) |
+| 3D model | `.stl` `.obj` `.ply` `.gltf` `.glb` `.3mf` `.fbx` `.dae` `.abc` | A shaded model to turn about | Filescape (gltf for glTF, craft-mesh for FBX, COLLADA and Alembic) |
 | DXF drawing | `.dxf` | The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size | Filescape |
-| CAD model (DWG, STEP, IGES) | `.dwg` `.step` `.stp` `.p21` `.iges` `.igs` | What the file says: the program that made it, units, author and parts (not drawn) | Filescape |
+| CAD model (DWG, STEP, IGES) | `.dwg` `.step` `.stp` `.p21` `.iges` `.igs` | DWG: the drawing (lines, curves and blocks; text isn't drawn). STEP and IGES: the program that made it, units, author and parts (not drawn) | Filescape (craft-dwg with acadrust for DWG) |
 | Pages, Numbers and Keynote | `.pages` `.numbers` `.key` | The picture the app saved inside the file, and the version that saved it | Filescape |
 | Design and 3D app files (Sketch, Affinity, CorelDRAW, SketchUp, Blender, Cinema 4D, 3ds Max, Maya, Houdini) | `.sketch` `.afdesign` `.afphoto` `.afpub` `.aftemplate` `.cdr` `.skp` `.blend` `.c4d` `.max` `.ma` `.mb` `.hip` `.hipnc` `.hiplc` | The picture the app saved inside the file, and the version that saved it | Filescape |
 | Craft Apps files (PhotoCraft, VectorCraft, EffectCraft, FigCraft, DesignCraft, TextureCraft, DeckCraft, AniCraft, MaterialCraft, FilmCraft, SoundCraft) | `.pcraft` `.vectorcraft` `.drawcraft` `.vctemplate` `.ecproj` `.ectemplate` `.figcraft` `.designcraft` `.tcraft` `.deckcraft` `.anicraft` `.mcraft` `.fcproj` `.scraft` `.scraftz` | The picture the app saved inside the file, with its pages, layers, size, length and the version that saved it | Filescape (craft-doc) |

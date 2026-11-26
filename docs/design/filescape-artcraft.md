@@ -308,3 +308,4 @@ rows there and to the tracker below.
 | Stage B: files a project uses, After Effects projects, LightCraft libraries, PhotoCraft bundles | #94 | In review |
 | Stage C1: 12-bit and arithmetic JPEG, Photoshop layers | (this PR) | In review |
 | Stage C2: Krita, OpenRaster, Figma, GIMP and Paint.NET | (this PR) | In review |
+| Stage C3: FBX, COLLADA, Alembic models; DWG drawings | (this PR) | In review |

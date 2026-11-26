@@ -130,6 +130,8 @@
   adjustments, and the names at the top of the stack.
 - Krita, OpenRaster and Figma files show the picture saved inside them, with their layers. GIMP
   and Paint.NET pictures are drawn from their layers.
+- FBX, COLLADA (.dae) and Alembic (.abc) models show as shaded clay to turn about, like other 3D
+  models. AutoCAD DWG drawings are drawn, converted to DXF in a separate process first.
 - Music projects from Ableton Live (.als), REAPER (.rpp), FL Studio (.flp) and Cubase or Nuendo
   (.cpr, .npr) show the version that saved them, the tempo, tracks, plugins and the sound files
   they use, marking any that aren't on this computer.

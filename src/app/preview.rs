@@ -344,7 +344,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             }
             Err(e) => Content::Error(e),
         },
-        Kind::Cad if crate::cadview::is_dxf(path) => match crate::cadview::read_dxf(path) {
+        Kind::Cad if crate::cadview::is_dxf(path) || crate::cadview::is_dwg(path) => match if crate::cadview::is_dwg(path) { crate::cadview::read_dwg(path) } else { crate::cadview::read_dxf(path) } {
             Ok(d) => {
                 let (w, h) = d.fit(1400);
                 Content::Image {
@@ -358,7 +358,11 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                     facts: d.facts,
                 }
             }
-            Err(e) => Content::Error(e),
+            // A DWG that couldn't be converted still says what it is.
+            Err(e) => match crate::cadview::is_dwg(path).then(|| crate::cadview::read_info(path)).and_then(Result::ok) {
+                Some(i) => Content::Doc { blocks: Arc::new(i.blocks), facts: i.facts },
+                None => Content::Error(e),
+            },
         },
         Kind::Cad => match crate::cadview::read_info(path) {
             Ok(i) => Content::Doc { blocks: Arc::new(i.blocks), facts: i.facts },
