@@ -349,7 +349,9 @@ impl App {
     }
 
     /// The pane at the right of the map: the clicked tile's preview and what's known about it.
-    pub(super) fn map_preview_pane(&mut self, ui: &mut egui::Ui) {
+    /// The preview takes all the room the facts under it leave in the pane (`tall` points high),
+    /// so the facts sit at the bottom and pictures and videos get the space.
+    pub(super) fn map_preview_pane(&mut self, ui: &mut egui::Ui, tall: f32) {
         let pal = style::pal(ui);
         ui.add_space(6.0);
         ui.horizontal(|ui| {
@@ -376,9 +378,13 @@ impl App {
         } else if crate::fsys::remote::is_remote(&path) && !previewable(&n.name) {
             // Nothing worth fetching from a server.
         } else {
-            let h = (ui.available_height() * 0.5).clamp(120.0, w * 1.2);
+            // The facts' height as last drawn (they're drawn after the preview).
+            let facts = ui.data(|d| d.get_temp::<f32>(egui::Id::new("map-preview-facts"))).unwrap_or(220.0);
+            let above = ui.cursor().top() - ui.max_rect().top();
+            let h = (tall - above - facts - 10.0).max(tall * 0.45).max(120.0);
             self.preview_body(ui, &path, &e, vec2(w, h));
         }
+        let facts_top = ui.cursor().top();
         ui.add_space(8.0);
         ui.add(egui::Label::new(egui::RichText::new(&*n.name).strong()).wrap());
         ui.add_space(4.0);
@@ -503,6 +509,8 @@ impl App {
                 self.files.spawn(move || crate::actions::reveal(&p));
             }
         });
+        let facts = ui.cursor().top() - facts_top;
+        ui.data_mut(|d| d.insert_temp(egui::Id::new("map-preview-facts"), facts));
         if let Some(p) = go {
             self.select(p);
         }

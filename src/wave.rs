@@ -21,6 +21,16 @@ pub fn peaks(path: &Path, buckets: usize) -> Result<Vec<f32>, String> {
     Ok(to_peaks(&s, buckets))
 }
 
+/// A video's sound for its timeline: `buckets` loudness values (as `peaks`) and how many seconds
+/// from the start they cover (all of it, unless it's longer than two hours).
+pub fn timeline(path: &Path, buckets: usize) -> Result<(Vec<f32>, f64), String> {
+    let s = imp::samples(path, RATE, 2.0 * 3600.0)?;
+    if s.is_empty() || buckets == 0 {
+        return Err("No sound".into());
+    }
+    Ok((to_peaks(&s, buckets), s.len() as f64 / RATE as f64))
+}
+
 /// Mean loudness of each stretch, scaled so the loudest is 1.
 pub fn to_peaks(s: &[i16], buckets: usize) -> Vec<f32> {
     let n = s.len();

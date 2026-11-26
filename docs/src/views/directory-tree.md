@@ -41,7 +41,7 @@ instantly.
 ## Highlight mode
 
 When a filter is on in **Highlight** mode, files that don't match, and folders with no matches
-anywhere inside, are shown faintly in the tree, as on the map. In **Show matches only** mode the tree lists only the matching files and the
+anywhere inside, are shown faintly in the tree, as on the map. In **Only matches** mode the tree lists only the matching files and the
 folders that hold them. See [Filtering overview](../filtering/overview.md).
 
 ## During a scan

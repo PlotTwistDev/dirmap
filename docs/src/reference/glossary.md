@@ -6,7 +6,7 @@ deactivating one frees its place; a temporary licence can be activated 3 times, 
 **Breadcrumbs**: The row of folder names above the map (🏠 *scan* › *folder* › …) showing which folder the map is
 showing. Click one to go there.
 
-**Category**: A group of extensions such as Audio or Disk images, used by the **Show:** buttons. See
+**Category**: A group of extensions such as Audio or Disk images, used by the **File types** buttons in the **Filters** panel. See
 [File categories](../filtering/categories.md).
 
 **Cushion shading**: The shading on the treemap that makes each folder's area look like a cushion, so the borders
@@ -49,7 +49,7 @@ the selection.
 **Sequence**: A set of numbered files in one folder, such as rendered frames, that differ only in their frame
 number. See [Numbered sequences](../filtering/sequences.md).
 
-**Show matches only**: Rebuilds the map and file manager from the files that match the filter.
+**Only matches**: Rebuilds the map and file manager from the files that match the filter.
 
 **Snapshot**: A saved copy of a scan's results (`.dmsnap` file) for comparing later. See
 [Comparing with a snapshot](../analysis/snapshots.md).

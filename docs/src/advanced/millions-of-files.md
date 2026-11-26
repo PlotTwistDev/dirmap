@@ -33,7 +33,7 @@ takes roughly 100–150 bytes, plus its name. In practice:
 
 Some features hold extra data while they're in use:
 
-- **Show matches only** builds a filtered copy of the part of the tree that matches.
+- **Only matches** builds a filtered copy of the part of the tree that matches.
 - **Compare with snapshot** loads the snapshot's whole tree as well.
 - **Find duplicates** keeps a list of candidate files while it runs.
 - While a scan is finishing, the live tree and the final tree briefly exist side by side.

@@ -25,6 +25,7 @@ pub struct Group {
 const APP: &str = "src/app.rs";
 const MENUS: &str = "src/app/menus.rs";
 const CUSTOM: &str = "src/app/custom.rs";
+const VIZ: &str = "src/app/viz.rs";
 const HELP: &str = "src/help/mod.rs";
 const BROWSER: &str = "src/app/browser.rs";
 const FILES: &str = "src/app/files.rs";
@@ -175,7 +176,7 @@ pub const KEYBOARD: &[Group] = &[
         title: "Folder box and Custom filter box",
         note: "While typing in them.",
         bindings: &[
-            b("Enter (folder box)", "", "Scan the folder typed.", &[(APP, "let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));")]),
+            b("Enter (folder box)", "", "Scan the folder typed.", &[(VIZ, "let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));")]),
             b("Enter (Custom box)", "", "Apply the pattern now and add it to Recent.", &[(CUSTOM, "let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));")]),
             b("↓ / ↑", "", "Choose a suggested extension or example.", &[(CUSTOM, "egui::Key::ArrowDown"), (CUSTOM, "egui::Key::ArrowUp")]),
             b("Tab", "", "Complete the chosen suggestion.", &[(CUSTOM, "egui::Key::Tab")]),

@@ -299,6 +299,19 @@ impl Help {
                     ui.end_row();
                 });
                 ui.add_space(8.0);
+                ui.label(
+                    RichText::new(
+                        "Filescape is provided \"as is\", without warranty. It can delete, move and overwrite files, \
+                         and some of that can't be undone: keep backups of anything you can't afford to lose. \
+                         To the extent the law allows, we aren't liable for lost or damaged files.",
+                    )
+                    .weak()
+                    .size(11.5),
+                );
+                if ui.link("Terms of use").clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(crate::licence::TERMS_URL));
+                }
+                ui.add_space(8.0);
                 ui.horizontal_wrapped(|ui| {
                     if ui.button("Copy details").on_hover_text("For a problem report").clicked() {
                         let text = format!(

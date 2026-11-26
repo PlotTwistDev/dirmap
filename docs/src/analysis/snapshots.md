@@ -34,7 +34,7 @@ The tab then shows:
   ones **deleted** (blue), and the amount is shown in orange for growth and blue for shrinkage.
   Hover over a line to see the old and new size; click a line to select that item.
 
-Press **Color the map by change** (or **Color by: Change** in the filter bar) to colour the map:
+Press **Color the map by change** (or **Colour: Change** above the map) to colour the map:
 red for new, orange for grown, blue for shrunk, grey for unchanged. Hovering over the map also
 shows how each file changed. See [Colour modes](../views/color-modes.md).
 

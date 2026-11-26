@@ -15,7 +15,7 @@ Filescape keeps the whole scan in memory so that browsing, filtering and zooming
 read the disk again. As a rough guide, allow **about 150 MB of memory per million files**
 scanned, plus some extra while the scan finishes. A drive with 3.5 million files therefore needs
 roughly 0.5 to 1 GB. Comparing with a snapshot holds a second copy of the scan, and
-**Show matches only** builds a smaller filtered copy.
+**Only matches** builds a smaller filtered copy.
 
 See [Scanning millions of files](../advanced/millions-of-files.md) for more detail.
 

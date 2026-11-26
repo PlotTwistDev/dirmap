@@ -14,7 +14,7 @@
 
    Use `{frame}` if you don't know how many digits there are, and a range such as
    `{frame:1001-1050}` for part of the sequence.
-3. The count shows how many frames match and their total size. Choose **Show matches only** to
+3. The count shows how many frames match and their total size. Choose **Only matches** to
    see only those frames, with the folders they're in.
 
 ## If you don't know the name

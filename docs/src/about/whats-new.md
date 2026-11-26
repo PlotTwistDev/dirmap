@@ -2,6 +2,19 @@
 
 ## Next version
 
+### A calmer Storage Analysis toolbar
+
+- The controls above the map are one row now: **Treemap** / **Sunburst**, a **Size** menu, a
+  **Colour** menu, **Filters**, a search box and a **Display** menu. Back, Forward, Up, Whole map
+  and Zoom to selection sit beside a breadcrumb of the folder on the map, whose last part opens
+  the scan controls. In a narrow window, menus fold into **⋯** instead of wrapping.
+- Filters moved into a **Filters** panel that stays open while you use the map: file types,
+  where files are stored, size presets and ranges, and a new **Last changed** filter (last 7 or
+  30 days, last year, or untouched for over a year or five years).
+- Each filter that's on shows as a removable chip under the toolbar, with **Highlight** /
+  **Only matches**, the match count and **Clear all**. With no filter on, the row is hidden.
+  See [Filtering overview](../filtering/overview.md).
+
 ### Storage Analysis keeps up with changes
 
 - Files added, changed or removed after a scan now show in Storage Analysis by themselves: a
@@ -190,6 +203,12 @@
 - **Steadier tile previews.** Previews on the Storage Analysis map no longer blink off and
   fade back in as you pan and zoom: a tile keeps its preview while the map sharpens, and sound
   waveforms hold their shape as tiles grow.
+- **Roomier preview pane.** In Storage Analysis the preview takes all the room the details
+  leave, and the details sit at the bottom of the pane.
+- **Video timeline.** A video's filmstrip is a timeline: click it to play from there, or drag
+  along it to scrub, the picture following back and forth. The video's sound is drawn under it
+  when it has some. Dragging the time slider scrubs too.
+- **Line numbers** beside the text of text files and scripts in previews.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
