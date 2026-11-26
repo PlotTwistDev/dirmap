@@ -45,6 +45,8 @@ pub fn general(ui: &mut egui::Ui, cx: &mut PageCx, licence: &mut crate::licence:
         kit::toggle_row(ui, "Striped rows", Some("Shade every other row so long lists are easier to follow."), &mut d.stripes);
         kit::divider(ui);
         kit::toggle_row(ui, "Explain system files", Some("Show an info icon after system files and folders that aren't obvious, like pagefile.sys, WinSxS, .Spotlight-V100 or /proc. Hover it to see what the item is and whether it's safe to delete. The preview pane and the right-click menu's What Is This? explain them too."), &mut d.system_notes);
+        kit::divider(ui);
+        kit::toggle_row(ui, "Backup reminder at start", Some("Each time Filescape starts, remind you to keep regular offline backups. Filescape can delete, move and overwrite files, and some of that can't be undone."), &mut d.backup_reminder);
     });
 
     kit::section(ui, Icon::Ruler, "File sizes", f.of("sizes"), |ui| {
