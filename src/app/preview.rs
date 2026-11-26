@@ -132,18 +132,29 @@ pub(super) struct Look {
 /// A video's filmstrip: being read, then its frames.
 struct StripView {
     path: PathBuf,
-    rx: Option<mpsc::Receiver<Result<Vec<crate::video::Frame>, String>>>,
+    rx: Option<mpsc::Receiver<Result<(crate::video::Info, Vec<crate::video::Frame>), String>>>,
     frames: Vec<(f64, egui::TextureHandle)>,
+    /// The video's length, from the filmstrip's reading of it.
+    length: Option<f64>,
+    /// Its sound's shape and the seconds that covers, read after the frames (`None` while
+    /// reading, `Some(None)` when it has no sound).
+    wave_rx: Option<mpsc::Receiver<Option<(Vec<f32>, f64)>>>,
+    wave: Option<Option<(Vec<f32>, f64)>>,
 }
 
-/// The filmstrip's height.
+/// The filmstrip's height, and the sound's under it.
 const STRIP_H: f32 = 56.0;
+const STRIP_WAVE_H: f32 = 30.0;
+/// Stretches in a video's sound on its timeline.
+const STRIP_WAVE_BARS: usize = 600;
 
 /// A video playing in a preview, and its picture.
 pub(super) struct VideoView {
     pub video: crate::video::Video,
     tex: Option<egui::TextureHandle>,
     serial: u64,
+    /// While the time slider is dragged: whether it was playing before, and where it's at.
+    scrub: Option<(bool, f64)>,
 }
 
 impl Look {
@@ -1142,39 +1153,58 @@ impl App {
             }
             return self.preview_main(ui, path, e, size);
         }
-        self.preview_main(ui, path, e, vec2(size.x, size.y - STRIP_H - ui.spacing().item_spacing.y));
-        self.filmstrip(ui, path, vec2(size.x, STRIP_H));
+        // The sound under the frames, once it's known there is some.
+        let wave = self.files.look.strip.as_ref().is_some_and(|s| s.path == path && matches!(s.wave, Some(Some(_))));
+        let strip_h = STRIP_H + if wave { STRIP_WAVE_H } else { 0.0 };
+        self.preview_main(ui, path, e, vec2(size.x, size.y - strip_h - ui.spacing().item_spacing.y));
+        self.filmstrip(ui, path, vec2(size.x, strip_h));
     }
 
-    /// Frames from across a video; clicking one plays from there.
+    /// The video as a timeline: frames from across it, and its sound under them when it has
+    /// some. Click to play from that moment; drag to scrub, the picture following back and forth.
     fn filmstrip(&mut self, ui: &mut egui::Ui, path: &Path, size: Vec2) {
         const N: usize = 8;
         let pal = style::pal(ui);
         if self.files.look.strip.as_ref().is_none_or(|s| s.path != path) {
             let (tx, rx) = mpsc::channel();
+            let (wtx, wrx) = mpsc::channel();
             let (p, ctx) = (path.to_path_buf(), ui.ctx().clone());
             let h = (STRIP_H * ui.ctx().pixels_per_point()).round() as u32;
             let _ = std::thread::Builder::new().name("filescape-filmstrip".into()).spawn(move || {
-                let _ = tx.send(crate::video::filmstrip(&p, N, h).map(|(_, f)| f));
+                let _ = tx.send(crate::video::filmstrip(&p, N, h));
+                ctx.request_repaint();
+                // The sound after the pictures, so they come first.
+                let wave = crate::wave::timeline(&p, STRIP_WAVE_BARS).ok().filter(|(w, _)| w.iter().any(|v| *v > 0.01));
+                let _ = wtx.send(wave);
                 ctx.request_repaint();
             });
-            self.files.look.strip = Some(StripView { path: path.to_path_buf(), rx: Some(rx), frames: Vec::new() });
+            self.files.look.strip = Some(StripView { path: path.to_path_buf(), rx: Some(rx), frames: Vec::new(), length: None, wave_rx: Some(wrx), wave: None });
         }
         let st = self.files.look.strip.as_mut().expect("just set");
         if let Some(rx) = &st.rx
             && let Ok(res) = rx.try_recv()
         {
             st.rx = None;
-            for (i, f) in res.unwrap_or_default().into_iter().enumerate() {
-                let img = egui::ColorImage::from_rgba_unmultiplied(f.size, &f.rgba);
-                st.frames.push((f.pts, ui.ctx().load_texture(format!("strip:{}:{i}", path.display()), img, egui::TextureOptions::LINEAR)));
+            if let Ok((info, frames)) = res {
+                st.length = info.duration.filter(|d| *d > 0.0);
+                for (i, f) in frames.into_iter().enumerate() {
+                    let img = egui::ColorImage::from_rgba_unmultiplied(f.size, &f.rgba);
+                    st.frames.push((f.pts, ui.ctx().load_texture(format!("strip:{}:{i}", path.display()), img, egui::TextureOptions::LINEAR)));
+                }
             }
+        }
+        if let Some(rx) = &st.wave_rx
+            && let Ok(w) = rx.try_recv()
+        {
+            st.wave_rx = None;
+            st.wave = Some(w);
         }
         let (r, _) = ui.allocate_exact_size(size, Sense::hover());
         let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
         p.rect_filled(r, style::RADIUS, Color32::BLACK);
+        let film = Rect::from_min_size(r.min, vec2(r.width(), STRIP_H.min(r.height())));
         if st.rx.is_some() {
-            ui.put(Rect::from_center_size(r.center(), vec2(18.0, 18.0)), egui::Spinner::new());
+            ui.put(Rect::from_center_size(film.center(), vec2(18.0, 18.0)), egui::Spinner::new());
             return;
         }
         if st.frames.is_empty() {
@@ -1182,37 +1212,101 @@ impl App {
         }
         // As many as fit at a useful size: every other one in a narrow pane.
         let total = st.frames.len();
-        let fit = ((r.width() / (STRIP_H * 1.5)).floor() as usize).clamp(3, total.max(3)).min(total);
+        let fit = ((film.width() / (STRIP_H * 1.5)).floor() as usize).clamp(3, total.max(3)).min(total);
         let shown: Vec<usize> = (0..fit).map(|k| (k * total + total / 2) / fit).map(|i| i.min(total - 1)).collect();
-        let cell = r.width() / fit as f32;
-        let mut seek = None;
-        for (i, (t, tex)) in shown.iter().map(|&j| &st.frames[j]).enumerate() {
-            let c = Rect::from_min_size(pos2(r.left() + i as f32 * cell, r.top()), vec2(cell, r.height())).shrink(1.0);
+        let cell = film.width() / fit as f32;
+        for (i, (_, tex)) in shown.iter().map(|&j| &st.frames[j]).enumerate() {
+            let c = Rect::from_min_size(pos2(film.left() + i as f32 * cell, film.top()), vec2(cell, film.height())).shrink(1.0);
             let ts = tex.size_vec2();
-            let s = (c.width() / ts.x).min(c.height() / ts.y);
-            let img = Rect::from_center_size(c.center(), ts * s);
-            p.image(tex.id(), img, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-            let resp = ui.interact(c, ui.id().with(("strip", path, i)), Sense::click());
-            if resp.hovered() {
-                p.rect_stroke(img, 2.0, Stroke::new(2.0, pal.accent), egui::StrokeKind::Inside);
-            }
-            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(format!("Play from {}", crate::media::clock(*t))).clicked() {
-                seek = Some(*t);
+            let s = (c.width() / ts.x).max(c.height() / ts.y);
+            // Each frame fills its cell, cropped from the middle, so the strip reads as one band.
+            let (fx, fy) = (c.width() / (ts.x * s), c.height() / (ts.y * s));
+            p.image(tex.id(), c, Rect::from_center_size(pos2(0.5, 0.5), vec2(fx, fy)), Color32::WHITE);
+        }
+        // The sound, along the same time as the frames.
+        if let Some(Some((w, secs))) = &st.wave
+            && let Some(len) = st.length
+            && r.height() > STRIP_H + 4.0
+        {
+            let band = Rect::from_min_max(pos2(r.left(), film.bottom() + 2.0), pos2(r.right(), r.bottom() - 2.0));
+            let span = band.width() * (secs / len).min(1.0) as f32;
+            let bars = ((span / 2.0) as usize).clamp(1, w.len());
+            let bw = span / bars as f32;
+            let mid = band.center().y;
+            let ink = style::blend(pal.accent, Color32::WHITE, 0.25);
+            for i in 0..bars {
+                let (lo, hi) = (i * w.len() / bars, ((i + 1) * w.len() / bars).max(i * w.len() / bars + 1));
+                let v = w[lo..hi.min(w.len())].iter().copied().fold(0.0, f32::max);
+                let h = (v * band.height() * 0.5).max(0.5);
+                let x = band.left() + i as f32 * bw;
+                p.rect_filled(Rect::from_min_max(pos2(x, mid - h), pos2(x + (bw - 0.5).max(0.5), mid + h)), 0.0, ink);
             }
         }
-        if let Some(t) = seek {
-            match &self.files.look.video {
-                Some(v) if v.video.path == path => {
+        let Some(len) = st.length else { return };
+        let resp = ui.interact(r, ui.id().with(("timeline", path)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        let at_x = |x: f32| ((x - r.left()) / r.width()).clamp(0.0, 1.0) as f64 * len;
+        // Where the video is, and where the pointer would take it.
+        let playing_here = self.files.look.video.as_ref().filter(|v| v.video.path == path);
+        let head = playing_here.map(|v| v.scrub.map_or(v.video.state().position, |s| s.1));
+        if let Some(t) = head {
+            let x = r.left() + (t / len).clamp(0.0, 1.0) as f32 * r.width();
+            p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(2.0, Color32::WHITE));
+            p.circle_filled(pos2(x, r.top() + 1.0), 4.0, Color32::WHITE);
+        }
+        if let Some(q) = resp.hover_pos() {
+            let x = q.x.clamp(r.left(), r.right());
+            p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(1.0, pal.accent));
+            let label = crate::media::clock(at_x(x));
+            let g = p.layout_no_wrap(label, FontId::monospace(11.0), Color32::WHITE);
+            let left = (x - g.size().x / 2.0 - 4.0).clamp(r.left(), (r.right() - g.size().x - 8.0).max(r.left()));
+            let chip = Rect::from_min_size(pos2(left, r.bottom() - g.size().y - 6.0), g.size() + vec2(8.0, 4.0));
+            p.rect_filled(chip, 3.0, Color32::from_black_alpha(190));
+            p.galley(chip.min + vec2(4.0, 2.0), g, Color32::WHITE);
+        }
+        let pointer = resp.interact_pointer_pos().map(|q| at_x(q.x));
+        if (resp.dragged() || resp.drag_started()) && let Some(t) = pointer {
+            // Scrub: paused while dragging, the picture following the pointer.
+            if self.files.look.video.as_ref().is_none_or(|v| v.video.path != path) {
+                let ctx = ui.ctx().clone();
+                let video = crate::video::Video::start(path, true, move || ctx.request_repaint());
+                video.pause();
+                self.files.look.video = Some(VideoView { video, tex: None, serial: 0, scrub: Some((false, f64::NAN)) });
+            }
+            if let Some(v) = self.files.look.video.as_mut() {
+                let was = v.scrub.map_or_else(|| v.video.state().playing, |s| s.0);
+                if v.scrub.is_none() && was {
+                    v.video.pause();
+                }
+                if v.scrub.is_none_or(|s| s.1 != t) {
+                    v.video.seek(t);
+                }
+                v.scrub = Some((was, t));
+            }
+        } else if resp.drag_stopped() {
+            // Let go: carry on playing if it was before.
+            if let Some(v) = self.files.look.video.as_mut().filter(|v| v.video.path == path)
+                && v.scrub.take().is_some_and(|s| s.0)
+            {
+                v.video.play();
+            }
+        } else if resp.clicked() && let Some(t) = pointer {
+            // A click plays from there.
+            match self.files.look.video.as_mut().filter(|v| v.video.path == path) {
+                Some(v) => {
+                    v.scrub = None;
                     v.video.seek(t);
                     v.video.play();
                 }
-                _ => {
+                None => {
                     let ctx = ui.ctx().clone();
                     let video = crate::video::Video::start(path, true, move || ctx.request_repaint());
                     video.seek(t);
-                    self.files.look.video = Some(VideoView { video, tex: None, serial: 0 });
+                    self.files.look.video = Some(VideoView { video, tex: None, serial: 0, scrub: None });
                 }
             }
+        }
+        if head.is_some() {
+            ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
     }
 
@@ -1479,7 +1573,7 @@ impl App {
             if crate::video::supported() {
                 let ctx = ui.ctx().clone();
                 let video = crate::video::Video::start(path, true, move || ctx.request_repaint());
-                self.files.look.video = Some(VideoView { video, tex: None, serial: 0 });
+                self.files.look.video = Some(VideoView { video, tex: None, serial: 0, scrub: None });
             } else {
                 let v = path.to_path_buf();
                 self.files.spawn(move || crate::media::play_video(&v));
@@ -1535,11 +1629,26 @@ fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
     };
     let tw = 140.0;
     if let Some(l) = st.info.and_then(|i| i.duration).filter(|l| *l > 0.0) {
-        let mut at = st.position.min(l);
+        let mut at = v.scrub.map_or(st.position, |s| s.1).min(l);
         ui.spacing_mut().slider_width = (ui.available_width() - tw - 34.0).max(40.0);
         let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
+        // Dragging scrubs: the picture follows the handle back and forth, paused, and playing
+        // carries on from there when it's let go if it was playing before.
+        if s.dragged() {
+            let was = v.scrub.map_or(st.playing, |s| s.0);
+            if v.scrub.is_none() && st.playing {
+                v.video.pause();
+            }
+            if v.scrub.is_none_or(|s| s.1 != at) {
+                v.video.seek(at);
+            }
+            v.scrub = Some((was, at));
+        }
         if s.drag_stopped() || (s.clicked() && !s.dragged()) {
             v.video.seek(at);
+            if v.scrub.take().is_some_and(|s| s.0) {
+                v.video.play();
+            }
         }
     }
     ui.label(egui::RichText::new(time).monospace().size(12.0).color(pal.weak));
@@ -1567,20 +1676,45 @@ fn text_view(ui: &mut egui::Ui, path: &Path, text: &str, truncated: bool, size: 
         ui.set_min_size(size - vec2(16.0, 16.0));
         ui.set_max_size(size - vec2(16.0, 16.0));
         egui::ScrollArea::vertical().id_salt(("look-text", path)).auto_shrink(false).show(ui, |ui| {
-            match colours {
-                Some(c) => {
-                    let spans = if ui.visuals().dark_mode { &c.dark } else { &c.light };
-                    ui.add(egui::Label::new(coloured_job(text, spans, ui.visuals().text_color())).wrap());
-                }
-                None => {
-                    ui.add(egui::Label::new(egui::RichText::new(text).monospace().size(12.0)).wrap());
-                }
-            }
+            let ink = ui.visuals().text_color();
+            let job = match colours {
+                Some(c) => coloured_job(text, if ui.visuals().dark_mode { &c.dark } else { &c.light }, ink),
+                None => egui::text::LayoutJob::simple(text.to_string(), FontId::monospace(12.0), ink, f32::INFINITY),
+            };
+            numbered(ui, text, job);
             if truncated {
                 ui.weak("… (only the first 256 KB is shown)");
             }
         });
     });
+}
+
+/// Text laid out with its line numbers in a gutter at the left: the number on the first row of
+/// each line, so a wrapped line keeps one number.
+fn numbered(ui: &mut egui::Ui, text: &str, mut job: egui::text::LayoutJob) {
+    let font = FontId::monospace(11.0);
+    let lines = text.lines().count().max(1);
+    let digits = lines.to_string().len();
+    let gutter = ui.fonts_mut(|f| f.glyph_width(&font, '0')) * digits as f32 + 12.0;
+    job.wrap.max_width = (ui.available_width() - gutter).max(40.0);
+    let galley = ui.painter().layout_job(job);
+    let (r, _) = ui.allocate_exact_size(vec2(gutter + galley.size().x, galley.size().y), Sense::hover());
+    let p = ui.painter();
+    let weak = ui.visuals().weak_text_color().gamma_multiply(0.8);
+    let view = ui.clip_rect();
+    let mut line = 1;
+    let mut starts = true;
+    for row in &galley.rows {
+        let y = r.top() + row.pos.y;
+        if starts && y + row.rect().height() >= view.top() && y <= view.bottom() {
+            p.text(pos2(r.left() + gutter - 8.0, y + row.rect().height() / 2.0), Align2::RIGHT_CENTER, line.to_string(), font.clone(), weak);
+        }
+        if row.ends_with_newline {
+            line += 1;
+        }
+        starts = row.ends_with_newline;
+    }
+    p.galley(r.min + vec2(gutter, 0.0), galley, ui.visuals().text_color());
 }
 
 /// A workbook: a switch between its sheets, and the cells of the one picked, drawn only where
