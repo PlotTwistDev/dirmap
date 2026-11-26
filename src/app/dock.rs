@@ -559,25 +559,7 @@ impl App {
     /// The map's filters, which are shared with Storage Analysis: what they are, and a way to
     /// clear them here, so a map that's mostly dimmed or empty says why.
     fn dock_filters(&mut self, ui: &mut egui::Ui) {
-        let mut parts = Vec::new();
-        if self.filter.kinds != 0 {
-            parts.push(Category::ALL.iter().filter(|c| self.filter.kinds & c.bit() != 0).map(|c| c.label()).collect::<Vec<_>>().join(", "));
-        }
-        if let Some(f) = &self.filter.custom {
-            parts.push(format!("Custom: {}", f.source().trim()));
-        }
-        if self.filter.stored != 0 {
-            parts.push(super::cloud::stored_names(self.filter.stored));
-        }
-        if self.filter.larger > 0 {
-            parts.push(format!("larger than {}", scan::human(self.filter.larger)));
-        }
-        if self.filter.smaller > 0 {
-            parts.push(format!("smaller than {}", scan::human(self.filter.smaller)));
-        }
-        if self.dupes_only {
-            parts.push("duplicates only".into());
-        }
+        let parts: Vec<String> = super::viz::chips_of(&self.filter, self.dupes_only).into_iter().map(|(_, s)| s).collect();
         if parts.is_empty() {
             return;
         }
@@ -599,9 +581,7 @@ impl App {
                         .on_hover_text("This filter is set in Storage Analysis and applies to both maps.");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.small_button("Clear Filter").on_hover_text("Show every file on the maps again").clicked() {
-                            self.filter = ViewFilter::default();
-                            self.clear_custom();
-                            self.dupes_only = false;
+                            self.clear_all_filters();
                         }
                         if ui.small_button("Change…").on_hover_text("Open Storage Analysis, where the filter is set (Ctrl+3)").clicked() {
                             self.set_workspace(Workspace::Analysis);

@@ -1,6 +1,6 @@
 # Filter examples
 
-Ready-made patterns for the **🔍 Custom** filter (**Ctrl+F**). Copy one with the **Copy** button,
+Ready-made patterns for the search box (**Ctrl+F**). Copy one with the **Copy** button,
 or press **Use in Custom filter** to apply it straight away. See [Custom filter syntax](syntax.md)
 for how they work.
 
@@ -122,11 +122,11 @@ Files with a version number, such as `comp_v012.nk`:
 
 ## Combining with other filters
 
-The Custom pattern combines with the **Show:** categories and the size limits. For example:
+The Custom pattern combines with the **File types** in the **Filters** panel and the size limits. For example:
 
 - **Custom** `*.exr` with **Larger than** `100 MB`: unusually large frames, often a sign of a
   render setting gone wrong.
-- **Show: 🎬 Video** with **Custom** `!*proxy*`: every video except proxies.
+- **Filters › Video** with **Custom** `!*proxy*`: every video except proxies.
 - **Custom** `*.log` with **Larger than** `1 GB`: runaway log files.
 
 ## Related topics

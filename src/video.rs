@@ -188,7 +188,17 @@ fn run(path: &Path, rx: &mpsc::Receiver<Cmd>, shared: &Mutex<Shared>, repaint: &
                 set(&mut |s| s.playing = false);
                 continue;
             }
-            Some(Cmd::Seek(t)) => {
+            Some(Cmd::Seek(mut t)) => {
+                // Scrubbing sends a stream of these: go straight to the newest.
+                while let Ok(c) = rx.try_recv() {
+                    match c {
+                        Cmd::Seek(n) => t = n,
+                        other => {
+                            pending = Some(other);
+                            break;
+                        }
+                    }
+                }
                 pos = t.max(0.0);
                 clock = None;
                 match open(path, pos) {

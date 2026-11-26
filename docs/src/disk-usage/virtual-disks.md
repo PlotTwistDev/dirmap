@@ -12,7 +12,7 @@ shows each of these as a single rectangle, often one of the biggest on the drive
 | `.dmg` | macOS disk images |
 | `.iso`, `.wim`, `.esd` | Installation media and Windows images |
 
-All of these are in the **💿 Disk images** category, so **Show: 💿 Disk images** lights them all
+All of these are in the **💿 Disk images** category, so **Filters › Disk images** lights them all
 up at once.
 
 ## Why virtual disks are often bigger than what's inside
@@ -33,7 +33,7 @@ disk itself.
 ## Finding them
 
 1. Scan the drive.
-2. Click **Show: 💿 Disk images**. Everything else is hidden.
+2. Click **Filters › Disk images**. Everything else is hidden.
 3. Hover over the bright rectangles to see their paths, or use the **File types** tab:
    right-click `.vhdx` and choose **🔍 Find all .vhdx files** for a list, largest first.
 

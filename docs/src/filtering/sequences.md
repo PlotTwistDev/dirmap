@@ -28,7 +28,7 @@ missing (the first 20 gaps).
 
 **Click a sequence** to filter the map to it: Filescape puts a matching pattern in the Custom
 filter (for example `shot010_comp.####.exr`) and selects the folder that holds it. Use
-**Show matches only** to see just that sequence.
+**Only matches** to see just that sequence.
 
 ## How Filescape decides what a sequence is
 

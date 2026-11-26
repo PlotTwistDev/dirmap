@@ -27,31 +27,9 @@ pub(super) struct Summary {
     pub pending: bool,
 }
 
-/// The active filters in words, e.g. "Images, Video · larger than 100 MB · \"*beauty*\"".
+/// The active filters in words, e.g. "Images · Video · Larger than 100 MB · Name: *beauty*".
 fn describe(f: &ViewFilter) -> String {
-    let mut parts = Vec::new();
-    if f.kinds != 0 {
-        let names: Vec<&str> = Category::ALL
-            .iter()
-            .filter(|c| f.kinds & c.bit() != 0)
-            // The labels start with an emoji; the words are enough here.
-            .map(|c| c.label().split_once(' ').map_or(c.label(), |(_, t)| t))
-            .collect();
-        parts.push(names.join(", "));
-    }
-    if f.larger > 0 {
-        parts.push(format!("larger than {}", scan::human(f.larger)));
-    }
-    if f.smaller > 0 {
-        parts.push(format!("smaller than {}", scan::human(f.smaller)));
-    }
-    if let Some(c) = &f.custom {
-        parts.push(format!("\"{}\"", c.source()));
-    }
-    if f.stored != 0 {
-        parts.push(super::cloud::stored_names(f.stored));
-    }
-    parts.join(" · ")
+    super::viz::chips_of(f, false).into_iter().map(|(_, s)| s).collect::<Vec<_>>().join(" · ")
 }
 
 impl App {
@@ -174,12 +152,12 @@ mod tests {
         assert_eq!(describe(&ViewFilter::default()), "");
         let f = ViewFilter { kinds: Category::Images.bit() | Category::Video.bit(), larger: 100 * 1024 * 1024, ..Default::default() };
         let d = describe(&f);
-        assert!(d.starts_with("Video, Images · larger than 100"), "{d}");
+        assert!(d.starts_with("Video · Images · Larger than 100"), "{d}");
         let f = ViewFilter {
             smaller: 4096,
             custom: Some(Arc::new(crate::pattern::Filter::compile("*beauty*", crate::pattern::Options::default()).unwrap())),
             ..Default::default()
         };
-        assert_eq!(describe(&f), format!("smaller than {} · \"*beauty*\"", scan::human(4096)));
+        assert_eq!(describe(&f), format!("Smaller than {} · Name: *beauty*", scan::human(4096)));
     }
 }
