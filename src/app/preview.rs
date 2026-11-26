@@ -1120,6 +1120,12 @@ impl App {
             ui.add(egui::Label::new(path.parent().map(|p| p.shown()).unwrap_or_default()).wrap());
             ui.end_row();
         });
+        if !e.is_dir && !e.not_local() && !crate::fsys::remote::is_remote(&path) && !crate::fsys::archive::inside(&path) {
+            let scene = self.files.look.cache.iter().find(|c| c.0 == path).and_then(|c| if let Content::Splat { scene, .. } = &c.2 { Some(scene.clone()) } else { None });
+            if let Some(scene) = scene {
+                super::splatopt::card(ui, &path, &scene, e.size);
+            }
+        }
         if self.settings.system_notes && !crate::fsys::remote::is_remote(&path) {
             super::explain::preview_section(ui, &path, &e.name);
         }

@@ -16,6 +16,7 @@ pub mod ply;
 pub mod splat;
 pub mod sog;
 pub mod spz;
+pub mod write;
 
 use std::path::Path;
 
@@ -58,21 +59,25 @@ pub struct Limits {
     pub max_points: usize,
     /// Keep the spherical harmonics (view-dependent colour) when there's room.
     pub keep_sh: bool,
+    /// Memory the view-dependent colour may take (half precision); scenes needing more are
+    /// read with base colour only, and say so.
+    pub sh_bytes: u64,
 }
 
 impl Limits {
     /// For the preview pane.
-    pub const PREVIEW: Limits = Limits { max_points: 4_000_000, keep_sh: true };
+    pub const PREVIEW: Limits = Limits { max_points: 4_000_000, keep_sh: true, sh_bytes: Self::SH_BYTES };
     /// For a thumbnail: a sample is plenty.
-    pub const THUMB: Limits = Limits { max_points: 400_000, keep_sh: false };
+    pub const THUMB: Limits = Limits { max_points: 400_000, keep_sh: false, sh_bytes: Self::SH_BYTES };
+    /// For converting to another format: every splat and all of its colour.
+    pub const CONVERT: Limits = Limits { max_points: HARD_MAX_POINTS, keep_sh: true, sh_bytes: u64::MAX };
 
-    /// Memory the view-dependent colour may take (half precision); scenes needing more are
-    /// shown with base colour only, and say so.
+    /// The view-dependent colour a preview keeps at most.
     pub const SH_BYTES: u64 = 256 << 20;
 
     /// Whether to keep harmonics for `points` splats with `rest` higher values per channel.
     pub fn keeps_sh(&self, points: u64, rest: usize) -> bool {
-        self.keep_sh && rest > 0 && points.min(self.max_points as u64) * rest as u64 * 3 * 2 <= Self::SH_BYTES
+        self.keep_sh && rest > 0 && points.min(self.max_points as u64).saturating_mul(rest as u64 * 3 * 2) <= self.sh_bytes
     }
 }
 

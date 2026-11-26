@@ -75,7 +75,7 @@ fn ply_headers_are_told_apart() {
 fn splat_ply_values_decode() {
     // Degree 1: 9 f_rest values.
     let p = tmp("decode.ply", &splat_ply(5, 9, None, plain));
-    let s = read(&p, Limits { max_points: 100, keep_sh: true }).unwrap();
+    let s = read(&p, Limits { max_points: 100, keep_sh: true, sh_bytes: Limits::SH_BYTES }).unwrap();
     assert_eq!(s.kind, SceneKind::Splat);
     assert_eq!((s.total, s.len(), s.sh_degree), (5, 5, 1));
     assert_eq!(s.pos[3], [3.0, 2.0, -1.0]);
@@ -112,7 +112,7 @@ fn bad_numbers_are_skipped() {
 
 #[test]
 fn big_files_are_sampled_in_blocks() {
-    let s = read(&tmp("many.ply", &splat_ply(50_000, 0, None, plain)), Limits { max_points: 10_000, keep_sh: false }).unwrap();
+    let s = read(&tmp("many.ply", &splat_ply(50_000, 0, None, plain)), Limits { max_points: 10_000, keep_sh: false, sh_bytes: Limits::SH_BYTES }).unwrap();
     assert_eq!(s.total, 50_000);
     assert!(s.len() >= 10_000 && s.len() < 10_000 + 4096, "{}", s.len());
     // Spread over the whole file, not just its start.
@@ -207,7 +207,7 @@ fn spz_v4(points: u32, degree: u8, streams: &[Vec<u8>]) -> Vec<u8> {
 fn spz_v4_with_harmonics() {
     let n = 3usize;
     let streams = vec![vec![0u8; n * 9], vec![255; n], vec![128; n * 3], vec![160; n * 3], vec![0; n * 4], (0..n * 9).map(|i| (128 + i) as u8).collect()];
-    let s = spz::parse(&spz_v4(n as u32, 1, &streams), Limits { max_points: 10, keep_sh: true }).unwrap();
+    let s = spz::parse(&spz_v4(n as u32, 1, &streams), Limits { max_points: 10, keep_sh: true, sh_bytes: Limits::SH_BYTES }).unwrap();
     assert_eq!((s.len(), s.sh_degree), (3, 1));
     assert_eq!(s.scale[0], [1.0, 1.0, 1.0]); // 160 / 16 - 10 = 0, exp(0) = 1
     assert_eq!(s.sh[1].to_f32(), 1.0 / 128.0);
@@ -631,7 +631,7 @@ fn every_s3_format_reads_back_what_was_written() {
     // An ordinary page or model isn't claimed.
     assert!(!claims(&tmp("plain.html", b"<html><body>hello</body></html>")));
     // Thinned evenly when there are too many.
-    let small = Limits { max_points: 100, keep_sh: false };
+    let small = Limits { max_points: 100, keep_sh: false, sh_bytes: Limits::SH_BYTES };
     for p in [tmp("t3.splat", &enc_splat(&ts)), tmp("t3.sog", &sog), tmp("t3.glb", &enc_glb(&ts)), tmp("t3.ply", &enc_compressed_ply(&ts))] {
         let s = read(&p, small).unwrap();
         assert!(s.len() <= 100 && s.len() >= 80 && s.total == 700, "{} {}", s.format, s.len());
@@ -678,7 +678,7 @@ fn s3_real_scenes_look_the_same() {
     let Ok(dir) = std::env::var("FILESCAPE_SPLAT_SAMPLES") else { return };
     let out = std::path::Path::new(&dir).join("s3");
     std::fs::create_dir_all(&out).unwrap();
-    let limits = Limits { max_points: 1_000_000, keep_sh: false };
+    let limits = Limits { max_points: 1_000_000, keep_sh: false, sh_bytes: Limits::SH_BYTES };
     for e in std::fs::read_dir(&dir).unwrap().flatten() {
         let p = e.path();
         let name = p.file_name().unwrap().to_string_lossy().to_string();
@@ -862,3 +862,147 @@ fn the_projector_puts_points_where_the_drawing_does() {
     let (narrow, wide) = (View { fov: 30.0, ..View::default() }, View { fov: 90.0, ..View::default() });
     assert!(narrow.distance(r) > wide.distance(r));
 }
+
+/// A scene with every kind of value varied: positions over a few metres with a far-out few,
+/// colours, opacities, sizes, any rotation, and degree-3 harmonics.
+fn varied_ply(n: u64) -> Vec<u8> {
+    let h = |i: u64, k: u64| {
+        let mut x = i.wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(k.wrapping_mul(0xbf58_476d_1ce4_e5b9));
+        x ^= x >> 31;
+        x = x.wrapping_mul(0x94d0_49bb_1331_11eb);
+        x ^= x >> 29;
+        (x >> 11) as f32 / (1u64 << 53) as f32
+    };
+    splat_ply(n, 45, None, move |i, p| {
+        let far = if i % 500 == 0 { 40.0 } else { 1.0 };
+        match p {
+            "x" => (h(i, 1) - 0.5) * 6.0 * far,
+            "y" => (h(i, 2) - 0.5) * 4.0 * far,
+            "z" => (h(i, 3) - 0.5) * 6.0 * far,
+            "f_dc_0" | "f_dc_1" | "f_dc_2" => (h(i, p.len() as u64 + p.as_bytes()[5] as u64) - 0.5) * 3.0,
+            "opacity" => (h(i, 7) - 0.5) * 8.0,
+            "scale_0" | "scale_1" | "scale_2" => -6.0 + h(i, 8 + p.as_bytes()[6] as u64) * 4.0,
+            "rot_0" | "rot_1" | "rot_2" | "rot_3" => h(i, 20 + p.as_bytes()[4] as u64) - 0.5,
+            p if p.starts_with("f_rest_") => (h(i, 100 + p[7..].parse::<u64>().unwrap()) - 0.5) * 0.6,
+            _ => 0.0,
+        }
+    })
+}
+
+#[test]
+fn every_writer_round_trips_and_checks_itself() {
+    use write::Target;
+    let src = tmp("varied.ply", &varied_ply(3000));
+    let scene = read(&src, Limits::CONVERT).unwrap();
+    assert!(write::complete(&scene), "{:?}", write::unwritable(&scene));
+    let (_, r) = framing(&scene);
+    for target in Target::ALL {
+        let dest = write::suggested_name(&src, target);
+        assert_ne!(dest, src);
+        let checked = write::convert(&scene, &src, target, &dest).unwrap_or_else(|e| panic!("{target:?}: {e}"));
+        assert_eq!(checked.splats, 3000);
+        let back = read(&dest, Limits::CONVERT).unwrap();
+        assert_eq!(back.sh_degree, 3, "{target:?}");
+        // Match splats up (compressed PLY reorders them) by nearest position.
+        let flip = if back.frame == scene.frame { 1.0 } else { -1.0 };
+        let near = |p: [f32; 3]| (0..back.len()).min_by(|&a, &b| {
+            let d = |j: usize| (0..3).map(|k| (back.pos[j][k] * if k == 0 { 1.0 } else { flip } - p[k]).powi(2)).sum::<f32>();
+            d(a).total_cmp(&d(b))
+        }).unwrap();
+        let rest = sh_rest(3);
+        let mut sh_err = 0f32;
+        let mut checked_n = 0;
+        for i in (0..scene.len()).step_by(37) {
+            if i % 500 == 0 {
+                continue; // far-out splats share a chunk with coarse bounds
+            }
+            let j = near(scene.pos[i]);
+            let d = (0..3).map(|k| (back.pos[j][k] * if k == 0 { 1.0 } else { flip } - scene.pos[i][k]).powi(2)).sum::<f32>().sqrt();
+            assert!(d < 0.02 * r, "{target:?} splat {i} moved {d}");
+            // The same rotation once the axes are turned back.
+            let q = back.rot[j];
+            let q = if flip < 0.0 { [q[0], -q[1], -q[2], q[3]] } else { q };
+            let dot: f32 = (0..4).map(|k| q[k] * scene.rot[i][k]).sum();
+            assert!(dot.abs() > 0.99, "{target:?} splat {i} rotation {:?} vs {:?}", q, scene.rot[i]);
+            for k in 0..3 {
+                assert!((back.scale[j][k] / scene.scale[i][k]).ln().abs() < 0.1, "{target:?} splat {i} scale");
+                assert!((back.color[j][k] as i32 - scene.color[i][k] as i32).abs() <= 3, "{target:?} splat {i} colour {:?} vs {:?}", back.color[j], scene.color[i]);
+            }
+            assert!((back.color[j][3] as i32 - scene.color[i][3] as i32).abs() <= 1, "{target:?} opacity");
+            // Harmonics: signs must survive the axis flip.
+            let sign = [-1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0];
+            for k in 0..rest {
+                for ch in 0..3 {
+                    let a = scene.sh[(i * rest + k) * 3 + ch].to_f32();
+                    let b = back.sh[(j * rest + k) * 3 + ch].to_f32() * if flip < 0.0 { sign[k] } else { 1.0 };
+                    sh_err = sh_err.max((a - b).abs());
+                }
+            }
+            checked_n += 1;
+        }
+        assert!(checked_n > 50);
+        assert!(sh_err < 0.07, "{target:?} harmonics off by {sh_err}");
+        std::fs::remove_file(&dest).unwrap();
+    }
+}
+
+#[test]
+fn spz_rotations_match_niantics_packing() {
+    // Niantic packs the three smaller components first to last from the top bits down; a
+    // rotation about one axis shows whether the reader unpacks them in the same order.
+    let q = [0.6f32, 0.0, 0.0, 0.8]; // x y z w: about x
+    let src = tmp("rot.ply", &splat_ply(1, 0, None, |_, p| match p {
+        "rot_0" => q[3],
+        "rot_1" => q[0],
+        "scale_0" | "scale_1" | "scale_2" => -3.0,
+        _ => 0.0,
+    }));
+    let scene = read(&src, Limits::CONVERT).unwrap();
+    let bytes = write::encode(&scene, write::Target::Spz).unwrap();
+    let back = spz::parse(&bytes, Limits::CONVERT).unwrap();
+    // Turned to SPZ's axes: x stays, so the rotation does too.
+    let r = back.rot[0];
+    assert!((r[0] - 0.6).abs() < 0.01 && r[1].abs() < 0.01 && r[2].abs() < 0.01 && (r[3] - 0.8).abs() < 0.01, "{r:?}");
+}
+
+#[test]
+fn conversion_never_replaces_the_original_and_names_dont_clash() {
+    use write::Target;
+    let src = tmp("keep.spz", MIN_V3);
+    let scene = read(&src, Limits::CONVERT).unwrap();
+    assert!(write::convert(&scene, &src, Target::Ply, &src).is_err());
+    assert_eq!(std::fs::read(&src).unwrap(), MIN_V3);
+    assert!(Target::Spz.is_format_of(&scene));
+    let first = write::suggested_name(&src, Target::Ply);
+    assert_eq!(first.file_name().unwrap(), "keep.ply");
+    std::fs::write(&first, b"taken").unwrap();
+    assert_eq!(write::suggested_name(&src, Target::Ply).file_name().unwrap(), "keep 2.ply");
+    assert_eq!(write::suggested_name(&src, Target::CompressedPly).file_name().unwrap(), "keep.compressed.ply");
+    // A thinned scene can't be written whole.
+    let thin = read(&tmp("thin.ply", &splat_ply(50_000, 0, None, plain)), Limits { max_points: 10_000, ..Limits::CONVERT }).unwrap();
+    assert!(write::unwritable(&thin).is_some());
+}
+
+/// Sizes and times for real scenes: `FILESCAPE_SPLAT_DIR=... cargo test measure_real -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn measure_real_scenes() {
+    let dir = std::env::var("FILESCAPE_SPLAT_DIR").unwrap();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        let t = std::time::Instant::now();
+        let Ok(scene) = read(&p, Limits::CONVERT) else { continue };
+        println!("{} ({}, {} bytes): read {:?}", p.display(), scene.format, std::fs::metadata(&p).unwrap().len(), t.elapsed());
+        for target in write::Target::ALL {
+            let t = std::time::Instant::now();
+            let b = write::encode(&scene, target).unwrap();
+            let enc = t.elapsed();
+            let out = std::env::temp_dir().join(format!("measure.{}", target.extension()));
+            let t = std::time::Instant::now();
+            let c = write::convert(&scene, &p, target, &out);
+            println!("  {:?}: {} bytes, encode {enc:?}, write+check {:?}: {:?}", target, b.len(), t.elapsed(), c.map(|c| c.summary()));
+            let _ = std::fs::remove_file(out);
+        }
+    }
+}
+
