@@ -203,7 +203,7 @@ mod tests {
     fn reads_a_database_without_changing_it() {
         let dir = std::env::temp_dir().join(format!("filescape-sql-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("shop?#.sqlite");
+        let p = dir.join("shop #%.sqlite");
         {
             let db = rusqlite::Connection::open(&p).unwrap();
             db.execute_batch(
@@ -219,7 +219,7 @@ mod tests {
         let book = read_sqlite(&p, 2, 40).unwrap();
         let facts = &book.facts;
         assert_eq!(std::fs::read(&p).unwrap(), before);
-        assert!(!dir.join("shop?#.sqlite-journal").exists() && !dir.join("shop?#.sqlite-wal").exists());
+        assert!(!dir.join("shop #%.sqlite-journal").exists() && !dir.join("shop #%.sqlite-wal").exists());
         assert_eq!(book.noun, "tables");
         assert_eq!(book.sheets.len(), 2);
         let s = book.sheets.iter().find(|s| s.name == "odd \"name\"").unwrap();
