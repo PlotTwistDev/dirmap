@@ -33,7 +33,7 @@ pub(super) fn stamp(size: u64, modified: i64) -> u64 {
 pub(super) fn wants_thumb(name: &str) -> bool {
     match preview::kind_of(name) {
         Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Media(_) => true,
-        Kind::Midi | Kind::Model => crate::thumbcache::rich(),
+        Kind::Midi | Kind::Model | Kind::Map => crate::thumbcache::rich(),
         _ => false,
     }
 }
@@ -331,6 +331,10 @@ fn picture(job: &Job, config: Config, kind: Kind, name: &str) -> Option<Decoded>
         Kind::Model => crate::model3d::read(&local).ok().map(|m| {
             let n = max.min(512) as usize;
             Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([n, n], &m.draw(n, n, crate::model3d::Angle::default(), 1)))
+        }),
+        Kind::Map => crate::geoview::read(&local).ok().map(|g| {
+            let (w, h) = g.fit(max.min(512));
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &g.draw(w, h)))
         }),
         Kind::Midi => crate::midiview::read(&local).ok().map(|song| {
             let (w, h) = (max, (max * 2 / 3).max(1));

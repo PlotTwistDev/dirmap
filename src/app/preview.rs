@@ -175,6 +175,8 @@ pub(super) enum Kind {
     Doc,
     /// MIDI: a piano roll.
     Midi,
+    /// GeoJSON, GPX or KML: the shapes drawn.
+    Map,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -203,6 +205,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::SystemPicture => Kind::Media(Media::Picture),
         C::Document => Kind::Doc,
         C::Midi => Kind::Midi,
+        C::Map => Kind::Map,
         C::Database => Kind::Database,
         C::Model => Kind::Model,
     }
@@ -319,6 +322,22 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                     poster: true,
                     source: None,
                     facts: song.facts,
+                }
+            }
+            Err(e) => Content::Error(e),
+        },
+        Kind::Map => match crate::geoview::read(path) {
+            Ok(g) => {
+                let (w, h) = g.fit(1200);
+                Content::Image {
+                    look: None,
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &g.draw(w, h))),
+                    tex: None,
+                    size: [w, h],
+                    info: "Drawn from the file: no map is fetched to go behind it".into(),
+                    poster: true,
+                    source: None,
+                    facts: g.facts,
                 }
             }
             Err(e) => Content::Error(e),
