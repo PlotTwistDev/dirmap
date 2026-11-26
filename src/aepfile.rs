@@ -187,7 +187,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let clip = dir.join("clip.mov");
         std::fs::write(&clip, [0u8; 100]).unwrap();
-        let folder = Chunk::list(*b"Item", vec![idta(1, 9), utf8("Footage"), Chunk::list(*b"Sfdr", vec![footage(3, Some(&clip.display().to_string())), footage(4, None)])]);
+        let folder = Chunk::list(*b"Item", vec![idta(1, 9), utf8("Footage"), Chunk::list(*b"Sfdr", vec![footage(3, Some(&clip.display().to_string().replace('\\', "/"))), footage(4, None)])]);
         let data = project(vec![comp("Main", 2, 3), folder, footage(5, Some("/nowhere/gone.wav"))]);
         let path = dir.join("Promo.aep");
         std::fs::write(&path, &data).unwrap();

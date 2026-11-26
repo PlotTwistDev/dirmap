@@ -231,7 +231,7 @@ mod tests {
                 "3":{{"id":3,"source":{{"type":"file","path":"/nowhere/c.mov"}},"kind":"video"}},
                 "4":{{"id":4,"source":{{"type":"demo","scene":2}}}}}},
               "albums":{{"1":{{"name":"Trip"}}}},"next_photo":5}}}}"#,
-            outside.display()
+            outside.display().to_string().replace('\\', "/")
         );
         let d = library(&snap);
         assert!(is_library(&d));
