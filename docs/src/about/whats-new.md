@@ -26,6 +26,9 @@
   Health samples every tensor for broken values or missing data.
 - A model's **Tokens** show its vocabulary: which languages and kinds of text it covers, its
   special tokens and chat template, and every token, searchable.
+- **Compare with…** puts two models side by side: their facts, where their space goes, how their
+  numbers are stored, and which tensors and metadata differ, so you can tell two compressions of
+  one model from two different models.
 - A model's **Structure** shows its layers in order and draws the model as a map of its layers
   and tensors, coloured by what each part does or by how its numbers are stored.
 
