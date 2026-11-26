@@ -2,6 +2,19 @@
 
 ## Next version
 
+### Totals, legend and storage under the map
+
+- Under the Storage Analysis map, a strip of totals: **On disk**, **Logical size**, **Cloud only**,
+  **Reclaimable**, **Files**, **Folders** and, with a filter on, **Matching**. The total the map is
+  sized by is highlighted, and clicking another switches to it. Cloud-only data is never counted
+  as on this computer. See [The summary under the map](../views/treemap.md#the-summary-under-the-map).
+- A new legend shows each type's colour, size and share. Point to a type to see where those
+  files are on the map, click to highlight them, and Ctrl+click (⌘-click) to highlight several.
+  **All N types** lists every type, sortable by size, count or name. The Files dock uses the
+  same legend.
+- **Details** and **Storage** open the scan's details and the cloud storage breakdown, now a
+  full-width bar with Reclaimable beside it. The status bar keeps to what's happening.
+
 ### A calmer Storage Analysis toolbar
 
 - The controls above the map are one row now: **Treemap** / **Sunburst**, a **Size** menu, a

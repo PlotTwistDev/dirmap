@@ -80,8 +80,10 @@ pub(super) struct Stats {
     pub folders: u64,
     pub largest_file: Option<(String, u64)>,
     pub largest_dir: Option<(String, u64)>,
-    /// Bytes per extension, largest first (top few).
+    /// Bytes per extension, largest first (the biggest 200).
     pub types: Vec<(String, u64)>,
+    /// Files per extension, in the same order as `types`.
+    pub type_files: Vec<u64>,
 }
 
 /// Where the folder the dock wants stands against the analysis.
@@ -661,39 +663,14 @@ impl App {
         });
     }
 
-    /// The file-type legend: the types taking the most space here, in their map colours.
-    /// Click one to highlight it on the map.
+    /// The file-type legend: the types taking the most space here, in their map colours (the
+    /// same legend as under the Storage Analysis map, compact).
     fn dock_legend(&mut self, ui: &mut egui::Ui) {
-        let pal = style::pal(ui);
         let id = self.shown_tree().map(|t| Arc::as_ptr(&t) as usize).unwrap_or(0);
         let Some(Cover::In(at)) = self.dock.cover.clone() else { return };
         let Some((_, _, st)) = self.dock.stats.clone().filter(|(i, p, _)| *i == id && *p == at) else { return };
-        ui.spacing_mut().item_spacing.x = 2.0;
-        for (ext, bytes) in st.types.iter().take(10) {
-            let on = self.highlight_ext.as_deref() == Some(ext.as_str());
-            let color = self.color_for_ext(ext);
-            let label = if ext.is_empty() { "(none)".to_string() } else { ext.clone() };
-            let text = format!("{label}  {}", scan::human(*bytes));
-            let font = FontId::proportional(11.5);
-            let w = ui.fonts_mut(|f| f.layout_no_wrap(text.clone(), font.clone(), pal.text).size().x) + 26.0;
-            if ui.available_width() < w {
-                break;
-            }
-            let (r, resp) = ui.allocate_exact_size(vec2(w, 20.0), Sense::click());
-            if on {
-                ui.painter().rect_filled(r, 4.0, pal.sel);
-            } else if resp.hovered() {
-                ui.painter().rect_filled(r, 4.0, pal.hover);
-            }
-            ui.painter().rect_filled(Rect::from_center_size(pos2(r.left() + 10.0, r.center().y), vec2(9.0, 9.0)), 2.0, color);
-            ui.painter().text(pos2(r.left() + 20.0, r.center().y), Align2::LEFT_CENTER, text, font, if on { pal.strong } else { pal.text });
-            if resp.on_hover_text(if on { "Click to stop highlighting" } else { "Click to highlight these files on the map" }).clicked() && (on || self.premium(crate::licence::Feature::Filters)) {
-                self.highlight_ext = if on { None } else { Some(ext.clone()) };
-            }
-        }
-        if self.highlight_ext.is_some() && ui.add(egui::Button::new(egui::RichText::new("Clear").size(11.5)).frame_when_inactive(false)).clicked() {
-            self.highlight_ext = None;
-        }
+        let items: Vec<viz::LegendItem> = st.types.iter().zip(&st.type_files).map(|((ext, bytes), n)| viz::LegendItem { ext: ext.clone(), bytes: *bytes, files: Some(*n) }).collect();
+        self.type_legend(ui, &items, st.size, true, "dock");
     }
 
     /// The status bar's activity indicator: background jobs, with details on click.
@@ -762,7 +739,7 @@ fn dock_message(ui: &mut egui::Ui, icon: &str, title: &str, detail: Option<&str>
 pub(super) fn stats_of(n: &Node) -> Stats {
     let mut st = Stats { size: n.size, files: n.files, ..Default::default() };
     st.largest_dir = n.children.iter().filter(|c| c.is_dir).max_by_key(|c| c.size).map(|c| (c.name.to_string(), c.size));
-    let mut types: HashMap<String, u64> = HashMap::new();
+    let mut types: HashMap<String, (u64, u64)> = HashMap::new();
     let mut stack: Vec<&Node> = vec![n];
     let mut best: Option<&Node> = None;
     while let Some(x) = stack.pop() {
@@ -776,19 +753,23 @@ pub(super) fn stats_of(n: &Node) -> Stats {
                 }
                 let e = c.ext();
                 match types.get_mut(e) {
-                    Some(v) => *v += c.size,
+                    Some(v) => {
+                        v.0 += c.size;
+                        v.1 += 1;
+                    }
                     None => {
-                        types.insert(e.to_string(), c.size);
+                        types.insert(e.to_string(), (c.size, 1));
                     }
                 }
             }
         }
     }
     st.largest_file = best.map(|b| (b.name.to_string(), b.size));
-    let mut t: Vec<(String, u64)> = types.into_iter().filter(|(_, b)| *b > 0).collect();
-    t.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    t.truncate(12);
-    st.types = t;
+    let mut t: Vec<(String, (u64, u64))> = types.into_iter().filter(|(_, b)| b.0 > 0).collect();
+    t.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(&b.0)));
+    t.truncate(200);
+    st.type_files = t.iter().map(|e| e.1.1).collect();
+    st.types = t.into_iter().map(|(e, (b, _))| (e, b)).collect();
     st
 }
 

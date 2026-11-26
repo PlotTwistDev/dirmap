@@ -26,6 +26,8 @@ const APP: &str = "src/app.rs";
 const MENUS: &str = "src/app/menus.rs";
 const CUSTOM: &str = "src/app/custom.rs";
 const VIZ: &str = "src/app/viz.rs";
+const SUMMARY: &str = "src/app/summary.rs";
+const CLOUD: &str = "src/app/cloud.rs";
 const HELP: &str = "src/help/mod.rs";
 const BROWSER: &str = "src/app/browser.rs";
 const FILES: &str = "src/app/files.rs";
@@ -255,7 +257,9 @@ pub const MOUSE: &[Group] = &[
             b("Click a tile", "", "Select it. The item in the list that holds it is selected too.", &[(DOCK, "self.files.select_name(&first.as_os_str().to_string_lossy());")]),
             b("Double-click a tile", "", "Open its folder in the list; the map follows.", &[(DOCK, "self.files.go(Location::Dir(disk));")]),
             b("Right-click a tile", "", "The same menu as in the list, plus Open in List or Show in List.", &[(DOCK, "self.tile_menu(ui, &disk, is_dir);")]),
-            b("Click a file type under the map", "", "Highlight those files on the map; click again to stop.", &[(DOCK, "self.highlight_ext = if on { None } else { Some(ext.clone()) };")]),
+            b("Point to a file type under the map", "", "Those files stand out on the map while the pointer is there.", &[(VIZ, "self.highlight_ext.set_hover(hits.hover.as_deref());")]),
+            b("Click a file type under the map", "", "Highlight those files on the map; click again to stop.", &[(VIZ, "if add { self.highlight_ext.toggle(&ext) } else { self.highlight_ext.only(&ext) }")]),
+            b("Ctrl+click a file type under the map", "⌘-click", "Add it to the highlight, or take it out.", &[(VIZ, "self.click = Some((ext.to_string(), ui.input(|i| i.modifiers.command)));")]),
             b("Drag the line above the dock", "", "Give the list or the map more room.", &[(FILES, "egui::Panel::bottom(\"files-dock\")")]),
         ],
     },
@@ -312,6 +316,17 @@ pub const MOUSE: &[Group] = &[
             b("Click the arrow, or double-click a folder", "", "Open or close the folder.", &[(APP, "if n.is_dir && ((resp.clicked() && on_arrow) || resp.double_clicked()) {")]),
             b("Right-click", "", "Select the item and open the right-click menu.", &[(APP, "resp.context_menu(|ui| {")]),
             b("Click a column heading", "", "Sort by that column; click again to reverse.", &[(APP, "self.sort_desc = !self.sort_desc;")]),
+        ],
+    },
+    Group {
+        title: "Under the map",
+        note: "The totals, the file-type legend and the storage breakdown under the Storage Analysis map.",
+        bindings: &[
+            b("Click a size total (On disk, Logical size, Cloud only, Reclaimable)", "", "Size the map by it.", &[(SUMMARY, "measure = c.measure;")]),
+            b("Point to a file type", "", "Those files stand out on the map while the pointer is there.", &[(VIZ, "self.highlight_ext.set_hover(hits.hover.as_deref());")]),
+            b("Click a file type", "", "Highlight those files on the map; click again to stop.", &[(VIZ, "if add { self.highlight_ext.toggle(&ext) } else { self.highlight_ext.only(&ext) }")]),
+            b("Ctrl+click a file type", "⌘-click", "Add it to the highlight, or take it out.", &[(VIZ, "self.click = Some((ext.to_string(), ui.input(|i| i.modifiers.command)));")]),
+            b("Click a part of the storage breakdown", "", "Show only those files on the map; click again to stop.", &[(CLOUD, "pick = Some((*st, on));")]),
         ],
     },
     Group {
