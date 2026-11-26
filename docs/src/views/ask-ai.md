@@ -68,6 +68,31 @@ away under **Thought about it**; click it to read it.
 
 Under the last answer, Filescape shows how many tokens it took and how fast they were written.
 
+## Asking about files and folders
+
+Right-click a file or folder in [Files](file-manager.md) or in Storage Analysis and choose **💬 Ask AI
+About This…** (**Ask AI About These…** for several items in Files). Ask AI opens with them
+attached to your next question, shown above the question box as **📎 About …**. Ask something like
+"What is this folder for?" or "What could I delete here?".
+
+What the model is told:
+
+- The item's path, whether it's a file or folder, its size and when it was last changed.
+- For a folder, what it holds directly, largest first, until the room for it runs out, then how
+  many more items there are. From Storage Analysis, sizes include everything inside folders, and
+  there's also a breakdown by file type.
+- **Not** what's inside the files, unless you tick **Include the file's contents**. That box
+  appears when you ask about files, and applies to that one question: Filescape then reads the
+  start of each chosen text file, as much as fits in the model's context. Files that aren't text,
+  and files that are only in the cloud, aren't read, so asking never downloads anything.
+
+Press **×** to ask without them. After you send the question, **📎 About …** stays above it; hover
+it to see exactly what the model was told. Follow-up questions in the same chat can refer back to
+it.
+
+Nothing is sent anywhere: the model runs on this computer. Ask AI never deletes, moves or renames
+anything, whatever the answer says.
+
 ## What to expect
 
 Answers come from the model, not from Filescape, and can be wrong, especially from small models.
