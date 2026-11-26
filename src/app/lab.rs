@@ -173,12 +173,15 @@ impl App {
                     l.continuation.clear();
                 }
                 ui.separator();
-                if ui.add_enabled(!busy, egui::Button::new("Next token")).on_hover_text("What the model would write next, and the alternatives").clicked() {
-                    run = Some(1);
-                }
-                if ui.add_enabled(!busy, egui::Button::new(format!("Write {}", l.steps))).on_hover_text("Write several tokens, each coloured by how likely the model thought it was").clicked() {
-                    run = Some(l.steps);
-                }
+                // Buttons that look like buttons: the page's own tab is also called Next token.
+                ui.add_enabled_ui(!busy, |ui| {
+                    if kit::button(ui, kit::Kind::Primary, None, "▶ Show next token").on_hover_text("What the model would write next, and the alternatives").clicked() {
+                        run = Some(1);
+                    }
+                    if kit::button(ui, kit::Kind::Secondary, None, &format!("Write {} tokens", l.steps)).on_hover_text("Write several tokens, each coloured by how likely the model thought it was").clicked() {
+                        run = Some(l.steps);
+                    }
+                });
                 egui::ComboBox::from_id_salt("lab-steps").width(60.0).selected_text(format!("{}", l.steps)).show_ui(ui, |ui| {
                     for n in [10u32, 30, 100, 300] {
                         ui.selectable_value(&mut l.steps, n, format!("{n} tokens"));
@@ -202,7 +205,7 @@ impl App {
         ui.separator();
         // The text so far, then the run's tokens coloured by confidence.
         let Some(r) = self.ask.lab_state.run.clone() else {
-            ui.weak("Press Next token to see what the model would write.");
+            ui.weak("Press Show next token to see what the model would write.");
             if let Some(n) = run {
                 self.lab_run(n);
             }
