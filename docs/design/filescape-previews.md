@@ -219,4 +219,4 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Disk images: ISO contents, virtual disks, DMG, WIM | #82 | Merged |
 | UDF disc listing (DVD, Blu-ray, Windows install) | #83 | Merged |
 | JPEG 2000, JPEG-LS and lossless JPEG (DICOM and .jp2) | #85 | Merged |
-| Logic Pro projects (.logicx packages) | #86 | In review |
+| Logic Pro projects (.logicx packages) | #87 | In review |
