@@ -51,6 +51,10 @@ for the settings.
 | PowerPoint presentation | `.pptx` `.pptm` `.ppsx` `.potx` | Each slide's title and points | Filescape |
 | OpenDocument presentation | `.odp` `.otp` | Each slide's title and points | Filescape |
 | EPUB book | `.epub` | Chapters, formatted; the cover in Icons view | Filescape |
+| Email message | `.eml` `.emlx` | Sender, recipients, date, the text (HTML as plain text, nothing loaded) and a list of attachments | Filescape |
+| Mailbox | `.mbox` `.mbx` | A list of the messages: date, sender and subject | Filescape |
+| Contact cards (vCard) | `.vcf` `.vcard` | A contact card, or a list of contacts | Filescape |
+| Calendar (iCalendar) | `.ics` `.ical` `.ifb` | An event's time, place and details, or a list of events and to-dos | Filescape |
 | Archives | `.zip` `.7z` `.tar` `.tar.gz` `.tgz` `.tar.xz` `.txz` `.tar.bz2` `.tbz2` | A tree of what's inside, with sizes and how much was saved | Filescape (zip, sevenz-rust2, tar) |
 
 <!-- END GENERATED -->

@@ -368,6 +368,8 @@ pub(super) enum TextKind {
     Book,
     /// A SQLite database: its first table's first rows.
     Database,
+    /// An email, mailbox, contact card or calendar: who, what and when.
+    Mail,
 }
 
 pub(super) fn text_kind(name: &str) -> Option<TextKind> {
@@ -380,6 +382,7 @@ pub(super) fn text_kind(name: &str) -> Option<TextKind> {
         "odt" => Some(TextKind::Odt),
         "pptx" | "odp" => Some(TextKind::Slides),
         "epub" => Some(TextKind::Book),
+        "mail" | "mbox" | "vcard" | "ical" => Some(TextKind::Mail),
         _ => (f.category == crate::formats::Category::Text).then_some(TextKind::Plain),
     }
 }
@@ -401,6 +404,7 @@ fn snippet(path: &Path, kind: TextKind) -> Option<String> {
         }
         TextKind::Database => crate::sheets::snippet(&crate::tables::read_sqlite(path, 40, 12).ok()?),
         TextKind::Book => crate::officedoc::plain_text(&crate::epub::open(path, 40).ok()?.blocks),
+        TextKind::Mail => crate::mailview::snippet(path)?,
     };
     let mut out = String::new();
     for line in raw.lines().take(SNIPPET_LINES) {
