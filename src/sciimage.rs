@@ -153,10 +153,11 @@ fn ts_name(uid: &str) -> (&'static str, bool, bool, bool) {
         "1.2.840.10008.1.2.2" => ("Explicit VR big-endian", true, true, true),
         "1.2.840.10008.1.2.1.99" => ("Deflated explicit VR", true, false, false),
         "1.2.840.10008.1.2.4.50" => ("JPEG baseline", true, false, true),
-        "1.2.840.10008.1.2.4.51" => ("JPEG extended", true, false, false),
-        "1.2.840.10008.1.2.4.57" | "1.2.840.10008.1.2.4.70" => ("JPEG lossless", true, false, false),
-        "1.2.840.10008.1.2.4.80" | "1.2.840.10008.1.2.4.81" => ("JPEG-LS", true, false, false),
-        "1.2.840.10008.1.2.4.90" | "1.2.840.10008.1.2.4.91" => ("JPEG 2000", true, false, false),
+        "1.2.840.10008.1.2.4.51" => ("JPEG extended", true, false, true),
+        "1.2.840.10008.1.2.4.57" | "1.2.840.10008.1.2.4.70" => ("JPEG lossless", true, false, true),
+        "1.2.840.10008.1.2.4.80" | "1.2.840.10008.1.2.4.81" => ("JPEG-LS", true, false, true),
+        "1.2.840.10008.1.2.4.90" | "1.2.840.10008.1.2.4.91" => ("JPEG 2000", true, false, true),
+        "1.2.840.10008.1.2.4.201" | "1.2.840.10008.1.2.4.202" | "1.2.840.10008.1.2.4.203" => ("High-throughput JPEG 2000", true, false, false),
         "1.2.840.10008.1.2.5" => ("RLE", true, false, true),
         _ => ("Other", true, false, false),
     }
@@ -309,7 +310,35 @@ fn dicom_parse(b: &[u8], inflated: bool) -> Result<Sci, String> {
     }
     let bits = us(0x0028, 0x0100).unwrap_or(16) as usize;
     let signed = us(0x0028, 0x0103).unwrap_or(0) == 1;
+    let stored = us(0x0028, 0x0101).map_or(bits, |b| b as usize).clamp(1, 32);
     let n = rows * cols;
+    // JPEG extended and lossless, JPEG-LS and JPEG 2000: the first frame decoded.
+    let mut decoded: Option<Vec<f64>> = None;
+    if matches!(ts.as_str(), "1.2.840.10008.1.2.4.51" | "1.2.840.10008.1.2.4.57" | "1.2.840.10008.1.2.4.70" | "1.2.840.10008.1.2.4.80" | "1.2.840.10008.1.2.4.81" | "1.2.840.10008.1.2.4.90" | "1.2.840.10008.1.2.4.91") {
+        let frame = first_frame(data, r.big).ok_or("No picture in it")?;
+        let (w, h, chans, mut vals) = decode_frame(&ts, &frame, n)?;
+        if w as usize * h as usize != n {
+            return Err("The picture's size doesn't match the file's".into());
+        }
+        if chans == 3 {
+            let max = vals.iter().cloned().fold(1.0f64, f64::max);
+            let k = if max > 255.0 { 255.0 / max } else { 1.0 };
+            let rgba = vals.chunks_exact(3).flat_map(|c| [(c[0] * k) as u8, (c[1] * k) as u8, (c[2] * k) as u8, 255]).collect();
+            return Ok(Sci { width: w, height: h, rgba, facts });
+        }
+        if signed {
+            let half = (1u64 << (stored - 1)) as f64;
+            let jp2k = ts.ends_with(".90") || ts.ends_with(".91");
+            if jp2k {
+                // The JPEG 2000 decoder returns signed samples shifted up by half the range.
+                vals.iter_mut().for_each(|v| *v -= half);
+            } else {
+                // The others return the stored bits: two's complement.
+                vals.iter_mut().for_each(|v| if *v >= half { *v -= 2.0 * half });
+            }
+        }
+        decoded = Some(vals);
+    }
     // RLE: the first frame's segments unpacked into planes, then read as uncompressed planar
     // little-endian data.
     let unpacked;
@@ -321,7 +350,7 @@ fn dicom_parse(b: &[u8], inflated: bool) -> Result<Sci, String> {
         (data, false)
     };
     let big_px = r.big && !planar_rle;
-    if spp == 3 && bits == 8 {
+    if decoded.is_none() && spp == 3 && bits == 8 {
         // Colour: interleaved, or planar when (0028,0006) is 1.
         if data.len() < n * 3 {
             return Err("The picture is cut short".into());
@@ -332,14 +361,14 @@ fn dicom_parse(b: &[u8], inflated: bool) -> Result<Sci, String> {
             .collect();
         return Ok(Sci { width: cols as u32, height: rows as u32, rgba, facts });
     }
-    if spp != 1 || !(bits == 8 || bits == 16 || bits == 32) {
+    if decoded.is_none() && (spp != 1 || !(bits == 8 || bits == 16 || bits == 32)) {
         return Err(format!("{spp} samples of {bits} bits a pixel isn't supported yet"));
     }
     let need = n * bits / 8;
-    if data.len() < need {
+    if decoded.is_none() && data.len() < need {
         return Err("The picture is cut short".into());
     }
-    let raw: Vec<f64> = (0..n)
+    let raw: Vec<f64> = if let Some(d) = decoded { d } else { (0..n)
         .map(|i| {
             if bits == 8 {
                 data[i] as f64
@@ -353,7 +382,7 @@ fn dicom_parse(b: &[u8], inflated: bool) -> Result<Sci, String> {
                 if signed { u as i32 as f64 } else { u as f64 }
             }
         })
-        .collect();
+        .collect() };
     let (slope, icpt) = (num(0x0028, 0x1053).unwrap_or(1.0), num(0x0028, 0x1052).unwrap_or(0.0));
     let vals: Vec<f64> = raw.iter().map(|v| v * slope + icpt).collect();
     // The scan's own window, or the range of its values.
@@ -371,6 +400,116 @@ fn dicom_parse(b: &[u8], inflated: bool) -> Result<Sci, String> {
         })
         .collect();
     Ok(Sci { width: cols as u32, height: rows as u32, rgba: grey_to_rgba(&grey), facts })
+}
+
+/// The first frame's compressed bytes: fragments after the offset table, up to the end of
+/// the first JPEG-family stream.
+fn first_frame(data: &[u8], big: bool) -> Option<Vec<u8>> {
+    let frags = fragments(data, big);
+    let mut out = Vec::new();
+    for f in frags.iter().skip(1) {
+        out.extend_from_slice(f);
+        let end = out.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+        if out[..end].ends_with(&[0xFF, 0xD9]) {
+            out.truncate(end);
+            break;
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// A JPEG 2000 file (.jp2 or a bare codestream) as a picture, refusing sides over `max`.
+pub fn jpeg2000(bytes: &[u8], max: u32) -> Result<image::RgbaImage, String> {
+    let img = hayro_jpeg2000::Image::new(bytes, &hayro_jpeg2000::DecodeSettings::default()).map_err(|e| format!("Couldn't read the image: {e:?}"))?;
+    let (w, h) = (img.width(), img.height());
+    if w == 0 || h == 0 || w > max || h > max {
+        return Err("Too large to preview safely.".into());
+    }
+    let mut ctx = hayro_jpeg2000::DecoderContext::default();
+    let dec = img.decode(&mut ctx).map_err(|e| format!("Couldn't read the image: {e:?}"))?;
+    let comps = dec.components();
+    let n = w as usize * h as usize;
+    let get = |c: usize, i: usize| -> u8 {
+        let comp = &comps[c.min(comps.len() - 1)];
+        let max = ((1u32 << comp.bit_depth().clamp(1, 16)) - 1) as f32;
+        (comp.samples().get(i).copied().unwrap_or(0.0) / max * 255.0).round().clamp(0.0, 255.0) as u8
+    };
+    if comps.is_empty() {
+        return Err("Couldn't read the image".into());
+    }
+    let colour = comps.len() >= 3;
+    let alpha = comps.len() == 2 || comps.len() >= 4;
+    let mut out = Vec::with_capacity(n * 4);
+    for i in 0..n {
+        let (r, g, b) = if colour { (get(0, i), get(1, i), get(2, i)) } else { let v = get(0, i); (v, v, v) };
+        let a = if alpha { get(comps.len() - 1, i) } else { 255 };
+        out.extend_from_slice(&[r, g, b, a]);
+    }
+    image::RgbaImage::from_raw(w, h, out).ok_or_else(|| "Couldn't read the image".into())
+}
+
+/// A compressed frame decoded: width, height, channels (1 or 3) and samples, interleaved.
+fn decode_frame(ts: &str, frame: &[u8], n: usize) -> Result<(u32, u32, usize, Vec<f64>), String> {
+    let wrong = || "The picture's size doesn't match the file's".to_string();
+    match ts.rsplit('.').next().unwrap_or("") {
+        "90" | "91" => {
+            let img = hayro_jpeg2000::Image::new(frame, &hayro_jpeg2000::DecodeSettings::default()).map_err(|e| format!("Couldn't decode its JPEG 2000 picture: {e:?}"))?;
+            let (w, h) = (img.width(), img.height());
+            // Checked before decoding: the decoder sets aside room for the size it's told.
+            if w as usize * h as usize != n {
+                return Err(wrong());
+            }
+            let mut ctx = hayro_jpeg2000::DecoderContext::default();
+            let dec = img.decode(&mut ctx).map_err(|e| format!("Couldn't decode its JPEG 2000 picture: {e:?}"))?;
+            let comps = dec.components();
+            let n = w as usize * h as usize;
+            let chans = if comps.len() >= 3 { 3 } else { 1 };
+            let mut out = vec![0.0; n * chans];
+            for (c, comp) in comps.iter().take(chans).enumerate() {
+                for (i, v) in comp.samples().iter().take(n).enumerate() {
+                    out[i * chans + c] = *v as f64;
+                }
+            }
+            Ok((w, h, chans, out))
+        }
+        "80" | "81" => {
+            // The frame header (SOF55) gives the size before anything is decoded.
+            let sof = frame.windows(2).position(|w| w == [0xFF, 0xF7]).and_then(|i| frame.get(i + 5..i + 9));
+            if sof.is_none_or(|s| u16::from_be_bytes([s[0], s[1]]) as usize * u16::from_be_bytes([s[2], s[3]]) as usize != n) {
+                return Err(wrong());
+            }
+            let img = jpegls::decode_image(frame).map_err(|e| format!("Couldn't decode its JPEG-LS picture: {e}"))?;
+            let n = img.width as usize * img.height as usize;
+            let chans = if img.components >= 3 { 3 } else { 1 };
+            let mut out = vec![0.0; n * chans];
+            for c in 0..chans {
+                for i in 0..n {
+                    out[i * chans + c] = img.samples.get(c * n + i).copied().unwrap_or(0) as f64;
+                }
+            }
+            Ok((img.width, img.height, chans, out))
+        }
+        _ => {
+            let mut d = jpeg_decoder::Decoder::new(frame);
+            let jpeg_err = |e: jpeg_decoder::Error| match e {
+                jpeg_decoder::Error::Unsupported(jpeg_decoder::UnsupportedFeature::SamplePrecision(b)) => format!("Its picture is {b}-bit JPEG, which Filescape can't decode yet"),
+                e => format!("Couldn't decode its JPEG picture: {e}"),
+            };
+            d.read_info().map_err(jpeg_err)?;
+            if d.info().is_none_or(|i| i.width as usize * i.height as usize != n) {
+                return Err(wrong());
+            }
+            let px = d.decode().map_err(jpeg_err)?;
+            let info = d.info().ok_or("Couldn't decode its JPEG picture")?;
+            let (w, h) = (info.width as u32, info.height as u32);
+            Ok(match info.pixel_format {
+                jpeg_decoder::PixelFormat::L8 => (w, h, 1, px.iter().map(|&v| v as f64).collect()),
+                jpeg_decoder::PixelFormat::L16 => (w, h, 1, px.chunks_exact(2).map(|c| u16::from_ne_bytes([c[0], c[1]]) as f64).collect()),
+                jpeg_decoder::PixelFormat::RGB24 => (w, h, 3, px.iter().map(|&v| v as f64).collect()),
+                jpeg_decoder::PixelFormat::CMYK32 => return Err("Its picture is in CMYK, which isn't supported".into()),
+            })
+        }
+    }
 }
 
 /// One RLE frame: a 64-byte header of segment offsets, then PackBits segments, one per byte of
@@ -632,7 +771,7 @@ mod tests {
     fn dicom_compressed_says_so_and_junk_is_refused() {
         let mut b = vec![0u8; 128];
         b.extend(b"DICM");
-        b.extend(el((0x0002, 0x0010), b"UI", b"1.2.840.10008.1.2.4.90"));
+        b.extend(el((0x0002, 0x0010), b"UI", b"1.2.840.10008.1.2.4.201\0"));
         b.extend(el((0x0028, 0x0010), b"US", &2u16.to_le_bytes()));
         b.extend(el((0x0028, 0x0011), b"US", &2u16.to_le_bytes()));
         b.extend([0xE0, 0x7F, 0x10, 0x00, b'O', b'B', 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]);
@@ -691,7 +830,14 @@ fn read_sample_folder() {
     names.sort();
     for p in names {
         match read(&p) {
-            Ok(s) => println!("ok   {:50} {}x{} {:?}", p.file_name().unwrap().to_string_lossy(), s.width, s.height, s.facts.iter().find(|f| f.0 == "Encoding").map(|f| &f.1)),
+            Ok(s) => println!(
+                "ok   {:50} {}x{} {:?} sum={}",
+                p.file_name().unwrap().to_string_lossy(),
+                s.width,
+                s.height,
+                s.facts.iter().find(|f| f.0 == "Encoding").map(|f| &f.1),
+                s.rgba.iter().map(|&v| v as u64).sum::<u64>()
+            ),
             Err(e) => println!("err  {:50} {e}", p.file_name().unwrap().to_string_lossy()),
         }
     }

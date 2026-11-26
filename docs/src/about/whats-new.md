@@ -112,6 +112,8 @@
   machine disks show their size and type, and Windows images list their editions.
 - Disc images that use UDF (DVDs, Blu-ray discs and Windows install discs) list their files
   too.
+- JPEG 2000 pictures (.jp2, .j2k) preview, and DICOM scans compressed with JPEG 2000,
+  JPEG-LS or lossless JPEG now show their picture.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the

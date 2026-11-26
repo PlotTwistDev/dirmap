@@ -93,9 +93,10 @@ impl Format {
             "vcard" => ("A contact card, or a list of contacts", "Filescape"),
             "ical" => ("An event's time, place and details, or a list of events and to-dos", "Filescape"),
             "jxl" => ("The picture; channels one by one", "jxl-oxide"),
+            "jp2" => ("The picture; channels one by one", "hayro-jpeg2000"),
             "dxf" => ("The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size", "Filescape"),
             "daw" => ("The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones)", "Filescape"),
-            "dicom" => ("The scan (uncompressed or baseline JPEG) in its window, and what kind of scan it is; patient details are never shown", "Filescape"),
+            "dicom" => ("The scan (uncompressed, RLE, JPEG, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown", "Filescape"),
             "fits" => ("The first picture, stretched so faint detail shows, with the object, telescope and exposure", "Filescape"),
             "heif" => ("The picture", "The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg)"),
             _ => match self.category {
@@ -147,6 +148,7 @@ pub static FORMATS: &[Format] = &[
     Format { id: "gif", name: "GIF image", category: Category::Picture, exts: &["gif"] },
     Format { id: "webp", name: "WebP image", category: Category::Picture, exts: &["webp"] },
     Format { id: "jxl", name: "JPEG XL image", category: Category::Picture, exts: &["jxl"] },
+    Format { id: "jp2", name: "JPEG 2000 image", category: Category::Picture, exts: &["jp2", "j2k", "j2c", "jpc", "jpf", "jpg2"] },
     Format { id: "tiff", name: "TIFF image", category: Category::Picture, exts: &["tif", "tiff"] },
     Format { id: "bmp", name: "BMP image", category: Category::Picture, exts: &["bmp"] },
     Format { id: "tga", name: "Targa image", category: Category::Picture, exts: &["tga"] },
@@ -253,6 +255,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "webp"
     } else if at(0, b"\xff\x0a") || at(0, b"\0\0\0\x0cJXL \r\n\x87\n") {
         "jxl"
+    } else if at(0, b"\0\0\0\x0cjP  \r\n\x87\n") || at(0, b"\xff\x4f\xff\x51") {
+        "jp2"
     } else if at(0, b"II*\0") || at(0, b"MM\0*") {
         "tiff"
     } else if at(0, b"qoif") {
