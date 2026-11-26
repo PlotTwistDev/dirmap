@@ -465,7 +465,7 @@ the next. The selection stays as it is.
 
 | Kind | What you see |
 |---|---|
-| Images | PNG, JPEG, JPEG XL, GIF, WebP, TIFF, BMP, TGA, ICO, QOI, PNM, and HDR and OpenEXR (shown with a standard display curve). Transparent areas show a checkerboard. |
+| Images | PNG, JPEG, JPEG XL, GIF, WebP, TIFF, BMP, TGA, ICO, QOI, PNM, and HDR and OpenEXR (shown with a standard display curve). Transparent areas show a checkerboard. Over pictures with transparency, high dynamic range pictures, and any picture in Quick Look, a row of buttons shows each channel on its own (**R**, **G**, **B**, **A**). Point at the picture to read the values under the pointer. HDR and OpenEXR pictures also have an **Exposure** slider in stops, to see into bright highlights and deep shadows. Multilayer OpenEXR files (render passes such as diffuse, specular and depth) have a list to pick the layer; depth is shown from near (dark) to far (light). |
 | Photoshop | PSD and PSB documents: the flattened picture Photoshop saves with them (8, 16 and 32 bits; RGB, greyscale, CMYK and indexed), or their small thumbnail if it was saved without **Maximize Compatibility**. Layers aren't shown separately. |
 | HEIC and AVIF | iPhone photos (HEIC) and AVIF pictures, drawn by the system: built into macOS; on Windows with the free HEIF and AV1 Video Extensions from the Microsoft Store; on Linux with libheif's `heif-thumbnailer` or ffmpeg. |
 | Camera RAW | CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2, PEF, SRW and other RAW photos: the JPEG preview the camera stored in the file, turned the way the camera was held, and in the details the camera, lens, exposure and when it was taken. The RAW data itself isn't developed. |

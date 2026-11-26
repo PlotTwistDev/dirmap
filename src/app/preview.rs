@@ -34,6 +34,8 @@ pub(super) enum Content {
         source: Option<(String, bool)>,
         /// More about it for the details (a photo's camera and exposure).
         facts: Vec<(&'static str, String)>,
+        /// Its channels and layers, to look at one by one (pictures only).
+        look: Option<Box<ImageLook>>,
     },
     /// Sound: played with the controls in the preview, from this file (a fetched copy for one
     /// on a server).
@@ -261,6 +263,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                 let rgba = img.to_rgba8();
                 let (w, h) = rgba.dimensions();
                 Content::Image {
+                    look: None,
                     pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba)),
                     tex: None,
                     size: p.size,
@@ -278,6 +281,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                 let rgba = img.to_rgba8();
                 let (w, h) = rgba.dimensions();
                 Content::Image {
+                    look: None,
                     pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba)),
                     tex: None,
                     size: [w, h],
@@ -293,6 +297,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Ok(song) => {
                 let (w, h) = (1200, 400);
                 Content::Image {
+                    look: None,
                     pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &song.roll(w, h))),
                     tex: None,
                     size: [w, h],
@@ -306,6 +311,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
         },
         Kind::Font => match crate::fontview::specimen(path, 800) {
             Ok(s) => Content::Image {
+                look: None,
                 pixels: Some(egui::ColorImage::from_rgba_unmultiplied([s.width as usize, s.height as usize], &s.rgba)),
                 tex: None,
                 size: [s.width, s.height],
@@ -323,6 +329,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                     _ => None, // .svgz: compressed, no source to show
                 };
                 Content::Image {
+                    look: None,
                     pixels: Some(egui::ColorImage::from_rgba_unmultiplied([d.width as usize, d.height as usize], &d.rgba)),
                     tex: None,
                     size: [d.natural[0].round().max(1.0) as u32, d.natural[1].round().max(1.0) as u32],
@@ -346,6 +353,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Ok(doc) => Content::Pdf(Arc::new(PdfShown { doc, pages: Default::default() })),
             Err(e) => match crate::media::thumbnail(path, 1024) {
                 Ok((w, h, rgba)) => Content::Image {
+                    look: None,
                     pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
                     tex: None,
                     size: [w as u32, h as u32],
@@ -359,6 +367,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
         },
         Kind::Media(m) => match crate::media::thumbnail(path, 1024) {
             Ok((w, h, rgba)) => Content::Image {
+                look: None,
                 pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
                 tex: None,
                 size: [w as u32, h as u32],
@@ -409,17 +418,105 @@ fn sniffed(path: &Path) -> Option<Kind> {
 }
 
 fn load_image(path: &Path, linear: bool, size: u64) -> Content {
-    match decode_image(path, linear, size, SHOW_MAX) {
-        Ok((pixels, size, info)) => Content::Image { pixels: Some(pixels), tex: None, size, info, poster: false, source: None, facts: Vec::new() },
+    use crate::imagelook::{Planes, View};
+    let picture = |planes: Planes, full: [u32; 2], info: String, facts: Vec<(&'static str, String)>| {
+        let (w, h, rgba) = planes.render(&View::default());
+        Content::Image {
+            pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
+            tex: None,
+            size: full,
+            info,
+            poster: false,
+            source: None,
+            facts,
+            look: Some(Box::new(ImageLook { planes, view: View::default(), drawn: View::default() })),
+        }
+    };
+    // OpenEXR: every layer (render passes), not only the main picture.
+    let exr = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("exr"));
+    if exr && size <= IMAGE_MAX_FILE
+        && let Ok(planes) = crate::imagelook::Planes::read_exr(path, SHOW_MAX as usize)
+    {
+        let full = planes.layers[0].full;
+        let n = planes.layers.len();
+        let mut facts = Vec::new();
+        if n > 1 {
+            facts.push(("Layers", planes.layers.iter().map(|l| l.label()).collect::<Vec<_>>().join(", ")));
+        }
+        let info = format!("{} · linear, shown as sRGB", if n == 1 { "1 layer".to_string() } else { format!("{n} layers") });
+        return picture(planes, full, info, facts);
+    }
+    match open_image(path, size) {
+        Ok(img) => {
+            let full = [img.width(), img.height()];
+            let info = describe(img.color());
+            let planes = Planes::from_image(&img, linear, SHOW_MAX as usize);
+            let info = if planes.linear { format!("{info} · linear, shown as sRGB") } else { info };
+            picture(planes, full, info, Vec::new())
+        }
         Err(e) => Content::Error(e),
     }
 }
 
-/// Decode an image file for display, no larger than `max` pixels across: the pixels, the full
-/// size and a description of the pixel format. Linear-light and float images go through the sRGB
-/// curve. Big files and huge dimensions are refused rather than risk the memory. Runs on worker
-/// threads (previews and thumbnails).
-pub(super) fn decode_image(path: &Path, linear: bool, size: u64, max: u32) -> Result<(egui::ColorImage, [u32; 2], String), String> {
+/// A picture's channels and layers, and which of them is showing.
+pub(super) struct ImageLook {
+    planes: crate::imagelook::Planes,
+    view: crate::imagelook::View,
+    /// The view the texture was drawn for.
+    drawn: crate::imagelook::View,
+}
+
+/// The row over a picture: which layer, which channel, and (for high dynamic range pictures)
+/// the exposure.
+fn image_controls(ui: &mut egui::Ui, path: &Path, lk: &mut ImageLook) {
+    let p = &lk.planes;
+    let v = &mut lk.view;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if p.layers.len() > 1 {
+            let mut layer = v.layer;
+            egui::ComboBox::from_id_salt(("look-layer", path)).selected_text(p.layers[v.layer].label()).width(150.0).show_ui(ui, |ui| {
+                for (i, l) in p.layers.iter().enumerate() {
+                    ui.selectable_value(&mut layer, i, l.label());
+                }
+            });
+            if layer != v.layer {
+                v.layer = layer;
+                v.channel = None;
+            }
+        }
+        let l = &p.layers[v.layer];
+        let colour = l.channels.len() > 1;
+        if colour {
+            ui.selectable_value(&mut v.channel, None, "Colour").on_hover_text("All channels together");
+        }
+        for (i, (name, _)) in l.channels.iter().enumerate() {
+            let tip = match name.to_ascii_uppercase().as_str() {
+                "R" => "Red only".to_string(),
+                "G" => "Green only".to_string(),
+                "B" => "Blue only".to_string(),
+                "A" => "Transparency (alpha): white is solid".to_string(),
+                "Z" => "Depth: near is dark, far is light".to_string(),
+                _ => format!("The {name} channel only"),
+            };
+            if colour {
+                ui.selectable_value(&mut v.channel, Some(i), name.as_str()).on_hover_text(tip);
+            }
+        }
+        if p.linear {
+            ui.add_space(6.0);
+            ui.add(egui::Slider::new(&mut v.exposure, -8.0..=8.0).step_by(0.25).text("stops").fixed_decimals(2))
+                .on_hover_text("Exposure: each stop doubles or halves the light, to see into the highlights and shadows");
+            if v.exposure != 0.0 && ui.small_button("Reset").clicked() {
+                v.exposure = 0.0;
+            }
+        }
+    });
+    ui.add_space(2.0);
+}
+
+/// Open an image file, refusing big files and huge dimensions rather than risk the memory.
+fn open_image(path: &Path, size: u64) -> Result<image::DynamicImage, String> {
     if size > IMAGE_MAX_FILE {
         return Err(format!("Too big to preview ({}).", crate::scan::human(size)));
     }
@@ -431,11 +528,18 @@ pub(super) fn decode_image(path: &Path, linear: bool, size: u64, max: u32) -> Re
     limits.max_image_height = Some(16_384);
     limits.max_alloc = Some(512 << 20);
     reader.limits(limits);
-    let img = match reader.decode() {
-        Ok(i) => i,
-        Err(image::ImageError::Limits(_)) => return Err("Too large to preview safely.".into()),
-        Err(e) => return Err(format!("Couldn't read the image: {e}")),
-    };
+    match reader.decode() {
+        Ok(i) => Ok(i),
+        Err(image::ImageError::Limits(_)) => Err("Too large to preview safely.".into()),
+        Err(e) => Err(format!("Couldn't read the image: {e}")),
+    }
+}
+
+/// Decode an image file for display, no larger than `max` pixels across: the pixels, the full
+/// size and a description of the pixel format. Linear-light and float images go through the sRGB
+/// curve. Runs on worker threads (thumbnails).
+pub(super) fn decode_image(path: &Path, linear: bool, size: u64, max: u32) -> Result<(egui::ColorImage, [u32; 2], String), String> {
+    let img = open_image(path, size)?;
     let (w, h) = (img.width(), img.height());
     let info = describe(img.color());
     let small = if w > max || h > max { img.thumbnail(max, max) } else { img };
@@ -460,8 +564,7 @@ pub(super) fn decode_image(path: &Path, linear: bool, size: u64, max: u32) -> Re
 
 /// Linear light to the sRGB display curve.
 fn srgb(v: f32) -> f32 {
-    let v = v.max(0.0);
-    if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.min(1.0).powf(1.0 / 2.4) - 0.055 }
+    crate::imagelook::srgb(v)
 }
 
 fn describe(c: image::ColorType) -> String {
@@ -904,8 +1007,23 @@ impl App {
                 return;
             }
         }
+        // A picture: its layers, channels and exposure.
+        if let Content::Image { look: Some(lk), pixels, .. } = c {
+            let p = &lk.planes;
+            let has_alpha = p.layers[0].channels.iter().any(|c| c.0 == "A");
+            if p.linear || p.layers.len() > 1 || has_alpha || size.x > 520.0 {
+                let top = ui.cursor().top();
+                image_controls(ui, path, lk);
+                size.y -= ui.cursor().top() - top;
+            }
+            if lk.view != lk.drawn {
+                let (w, h, rgba) = lk.planes.render(&lk.view);
+                *pixels = Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba));
+                lk.drawn = lk.view;
+            }
+        }
         match c {
-            Content::Image { pixels, tex, size: full, source, .. } => {
+            Content::Image { pixels, tex, size: full, source, look, .. } => {
                 if let Some(px) = pixels.take() {
                     *tex = Some(ctx.load_texture(format!("look:{}", path.display()), px, egui::TextureOptions::LINEAR));
                 }
@@ -945,7 +1063,18 @@ impl App {
                 if resp.double_clicked() {
                     new_view = Some(if zoom.is_some() { (None, Vec2::ZERO) } else { (Some(1.0), Vec2::ZERO) });
                 }
-                let label = format!("{} × {}  ·  {:.0}%", full[0], full[1], scale * 100.0);
+                let mut label = format!("{} × {}  ·  {:.0}%", full[0], full[1], scale * 100.0);
+                // The values under the pointer.
+                if let Some(lk) = look
+                    && let Some(m) = resp.hover_pos()
+                    && img_rect.contains(m)
+                {
+                    let f = (m - img_rect.min) / img_rect.size();
+                    let vals = lk.planes.sample(&lk.view, f.x, f.y);
+                    let num = |v: f32| if lk.planes.linear { format!("{v:.2}") } else { format!("{}", (v * 255.0).round()) };
+                    label.clear();
+                    label.push_str(&vals.iter().map(|(n, v)| format!("{n} {}", num(*v))).collect::<Vec<_>>().join("  "));
+                }
                 let g = ui.painter().layout_no_wrap(label, FontId::proportional(11.0), Color32::WHITE);
                 let lr = Rect::from_min_size(r.left_bottom() + vec2(6.0, -g.size().y - 10.0), g.size() + vec2(10.0, 4.0));
                 ui.painter().rect_filled(lr, 3.0, Color32::from_black_alpha(150));
@@ -1390,6 +1519,7 @@ fn load_doc(path: &Path) -> Content {
                 let rgba = img.to_rgba8();
                 let (w, h) = rgba.dimensions();
                 Content::Image {
+                    look: None,
                     pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba)),
                     tex: None,
                     size: [w, h],
