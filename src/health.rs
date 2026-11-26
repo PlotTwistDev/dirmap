@@ -246,7 +246,7 @@ mod tests {
 
     fn model(format: Format, names: &[&str]) -> Model {
         let files = names.iter().map(|n| File { path: PathBuf::from(format!("/m/{n}")), size: 0, not_local: false }).collect();
-        Model { name: "m".into(), source: Source::Folder, format, info: Info::default(), files, size: 0, copies: vec![], extra: 0, orphan: false }
+        Model { name: "m".into(), source: Source::Folder, format, info: Info::default(), files, size: 0, copies: vec![], extra: 0, same_as: Vec::new(), orphan: false }
     }
 
     fn tensor(name: &str, offset: u64, bytes: u64) -> Tensor {

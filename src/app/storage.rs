@@ -12,6 +12,9 @@ use crate::kit::{self, Tone};
 use crate::models::{Model, Source};
 use std::collections::BTreeSet;
 
+mod moving;
+mod shrink;
+
 #[derive(Default)]
 pub(super) struct StorageState {
     /// The Storage view is on screen instead of the library.
@@ -24,11 +27,17 @@ pub(super) struct StorageState {
     confirm: Option<Confirm>,
     removing: Option<mpsc::Receiver<Vec<(Item, Vec<Removed>)>>>,
     pub outcome: Option<(Tone, String)>,
+    /// Moving an app's folder to another drive.
+    moving: Option<moving::Moving>,
+    /// Shrinking one model into a new file.
+    shrink: Option<shrink::Shrink>,
 }
 
 struct Confirm {
     items: Vec<Item>,
     trash: bool,
+    /// Share copies as one file instead of removing them.
+    share: bool,
 }
 
 impl StorageState {
@@ -62,6 +71,7 @@ impl App {
     }
 
     pub(super) fn poll_storage(&mut self, ctx: &egui::Context) {
+        self.poll_moving(ctx);
         let s = &mut self.models.storage;
         if let Some(rx) = &s.rx {
             match rx.try_recv() {
@@ -90,17 +100,19 @@ impl App {
     /// Asks to remove one model from the library: what that means is worked out first.
     pub(super) fn ask_remove_model(&mut self, m: &Model) {
         match cleanup::plan(m) {
-            Ok(item) => self.models.storage.confirm = Some(Confirm { items: vec![item], trash: true }),
+            Ok(item) => self.models.storage.confirm = Some(Confirm { items: vec![item], trash: true, share: false }),
             Err(e) => self.models.storage.outcome = Some((Tone::Warn, format!("{} can't be removed: {e}", m.name))),
         }
     }
 
-    /// Asks to remove these, after the Professional check for more than one.
-    fn ask_remove(&mut self, items: Vec<Item>) {
+    /// Asks to remove these (or share them as one file), after the Professional check for more
+    /// than one.
+    fn ask_remove(&mut self, items: Vec<Item>, share: bool) {
+        let items: Vec<Item> = items.into_iter().filter(|i| if share { i.can_share } else { i.can_trash }).collect();
         if items.is_empty() || (items.len() > 1 && !self.premium(crate::licence::Feature::ModelAutomation)) {
             return;
         }
-        self.models.storage.confirm = Some(Confirm { items, trash: true });
+        self.models.storage.confirm = Some(Confirm { items, trash: true, share });
     }
 
     /// The Storage view.
@@ -126,6 +138,7 @@ impl App {
             ui.add_space(6.0);
         }
         by_app(ui, &list);
+        self.storage_places(ui, &list);
         ui.add_space(12.0);
         let busy = self.models.storage.removing.is_some();
         let Some(items) = self.models.storage.items.clone() else {
@@ -151,6 +164,7 @@ impl App {
         ui.weak("Nothing here is used by a model. Each item lists what it removes before anything happens.");
         ui.add_space(4.0);
         let mut remove_one = None;
+        let mut share_one = None;
         egui::ScrollArea::vertical().id_salt("storage-items").max_height((ui.available_height() - 40.0).max(120.0)).auto_shrink([false, true]).show(ui, |ui| {
             let mut last = None;
             for (i, it) in items.iter().enumerate() {
@@ -183,8 +197,16 @@ impl App {
                         ui.add(egui::Label::new(egui::RichText::new(&it.detail).small().weak()).wrap());
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add_enabled(!busy, egui::Button::new(format!("{}…", bin_verb()))).on_hover_text("See what this removes, then confirm").clicked() {
+                        if it.can_trash && ui.add_enabled(!busy, egui::Button::new(format!("{}…", bin_verb()))).on_hover_text("See what this removes, then confirm").clicked() {
                             remove_one = Some(i);
+                        }
+                        if it.can_share
+                            && ui
+                                .add_enabled(!busy, egui::Button::new("Share as one file…"))
+                                .on_hover_text("Keep both names but one file on disk (a hard link). Every app keeps working; the space is freed at once.")
+                                .clicked()
+                        {
+                            share_one = Some(i);
                         }
                     });
                 })
@@ -196,11 +218,18 @@ impl App {
         ui.separator();
         let picked: Vec<usize> = self.models.storage.picked.iter().copied().filter(|&i| i < items.len()).collect();
         let mut remove_picked = false;
+        let mut share_picked = false;
         ui.horizontal(|ui| {
-            let bytes: u64 = picked.iter().map(|&i| items[i].bytes).sum();
-            let label = if picked.len() > 1 { format!("Remove {} items ({})…", picked.len(), scan::human(bytes)) } else { "Remove selected…".into() };
-            let r = ui.add_enabled(!busy && !picked.is_empty(), egui::Button::new(label));
+            let trash: Vec<usize> = picked.iter().copied().filter(|&i| items[i].can_trash).collect();
+            let bytes: u64 = trash.iter().map(|&i| items[i].bytes).sum();
+            let label = if trash.len() > 1 { format!("Remove {} items ({})…", trash.len(), scan::human(bytes)) } else { "Remove selected…".into() };
+            let r = ui.add_enabled(!busy && !trash.is_empty(), egui::Button::new(label));
             remove_picked = r.on_hover_text("Several at once is part of managing models in bulk (Professional). One at a time is free.").clicked();
+            let shared: Vec<usize> = picked.iter().copied().filter(|&i| items[i].can_share).collect();
+            if !shared.is_empty() {
+                let label = if shared.len() > 1 { format!("Share {} as one file…", shared.len()) } else { "Share selected as one file…".into() };
+                share_picked = ui.add_enabled(!busy, egui::Button::new(label)).clicked();
+            }
             if !self.licence.allows(crate::licence::Feature::ModelAutomation) {
                 ui.weak("Several at once: Professional");
             }
@@ -212,9 +241,11 @@ impl App {
             }
         });
         if let Some(i) = remove_one {
-            self.ask_remove(vec![items[i].clone()]);
-        } else if remove_picked {
-            self.ask_remove(picked.iter().map(|&i| items[i].clone()).collect());
+            self.ask_remove(vec![items[i].clone()], false);
+        } else if let Some(i) = share_one {
+            self.ask_remove(vec![items[i].clone()], true);
+        } else if remove_picked || share_picked {
+            self.ask_remove(picked.iter().map(|&i| items[i].clone()).collect(), share_picked);
         }
     }
 
@@ -227,34 +258,46 @@ impl App {
         let paths: usize = c.items.iter().map(|i| i.paths.len()).sum();
         egui::Modal::new(egui::Id::new("storage-confirm")).show(ctx, |ui| {
             ui.set_max_width(560.0);
-            ui.heading(match &c.items[..] {
-                [one] if one.kind == Kind::Model => format!("Remove {}?", one.title),
-                [one] => format!("Remove {}?", one.title),
-                many => format!("Remove {} items?", many.len()),
-            });
+            let what = match &c.items[..] {
+                [one] => one.title.clone(),
+                many => format!("{} items", many.len()),
+            };
+            ui.heading(if c.share { format!("Share {what} as one file?") } else { format!("Remove {what}?") });
             ui.add_space(4.0);
-            ui.label(format!("This frees {}, removing {}:", scan::human(bytes), if paths == 1 { "this".to_string() } else { format!("these {paths}") }));
+            if c.share {
+                ui.label(format!("This frees {}. Each copy becomes a second name of the file it's the same as, so every app keeps finding its model, with one file on disk. Each pair is compared once more first.", scan::human(bytes)));
+            } else {
+                ui.label(format!("This frees {}, removing {}:", scan::human(bytes), if paths == 1 { "this".to_string() } else { format!("these {paths}") }));
+            }
             ui.add_space(4.0);
             egui::ScrollArea::vertical().max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
                 for it in &c.items {
                     ui.label(egui::RichText::new(format!("{} · {}", it.title, scan::human(it.bytes))).strong());
                     ui.add(egui::Label::new(egui::RichText::new(&it.detail).small().weak()).wrap());
-                    for p in &it.paths {
-                        ui.add(egui::Label::new(egui::RichText::new(p.shown()).small().monospace()).wrap());
+                    for (k, p) in it.paths.iter().enumerate() {
+                        let line = match it.keep.get(k).filter(|_| c.share) {
+                            Some(keep) => format!("{}\n    becomes the same file as {}", p.shown(), keep.shown()),
+                            None => p.shown(),
+                        };
+                        ui.add(egui::Label::new(egui::RichText::new(line).small().monospace()).wrap());
                     }
                     ui.add_space(4.0);
                 }
             });
             ui.add_space(6.0);
-            ui.radio_value(&mut c.trash, true, format!("{} (the space comes back when it's emptied)", bin_verb()));
-            ui.radio_value(&mut c.trash, false, "Delete for good (the space comes back now)");
+            if c.share {
+                ui.weak("Removing either name later keeps the other. A program that changes one in place would change both; model files aren't changed that way.");
+            } else {
+                ui.radio_value(&mut c.trash, true, format!("{} (the space comes back when it's emptied)", bin_verb()));
+                ui.radio_value(&mut c.trash, false, "Delete for good (the space comes back now)");
+            }
             if c.items.iter().any(|i| i.app == "Ollama") {
                 ui.weak("If Ollama is downloading a model right now, let it finish first.");
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let verb = if c.trash { bin_verb() } else { "Delete" };
-                go = kit::button(ui, if c.trash { kit::Kind::Primary } else { kit::Kind::Danger }, None, verb).clicked();
+                let verb = if c.share { "Share as one file" } else if c.trash { bin_verb() } else { "Delete" };
+                go = kit::button(ui, if c.trash || c.share { kit::Kind::Primary } else { kit::Kind::Danger }, None, verb).clicked();
                 cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
             });
         });
@@ -267,11 +310,11 @@ impl App {
         if cancel {
             self.models.storage.confirm = None;
         } else if go {
-            let Confirm { items, trash } = self.models.storage.confirm.take().unwrap();
+            let Confirm { items, trash, share } = self.models.storage.confirm.take().unwrap();
             let (tx, rx) = mpsc::channel();
             std::thread::spawn(move || {
                 let done = items.into_iter().map(|it| {
-                    let r = cleanup::remove(&it, trash);
+                    let r = if share { cleanup::share(&it) } else { cleanup::remove(&it, trash) };
                     (it, r)
                 });
                 let _ = tx.send(done.collect());
@@ -299,7 +342,7 @@ fn outcome(done: &[(Item, Vec<Removed>)]) -> (Tone, String) {
         many => format!("{} items", many.len()),
     };
     if failed.is_empty() {
-        (Tone::Success, format!("Removed {names}: {} freed.", scan::human(freed)))
+        (Tone::Success, format!("Done: {names}, {} freed.", scan::human(freed)))
     } else {
         let first = &failed[0];
         let why = first.result.as_ref().err().cloned().unwrap_or_default();
@@ -312,7 +355,7 @@ fn kind_words(k: Kind) -> &'static str {
         Kind::Unused => "Left behind by removed models or stopped downloads. No model needs them.",
         Kind::Partial => "Downloads that stopped part way. Starting the download again starts afresh.",
         Kind::OldVersion => "Hugging Face keeps each version a program downloaded. Programs use the current one.",
-        Kind::Copy => "Loose files that are byte-for-byte the same as a model kept elsewhere. The other copy stays.",
+        Kind::Copy => "Files that are byte-for-byte the same as a model kept elsewhere. Share them as one file so every app keeps working, or remove a loose copy.",
         Kind::Model => "",
     }
 }

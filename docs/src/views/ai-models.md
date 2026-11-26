@@ -214,14 +214,22 @@ Hugging Face and other folders), and what can be freed:
 - **Older Hugging Face versions**: Hugging Face keeps every version of a model a program
   downloaded. Programs use the current one (the one its `refs` point to); the older ones, and
   files no version uses, can go.
-- **Extra copies**: a loose model file (in Downloads, say) that's byte-for-byte the same as one an
-  app or another folder keeps. The other copy stays.
+- **Extra copies**: model files that are byte-for-byte the same as files another model keeps, such
+  as the same GGUF file in LM Studio and in Downloads.
 
 Each item says why it can go. **Move to Trash…** shows every file, folder and link it removes, and
 asks once. Choose **Move to Trash** to be able to put it back (the space comes back when the Trash
 is emptied), or **Delete for good** to get the space back straight away. Removing one item at a
 time is free; ticking several and pressing **Remove N items…** is part of managing models in bulk,
 in Filescape Professional.
+
+**Share as one file…** (for copies on the same drive) keeps both names but only one file on disk,
+so every app keeps finding its model and the space is freed straight away. Filescape compares the
+two files once more first, then makes the copy a second name of the file it's the same as (a
+*hard link*). Removing either name later keeps the other. A loose copy can also be moved to the
+Trash; a copy an app keeps can only be shared, since removing it would take the model from that
+app. Copies on different drives can't be shared. Sharing several at once is Professional, like
+removing several.
 
 Filescape only calls something unused when the app's own records say so. If Ollama's list of
 models or Hugging Face's version records can't be read, nothing in that folder is offered.
@@ -237,6 +245,40 @@ goes before anything happens:
 - **LM Studio and other folders**: its files.
 
 If Ollama is downloading a model, let it finish first.
+
+## Moving models to another drive
+
+**Storage** lists where Ollama, LM Studio and Hugging Face keep their models. **Move to another
+drive…** moves one app's whole folder to a folder you choose on another drive, and leaves a link
+where it was, so the app finds its models as before without any setting changing. This is part of
+managing models in bulk (Professional).
+
+Filescape checks first that the other drive has room and that Ollama isn't running (quit
+LM Studio, or programs using Hugging Face models, yourself). Then it copies everything into a new
+folder named, say, `Ollama models`, compares the copy with the original, and puts the link in
+place. The original is deleted only after the link has been checked; if anything fails or you
+press **Stop**, everything is put back as it was. On Windows the link is a directory junction,
+which needs no special rights.
+
+A folder that has already been moved shows where its link leads.
+
+## Shrinking a model
+
+Right-click a GGUF model in the list and choose **Shrink (quantise)…** to make a smaller copy with
+less precise weights: it loads faster, needs less memory, and writes slightly worse. This is part
+of model quantisation (Professional).
+
+Pick a size, from **Q8_0** (barely different from the original) to **Q2_K** (smallest, for trying
+out only); each shows roughly how big the new file will be, and sizes that wouldn't be smaller are
+greyed out. **Q4_K_M** is the usual choice. The new file goes beside the original, or, for a model
+in Ollama's or Hugging Face's own folder, in Filescape's models folder; choose another with
+**Choose…**.
+
+The original is only ever read. The new file is written under a temporary name and named only once
+it's finished, so stopping or a failure leaves nothing half-written behind. Shrinking an
+already-shrunk model is allowed with a warning: it loses more than shrinking the original would.
+llama.cpp does the work in a separate copy of Filescape, so a model it can't handle can't take the
+app down with it.
 
 ## On the command line
 
