@@ -69,6 +69,19 @@ struct ModelPage {
     /// Tokens to show (ids), for `vocab_shown_for`.
     vocab_shown: Vec<u32>,
     vocab_shown_for: Option<(String, Option<crate::vocab::Script>)>,
+    /// Compare: the other model (index into the list), being read or compared.
+    compare_with: Option<usize>,
+    compare_rx: Option<mpsc::Receiver<Inspection>>,
+    comparison: Option<Arc<(Inspection, crate::modeldiff::Comparison)>>,
+    compare_show: CompareShow,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CompareShow {
+    Changed,
+    OnlyA,
+    OnlyB,
+    All,
 }
 
 enum VocabState {
@@ -113,6 +126,7 @@ enum PageTab {
     Tensors,
     Tokens,
     Metadata,
+    Compare,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -542,6 +556,10 @@ impl App {
             vocab_script: None,
             vocab_shown: Vec::new(),
             vocab_shown_for: None,
+            compare_with: None,
+            compare_rx: None,
+            comparison: None,
+            compare_show: CompareShow::Changed,
         });
     }
 
@@ -571,12 +589,56 @@ impl App {
                 Err(mpsc::TryRecvError::Disconnected) => page.rx = None,
             }
         }
+        if let (Some(rx), Some(a)) = (&page.compare_rx, &page.data) {
+            match rx.try_recv() {
+                Ok(b) => {
+                    let c = crate::modeldiff::compare(a, &b);
+                    page.comparison = Some(Arc::new((b, c)));
+                    page.compare_rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => ui.ctx().request_repaint_after(Duration::from_millis(50)),
+                Err(mpsc::TryRecvError::Disconnected) => page.compare_rx = None,
+            }
+        }
         let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input();
         let mut open = None;
         ui.horizontal(|ui| {
             close |= ui.button("⏴ All models").on_hover_text("Back to the list (Esc)").clicked();
             ui.add_space(8.0);
-            ui.add(egui::Label::new(egui::RichText::new(&m.name).heading()).truncate());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if page.data.is_some() && list.len() > 1 {
+                    let mut pick = None;
+                    egui::ComboBox::from_id_salt("compare-with")
+                        .selected_text(page.compare_with.and_then(|c| list.get(c)).map_or("Compare with…".to_string(), |o| format!("Compared with {}", o.name)))
+                        .width(220.0)
+                        .show_ui(ui, |ui| {
+                            for (i, o) in list.iter().enumerate() {
+                                if i == page.model || o.info.companion || o.files.iter().all(|f| f.not_local) {
+                                    continue;
+                                }
+                                if ui.selectable_label(page.compare_with == Some(i), format!("{}  ·  {}", o.name, o.details())).clicked() {
+                                    pick = Some(i);
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text("Compare this model with another: their facts, layers, tensors and metadata side by side");
+                    if let Some(i) = pick {
+                        let (tx, rx) = mpsc::channel();
+                        let o = list[i].clone();
+                        std::thread::spawn(move || {
+                            let _ = tx.send(inspect::inspect(&o));
+                        });
+                        page.compare_with = Some(i);
+                        page.compare_rx = Some(rx);
+                        page.comparison = None;
+                        page.tab = PageTab::Compare;
+                    }
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(egui::Label::new(egui::RichText::new(&m.name).heading()).truncate());
+                });
+            });
         });
         ui.horizontal_wrapped(|ui| {
             ui.weak(format!("{} · {} · {}", m.details(), scan::human(m.size), m.source.label()));
@@ -607,6 +669,9 @@ impl App {
         }
         if metas > 0 {
             tabs.push((PageTab::Metadata, meta_label.as_str()));
+        }
+        if page.compare_with.is_some() {
+            tabs.push((PageTab::Compare, "Compare"));
         }
         if tabs.len() > 1 {
             kit::segmented(ui, &mut page.tab, &tabs, false);
@@ -652,6 +717,13 @@ impl App {
                 page_tensors(ui, &mut page, m, &d);
             }
             (Some(_), PageTab::Tokens) => page_tokens(ui, &mut page, m),
+            (Some(d), PageTab::Compare) => {
+                let d = d.clone();
+                let other = page.compare_with.and_then(|c| list.get(c));
+                if let Some(o) = other {
+                    page_compare(ui, &mut page, m, o, &d);
+                }
+            }
             (Some(d), PageTab::Metadata) => {
                 let d = d.clone();
                 page_metadata(ui, &mut page.filter, &d);
@@ -1979,6 +2051,219 @@ fn vocab_list(ui: &mut egui::Ui, page: &mut ModelPage, v: &crate::vocab::Vocab) 
             });
         }
     });
+}
+
+/// Compare: this model and another side by side.
+fn page_compare(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, o: &Model, a: &Inspection) {
+    use crate::modeldiff::Change;
+    let Some(cmp) = page.comparison.clone() else {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(format!("Reading {}…", o.name));
+        });
+        return;
+    };
+    let (b, c) = (&cmp.0, &cmp.1);
+    let mut stop = false;
+    egui::ScrollArea::vertical().id_salt("compare").auto_shrink(false).show(ui, |ui| {
+        if let Some(why) = &b.unread {
+            kit::callout(ui, Tone::Warn, format!("{} can't be compared: {why}", o.name));
+            return;
+        }
+        let t = kit::tokens(ui);
+        kit::callout(
+            ui,
+            match c.verdict {
+                crate::modeldiff::Verdict::Different | crate::modeldiff::Verdict::NoTensors => Tone::Neutral,
+                _ => Tone::Accent,
+            },
+            c.verdict.explain(),
+        );
+        ui.add_space(4.0);
+        ui.weak("Compared from what the files say about themselves. The weights aren't compared.");
+        ui.add_space(8.0);
+        let first = egui::RichText::new(format!("1  {}", m.name)).strong();
+        let second = egui::RichText::new(format!("2  {}", o.name)).strong();
+        egui::Grid::new("compare-facts").num_columns(3).spacing([18.0, 5.0]).striped(true).show(ui, |ui| {
+            ui.label("");
+            ui.label(first.clone());
+            ui.label(second.clone());
+            ui.end_row();
+            ui.weak("Size");
+            ui.label(scan::human(m.size));
+            ui.label(scan::human(o.size));
+            ui.end_row();
+            for r in &c.facts {
+                ui.weak(r.label);
+                let differs = r.differs();
+                for v in [&r.a, &r.b] {
+                    match v {
+                        Some(v) if differs => ui.label(egui::RichText::new(v).color(t.accent)),
+                        Some(v) => ui.label(v),
+                        None => ui.weak("—"),
+                    };
+                }
+                ui.end_row();
+            }
+        });
+        let tensors = !a.tensors.is_empty() && !b.tensors.is_empty();
+        // Where the space goes.
+        if tensors {
+            ui.add_space(14.0);
+            ui.strong("Where the space goes");
+            ui.add_space(4.0);
+            let top = c.parts.iter().map(|(x, y)| (*x).max(*y)).max().unwrap_or(1).max(1) as f32;
+            egui::Grid::new("compare-parts").num_columns(4).spacing([14.0, 4.0]).show(ui, |ui| {
+                for (i, p) in inspect::Part::ALL.iter().enumerate() {
+                    let (x, y) = c.parts[i];
+                    if x == 0 && y == 0 {
+                        continue;
+                    }
+                    swatch(ui, part_colour(*p), p.label());
+                    for (v, n) in [(x, 1), (y, 2)] {
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(vec2(140.0, 10.0), Sense::hover());
+                            ui.painter().rect_filled(r, 2.0, ui.visuals().extreme_bg_color);
+                            let w = r.width() * v as f32 / top;
+                            ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(w.max(if v > 0 { 1.5 } else { 0.0 }), r.height())), 2.0, part_colour(*p));
+                            ui.label(egui::RichText::new(scan::human(v)).size(12.5)).on_hover_text(format!("In model {n}"));
+                        });
+                    }
+                    ui.label("");
+                    ui.end_row();
+                }
+            });
+            // Number types.
+            ui.add_space(14.0);
+            ui.strong("How the numbers are stored");
+            ui.add_space(4.0);
+            let mut kinds: Vec<&str> = a.kinds.iter().map(|k| k.kind.as_str()).collect();
+            for k in &b.kinds {
+                if !kinds.contains(&k.kind.as_str()) {
+                    kinds.push(&k.kind);
+                }
+            }
+            egui::Grid::new("compare-kinds").num_columns(3).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
+                ui.label("");
+                ui.label(first.clone());
+                ui.label(second.clone());
+                ui.end_row();
+                for k in kinds {
+                    ui.label(k);
+                    for d in [a, b] {
+                        match d.kinds.iter().find(|x| x.kind == k) {
+                            Some(x) => ui.label(format!("{} · {} tensors", scan::human(x.bytes), group(x.tensors as u64))),
+                            None => ui.weak("—"),
+                        };
+                    }
+                    ui.end_row();
+                }
+            });
+        }
+        // Metadata.
+        if !c.meta.is_empty() {
+            ui.add_space(14.0);
+            egui::CollapsingHeader::new(egui::RichText::new(format!("Metadata that differs ({})", c.meta.len())).strong()).id_salt("compare-meta").show(ui, |ui| {
+                egui::Grid::new("compare-meta-grid").num_columns(3).spacing([14.0, 4.0]).striped(true).show(ui, |ui| {
+                    for (k, x, y) in &c.meta {
+                        ui.add(egui::Label::new(egui::RichText::new(k).monospace().size(12.0)).selectable(true));
+                        for v in [x, y] {
+                            match v {
+                                Some(v) => {
+                                    let short: String = v.chars().take(80).collect();
+                                    ui.add(egui::Label::new(short).truncate()).on_hover_text(v.chars().take(600).collect::<String>());
+                                }
+                                None => {
+                                    ui.weak("—");
+                                }
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+        }
+        if !tensors {
+            ui.add_space(10.0);
+            stop = ui.button("Stop comparing").clicked();
+            return;
+        }
+        // Tensors.
+        ui.add_space(14.0);
+        ui.strong("Tensors");
+        ui.weak("Matched by name. Hugging Face names are translated to GGUF's, so a GGUF download can be compared with its original.");
+        ui.add_space(4.0);
+        let changed = c.kind + c.shape;
+        ui.weak(format!("{} the same in both, {} changed.", group(c.same as u64), group(changed as u64)));
+        ui.add_space(4.0);
+        let labels = [
+            format!("Changed ({})", group(changed as u64)),
+            format!("Only in 1 ({})", group(c.only_a as u64)),
+            format!("Only in 2 ({})", group(c.only_b as u64)),
+            format!("All ({})", group(c.tensors.len() as u64)),
+        ];
+        kit::segmented(
+            ui,
+            &mut page.compare_show,
+            &[
+                (CompareShow::Changed, labels[0].as_str()),
+                (CompareShow::OnlyA, labels[1].as_str()),
+                (CompareShow::OnlyB, labels[2].as_str()),
+                (CompareShow::All, labels[3].as_str()),
+            ],
+            false,
+        );
+        ui.add_space(4.0);
+        let rows: Vec<&crate::modeldiff::TensorRow> = c
+            .tensors
+            .iter()
+            .filter(|r| match page.compare_show {
+                CompareShow::Changed => matches!(r.change, Change::Kind | Change::Shape),
+                CompareShow::OnlyA => r.change == Change::OnlyA,
+                CompareShow::OnlyB => r.change == Change::OnlyB,
+                CompareShow::All => true,
+            })
+            .collect();
+        if rows.is_empty() {
+            ui.weak("None.");
+        }
+        let side = |d: &Inspection, i: Option<usize>| i.map(|i| &d.tensors[i]).map(|t| format!("{} · {} · {}", t.kind, t.shape_text(), scan::human(t.bytes))).unwrap_or_else(|| "—".into());
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let w = ui.available_width();
+        egui::ScrollArea::vertical().id_salt("compare-tensors").max_height(420.0).min_scrolled_height((rows.len() as f32 * ROW_H).min(420.0)).auto_shrink([false, true]).show_rows(ui, ROW_H, rows.len(), |ui, range| {
+            for k in range {
+                let r = rows[k];
+                let (rect, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
+                let vis = ui.visuals();
+                if k % 2 == 1 {
+                    ui.painter().rect_filled(rect, 0.0, vis.faint_bg_color);
+                }
+                let y = rect.center().y;
+                let col = (w - 16.0) / 3.0;
+                let clip = |x0: f32, x1: f32| Rect::from_min_max(pos2(x0, rect.top()), pos2(x1, rect.bottom())).intersect(ui.clip_rect());
+                let mono = FontId::monospace(12.0);
+                let plain = FontId::proportional(12.5);
+                ui.painter().with_clip_rect(clip(rect.left(), rect.left() + col)).text(pos2(rect.left() + 8.0, y), Align2::LEFT_CENTER, &r.name, mono, vis.text_color());
+                let colour = |changed: bool| if changed { kit::tokens(ui).accent } else { vis.text_color() };
+                let ch = r.change != Change::Same;
+                ui.painter().with_clip_rect(clip(rect.left() + col, rect.left() + 2.0 * col)).text(pos2(rect.left() + col + 8.0, y), Align2::LEFT_CENTER, side(a, r.a), plain.clone(), colour(ch && r.a.is_some()));
+                ui.painter().with_clip_rect(clip(rect.left() + 2.0 * col, rect.right())).text(pos2(rect.left() + 2.0 * col + 8.0, y), Align2::LEFT_CENTER, side(b, r.b), plain, colour(ch && r.b.is_some()));
+                let names = match (r.a, r.b) {
+                    (Some(i), Some(j)) if a.tensors[i].name != b.tensors[j].name => format!("\n1: {}\n2: {}", a.tensors[i].name, b.tensors[j].name),
+                    _ => String::new(),
+                };
+                resp.on_hover_text(format!("{} ({}){names}", r.name, r.change.label()));
+            }
+        });
+        ui.add_space(10.0);
+        stop = ui.button("Stop comparing").clicked();
+    });
+    if stop {
+        page.compare_with = None;
+        page.compare_rx = None;
+        page.comparison = None;
+        page.tab = PageTab::Overview;
+    }
 }
 
 fn page_metadata(ui: &mut egui::Ui, filter: &mut String, d: &Inspection) {

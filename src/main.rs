@@ -39,6 +39,7 @@ mod fit;
 mod health;
 mod weights;
 mod vocab;
+mod modeldiff;
 mod inspect;
 mod models;
 mod mapview;

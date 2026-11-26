@@ -158,6 +158,23 @@ and a model joins these pieces to spell anything its vocabulary lacks.
 **Metadata** lists every entry the model file carries, such as its training settings and
 tokenizer, with a box to find one.
 
+**Compare with…**, at the top right, puts this model beside another one from the list, in a
+**Compare** tab:
+
+- A sentence sums up what they share, for example "Same architecture and size, stored at
+  different precisions" for two downloads of one model compressed two ways, or "The same kind of
+  model at a different size".
+- Their facts side by side, with the ones that differ highlighted.
+- **Where the space goes**: the embeddings, attention, feed-forward and other parts of each.
+- **How the numbers are stored** in each, by number type.
+- **Metadata that differs**, entry by entry.
+- **Tensors**, matched by name, showing those stored differently (another number type or shape)
+  and those only one of them has. A Hugging Face model's tensor names are translated to GGUF's, so
+  a GGUF download can be compared with the original it was made from.
+
+Only what the files say about themselves is compared, not the weights. **Stop comparing** closes
+the tab.
+
 GGUF and safetensors models can be inspected. PyTorch checkpoints (`.ckpt`, `.pt`, `.pth` and
 `.bin`) are never opened, because they are saved with Python's pickle, which can run code when a
 file is opened. Their names and sizes are shown, and the same model in safetensors or GGUF format

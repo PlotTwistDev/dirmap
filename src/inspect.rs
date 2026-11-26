@@ -509,7 +509,7 @@ impl Part {
         }
     }
 
-    fn index(self) -> usize {
+    pub fn index(self) -> usize {
         Part::ALL.iter().position(|&p| p == self).unwrap_or(6)
     }
 }
