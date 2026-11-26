@@ -12,7 +12,7 @@ use eframe::egui::Vec2;
 use crate::fsys::listing::Entry;
 use std::collections::VecDeque;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const IMAGE_MAX_FILE: u64 = 256 << 20;
 const TEXT_MAX: usize = 256 << 10;
@@ -410,6 +410,9 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                     blocks.push(Block::Rule);
                     let note = s.note.clone().unwrap_or_else(|| format!("There's no picture saved inside it, and Filescape can't draw {app} files itself."));
                     blocks.push(Block::Para(plain(note)));
+                    if let Some(r) = &s.refs {
+                        blocks.extend(r.blocks());
+                    }
                     Content::Doc { blocks: Arc::new(blocks), facts: s.facts }
                 }
             },
@@ -1852,6 +1855,13 @@ fn pdf_view(ui: &mut egui::Ui, path: &Path, shown: &Arc<PdfShown>, size: Vec2) {
     });
 }
 
+const SHOW_ID: &str = "filescape-show-file";
+
+/// A file a preview's link asked to be shown in Files, once.
+pub(super) fn take_show(ctx: &egui::Context) -> Option<PathBuf> {
+    ctx.data_mut(|d| d.remove_temp::<PathBuf>(egui::Id::new(SHOW_ID))).filter(|p| !p.as_os_str().is_empty())
+}
+
 /// Blocks drawn with the Help Centre's renderer. Web links open in the browser; links to other
 /// files or headings do nothing, and pictures aren't fetched.
 fn doc_blocks(ui: &mut egui::Ui, blocks: &[crate::help::doc::Block]) {
@@ -1867,6 +1877,13 @@ fn doc_blocks(ui: &mut egui::Ui, blocks: &[crate::help::doc::Block]) {
         anchors: Vec::new(),
     };
     render::blocks(ui, &mut out, blocks);
+    // A file a project uses: shown in Files by the app (see `take_show`).
+    if let Some(render::Nav::Url(u)) = &out.nav
+        && let Some(p) = crate::projrefs::shown_path(u)
+    {
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(SHOW_ID), p));
+        out.nav = None;
+    }
     if let Some(render::Nav::Url(u)) = out.nav.take()
         && (u.contains("://") || u.starts_with("mailto:"))
     {

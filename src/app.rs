@@ -2839,6 +2839,18 @@ impl eframe::App for App {
             self.set_custom(&p);
         }
         self.help_regions.clear();
+        // A link in a preview to a file a project uses: show it in Files, or in Storage Analysis
+        // when that's where the preview is.
+        if let Some(p) = preview::take_show(&ctx)
+            && let (Some(dir), Some(name)) = (p.parent(), p.file_name())
+        {
+            let from = self.files.prefs.workspace;
+            self.set_workspace(Workspace::Files);
+            self.files.reveal(dir.to_path_buf(), vec![name.to_string_lossy().into()]);
+            if from == Workspace::Analysis {
+                self.set_workspace(Workspace::Analysis);
+            }
+        }
 
         self.licence.tick(&ctx);
         self.licence.update_tick(&ctx, self.settings.check_updates);

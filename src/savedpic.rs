@@ -73,6 +73,8 @@ pub struct Saved {
     pub facts: Vec<(&'static str, String)>,
     /// Said instead of the usual line when there's no picture (why there isn't one).
     pub note: Option<String>,
+    /// The files a project uses, checked (Craft Apps projects).
+    pub refs: Option<crate::projrefs::Refs>,
 }
 
 pub fn read(path: &Path) -> Result<Saved, String> {
@@ -109,7 +111,7 @@ pub fn read(path: &Path) -> Result<Saved, String> {
     if let Some(p) = &picture {
         facts.push(("Saved picture", format!("{} × {}", p.width(), p.height())));
     }
-    Ok(Saved { picture, facts, note: None })
+    Ok(Saved { picture, facts, note: None, refs: None })
 }
 
 pub(crate) fn zip_open(path: &Path) -> Option<zip::ZipArchive<std::fs::File>> {

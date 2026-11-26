@@ -261,6 +261,9 @@ pub(super) fn kind_for(name: &str, is_dir: bool) -> String {
     if ext.is_empty() {
         return "File".into();
     }
+    if let Some(c) = crate::craftfile::of(name) {
+        return c.kind().into();
+    }
     let noun = match categories::of(name) {
         Category::Audio => "audio",
         Category::Video => "video",

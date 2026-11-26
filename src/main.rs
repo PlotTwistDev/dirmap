@@ -61,6 +61,7 @@ mod officedoc;
 mod pdfview;
 mod pattern;
 mod player;
+mod projrefs;
 mod psdview;
 mod settings;
 mod sheets;
