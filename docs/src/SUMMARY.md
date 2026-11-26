@@ -63,6 +63,7 @@
 
 - [Keyboard shortcuts](reference/keyboard.md)
 - [Mouse controls](reference/mouse.md)
+- [Supported formats](reference/formats.md)
 - [Command line](reference/command-line.md)
 - [Glossary](reference/glossary.md)
 

@@ -1,0 +1,56 @@
+# Supported formats
+
+Every kind of file Filescape previews itself, in the preview pane, Quick Look, Icons view and on
+map tiles. Other files still show their details, with **Open**. A file with a missing or wrong
+extension that is really a picture, video, sound, PDF, font, database, MIDI file or glTF model
+(judged by its first bytes) is previewed as one.
+
+Nothing in a file is ever run: no macros, scripts, formulas or links are followed, and files are
+only read, never changed. Everything is read by Filescape itself or by your system's own
+decoders; nothing is sent anywhere. The libraries named here are listed with their licences in
+**Help › About › Third-party licences**.
+
+See [Quick Look and the preview pane](../views/file-manager.md#quick-look-and-the-preview-pane)
+for what each preview can do, and [Previews & thumbnails](../settings/reference.md#previews--thumbnails)
+for the settings.
+
+<!-- BEGIN GENERATED: do not edit by hand; see src/help/reference.rs -->
+
+| Format | Extensions | What the preview shows | Read by |
+|---|---|---|---|
+| PNG image | `.png` | The picture; channels one by one | image |
+| JPEG image | `.jpg` `.jpeg` `.jpe` | The picture; channels one by one | image |
+| GIF image | `.gif` | The picture; channels one by one | image |
+| WebP image | `.webp` | The picture; channels one by one | image |
+| JPEG XL image | `.jxl` | The picture; channels one by one | jxl-oxide |
+| TIFF image | `.tif` `.tiff` | The picture; channels one by one | image |
+| BMP image | `.bmp` | The picture; channels one by one | image |
+| Targa image | `.tga` | The picture; channels one by one | image |
+| Windows icon | `.ico` | The picture; channels one by one | image |
+| QOI image | `.qoi` | The picture; channels one by one | image |
+| Netpbm image | `.pbm` `.pgm` `.ppm` `.pnm` | The picture; channels one by one | image |
+| Camera RAW photo | `.cr2` `.cr3` `.crw` `.nef` `.nrw` `.arw` `.srf` `.sr2` `.dng` `.raf` `.orf` `.rw2` `.rwl` `.pef` `.srw` `.erf` `.3fr` `.fff` `.iiq` `.mos` `.mef` `.mrw` `.x3f` `.kdc` `.dcr` | The camera's own preview, and the camera, lens and exposure | Filescape (kamadak-exif) |
+| Photoshop document | `.psd` `.psb` | The flattened picture | Filescape |
+| HEIC or AVIF picture | `.heic` `.heif` `.hif` `.avif` | The picture | The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg) |
+| OpenEXR image | `.exr` | The picture with an exposure slider; every layer of a multilayer EXR | image, exr |
+| Radiance HDR image | `.hdr` | The picture with an exposure slider; every layer of a multilayer EXR | image, exr |
+| SVG drawing | `.svg` `.svgz` | The drawing, with its source a click away | resvg |
+| Font | `.ttf` `.otf` `.ttc` `.otc` | A specimen: the alphabet and sample text | Filescape (ttf-parser, ab_glyph) |
+| Markdown | `.md` `.markdown` | Formatted text, with the source a click away | Filescape |
+| Text, code and settings | `.txt` `.rst` `.log` `.json` `.jsonl` `.xml` `.yaml` `.yml` `.toml` `.ini` `.cfg` `.conf` `.rs` `.py` `.js` `.mjs` `.ts` `.tsx` `.jsx` `.c` `.h` `.cpp` `.hpp` `.cc` `.cs` `.java` `.kt` `.go` `.rb` `.php` `.swift` `.m` `.mm` `.sh` `.bash` `.zsh` `.fish` `.ps1` `.psm1` `.bat` `.cmd` `.lua` `.sql` `.html` `.htm` `.css` `.scss` `.less` `.vue` `.svelte` `.glsl` `.hlsl` `.wgsl` `.osl` `.vex` `.mel` `.nk` `.usda` `.mtl` `.gitignore` `.dockerfile` `.makefile` `.cmake` `.gradle` `.properties` `.env` `.srt` `.vtt` `.tex` `.bib` `.r` `.jl` `.dart` `.zig` `.nim` `.ex` `.exs` `.erl` `.hs` `.ml` `.clj` `.scala` `.pl` `.pm` `.tcl` `.diff` `.patch` `.lock` | The text, in syntax colours for code (about 200 languages) | Filescape (syntect, two-face) |
+| Video | `.mp4` `.m4v` `.mov` `.mkv` `.avi` `.wmv` `.webm` `.mpg` `.mpeg` `.m2ts` `.mts` `.3gp` `.flv` `.mxf` | A frame, playback and a filmstrip | The system (AVFoundation, Media Foundation, or ffmpeg on Linux) |
+| Sound | `.mp3` `.wav` `.flac` `.m4a` `.aac` `.ogg` `.oga` `.opus` `.wma` `.aif` `.aiff` `.alac` | Cover, waveform, tags and playback | The system, with lofty for tags |
+| CSV or TSV table | `.csv` `.tsv` `.tab` | A table, with column names from the first row | Filescape (csv) |
+| SQLite database | `.sqlite` `.sqlite3` `.db` `.db3` `.s3db` `.sl3` | Each table's columns and first rows, read-only | SQLite (rusqlite) |
+| 3D model | `.stl` `.obj` `.ply` `.gltf` `.glb` `.3mf` | A shaded model to turn about | Filescape (gltf for glTF) |
+| MIDI music | `.mid` `.midi` `.kar` | A piano roll, with tempo and instruments | midly |
+| PDF document | `.pdf` | Every page | hayro (the system for protected PDFs) |
+| Word document | `.docx` `.docm` `.dotx` | Formatted text: headings, lists, tables | Filescape |
+| Spreadsheet | `.xlsx` `.xlsm` `.xlsb` `.xls` `.xltx` `.xltm` `.ods` `.ots` | Each sheet's cells, as last saved | calamine |
+| OpenDocument text | `.odt` `.ott` | Formatted text: headings, lists, tables | Filescape |
+| PowerPoint presentation | `.pptx` `.pptm` `.ppsx` `.potx` | Each slide's title and points | Filescape |
+| OpenDocument presentation | `.odp` `.otp` | Each slide's title and points | Filescape |
+| EPUB book | `.epub` | Chapters, formatted; the cover in Icons view | Filescape |
+| Archives | `.zip` `.7z` `.tar` `.tar.gz` `.tgz` `.tar.xz` `.txz` `.tar.bz2` `.tbz2` | A tree of what's inside, with sizes and how much was saved | Filescape (zip, sevenz-rust2, tar) |
+
+<!-- END GENERATED -->

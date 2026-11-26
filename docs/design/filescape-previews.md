@@ -207,4 +207,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | Image channels, HDR exposure, multilayer EXR | #70 | Merged |
 | Video filmstrips and representative frames | #71 | Merged |
 | 3D model viewer (STL, OBJ, PLY, glTF, 3MF) | #72 | Merged |
-| Disk thumbnail cache, Previews & thumbnails settings | | In review |
+| Disk thumbnail cache, Previews & thumbnails settings | #73 | Merged |
+| Supported formats directory | | In review |
