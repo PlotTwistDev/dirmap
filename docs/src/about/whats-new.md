@@ -125,6 +125,9 @@
 - LightCraft library folders preview like a file: their photos and albums, what the catalogue,
   thumbnail cache and imported photos take, and the photos used from other folders. PhotoCraft
   documents saved as a folder preview like the single-file ones.
+- 12-bit and arithmetic-coded JPEGs now show, as do DICOM scans compressed with 12-bit JPEG.
+- Photoshop documents list their layers: groups, hidden layers, text layers, smart objects and
+  adjustments, and the names at the top of the stack.
 - Music projects from Ableton Live (.als), REAPER (.rpp), FL Studio (.flp) and Cubase or Nuendo
   (.cpr, .npr) show the version that saved them, the tempo, tracks, plugins and the sound files
   they use, marking any that aren't on this computer.

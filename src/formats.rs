@@ -98,7 +98,9 @@ impl Format {
             "jp2" => ("The picture; channels one by one", "hayro-jpeg2000"),
             "dxf" => ("The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size", "Filescape"),
             "daw" => ("The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones)", "Filescape"),
-            "dicom" => ("The scan (uncompressed, RLE, JPEG, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown", "Filescape"),
+            "dicom" => ("The scan (uncompressed, RLE, JPEG including 12-bit, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown", "Filescape (craft-jpeg for 12-bit JPEG)"),
+            "jpeg" => ("The picture, including 12-bit and arithmetic-coded JPEGs; channels one by one", "image (craft-jpeg for 12-bit and arithmetic-coded)"),
+            "psd" => ("The flattened picture, with its layers, groups, text and smart objects listed", "Filescape (craft-psd for the layers)"),
             "fits" => ("The first picture, stretched so faint detail shows, with the object, telescope and exposure", "Filescape"),
             "heif" => ("The picture", "The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg)"),
             _ => match self.category {

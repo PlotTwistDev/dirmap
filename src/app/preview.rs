@@ -291,8 +291,8 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Ok(b) => Content::Sheet(Arc::new(b)),
             Err(e) => Content::Error(e),
         },
-        Kind::Psd => match crate::psdview::picture(path, 0) {
-            Ok(p) => {
+        Kind::Psd => match crate::psdview::preview(path) {
+            Ok((p, layers)) => {
                 let img = image::DynamicImage::ImageRgba8(p.image);
                 let img = if img.width() > SHOW_MAX || img.height() > SHOW_MAX { img.thumbnail(SHOW_MAX, SHOW_MAX) } else { img };
                 let rgba = img.to_rgba8();
@@ -305,7 +305,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                     info: if p.thumbnail_only { "Photoshop's small thumbnail (the document is too large to show in full)".into() } else { "The flattened picture".into() },
                     poster: false,
                     source: None,
-                    facts: Vec::new(),
+                    facts: layers,
                 }
             }
             Err(e) => Content::Error(e),
@@ -671,10 +671,17 @@ fn open_image(path: &Path, size: u64) -> Result<image::DynamicImage, String> {
     limits.max_image_height = Some(16_384);
     limits.max_alloc = Some(512 << 20);
     reader.limits(limits);
+    let jpeg = reader.format() == Some(image::ImageFormat::Jpeg);
     match reader.decode() {
         Ok(i) => Ok(i),
         Err(image::ImageError::Limits(_)) => Err("Too large to preview safely.".into()),
-        Err(e) => Err(format!("Couldn't read the image: {e}")),
+        // 12-bit and arithmetic-coded JPEGs, which the usual decoder can't read.
+        Err(e) => {
+            if jpeg && let Ok(b) = std::fs::read(path) && crate::jpegx::needs(&b) {
+                return crate::jpegx::decode(&b);
+            }
+            Err(format!("Couldn't read the image: {e}"))
+        }
     }
 }
 

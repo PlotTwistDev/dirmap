@@ -38,6 +38,7 @@ mod highlight;
 mod icons;
 mod imagelook;
 mod known;
+mod jpegx;
 mod kit;
 mod licence;
 mod lightcraft;

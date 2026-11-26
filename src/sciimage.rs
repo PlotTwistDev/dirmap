@@ -489,6 +489,14 @@ fn decode_frame(ts: &str, frame: &[u8], n: usize) -> Result<(u32, u32, usize, Ve
             }
             Ok((img.width, img.height, chans, out))
         }
+        // 12-bit and arithmetic-coded frames (JPEG extended): craft-jpeg.
+        _ if crate::jpegx::needs(frame) => {
+            let (w, h, c, v) = crate::jpegx::samples(frame)?;
+            if w as usize * h as usize != n {
+                return Err(wrong());
+            }
+            Ok((w, h, c, v))
+        }
         _ => {
             let mut d = jpeg_decoder::Decoder::new(frame);
             let jpeg_err = |e: jpeg_decoder::Error| match e {
@@ -783,6 +791,33 @@ mod tests {
         for n in 0..b.len() {
             let _ = dicom_bytes(&b[..n]);
         }
+    }
+
+    #[test]
+    fn dicom_twelve_bit_jpeg() {
+        let jpeg = crate::jpegx::tests::twelve_bit();
+        let mut b = vec![0u8; 128];
+        b.extend(b"DICM");
+        b.extend(el((0x0002, 0x0010), b"UI", b"1.2.840.10008.1.2.4.51\0"));
+        b.extend(el((0x0028, 0x0002), b"US", &1u16.to_le_bytes()));
+        b.extend(el((0x0028, 0x0004), b"CS", b"MONOCHROME2 "));
+        b.extend(el((0x0028, 0x0010), b"US", &8u16.to_le_bytes()));
+        b.extend(el((0x0028, 0x0011), b"US", &8u16.to_le_bytes()));
+        b.extend(el((0x0028, 0x0100), b"US", &16u16.to_le_bytes()));
+        b.extend(el((0x0028, 0x0101), b"US", &12u16.to_le_bytes()));
+        // Encapsulated: an empty offset table, then the frame.
+        b.extend([0xE0, 0x7F, 0x10, 0x00, b'O', b'B', 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]);
+        b.extend([0xFE, 0xFF, 0x00, 0xE0, 0, 0, 0, 0]);
+        let mut frag = jpeg.clone();
+        if frag.len() % 2 == 1 {
+            frag.push(0);
+        }
+        b.extend([0xFE, 0xFF, 0x00, 0xE0]);
+        b.extend((frag.len() as u32).to_le_bytes());
+        b.extend(&frag);
+        b.extend([0xFE, 0xFF, 0xDD, 0xE0, 0, 0, 0, 0]);
+        let s = dicom_bytes(&b).unwrap();
+        assert_eq!((s.width, s.height), (8, 8));
     }
 
     #[test]

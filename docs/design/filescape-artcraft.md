@@ -305,4 +305,5 @@ rows there and to the tracker below.
 |---|---|---|
 | Phase 1 audit (this doc) | #89 | Merged |
 | Stage A: Craft documents with saved pictures | #91 | In review |
-| Stage B: files a project uses, After Effects projects, LightCraft libraries, PhotoCraft bundles | (this PR) | In review |
+| Stage B: files a project uses, After Effects projects, LightCraft libraries, PhotoCraft bundles | #94 | In review |
+| Stage C1: 12-bit and arithmetic JPEG, Photoshop layers | (this PR) | In review |

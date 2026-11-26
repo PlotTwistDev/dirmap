@@ -19,7 +19,7 @@ for the settings.
 | Format | Extensions | What the preview shows | Read by |
 |---|---|---|---|
 | PNG image | `.png` | The picture; channels one by one | image |
-| JPEG image | `.jpg` `.jpeg` `.jpe` | The picture; channels one by one | image |
+| JPEG image | `.jpg` `.jpeg` `.jpe` | The picture, including 12-bit and arithmetic-coded JPEGs; channels one by one | image (craft-jpeg for 12-bit and arithmetic-coded) |
 | GIF image | `.gif` | The picture; channels one by one | image |
 | WebP image | `.webp` | The picture; channels one by one | image |
 | JPEG XL image | `.jxl` | The picture; channels one by one | jxl-oxide |
@@ -31,7 +31,7 @@ for the settings.
 | QOI image | `.qoi` | The picture; channels one by one | image |
 | Netpbm image | `.pbm` `.pgm` `.ppm` `.pnm` | The picture; channels one by one | image |
 | Camera RAW photo | `.cr2` `.cr3` `.crw` `.nef` `.nrw` `.arw` `.srf` `.sr2` `.dng` `.raf` `.orf` `.rw2` `.rwl` `.pef` `.srw` `.erf` `.3fr` `.fff` `.iiq` `.mos` `.mef` `.mrw` `.x3f` `.kdc` `.dcr` | The camera's own preview, and the camera, lens and exposure | Filescape (kamadak-exif) |
-| Photoshop document | `.psd` `.psb` | The flattened picture | Filescape |
+| Photoshop document | `.psd` `.psb` | The flattened picture, with its layers, groups, text and smart objects listed | Filescape (craft-psd for the layers) |
 | HEIC or AVIF picture | `.heic` `.heif` `.hif` `.avif` | The picture | The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg) |
 | OpenEXR image | `.exr` | The picture with an exposure slider; every layer of a multilayer EXR | image, exr |
 | Radiance HDR image | `.hdr` | The picture with an exposure slider; every layer of a multilayer EXR | image, exr |
@@ -51,7 +51,7 @@ for the settings.
 | Craft Apps files (PhotoCraft, VectorCraft, EffectCraft, FigCraft, DesignCraft, TextureCraft, DeckCraft, AniCraft, MaterialCraft, FilmCraft, SoundCraft) | `.pcraft` `.vectorcraft` `.drawcraft` `.vctemplate` `.ecproj` `.ectemplate` `.figcraft` `.designcraft` `.tcraft` `.deckcraft` `.anicraft` `.mcraft` `.fcproj` `.scraft` `.scraftz` | The picture the app saved inside the file, with its pages, layers, size, length and the version that saved it | Filescape (craft-doc) |
 | After Effects project | `.aep` `.aepx` | The version that saved it, its compositions and the footage files it uses, marking any missing | craft-aep |
 | Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo, Logic Pro) | `.als` `.rpp` `.flp` `.cpr` `.npr` `.logicx` | The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones) | Filescape |
-| DICOM medical image | `.dcm` `.dicom` | The scan (uncompressed, RLE, JPEG, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown | Filescape |
+| DICOM medical image | `.dcm` `.dicom` | The scan (uncompressed, RLE, JPEG including 12-bit, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown | Filescape (craft-jpeg for 12-bit JPEG) |
 | Disk image | `.iso` `.img` `.dmg` `.vhd` `.vhdx` `.avhdx` `.vmdk` `.qcow2` `.qcow` `.vdi` `.wim` `.esd` | A disc's files and folders with sizes (ISO 9660 and UDF); a virtual disk's size, type and partitions; a Windows image's editions | Filescape |
 | FITS astronomy image | `.fits` `.fit` `.fts` | The first picture, stretched so faint detail shows, with the object, telescope and exposure | Filescape |
 | Map data (GeoJSON, GPX, KML) | `.geojson` `.gpx` `.kml` `.kmz` | The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks | Filescape |

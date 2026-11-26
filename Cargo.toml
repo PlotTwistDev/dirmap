@@ -67,6 +67,10 @@ plist = "1"
 craft-doc = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
 # After Effects projects (.aep, .aepx): a clean-room reader with no dependencies of its own.
 craft-aep = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
+# 12-bit and arithmetic-coded JPEGs, which the usual decoder can't read (no dependencies of its own).
+craft-jpeg = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
+# Photoshop layers (names, groups, text, smart objects), read-only.
+craft-psd = { git = "https://github.com/storytold/craft-libs", rev = "3b09a644a560ca526dfd0c7d8a1d107cdde26324" }
 
 [features]
 default = []
