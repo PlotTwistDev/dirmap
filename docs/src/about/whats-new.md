@@ -8,6 +8,9 @@
   LM Studio or internet connection needed, and nothing you ask leaves the computer. It runs GGUF
   models, on the graphics chip of a Mac with Apple silicon and on the processor elsewhere. Ask AI
   is free. See [Ask AI](../views/ask-ai.md).
+- No model yet? **Get a small model…** in Ask AI downloads Qwen3 1.7B (1.7 GB) from Qwen's own
+  page, after showing you its size, licence and the memory it needs. Filescape checks the file
+  before using it, and a stopped download carries on where it left off.
 
 - A new **✨ AI Models** workspace (**Ctrl+4**) lists the AI models on this computer: what Ollama,
   LM Studio and Hugging Face have downloaded, model files in Downloads and in folders you add, and

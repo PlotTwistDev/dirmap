@@ -15,6 +15,8 @@ download, and `.gguf` files from Hugging Face or elsewhere. The smallest come fi
 load and answer quickest. Models in other formats, and copies of a model listed earlier, aren't
 listed.
 
+If there's no model yet, see [Getting a small model](#getting-a-small-model) below.
+
 Click a model and press **Load**, or double-click it. Filescape first checks the model fits in this
 computer's memory, and says so if it doesn't. Loading takes from a few seconds to a minute,
 depending on the model's size and the disk. **Unload** frees the memory again.
@@ -29,6 +31,31 @@ On a Mac with Apple silicon, models run on the graphics chip. On Windows and Lin
 processor, which needs one with AVX2 (nearly every PC made since 2015). A small model of 1 to 4
 billion parameters answers at a comfortable reading speed on most computers; larger ones are
 slower.
+
+## Getting a small model
+
+If you don't have a model, press **Get a small model…** on the left. (When you already have
+models, it's a smaller button under the list, until you've downloaded it.) Filescape shows what it
+would download before anything happens:
+
+- **Qwen3 1.7B**, made by Qwen (Alibaba Cloud): a small general-purpose model that answers in many
+  languages and can think before it answers.
+- A 1.7 GB download, which needs about 2.2 GB of memory to run.
+- Its licence, Apache 2.0, and the publisher's page on Hugging Face, both of which you can open.
+- The folder it's saved in: `%LOCALAPPDATA%\Filescape\Models` on Windows,
+  `~/Library/Application Support/Filescape/Models` on a Mac and `~/.local/share/filescape/models`
+  on Linux.
+
+Press **Download** to get it, or **Not now**. The file comes from Qwen's own page on Hugging Face,
+at a fixed version, and Filescape checks its SHA-256 checksum before using it; a file that doesn't
+match is removed. When it's done, Filescape lists it and loads it, ready for your first question.
+
+**Stop** pauses the download. What has downloaded is kept, and **Carry on downloading** continues
+from there, even after Filescape is closed and opened again. If there isn't enough free space,
+Filescape says so before it starts.
+
+This is the only time Ask AI uses the internet. Nothing about you or your files is sent. To remove
+the model, delete its file from the folder above.
 
 ## Asking
 
