@@ -243,6 +243,10 @@ pub fn known_places() -> Vec<(&'static str, PathBuf)> {
     if let Some(h) = &home {
         out.push(("Downloads", h.join("Downloads")));
     }
+    // The model Ask AI's "Get a small model" downloads.
+    if let Some(p) = crate::getmodel::folder() {
+        out.push(("Filescape", p));
+    }
     let mut seen = std::collections::HashSet::new();
     out.retain(|(_, p)| p.is_dir() && seen.insert(p.clone()));
     out

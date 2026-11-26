@@ -16,6 +16,7 @@ looked:
 | LM Studio (`~/.lmstudio/models`, or the older `~/.cache/lm-studio/models`) | Each model file. |
 | Hugging Face (`~/.cache/huggingface/hub`, or the folder `HF_HUB_CACHE` or `HF_HOME` points to) | Each downloaded model by its Hugging Face name, such as `google/gemma-3-1b-it`. A repository with several GGUF versions shows each one. |
 | Downloads | Model files you downloaded by hand. |
+| Filescape | The model [Ask AI](ask-ai.md) downloads with **Get a small model…**. |
 | Folders you add | Press **✚ Add folder…** to also look in a folder of your choice. Press **✖** beside it to stop. |
 | The Storage Analysis scan | If you've scanned a drive or folder in Storage Analysis, its model files are included without scanning again. |
 

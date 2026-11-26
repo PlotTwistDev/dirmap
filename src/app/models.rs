@@ -152,7 +152,7 @@ const ROW: f32 = 2.0 * ROW_H + 6.0;
 
 impl App {
     /// Looks for models again: the known places, the user's folders and the analysis scan.
-    fn start_models(&mut self) {
+    pub(super) fn start_models(&mut self) {
         self.cancel_models();
         let mut places: Vec<(String, PathBuf)> = models::known_places().into_iter().map(|(l, p)| (l.to_string(), p)).collect();
         for p in &self.files.prefs.model_folders {
