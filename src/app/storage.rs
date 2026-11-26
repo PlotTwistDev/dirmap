@@ -1,0 +1,350 @@
+//! Storage, in the AI Models workspace: how much space models take, by app, and what can be freed
+//! (see `crate::cleanup`). Also the one confirmation every removal goes through, from here or
+//! from the library's "Move to Trash…".
+//!
+//! Removing one thing at a time is free; removing several at once is part of managing models in
+//! bulk (Professional), checked once when it starts.
+
+use super::*;
+use crate::cleanup::{self, Item, Kind, Removed};
+use crate::fsys::PathShow;
+use crate::kit::{self, Tone};
+use crate::models::{Model, Source};
+use std::collections::BTreeSet;
+
+#[derive(Default)]
+pub(super) struct StorageState {
+    /// The Storage view is on screen instead of the library.
+    pub open: bool,
+    rx: Option<mpsc::Receiver<Vec<Item>>>,
+    /// What can be freed, for the current model list (`None` until looked for).
+    items: Option<Vec<Item>>,
+    picked: BTreeSet<usize>,
+    /// Waiting for the one confirmation.
+    confirm: Option<Confirm>,
+    removing: Option<mpsc::Receiver<Vec<(Item, Vec<Removed>)>>>,
+    pub outcome: Option<(Tone, String)>,
+}
+
+struct Confirm {
+    items: Vec<Item>,
+    trash: bool,
+}
+
+impl StorageState {
+    /// The model list changed: look again when next shown.
+    pub fn forget(&mut self) {
+        self.rx = None;
+        self.items = None;
+        self.picked.clear();
+    }
+}
+
+fn app_order(app: &str) -> u8 {
+    match app {
+        "Ollama" => 0,
+        "LM Studio" => 1,
+        "Hugging Face" => 2,
+        _ => 3,
+    }
+}
+
+impl App {
+    /// Starts looking for what can be freed, once the model list is in.
+    fn storage_look(&mut self) {
+        let Some(list) = self.models.list.clone() else { return };
+        let places: Vec<PathBuf> = self.models.places.iter().map(|(_, p)| p.clone()).collect();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(cleanup::find(&places, &list));
+        });
+        self.models.storage.rx = Some(rx);
+    }
+
+    pub(super) fn poll_storage(&mut self, ctx: &egui::Context) {
+        let s = &mut self.models.storage;
+        if let Some(rx) = &s.rx {
+            match rx.try_recv() {
+                Ok(items) => {
+                    s.items = Some(items);
+                    s.rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
+                Err(mpsc::TryRecvError::Disconnected) => s.rx = None,
+            }
+        }
+        if let Some(rx) = &s.removing {
+            match rx.try_recv() {
+                Ok(done) => {
+                    s.removing = None;
+                    s.outcome = Some(outcome(&done));
+                    // Look again: the list and what can be freed have changed.
+                    self.start_models();
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
+                Err(mpsc::TryRecvError::Disconnected) => s.removing = None,
+            }
+        }
+    }
+
+    /// Asks to remove one model from the library: what that means is worked out first.
+    pub(super) fn ask_remove_model(&mut self, m: &Model) {
+        match cleanup::plan(m) {
+            Ok(item) => self.models.storage.confirm = Some(Confirm { items: vec![item], trash: true }),
+            Err(e) => self.models.storage.outcome = Some((Tone::Warn, format!("{} can't be removed: {e}", m.name))),
+        }
+    }
+
+    /// Asks to remove these, after the Professional check for more than one.
+    fn ask_remove(&mut self, items: Vec<Item>) {
+        if items.is_empty() || (items.len() > 1 && !self.premium(crate::licence::Feature::ModelAutomation)) {
+            return;
+        }
+        self.models.storage.confirm = Some(Confirm { items, trash: true });
+    }
+
+    /// The Storage view.
+    pub(super) fn storage_view(&mut self, ui: &mut egui::Ui) {
+        let Some(list) = self.models.list.clone() else {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Looking for AI models…");
+            });
+            return;
+        };
+        if self.models.storage.items.is_none() && self.models.storage.rx.is_none() {
+            self.storage_look();
+        }
+        ui.heading("Model storage");
+        ui.weak("How much space AI models take on this computer, and what can be freed.");
+        ui.add_space(6.0);
+        if let Some((tone, text)) = self.models.storage.outcome.clone() {
+            kit::callout(ui, tone, text);
+            if ui.small_button("Hide").clicked() {
+                self.models.storage.outcome = None;
+            }
+            ui.add_space(6.0);
+        }
+        by_app(ui, &list);
+        ui.add_space(12.0);
+        let busy = self.models.storage.removing.is_some();
+        let Some(items) = self.models.storage.items.clone() else {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Looking for space to free…");
+            });
+            return;
+        };
+        let total: u64 = items.iter().map(|i| i.bytes).sum();
+        if items.is_empty() {
+            ui.strong("Nothing to free");
+            ui.weak("No unused or unfinished downloads, older versions or loose copies were found where the library looked.");
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.heading(format!("{} can be freed", scan::human(total)));
+            if busy {
+                ui.spinner();
+                ui.label("Removing…");
+            }
+        });
+        ui.weak("Nothing here is used by a model. Each item lists what it removes before anything happens.");
+        ui.add_space(4.0);
+        let mut remove_one = None;
+        egui::ScrollArea::vertical().id_salt("storage-items").max_height((ui.available_height() - 40.0).max(120.0)).auto_shrink([false, true]).show(ui, |ui| {
+            let mut last = None;
+            for (i, it) in items.iter().enumerate() {
+                if last != Some(it.kind) {
+                    ui.add_space(8.0);
+                    let n = items.iter().filter(|x| x.kind == it.kind).count();
+                    let bytes: u64 = items.iter().filter(|x| x.kind == it.kind).map(|x| x.bytes).sum();
+                    ui.horizontal(|ui| {
+                        ui.strong(it.kind.heading());
+                        ui.weak(format!("· {n} · {}", scan::human(bytes)));
+                    });
+                    ui.weak(kind_words(it.kind));
+                    ui.add_space(2.0);
+                    last = Some(it.kind);
+                }
+                ui.horizontal(|ui| {
+                    let mut on = self.models.storage.picked.contains(&i);
+                    if ui.add_enabled(!busy, egui::Checkbox::without_text(&mut on)).changed() {
+                        if on {
+                            self.models.storage.picked.insert(i);
+                        } else {
+                            self.models.storage.picked.remove(&i);
+                        }
+                    }
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(&it.title).strong());
+                            ui.weak(format!("· {} · {}", it.app, scan::human(it.bytes)));
+                        });
+                        ui.add(egui::Label::new(egui::RichText::new(&it.detail).small().weak()).wrap());
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add_enabled(!busy, egui::Button::new(format!("{}…", bin_verb()))).on_hover_text("See what this removes, then confirm").clicked() {
+                            remove_one = Some(i);
+                        }
+                    });
+                })
+                .response
+                .on_hover_text(it.paths.first().map(|p| p.shown()).unwrap_or_default());
+                ui.add_space(3.0);
+            }
+        });
+        ui.separator();
+        let picked: Vec<usize> = self.models.storage.picked.iter().copied().filter(|&i| i < items.len()).collect();
+        let mut remove_picked = false;
+        ui.horizontal(|ui| {
+            let bytes: u64 = picked.iter().map(|&i| items[i].bytes).sum();
+            let label = if picked.len() > 1 { format!("Remove {} items ({})…", picked.len(), scan::human(bytes)) } else { "Remove selected…".into() };
+            let r = ui.add_enabled(!busy && !picked.is_empty(), egui::Button::new(label));
+            remove_picked = r.on_hover_text("Several at once is part of managing models in bulk (Professional). One at a time is free.").clicked();
+            if !self.licence.allows(crate::licence::Feature::ModelAutomation) {
+                ui.weak("Several at once: Professional");
+            }
+            if ui.add_enabled(!busy, egui::Button::new("Select all")).clicked() {
+                self.models.storage.picked = (0..items.len()).collect();
+            }
+            if !picked.is_empty() && ui.add_enabled(!busy, egui::Button::new("Select none")).clicked() {
+                self.models.storage.picked.clear();
+            }
+        });
+        if let Some(i) = remove_one {
+            self.ask_remove(vec![items[i].clone()]);
+        } else if remove_picked {
+            self.ask_remove(picked.iter().map(|&i| items[i].clone()).collect());
+        }
+    }
+
+    /// The one confirmation, listing everything that goes.
+    pub(super) fn storage_confirm(&mut self, ctx: &egui::Context) {
+        let Some(c) = &mut self.models.storage.confirm else { return };
+        let mut go = false;
+        let mut cancel = false;
+        let bytes: u64 = c.items.iter().map(|i| i.bytes).sum();
+        let paths: usize = c.items.iter().map(|i| i.paths.len()).sum();
+        egui::Modal::new(egui::Id::new("storage-confirm")).show(ctx, |ui| {
+            ui.set_max_width(560.0);
+            ui.heading(match &c.items[..] {
+                [one] if one.kind == Kind::Model => format!("Remove {}?", one.title),
+                [one] => format!("Remove {}?", one.title),
+                many => format!("Remove {} items?", many.len()),
+            });
+            ui.add_space(4.0);
+            ui.label(format!("This frees {}, removing {}:", scan::human(bytes), if paths == 1 { "this".to_string() } else { format!("these {paths}") }));
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical().max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
+                for it in &c.items {
+                    ui.label(egui::RichText::new(format!("{} · {}", it.title, scan::human(it.bytes))).strong());
+                    ui.add(egui::Label::new(egui::RichText::new(&it.detail).small().weak()).wrap());
+                    for p in &it.paths {
+                        ui.add(egui::Label::new(egui::RichText::new(p.shown()).small().monospace()).wrap());
+                    }
+                    ui.add_space(4.0);
+                }
+            });
+            ui.add_space(6.0);
+            ui.radio_value(&mut c.trash, true, format!("{} (the space comes back when it's emptied)", bin_verb()));
+            ui.radio_value(&mut c.trash, false, "Delete for good (the space comes back now)");
+            if c.items.iter().any(|i| i.app == "Ollama") {
+                ui.weak("If Ollama is downloading a model right now, let it finish first.");
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let verb = if c.trash { bin_verb() } else { "Delete" };
+                go = kit::button(ui, if c.trash { kit::Kind::Primary } else { kit::Kind::Danger }, None, verb).clicked();
+                cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
+            });
+        });
+        if cancel || go {
+            ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            });
+        }
+        if cancel {
+            self.models.storage.confirm = None;
+        } else if go {
+            let Confirm { items, trash } = self.models.storage.confirm.take().unwrap();
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let done = items.into_iter().map(|it| {
+                    let r = cleanup::remove(&it, trash);
+                    (it, r)
+                });
+                let _ = tx.send(done.collect());
+            });
+            self.models.storage.removing = Some(rx);
+            self.models.storage.picked.clear();
+        }
+    }
+}
+
+fn s(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
+fn bin_verb() -> &'static str {
+    if cfg!(windows) { "Move to Recycle Bin" } else { "Move to Trash" }
+}
+
+/// What removals came to, in a sentence.
+fn outcome(done: &[(Item, Vec<Removed>)]) -> (Tone, String) {
+    let failed: Vec<&Removed> = done.iter().flat_map(|(_, r)| r.iter()).filter(|r| r.result.is_err()).collect();
+    let freed: u64 = done.iter().filter(|(_, r)| r.iter().all(|r| r.result.is_ok())).map(|(i, _)| i.bytes).sum();
+    let names = match done {
+        [(one, _)] => one.title.clone(),
+        many => format!("{} items", many.len()),
+    };
+    if failed.is_empty() {
+        (Tone::Success, format!("Removed {names}: {} freed.", scan::human(freed)))
+    } else {
+        let first = &failed[0];
+        let why = first.result.as_ref().err().cloned().unwrap_or_default();
+        (Tone::Warn, format!("{} of {} couldn't be removed. {}: {why}", failed.len(), done.iter().map(|(_, r)| r.len()).sum::<usize>(), first.path.shown()))
+    }
+}
+
+fn kind_words(k: Kind) -> &'static str {
+    match k {
+        Kind::Unused => "Left behind by removed models or stopped downloads. No model needs them.",
+        Kind::Partial => "Downloads that stopped part way. Starting the download again starts afresh.",
+        Kind::OldVersion => "Hugging Face keeps each version a program downloaded. Programs use the current one.",
+        Kind::Copy => "Loose files that are byte-for-byte the same as a model kept elsewhere. The other copy stays.",
+        Kind::Model => "",
+    }
+}
+
+/// Space by app, as bars.
+fn by_app(ui: &mut egui::Ui, list: &[Model]) {
+    let mut apps: Vec<(&'static str, u64, usize)> = Vec::new();
+    for m in list {
+        let app = match m.source {
+            Source::Folder => "Other folders",
+            s => s.label(),
+        };
+        match apps.iter_mut().find(|a| a.0 == app) {
+            Some(a) => {
+                a.1 += m.size;
+                a.2 += usize::from(!m.orphan);
+            }
+            None => apps.push((app, m.size, usize::from(!m.orphan))),
+        }
+    }
+    apps.sort_by_key(|a| (app_order(a.0), std::cmp::Reverse(a.1)));
+    let total: u64 = apps.iter().map(|a| a.1).sum::<u64>().max(1);
+    let t = kit::tokens(ui);
+    egui::Grid::new("storage-apps").num_columns(4).spacing([12.0, 4.0]).show(ui, |ui| {
+        for (app, bytes, n) in &apps {
+            ui.label(*app);
+            let (rect, _) = ui.allocate_exact_size(vec2(220.0, 12.0), Sense::hover());
+            ui.painter().rect_filled(rect, 3.0, ui.visuals().faint_bg_color);
+            ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, vec2(rect.width() * (*bytes as f32 / total as f32), rect.height())), 3.0, t.accent);
+            ui.label(scan::human(*bytes));
+            ui.weak(format!("{n} model{}", s(*n)));
+            ui.end_row();
+        }
+    });
+}

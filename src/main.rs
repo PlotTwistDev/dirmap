@@ -22,6 +22,7 @@ mod cadview;
 mod camera;
 mod camraw;
 mod categories;
+mod cleanup;
 mod cloud;
 mod cloudops;
 mod craftfile;
