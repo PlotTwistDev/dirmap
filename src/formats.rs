@@ -46,6 +46,8 @@ pub enum Category {
     Database,
     /// 3D models, drawn here to turn about.
     Model,
+    /// Maps (GeoJSON, GPX, KML): their shapes drawn here, with no map tiles fetched.
+    Map,
 }
 
 /// One format.
@@ -98,6 +100,7 @@ impl Format {
                 Category::Midi => ("A piano roll, with tempo and instruments", "midly"),
                 Category::Database => ("Each table's columns and first rows, read-only", "SQLite (rusqlite)"),
                 Category::Model => ("A shaded model to turn about", "Filescape (gltf for glTF)"),
+                Category::Map => ("The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks", "Filescape"),
                 Category::Text | Category::Spreadsheet | Category::Document => ("A preview", "Filescape"),
             },
         }
@@ -177,6 +180,7 @@ pub static FORMATS: &[Format] = &[
     Format { id: "csv", name: "CSV or TSV table", category: Category::Spreadsheet, exts: &["csv", "tsv", "tab"] },
     Format { id: "sqlite", name: "SQLite database", category: Category::Database, exts: &["sqlite", "sqlite3", "db", "db3", "s3db", "sl3"] },
     Format { id: "model3d", name: "3D model", category: Category::Model, exts: &["stl", "obj", "ply", "gltf", "glb", "3mf"] },
+    Format { id: "map", name: "Map data (GeoJSON, GPX, KML)", category: Category::Map, exts: &["geojson", "gpx", "kml", "kmz"] },
     Format { id: "midi", name: "MIDI music", category: Category::Midi, exts: &["mid", "midi", "kar"] },
     Format { id: "pdf", name: "PDF document", category: Category::Pdf, exts: &["pdf"] },
     Format { id: "docx", name: "Word document", category: Category::Document, exts: &["docx", "docm", "dotx"] },

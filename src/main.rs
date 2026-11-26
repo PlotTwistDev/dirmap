@@ -36,6 +36,7 @@ mod imagelook;
 mod known;
 mod kit;
 mod licence;
+mod geoview;
 mod gguf;
 mod fit;
 mod health;
