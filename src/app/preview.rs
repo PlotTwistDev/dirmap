@@ -224,6 +224,13 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
 
 /// Read a file for its preview. Runs on a worker thread.
 fn load(path: &Path, kind: Kind, size: u64) -> Content {
+    // A LightCraft library: a folder, shown as one.
+    if !crate::fsys::remote::is_remote(path) && path.is_dir() && crate::lightcraft::is_library(path) {
+        return match crate::lightcraft::read(path) {
+            Ok((blocks, facts)) => Content::Doc { blocks: Arc::new(blocks), facts },
+            Err(e) => Content::Error(e),
+        };
+    }
     // On a server: fetched to a temporary copy first (not huge ones).
     if crate::fsys::remote::is_remote(path) {
         let archive = path.file_name().is_some_and(|n| crate::fsys::archive::is_archive(&n.to_string_lossy()));
@@ -986,8 +993,9 @@ impl App {
         ui.add_space(4.0);
         let w = ui.available_width();
         let h = (ui.available_height() * 0.55).clamp(120.0, w * 1.2);
-        // Folders get an icon; a Logic project (a folder package) gets a preview like a file.
-        if e.is_dir && !crate::daw::is_logic(&e.name) {
+        // Folders get an icon; a package (a Logic project, a LightCraft library…) gets a preview
+        // like a file.
+        if e.is_dir && !crate::packages::is_package(&path, &e.name) {
             let (r, _) = ui.allocate_exact_size(vec2(w, 96.0), Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(64.0, 64.0)), true, "", Color32::GRAY);
         } else {
@@ -1159,7 +1167,7 @@ impl App {
 
     fn preview_main(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
         let pal = style::pal(ui);
-        if e.is_dir && !crate::daw::is_logic(&e.name) {
+        if e.is_dir && !crate::packages::is_package(path, &e.name) {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), true, "", Color32::GRAY);
             return;

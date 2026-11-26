@@ -305,4 +305,4 @@ rows there and to the tracker below.
 |---|---|---|
 | Phase 1 audit (this doc) | #89 | Merged |
 | Stage A: Craft documents with saved pictures | #91 | In review |
-| Stage B1: files a project uses (FilmCraft, SoundCraft, EffectCraft, music projects) | (this PR) | In review |
+| Stage B: files a project uses, After Effects projects, LightCraft libraries, PhotoCraft bundles | (this PR) | In review |

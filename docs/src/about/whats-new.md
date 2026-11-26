@@ -117,6 +117,11 @@
 - Music projects, and FilmCraft, SoundCraft and EffectCraft projects, list the footage and sound
   files they use: where each one is (this drive, another drive, a network drive or the cloud), which
   are missing or only in the cloud, and their size together. Click one to show it in Files.
+- After Effects projects (.aep, .aepx) show the version that saved them, their compositions and
+  the footage files they use.
+- LightCraft library folders preview like a file: their photos and albums, what the catalogue,
+  thumbnail cache and imported photos take, and the photos used from other folders. PhotoCraft
+  documents saved as a folder preview like the single-file ones.
 - Music projects from Ableton Live (.als), REAPER (.rpp), FL Studio (.flp) and Cubase or Nuendo
   (.cpr, .npr) show the version that saved them, the tempo, tracks, plugins and the sound files
   they use, marking any that aren't on this computer.

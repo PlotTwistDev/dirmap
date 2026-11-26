@@ -81,6 +81,9 @@ pub fn read(path: &Path) -> Result<Saved, String> {
     if path.file_name().is_some_and(|n| crate::craftfile::of(&n.to_string_lossy()).is_some()) {
         return crate::craftfile::read(path);
     }
+    if path.file_name().is_some_and(|n| crate::aepfile::is_project(&n.to_string_lossy())) {
+        return crate::aepfile::read(path);
+    }
     let app = path.file_name().and_then(|n| app_of(&n.to_string_lossy())).ok_or("Not a file Filescape knows")?;
     if path.is_dir() {
         return Err(format!("A {} package (a folder); open it to see inside", app.name()));

@@ -83,6 +83,7 @@ impl Format {
         match self.id {
             "markdown" => ("Formatted text, with the source a click away", "Filescape"),
             "text" => ("The text, in syntax colours for code (about 200 languages)", "Filescape (syntect, two-face)"),
+            "aep" => ("The version that saved it, its compositions and the footage files it uses, marking any missing", "craft-aep"),
             "craft" => ("The picture the app saved inside the file, with its pages, layers, size, length and the version that saved it", "Filescape (craft-doc)"),
             "csv" => ("A table, with column names from the first row", "Filescape (csv)"),
             "sheet" => ("Each sheet's cells, as last saved", "calamine"),
@@ -214,6 +215,7 @@ pub static FORMATS: &[Format] = &[
         category: Category::Saved,
         exts: &["pcraft", "vectorcraft", "drawcraft", "vctemplate", "ecproj", "ectemplate", "figcraft", "designcraft", "tcraft", "deckcraft", "anicraft", "mcraft", "fcproj", "scraft", "scraftz"],
     },
+    Format { id: "aep", name: "After Effects project", category: Category::Saved, exts: &["aep", "aepx"] },
     Format { id: "daw", name: "Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo, Logic Pro)", category: Category::Document, exts: &["als", "rpp", "flp", "cpr", "npr", "logicx"] },
     Format { id: "dicom", name: "DICOM medical image", category: Category::Science, exts: &["dcm", "dicom"] },
     Format { id: "diskimage", name: "Disk image", category: Category::DiskImage, exts: &["iso", "img", "dmg", "vhd", "vhdx", "avhdx", "vmdk", "qcow2", "qcow", "vdi", "wim", "esd"] },

@@ -129,7 +129,7 @@ mod newest {
 
 pub fn read(path: &Path) -> Result<Saved, String> {
     let craft = path.file_name().and_then(|n| of(&n.to_string_lossy())).ok_or("Not a Craft Apps file")?;
-    if path.is_dir() {
+    if path.is_dir() && craft != Craft::PhotoCraft {
         return Err(format!("A {} bundle (a folder); open it to see inside", craft.name()));
     }
     let mut out = Saved { picture: None, facts: vec![("App", craft.name().to_string())], note: None, refs: None };
@@ -331,8 +331,20 @@ fn layers_fact(out: &mut Saved, layers: &[craft_doc::Layer]) {
 /// manifest and the saved pictures are taken out of it, into a small ZIP that craft-doc reads,
 /// so a large document is never held in memory.
 fn photo(path: &Path, out: &mut Saved) -> Result<(), String> {
-    let mut zip = zip_open(path).ok_or("Not a PhotoCraft document")?;
-    let manifest = zip_bytes(&mut zip, "manifest.json", JSON_MAX).ok_or("Not a PhotoCraft document")?;
+    // A PhotoCraft document is a ZIP, or the same files in a folder (a bundle). Only the
+    // manifest and the saved pictures are copied, never the tiles, which can be gigabytes.
+    let mut get: Box<dyn FnMut(&str, usize) -> Option<Vec<u8>>> = if path.is_dir() {
+        let dir = path.to_path_buf();
+        Box::new(move |name: &str, max: usize| {
+            let f = dir.join(name);
+            let md = std::fs::symlink_metadata(&f).ok()?;
+            (md.is_file() && md.len() <= max as u64).then(|| std::fs::read(&f).ok()).flatten()
+        })
+    } else {
+        let mut zip = zip_open(path).ok_or("Not a PhotoCraft document")?;
+        Box::new(move |name: &str, max: usize| zip_bytes(&mut zip, name, max))
+    };
+    let manifest = get("manifest.json", JSON_MAX).ok_or("Not a PhotoCraft document")?;
     let mut small = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let mut add = |name: &str, data: &[u8]| -> Option<()> {
@@ -342,7 +354,7 @@ fn photo(path: &Path, out: &mut Saved) -> Result<(), String> {
     };
     add("manifest.json", &manifest).ok_or("Couldn't read it")?;
     for name in ["composite/full.png", "composite/preview.png", "thumb.png"] {
-        if let Some(b) = zip_bytes(&mut zip, name, PIC_MAX) {
+        if let Some(b) = get(name, PIC_MAX) {
             add(name, &b).ok_or("Couldn't read it")?;
         }
     }
@@ -931,6 +943,24 @@ mod tests {
         let s = read(&p).unwrap();
         assert!(fact(&s, "Format").unwrap().contains("newer PhotoCraft"));
         assert!(fact(&s, "Size").is_none());
+        // The same document saved as a bundle (a folder): read from the folder's own files.
+        let zipped = pcraft(1);
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(zipped)).unwrap();
+        let (_d, p) = file("placeholder", b"");
+        let bundle = p.parent().unwrap().join("Bundle.pcraft");
+        for i in 0..z.len() {
+            let mut e = z.by_index(i).unwrap();
+            if e.is_dir() {
+                continue;
+            }
+            let out = bundle.join(e.name().unwrap().to_string());
+            std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+            std::io::copy(&mut e, &mut std::fs::File::create(&out).unwrap()).unwrap();
+        }
+        let s = read(&bundle).unwrap();
+        assert_eq!(s.picture.as_ref().map(|i| (i.width(), i.height())), Some((64, 48)));
+        assert_eq!(fact(&s, "Layers"), Some("3 layers (1 hidden)"));
+        assert!(crate::packages::is_package(&bundle, "Bundle.pcraft"));
     }
 
     fn vectorcraft(members: &str) -> String {
