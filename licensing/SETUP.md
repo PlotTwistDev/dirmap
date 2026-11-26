@@ -130,10 +130,14 @@ and redeploy the website (step 8).
 
 ## 8. The website (Cloudflare Pages)
 
-`licensing/site` is the whole site, ready to deploy: the homepage, `/buy`, `/contact`, `/terms`,
-`/privacy` and `/refunds`. The homepage is generated from `licensing/site-src`; after changing anything
-there, run `python3 licensing/site-src/build.py` to rebuild `site/index.html`. The Paddle token
-and price for both checkout buttons are in `licensing/site/config.js`.
+`licensing/site` is the whole site, ready to deploy: the homepage, the feature pages `/formats`,
+`/ai-models` and `/vfx`, `/buy`, `/mac`, `/contact`, `/terms`, `/privacy` and `/refunds`. The homepage
+and feature pages are generated from `licensing/site-src` (shared `head.html`, `nav.html` and
+`foot.html`, the homepage in `body.html`, the others in `pages/`); after changing anything there,
+or `docs/src/reference/formats.md`, run `python3 licensing/site-src/build.py`. It also writes
+`sitemap.xml` and `robots.txt`: add any new public page to `PAGES` or `STATIC` in `build.py`. The
+Paddle token and price for both checkout buttons are in `licensing/site/config.js`; rebuild after
+changing the price, since the structured data search engines read takes it from there.
 
 ```
 npx wrangler@4 pages deploy licensing/site --project-name filescape-site --branch main
@@ -145,6 +149,14 @@ production branch goes to a preview address instead of filescape.app.
 
 In the dashboard, **Workers & Pages > filescape-site > Custom domains**: add `filescape.app` (and
 `www.filescape.app` if you want it). Then submit the domain to Paddle (step 7.4).
+
+### Google Search Console
+
+filescape.app is a **Domain** property in Search Console (verified with a DNS record). Once the site
+is deployed, open the property, choose **Sitemaps** in the left menu, enter `sitemap.xml` under
+**Add a new sitemap** and press **Submit**. Google then reads `https://filescape.app/sitemap.xml`
+again by itself whenever it changes. To ask for a changed page to be crawled sooner, paste its
+address into **URL inspection** at the top and press **Request indexing**.
 
 ## 9. Downloads (R2)
 

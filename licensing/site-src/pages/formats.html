@@ -1,0 +1,76 @@
+<main id="top">
+  <div class="page-hero">
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="wrap">
+      <span class="eyebrow">File previews</span>
+      <h1>Look inside 300+ kinds of file.</h1>
+      <p class="lede">Photos straight from the camera, Photoshop documents, Office files, every page of a PDF, fonts, songs, 3D models and Gaussian splats. Press Space and see what a file is without opening another app, on Windows, macOS and Linux.</p>
+      <div class="dl-row">
+        <a class="btn btn-key" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download Filescape free</a>
+        <a class="btn btn-ghost" href="#all-formats">See every format</a>
+      </div>
+      <p class="free-note">Every preview is free, in every edition</p>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <div class="showcase">
+        <div class="copy">
+          <h3>Quick Look, a preview pane, and the map</h3>
+          <p>Select a file and press <span class="mono">Space</span> for a large preview, or keep the preview pane open beside the list with <span class="mono">Alt P</span>. The same previews show in Icons view and on the disk map, so when you zoom in on a big tile you see what it is.</p>
+          <ul class="ticks">
+            <li>Up and down arrows step through files while Quick Look stays open</li>
+            <li>Details beside every preview: camera and lens, page count, layers, tempo, triangles</li>
+            <li>Thumbnails are kept between runs, so folders you've seen show their pictures at once</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="{{img:previews-pane}}" alt="The Files workspace in Icons view with thumbnails of fonts, photos, a MIDI piano roll, a PDF and a 3D model, and a song's cover, waveform and tags in the preview pane" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="keys">
+        <div class="keycard"><span class="kbd">RAW · HEIC · JXL</span><h3>Photos</h3><p>Camera RAW from Canon, Nikon, Sony, Fujifilm and more, from the preview the camera saved. HEIC, AVIF, JPEG XL, JPEG 2000, OpenEXR and HDR with an exposure slider.</p></div>
+        <div class="keycard"><span class="kbd">PSD · AFDESIGN · KRA</span><h3>Design files</h3><p>Photoshop with its layers listed, Affinity, Sketch, CorelDRAW, Krita, GIMP, Paint.NET and Figma local copies, from the picture each app saves.</p></div>
+        <div class="keycard"><span class="kbd">DOCX · XLSX · PDF</span><h3>Documents</h3><p>Word and OpenDocument formatted, PowerPoint slide by slide, spreadsheet cells sheet by sheet, every PDF page, EPUB chapters and Markdown.</p></div>
+        <div class="keycard"><span class="kbd">MP3 · FLAC · MIDI</span><h3>Sound and video</h3><p>Album cover, waveform and tags, played in place. MIDI as a piano roll. Videos play in the pane, with a filmstrip to jump about.</p></div>
+        <div class="keycard"><span class="kbd">OBJ · FBX · DWG</span><h3>3D and CAD</h3><p>STL, OBJ, glTF, 3MF, FBX, COLLADA and Alembic as clay to turn about. DXF and DWG drawings drawn. Gaussian splats on the graphics chip.</p></div>
+        <div class="keycard"><span class="kbd">TTF · OTF</span><h3>Fonts</h3><p>A specimen in the font itself, with its family, style and glyph count, and a large "Aa" in Icons view.</p></div>
+        <div class="keycard"><span class="kbd">.rs · .py · .ts</span><h3>Code and data</h3><p>Syntax colours for about 200 languages. SQLite tables read-only, CSV and TSV as tables.</p></div>
+        <div class="keycard"><span class="kbd">ZIP · ISO · VHDX</span><h3>Archives and disk images</h3><p>What's inside, biggest first, without unpacking or mounting. Warnings for unsafe names and archives that unpack to a huge size.</p></div>
+        <div class="keycard"><span class="kbd">EML · ICS · GPX</span><h3>Mail, calendars and maps</h3><p>Emails as plain text with nothing loaded, contacts, calendar events, GPS tracks with distance and climb, GeoJSON and KML.</p></div>
+      </div>
+
+      <div class="callout">
+        <h3>Nothing in a file is ever run</h3>
+        <p>Previews only read files, never change them. Macros, scripts, formulas and links are never run or followed, HTML mail is shown as plain text so tracking pictures never load, and patient details in medical scans are never shown. Everything is read by Filescape itself or your system's own decoders, on your computer. Files that are only in the cloud aren't downloaded for a thumbnail.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="all-formats">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Supported formats</span>
+        <h2>{{formats_count}} kinds of file, {{extensions_count}} extensions.</h2>
+        <p class="lede">This list comes from the app's own Help Centre (Help › Supported Formats), so it matches what Filescape really previews. Other files still show their details, and a file with a missing or wrong extension is previewed by what it really is when Filescape can tell from its first bytes.</p>
+      </div>
+      <div class="fmt" role="region" aria-label="Every format Filescape previews">
+        <div class="fmt-scroll">
+          <table>
+            <thead><tr><th scope="col">Format</th><th scope="col">Extensions</th><th scope="col">What you see</th></tr></thead>
+            <tbody>
+{{formats_table}}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p class="small" style="margin-top:12px">HEIC, AVIF and video use your system's own decoders: built into macOS; on Windows, the free HEIF and AV1 extensions from the Microsoft Store; on Linux, libheif or ffmpeg.</p>
+
+      <div class="cta">
+        <h2>Try it on your own files.</h2>
+        <p class="lede">Filescape is free to download and every preview stays free. Pro adds filters, batch work, servers and more, for one payment.</p>
+        <div class="dl-row"><a class="btn btn-key" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download free</a><a class="btn btn-ghost" href="/#pricing">See pricing</a></div>
+      </div>
+    </div>
+  </section>
+</main>

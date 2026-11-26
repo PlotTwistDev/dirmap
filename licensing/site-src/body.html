@@ -1,30 +1,10 @@
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="i-dl" viewBox="0 0 16 16"><path d="M8 2v8m0 0L4.5 6.5M8 10l3.5-3.5M3 13h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-  <symbol id="i-logo" viewBox="0 0 20 20"><rect x="1" y="1" width="10" height="11" rx="2" fill="#ff6363"/><rect x="12" y="1" width="7" height="6" rx="1.5" fill="#e6e6e6"/><rect x="12" y="8" width="7" height="4" rx="1.2" fill="#63a1ff"/><rect x="1" y="13" width="6" height="6" rx="1.5" fill="#e6e6e6"/><rect x="8" y="13" width="5" height="6" rx="1.2" fill="#6a6b6c"/><rect x="14" y="13" width="5" height="6" rx="1.2" fill="#ff6363" opacity=".55"/></symbol>
-</svg>
-
-<header class="nav">
-  <div class="wrap">
-    <nav class="nav-bar" aria-label="Main">
-      <a class="brand" href="#top"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
-      <div class="nav-links">
-        <a href="#features">Features</a>
-        <a href="#vfx">For VFX</a>
-        <a href="#pricing">Pricing</a>
-        <a href="#download">Download</a>
-      </div>
-      <a class="btn btn-key btn-sm" href="#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
-    </nav>
-  </div>
-</header>
-
 <main id="top">
   <div class="hero">
     <div class="hero-glow" aria-hidden="true"></div>
     <div class="wrap">
-      <span class="eyebrow"><b>New in 2.3</b> Remote servers and transfers</span>
+      <a class="eyebrow" href="/formats" style="text-decoration:none"><b>New</b> Previews for 300+ file types, and your AI models</a>
       <h1>See where your disk went.</h1>
-      <p class="lede">Filescape scans a drive in seconds and draws every file as a tile you can zoom through. When you find what's eating the space, deal with it right there in a full file manager.</p>
+      <p class="lede">Filescape scans a drive in seconds and draws every file as a tile you can zoom through. Zoom in to see what's inside, then deal with it right there in a full file manager.</p>
       <div class="dl-row" id="hero-downloads">
         <a class="btn btn-key" data-os="windows" href="https://downloads.filescape.app/latest/windows"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for Windows</a>
         <a class="btn btn-ghost" data-os="mac" href="https://downloads.filescape.app/latest/macos"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for macOS</a>
@@ -60,7 +40,7 @@
   <div class="wrap">
     <div class="facts">
       <div class="fact"><b>47 s</b><span>to map 1.3 million files on our test drive</span></div>
-      <div class="fact"><b>25 MB</b><span>download, no installer or runtime on Windows</span></div>
+      <div class="fact"><b>300+</b><span>file types previewed, free in every edition</span></div>
       <div class="fact"><b>3</b><span>platforms: Windows, macOS and Linux</span></div>
       <div class="fact"><b><s class="js-list">$9.99</s> <span class="js-price">$4.99</span></b><span>once for Pro, on 3 computers at once</span></div>
     </div>
@@ -78,12 +58,12 @@
           <h3>A treemap you can fly through</h3>
           <p>Every file is a tile sized by how much space it takes, in soft colours by type (or the classic cushion shading, if you prefer). The map is drawn on your graphics card, so zooming and panning stay smooth even with millions of files.</p>
           <ul class="ticks">
-            <li>Zoom toward the pointer, pan with inertia, step Back and Forward</li>
+            <li>Zoom in and big tiles show what's in them: photos, video, PDF pages, waveforms, text</li>
             <li>Colour by file type, by age, or by what changed since a snapshot</li>
-            <li>Switch to a sunburst when you want to see the folder tree as rings</li>
+            <li>Switch to a sunburst, or rest the pointer on a system file to learn what it is</li>
           </ul>
         </div>
-        <div class="shot"><img src="{{img:map-and-files}}" alt="Filescape showing a folder list above a colourful treemap of a Projects folder, with a file types list on the right" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="{{img:map-previews}}" alt="Filescape's treemap zoomed in on a Photos folder, with each tile showing its picture and the selected photo in the preview pane" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="showcase flip">
@@ -91,12 +71,12 @@
           <h3>A real file manager, with the map docked underneath</h3>
           <p>Browse without scanning first. Two panes, tabs, previews and the usual copy, move and rename. The map follows the folder you're in, and selecting a file highlights its tile.</p>
           <ul class="ticks">
-            <li>Details, Icons, Columns and Gallery views, with EXR and HDR thumbnails</li>
-            <li>Batch rename with a preview, Compare Folders and sync, tags and notes</li>
-            <li>Zip, 7z and tar archives open like folders</li>
+            <li>Details, Icons, Columns and Gallery views, Quick Look on Space</li>
+            <li>Undo for copies, moves, renames and deletes, with Replace, Keep Both or Merge</li>
+            <li>Batch rename with a preview, Compare Folders and sync, archives that open like folders</li>
           </ul>
         </div>
-        <div class="shot"><img src="{{img:files-dock}}" alt="Filescape's Files workspace with a sidebar of drives, a file list and the analysis treemap docked below" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="{{img:files-dock}}" alt="Filescape's Files workspace with a sidebar of drives, a file list and the analysis treemap docked below" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="showcase">
@@ -106,10 +86,51 @@
           <ul class="ticks">
             <li>Saved sites in the sidebar, SSH agent or key files</li>
             <li>Passwords kept in your system keychain, never in a settings file</li>
-            <li>Choose how many transfers run at once</li>
+            <li>Compare and sync with a server, or open an SSH terminal in the folder</li>
           </ul>
         </div>
-        <div class="shot"><img src="{{img:remote}}" alt="The Remote workspace with a local folder and an SFTP server side by side and two transfers running in the queue" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="{{img:remote}}" alt="The Remote workspace with a local folder and an SFTP server side by side and two transfers running in the queue" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase flip">
+        <div class="copy">
+          <h3>Look inside without opening anything</h3>
+          <p>Press Space on a camera RAW photo, a Photoshop document, a spreadsheet, a font, a song or a 3D model and see it at once, with the details that matter. Nothing in a file is ever run, and every preview is free.</p>
+          <ul class="ticks">
+            <li>RAW, HEIC, AVIF, JPEG XL, PSD, Affinity, Sketch, Krita and GIMP</li>
+            <li>Word, Excel, PowerPoint, every PDF page, EPUB, Markdown and code in 200 languages</li>
+            <li>Audio waveforms, MIDI piano rolls, SQLite tables, archives, disk images and email</li>
+          </ul>
+          <a class="more" href="/formats">All 300+ supported formats</a>
+        </div>
+        <div class="shot"><img src="{{img:previews-pane}}" alt="The Files workspace in Icons view with thumbnails of fonts, photos, a MIDI piano roll, a PDF and a 3D model, and a song's cover, waveform and tags in the preview pane" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase">
+        <div class="copy">
+          <h3>Cloud folders, measured honestly</h3>
+          <p>Google Drive, OneDrive, iCloud Drive, Dropbox and others keep many files online only. Filescape shows what each file really takes on this computer, which ones are only in the cloud, and never downloads them behind your back.</p>
+          <ul class="ticks">
+            <li>Switch the map between size on disk, full size and what's only in the cloud</li>
+            <li>A status icon on every cloud file, and a breakdown of what's here and what isn't</li>
+            <li>Free Up Space or Always Keep on This Device, straight from the right-click menu</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="{{img:cloud}}" alt="A scan with a Dropbox folder: online-only files marked, and a bar under the map splitting local files, downloaded files and data only in the cloud" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase flip">
+        <div class="copy">
+          <h3>Your AI models, found and explained</h3>
+          <p>Models from Ollama, LM Studio and Hugging Face are some of the biggest files on a drive. The AI Models workspace lists them all, marks copies and leftovers, shows what's inside each one and whether it will run here, and lets you chat with it offline.</p>
+          <ul class="ticks">
+            <li>Model Inspector: architecture, tensors, tokens, health checks and memory needs</li>
+            <li>Ask AI runs GGUF models inside Filescape, with nothing sent anywhere</li>
+            <li>The Lab shows what a model would say next, and how sure it is</li>
+          </ul>
+          <a class="more" href="/ai-models">More about AI models</a>
+        </div>
+        <div class="shot"><img src="{{img:ai-structure}}" alt="The Model Inspector drawing a Qwen3 8B model as a map of its layers, coloured by what each part does" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="keys">
@@ -117,6 +138,9 @@
         <div class="keycard"><span class="kbd">Snapshots</span><h3>See what grew</h3><p>Save a snapshot, scan again next week, and colour the map by what changed.</p></div>
         <div class="keycard"><span class="kbd">Filters</span><h3>Show only what matters</h3><p>Filter by category, size or name pattern. Highlight matches or hide everything else.</p></div>
         <div class="keycard"><span class="kbd">Ctrl F</span><h3>Search subfolders</h3><p>Search a whole tree from the filter box and save searches you run often.</p></div>
+        <div class="keycard"><span class="kbd">What is this?</span><h3>Know what's safe to delete</h3><p>pagefile.sys, WinSxS, the sleep image, /proc and about 170 more, explained offline, with how to shrink them safely.</p></div>
+        <div class="keycard"><span class="kbd">Ctrl Z</span><h3>Undo it</h3><p>Copies, moves, renames, new items and Move to Trash can all be undone, putting deleted items back from the bin.</p></div>
+        <div class="keycard"><span class="kbd">Ctrl \</span><h3>Two panes</h3><p>Two folders side by side, each with its own tabs, sort and filter. Drag between them, or copy with Shift F5.</p></div>
         <div class="keycard"><span class="kbd">F1</span><h3>Help built in</h3><p>A searchable Help Centre and context help for every panel, offline.</p></div>
         <div class="keycard"><span class="kbd">--cli</span><h3>Reports from a terminal</h3><p>Print the largest folders or compare snapshots from the command line.</p></div>
       </div>
@@ -129,14 +153,15 @@
         <div class="copy">
           <span class="eyebrow">For VFX and post</span>
           <h2>Frame sequences are one row, not 240.</h2>
-          <p>Filescape folds numbered frames into a single sequence with its range, size and any missing frames. Copy or move the whole shot at once, and play it straight from the list.</p>
+          <p>Filescape folds numbered frames into a single sequence with its range, size and any missing frames. Copy or move the whole shot at once, and play it straight from the list. 3D models, CAD drawings and Gaussian splat scenes preview too.</p>
           <ul class="ticks">
             <li>Player for EXR, DPX (8 to 16 bit), PNG and TIFF, played from memory</li>
             <li>sRGB, Rec.709 and Cineon log display, exposure, and .cube LUTs</li>
             <li>A/B wipe to compare a plate against the comp</li>
           </ul>
+          <a class="more" href="/vfx">Filescape for VFX and 3D</a>
         </div>
-        <div class="shot"><img src="{{img:player}}" alt="The sequence player comparing a DPX plate and a PNG comp with an A/B wipe, at frame 11 of 30" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="{{img:player}}" alt="The sequence player comparing a DPX plate and a PNG comp with an A/B wipe, at frame 11 of 30" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="vfx" role="region" aria-label="Example of sequences folded in the file list">
@@ -161,17 +186,19 @@
       <div class="section-head">
         <span class="eyebrow">Pricing</span>
         <h2>Free to look. <span class="js-price">$4.99</span> to do everything.</h2>
-        <p class="lede">No subscription. Buy Pro once and use it on up to 3 of your computers at once.</p>
+        <p class="lede">Curiosity is free: exploring, previewing and looking inside your files and models costs nothing. Pro is for getting through a lot at once. No subscription; buy it once and use it on up to 3 of your computers.</p>
       </div>
       <div class="plans">
         <div class="plan">
           <div><h3>Free</h3><p class="small">Forever, no sign-up</p></div>
           <div class="price"><b>$0</b></div>
           <ul>
-            <li>The disk map: treemap and sunburst</li>
-            <li>The file browser</li>
-            <li>Zoom, browse and preview by hand</li>
-            <li>Scan exclusions</li>
+            <li>The disk map: treemap, sunburst and file types</li>
+            <li>The file manager: browse, copy, move, rename, delete, undo</li>
+            <li>Previews and Quick Look for 300+ file types</li>
+            <li>Cloud sizes and status icons, freeing up one file at a time</li>
+            <li>AI Models: find, inspect, health checks, Ask AI and the Lab</li>
+            <li>What system files are, and scan exclusions</li>
           </ul>
           <a class="btn btn-ghost" href="#download">Download free</a>
         </div>
@@ -180,10 +207,11 @@
           <div class="price"><s class="js-list">$9.99</s><b class="js-price">$4.99</b><span>once<span class="js-launch">, launch price</span></span></div>
           <ul>
             <li>Everything in Free</li>
-            <li>Two-pane file management, batch rename, Compare Folders</li>
-            <li>SFTP, FTP(S) and WebDAV with the transfer queue</li>
             <li>Filter by type, by size or with your own pattern</li>
-            <li>Sequence player, duplicates and snapshots</li>
+            <li>Batch rename, Compare Folders and sync, duplicates, snapshots</li>
+            <li>SFTP, FTP(S) and WebDAV with the transfer queue</li>
+            <li>Frame sequences and the sequence player</li>
+            <li>Archives, saved searches, and cloud folders freed up in bulk</li>
             <li>Active on 3 of your computers at once</li>
             <li>Every update for a year, then keep the version you have</li>
           </ul>
@@ -223,27 +251,18 @@
       <p class="small" style="margin-top:16px">Memory: allow about 150 MB per million files scanned. Graphics: any GPU with Vulkan, Direct3D 12, Metal or OpenGL 3.3.</p>
 
       <div class="faq">
-        <details><summary>Do my files leave my computer?</summary><p>No. Scanning, the map and previews all run locally. Filescape only goes online to activate a Pro licence, or when you connect to a server yourself.</p></details>
+        <details><summary>Do my files leave my computer?</summary><p>No. Scanning, the map and previews all run locally. Filescape only goes online to check for a new version (which you can turn off), to activate a Pro licence, or when you ask it to connect to a server or download an AI model.</p></details>
         <details><summary>My Mac says Filescape can't be opened. Is it safe?</summary><p>Yes. Filescape isn't notarised by Apple yet, so macOS asks you to allow it once. Try to open it, click <b>Done</b>, then go to <b>System Settings &gt; Privacy &amp; Security</b> and click <b>Open Anyway</b>. <a href="/mac">Step-by-step instructions</a>.</p></details>
         <details><summary>Is this a subscription?</summary><p>No. Pro is a single <span class="js-price">$4.99</span> payment. There's nothing to renew.</p></details>
         <details><summary>I replaced my computer. Can I move my licence?</summary><p>Yes. Deactivate Filescape on the old computer, or release it from your account at account.filescape.app, and activate on the new one. A licence can be active on 3 computers at once.</p></details>
-        <details><summary>How is size calculated?</summary><p>Filescape adds up file sizes. Hard links count once per name, and compressed, sparse or cloud-only files show their full size, so totals can differ from what your system reports as used.</p></details>
+        <details><summary>How is size calculated?</summary><p>By default Filescape shows each file's size on disk, what it really takes on this computer, as Explorer's "Size on disk" and <span class="mono">du</span> count it. So files that are only in the cloud take almost no space. Switch to <b>Logical</b> for full file sizes, or <b>Cloud only</b> to see what isn't on this computer, without rescanning.</p></details>
+        <details><summary>Are previews and the AI features free?</summary><p>Yes. Every preview is free, and so are the AI Models workspace, Ask AI and the Lab, with no limits on model size. Pro is for filters, batch work, servers, sequences and doing many things at once.</p></details>
+        <details><summary>Does Ask AI send my files or questions anywhere?</summary><p>No. Ask AI runs the model inside Filescape on your own computer, with no internet connection needed. Reading what's inside a file is a tick box you choose for each question.</p></details>
       </div>
     </div>
   </section>
 </main>
 
-<footer>
-  <div class="wrap foot">
-    <a class="brand" href="#top"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
-    <a href="https://account.filescape.app/">Your licence</a>
-    <a href="/terms">Terms</a>
-    <a href="/privacy">Privacy</a>
-    <a href="/refunds">Refunds</a>
-    <a href="/contact">Contact</a>
-    <span class="ver">© 2026 Filescape</span>
-  </div>
-</footer>
 
 <script>
 (() => {

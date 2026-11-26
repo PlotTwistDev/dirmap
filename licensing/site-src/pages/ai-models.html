@@ -1,0 +1,97 @@
+<main id="top">
+  <div class="page-hero">
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="wrap">
+      <span class="eyebrow">AI models</span>
+      <h1>Every AI model on your computer, explained.</h1>
+      <p class="lede">AI models are often the biggest files on a drive, and the same one is easily downloaded twice. Filescape finds them, tells you what each one is and whether it will run, and lets you chat with it offline, with nothing leaving your computer.</p>
+      <div class="dl-row">
+        <a class="btn btn-key" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download Filescape free</a>
+      </div>
+      <p class="free-note">Everything on this page is free, with no limits on model size or count</p>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <div class="showcase">
+        <div class="copy">
+          <span class="eyebrow">Find</span>
+          <h3>One list of everything you've downloaded</h3>
+          <p>The AI Models workspace looks where Ollama, LM Studio and Hugging Face keep their models, in your Downloads and in folders you add, and includes model files from your last disk scan. Each model shows its size, format, family, parameters, precision and context length, read from the file without loading it.</p>
+          <ul class="ticks">
+            <li>GGUF, safetensors, PyTorch, ONNX and Core ML, including Stable Diffusion and ComfyUI checkpoints</li>
+            <li>Byte-for-byte copies across apps are marked, and so are Ollama downloads no model uses</li>
+            <li><span class="mono">filescape --cli --models PATH</span> prints the same list in a terminal</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="{{img:ai-library}}" alt="The AI Models workspace listing models from Ollama, LM Studio and Hugging Face, largest first, with a copy marked" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase flip">
+        <div class="copy">
+          <span class="eyebrow">Inspect</span>
+          <h3>See what's inside a model</h3>
+          <p>Double-click a model for its architecture, layers, heads, vocabulary, licence and parameters. Each fact says where it comes from: the file itself, Filescape's own count, or the publisher's notes.</p>
+          <ul class="ticks">
+            <li>Will it run? Memory needed at any context length, and whether it fits on this computer's graphics chip</li>
+            <li>Health finds missing parts, downloads cut short, damaged files and size labels that don't add up</li>
+            <li>Every tensor and token, searchable, with a map of the layers and a side-by-side compare</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="{{img:ai-inspector}}" alt="The Model Inspector showing a Qwen3 8B model: its architecture, parameters, layers, context and how its numbers are stored" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase">
+        <div class="copy">
+          <span class="eyebrow">Will it run?</span>
+          <h3>Know before you load it</h3>
+          <p>Filescape works out the memory a model needs at any context length and says whether it runs on this computer's graphics chip, split between the graphics chip and the processor, on the processor alone, or not at all.</p>
+          <ul class="ticks">
+            <li>Health checks for missing parts, files cut short and damaged data</li>
+            <li>Verify Ollama and Hugging Face downloads against their checksums</li>
+            <li>Check the numbers samples every tensor for broken values</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="{{img:ai-willrun}}" alt="Will it run? for an 8B model: the memory it needs at each context length against this computer's graphics and system memory" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase flip">
+        <div class="copy">
+          <span class="eyebrow">Ask AI and the Lab</span>
+          <h3>Chat with a model offline, and watch it think</h3>
+          <p>Ask AI runs GGUF models inside Filescape itself, with no Ollama, LM Studio or internet connection needed. On a Mac with Apple silicon it uses the graphics chip; on Windows and Linux, the processor. Right-click a file or folder and choose Ask AI About This… to ask about it.</p>
+          <p>The Lab shows what a model would write next and how sure it is: each token coloured by its probability, with the ten likeliest alternatives. Pick another to see where the text goes instead.</p>
+          <ul class="ticks">
+            <li>See what temperature, top-k, top-p and min-p do to the choices</li>
+            <li>Look inside each layer, steer a model toward an idea, and test its speed</li>
+            <li>No model yet? Get a small one (Qwen3 1.7B) after seeing its size, licence and memory needs</li>
+          </ul>
+        </div>
+        <div class="lab" role="img" aria-label="Illustration of the Lab: the words of a sentence shaded by how sure the model was of each, and the likeliest next words with their probabilities">
+          <div class="lab-bar"><span>Lab · Qwen3 1.7B</span><span class="demo-badge">Illustration</span></div>
+          <p class="lab-text"><span>The largest files on most laptops are</span> <i style="--p:.92">videos</i><i style="--p:.48">,</i> <i style="--p:.71">disk</i> <i style="--p:.88">images</i> <i style="--p:.63">and</i> <i style="--p:.31">AI</i> <i style="--p:.95">models</i><i style="--p:.82">.</i></p>
+          <div class="lab-alts">
+            <div class="lab-head"><span>Instead of "AI"</span><span>Model</span></div>
+            <div class="lab-row"><span>AI</span><b style="--w:31%"></b><em>31%</em></div>
+            <div class="lab-row"><span>old</span><b style="--w:19%"></b><em>19%</em></div>
+            <div class="lab-row"><span>game</span><b style="--w:14%"></b><em>14%</em></div>
+            <div class="lab-row"><span>photo</span><b style="--w:9%"></b><em>9%</em></div>
+            <div class="lab-row"><span>backup</span><b style="--w:7%"></b><em>7%</em></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <h3>Your questions stay on your computer</h3>
+        <p>Models run on your own hardware and nothing you ask is sent anywhere. Filescape reads only the part of a model file that describes it, and never opens PyTorch checkpoints, since loading one can run code. Models that are only in the cloud are listed but not downloaded. Answers come from the model, not from Filescape, and small models can be wrong.</p>
+      </div>
+
+      <div class="cta">
+        <h2>Free, because it runs on your computer.</h2>
+        <p class="lede">Finding, inspecting, checking, chatting and the Lab are free for good. Filescape Pro is for working through many files or models at once.</p>
+        <div class="dl-row"><a class="btn btn-key" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download free</a><a class="btn btn-ghost" href="/#pricing">See pricing</a></div>
+      </div>
+    </div>
+  </section>
+</main>

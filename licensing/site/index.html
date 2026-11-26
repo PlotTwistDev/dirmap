@@ -3,10 +3,48 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Filescape</title>
+<title>Filescape: disk space analyzer and file manager</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="Filescape maps every file on your drive as a tile you can zoom through, with a full file manager, remote servers and VFX sequence tools built in. Windows, macOS and Linux.">
+<meta name="description" content="See where your disk space went: a zoomable map of every file, previews of 300+ file types and a full file manager. Windows, macOS and Linux.">
+<link rel="canonical" href="https://filescape.app/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Filescape">
+<meta property="og:title" content="Filescape: see where your disk space went">
+<meta property="og:description" content="See where your disk space went: a zoomable map of every file, previews of 300+ file types and a full file manager. Windows, macOS and Linux.">
+<meta property="og:url" content="https://filescape.app/">
+<meta property="og:image" content="https://filescape.app/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Filescape's colourful treemap of a drive, with the file manager above it">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "SoftwareApplication",
+ "name": "Filescape",
+ "url": "https://filescape.app/",
+ "applicationCategory": "UtilitiesApplication",
+ "operatingSystem": "Windows 10, Windows 11, macOS 11 or later, Linux",
+ "description": "See where your disk space went: a zoomable map of every file, previews of 300+ file types and a full file manager. Windows, macOS and Linux.",
+ "image": "https://filescape.app/img/og.png",
+ "offers": [
+  {
+   "@type": "Offer",
+   "name": "Filescape Free",
+   "price": "0",
+   "priceCurrency": "USD"
+  },
+  {
+   "@type": "Offer",
+   "name": "Filescape Pro",
+   "price": "4.99",
+   "priceCurrency": "USD",
+   "url": "https://filescape.app/#pricing"
+  }
+ ]
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
@@ -139,8 +177,8 @@ section { padding-block: 112px 0; }
 .copy { display: grid; gap: 14px; min-width: 0; }
 .copy p { color: var(--text-2); }
 .ticks { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 8px; font-size: 14px; color: var(--text-2); }
-.ticks li { display: flex; gap: 10px; }
-.ticks li::before { content: ""; flex: none; width: 6px; height: 6px; margin-top: 8px; border-radius: 2px; background: var(--coral); }
+.ticks li { position: relative; padding-left: 16px; }
+.ticks li::before { content: ""; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 2px; background: var(--coral); }
 .shot { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line-strong); box-shadow: 0 30px 80px -30px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.05); background: var(--ink); }
 .shot img { width: 100%; height: auto; aspect-ratio: 1280 / 820; }
 
@@ -201,6 +239,44 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 .foot a:hover { color: var(--text); }
 .foot .ver { margin-left: auto; font-family: var(--mono); font-size: 11px; }
 
+/* Feature pages (formats, ai-models, vfx) */
+.nav-links a[aria-current] { color: var(--text); }
+.page-hero { position: relative; padding-block: 72px 8px; }
+.page-hero + section { padding-top: 16px; }
+.page-hero .hero-glow { inset: -160px 0 auto; height: 560px; }
+.page-hero h1 { margin-top: 18px; font-size: clamp(36px, 6vw, 64px); line-height: 1.04; letter-spacing: -.033em; max-width: 16ch; }
+.page-hero .lede { margin-top: 18px; }
+.page-hero .dl-row { justify-content: flex-start; margin-top: 28px; }
+.free-note { display: inline-flex; gap: 8px; align-items: center; margin-top: 18px; font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.free-note::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--coral); }
+.more { display: inline-flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 14px; color: var(--text); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.more:hover { text-decoration-color: var(--coral); }
+.more::after { content: "→"; }
+.callout { margin-top: 56px; padding: 22px 24px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--ink); display: grid; gap: 8px; max-width: 820px; }
+.callout p { color: var(--text-2); font-size: 15px; }
+.fmt { margin-top: 40px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--ink); overflow: hidden; }
+.fmt-scroll { overflow-x: auto; }
+.fmt table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
+.fmt thead th { text-align: left; font: 400 11px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.fmt tbody th, .fmt td { text-align: left; vertical-align: top; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.fmt tbody tr:last-child th, .fmt tbody tr:last-child td { border-bottom: 0; }
+.fmt tbody th { font-weight: 500; color: var(--text); width: 24%; }
+.fmt td { color: var(--text-2); }
+.fmt td.exts { width: 30%; }
+.fmt code { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); background: var(--obsidian); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin: 0 2px 4px 0; display: inline-block; }
+.lab { border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--ink); overflow: hidden; min-width: 0; }
+.lab-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--text-3); }
+.lab-text { padding: 22px 18px 18px; font-family: var(--mono); font-size: 15px; line-height: 2; color: var(--text-2); }
+.lab-text i { font-style: normal; color: var(--text); padding: 2px 3px; border-radius: 4px; background: color-mix(in srgb, var(--coral) calc((1 - var(--p)) * 85%), #1d3a2a); }
+.lab-text i:nth-of-type(6) { outline: 1px solid var(--coral); }
+.lab-alts { border-top: 1px solid var(--line); padding: 12px 18px 16px; display: grid; gap: 7px; font-family: var(--mono); font-size: 12px; }
+.lab-head { display: flex; justify-content: space-between; color: var(--text-3); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.lab-row { display: grid; grid-template-columns: 70px 1fr 40px; gap: 10px; align-items: center; color: var(--text-2); }
+.lab-row b { height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--sky) var(--w), var(--obsidian) var(--w)); }
+.lab-row em { font-style: normal; text-align: right; color: var(--text); }
+.cta { margin-top: 112px; padding: 48px 24px; text-align: center; border-radius: 16px; border: 1px solid var(--line); background: radial-gradient(60% 120% at 50% 0%, var(--ember), var(--ink) 70%); display: grid; gap: 14px; justify-items: center; }
+.cta .lede { text-align: center; }
+.cta .dl-row { margin-top: 10px; }
 @media (max-width: 900px) {
   .showcase, .showcase.flip { grid-template-columns: minmax(0, 1fr); gap: 28px; }
   .showcase.flip .copy { order: 0; }
@@ -209,6 +285,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   .fact:nth-child(3) { border-left: 0; }
   .fact:nth-child(n+3) { border-top: 1px solid var(--line); }
   .reqs { grid-template-columns: minmax(0, 1fr); }
+  .nav-links { gap: 16px; font-size: 13px; }
 }
 @media (max-width: 640px) {
   .nav-links { display: none; }
@@ -228,6 +305,9 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   .fact b { font-size: 22px; }
   section { padding-block: 80px 0; }
   .foot .ver { margin-left: 0; }
+  .page-hero { padding-block: 48px 0; }
+  .page-hero .dl-row { margin-inline: 0; }
+  .cta { margin-top: 80px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; scroll-behavior: auto !important; }
@@ -245,14 +325,15 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 <header class="nav">
   <div class="wrap">
     <nav class="nav-bar" aria-label="Main">
-      <a class="brand" href="#top"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+      <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
       <div class="nav-links">
-        <a href="#features">Features</a>
-        <a href="#vfx">For VFX</a>
-        <a href="#pricing">Pricing</a>
-        <a href="#download">Download</a>
+        <a href="/#features">Features</a>
+        <a href="/formats">File previews</a>
+        <a href="/ai-models">AI models</a>
+        <a href="/vfx">VFX and 3D</a>
+        <a href="/#pricing">Pricing</a>
       </div>
-      <a class="btn btn-key btn-sm" href="#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
+      <a class="btn btn-key btn-sm" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
     </nav>
   </div>
 </header>
@@ -261,9 +342,9 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   <div class="hero">
     <div class="hero-glow" aria-hidden="true"></div>
     <div class="wrap">
-      <span class="eyebrow"><b>New in 2.3</b> Remote servers and transfers</span>
+      <a class="eyebrow" href="/formats" style="text-decoration:none"><b>New</b> Previews for 300+ file types, and your AI models</a>
       <h1>See where your disk went.</h1>
-      <p class="lede">Filescape scans a drive in seconds and draws every file as a tile you can zoom through. When you find what's eating the space, deal with it right there in a full file manager.</p>
+      <p class="lede">Filescape scans a drive in seconds and draws every file as a tile you can zoom through. Zoom in to see what's inside, then deal with it right there in a full file manager.</p>
       <div class="dl-row" id="hero-downloads">
         <a class="btn btn-key" data-os="windows" href="https://downloads.filescape.app/latest/windows"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for Windows</a>
         <a class="btn btn-ghost" data-os="mac" href="https://downloads.filescape.app/latest/macos"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for macOS</a>
@@ -299,7 +380,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   <div class="wrap">
     <div class="facts">
       <div class="fact"><b>47 s</b><span>to map 1.3 million files on our test drive</span></div>
-      <div class="fact"><b>25 MB</b><span>download, no installer or runtime on Windows</span></div>
+      <div class="fact"><b>300+</b><span>file types previewed, free in every edition</span></div>
       <div class="fact"><b>3</b><span>platforms: Windows, macOS and Linux</span></div>
       <div class="fact"><b><s class="js-list">$9.99</s> <span class="js-price">$4.99</span></b><span>once for Pro, on 3 computers at once</span></div>
     </div>
@@ -317,12 +398,12 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <h3>A treemap you can fly through</h3>
           <p>Every file is a tile sized by how much space it takes, in soft colours by type (or the classic cushion shading, if you prefer). The map is drawn on your graphics card, so zooming and panning stay smooth even with millions of files.</p>
           <ul class="ticks">
-            <li>Zoom toward the pointer, pan with inertia, step Back and Forward</li>
+            <li>Zoom in and big tiles show what's in them: photos, video, PDF pages, waveforms, text</li>
             <li>Colour by file type, by age, or by what changed since a snapshot</li>
-            <li>Switch to a sunburst when you want to see the folder tree as rings</li>
+            <li>Switch to a sunburst, or rest the pointer on a system file to learn what it is</li>
           </ul>
         </div>
-        <div class="shot"><img src="img/map-and-files.webp" alt="Filescape showing a folder list above a colourful treemap of a Projects folder, with a file types list on the right" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="/img/map-previews.webp" alt="Filescape's treemap zoomed in on a Photos folder, with each tile showing its picture and the selected photo in the preview pane" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="showcase flip">
@@ -330,12 +411,12 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <h3>A real file manager, with the map docked underneath</h3>
           <p>Browse without scanning first. Two panes, tabs, previews and the usual copy, move and rename. The map follows the folder you're in, and selecting a file highlights its tile.</p>
           <ul class="ticks">
-            <li>Details, Icons, Columns and Gallery views, with EXR and HDR thumbnails</li>
-            <li>Batch rename with a preview, Compare Folders and sync, tags and notes</li>
-            <li>Zip, 7z and tar archives open like folders</li>
+            <li>Details, Icons, Columns and Gallery views, Quick Look on Space</li>
+            <li>Undo for copies, moves, renames and deletes, with Replace, Keep Both or Merge</li>
+            <li>Batch rename with a preview, Compare Folders and sync, archives that open like folders</li>
           </ul>
         </div>
-        <div class="shot"><img src="img/files-dock.webp" alt="Filescape's Files workspace with a sidebar of drives, a file list and the analysis treemap docked below" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="/img/files-dock.webp" alt="Filescape's Files workspace with a sidebar of drives, a file list and the analysis treemap docked below" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="showcase">
@@ -345,10 +426,51 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <ul class="ticks">
             <li>Saved sites in the sidebar, SSH agent or key files</li>
             <li>Passwords kept in your system keychain, never in a settings file</li>
-            <li>Choose how many transfers run at once</li>
+            <li>Compare and sync with a server, or open an SSH terminal in the folder</li>
           </ul>
         </div>
-        <div class="shot"><img src="img/remote.webp" alt="The Remote workspace with a local folder and an SFTP server side by side and two transfers running in the queue" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="/img/remote.webp" alt="The Remote workspace with a local folder and an SFTP server side by side and two transfers running in the queue" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase flip">
+        <div class="copy">
+          <h3>Look inside without opening anything</h3>
+          <p>Press Space on a camera RAW photo, a Photoshop document, a spreadsheet, a font, a song or a 3D model and see it at once, with the details that matter. Nothing in a file is ever run, and every preview is free.</p>
+          <ul class="ticks">
+            <li>RAW, HEIC, AVIF, JPEG XL, PSD, Affinity, Sketch, Krita and GIMP</li>
+            <li>Word, Excel, PowerPoint, every PDF page, EPUB, Markdown and code in 200 languages</li>
+            <li>Audio waveforms, MIDI piano rolls, SQLite tables, archives, disk images and email</li>
+          </ul>
+          <a class="more" href="/formats">All 300+ supported formats</a>
+        </div>
+        <div class="shot"><img src="/img/previews-pane.webp" alt="The Files workspace in Icons view with thumbnails of fonts, photos, a MIDI piano roll, a PDF and a 3D model, and a song's cover, waveform and tags in the preview pane" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase">
+        <div class="copy">
+          <h3>Cloud folders, measured honestly</h3>
+          <p>Google Drive, OneDrive, iCloud Drive, Dropbox and others keep many files online only. Filescape shows what each file really takes on this computer, which ones are only in the cloud, and never downloads them behind your back.</p>
+          <ul class="ticks">
+            <li>Switch the map between size on disk, full size and what's only in the cloud</li>
+            <li>A status icon on every cloud file, and a breakdown of what's here and what isn't</li>
+            <li>Free Up Space or Always Keep on This Device, straight from the right-click menu</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="/img/cloud.webp" alt="A scan with a Dropbox folder: online-only files marked, and a bar under the map splitting local files, downloaded files and data only in the cloud" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase flip">
+        <div class="copy">
+          <h3>Your AI models, found and explained</h3>
+          <p>Models from Ollama, LM Studio and Hugging Face are some of the biggest files on a drive. The AI Models workspace lists them all, marks copies and leftovers, shows what's inside each one and whether it will run here, and lets you chat with it offline.</p>
+          <ul class="ticks">
+            <li>Model Inspector: architecture, tensors, tokens, health checks and memory needs</li>
+            <li>Ask AI runs GGUF models inside Filescape, with nothing sent anywhere</li>
+            <li>The Lab shows what a model would say next, and how sure it is</li>
+          </ul>
+          <a class="more" href="/ai-models">More about AI models</a>
+        </div>
+        <div class="shot"><img src="/img/ai-structure.webp" alt="The Model Inspector drawing a Qwen3 8B model as a map of its layers, coloured by what each part does" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="keys">
@@ -356,6 +478,9 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
         <div class="keycard"><span class="kbd">Snapshots</span><h3>See what grew</h3><p>Save a snapshot, scan again next week, and colour the map by what changed.</p></div>
         <div class="keycard"><span class="kbd">Filters</span><h3>Show only what matters</h3><p>Filter by category, size or name pattern. Highlight matches or hide everything else.</p></div>
         <div class="keycard"><span class="kbd">Ctrl F</span><h3>Search subfolders</h3><p>Search a whole tree from the filter box and save searches you run often.</p></div>
+        <div class="keycard"><span class="kbd">What is this?</span><h3>Know what's safe to delete</h3><p>pagefile.sys, WinSxS, the sleep image, /proc and about 170 more, explained offline, with how to shrink them safely.</p></div>
+        <div class="keycard"><span class="kbd">Ctrl Z</span><h3>Undo it</h3><p>Copies, moves, renames, new items and Move to Trash can all be undone, putting deleted items back from the bin.</p></div>
+        <div class="keycard"><span class="kbd">Ctrl \</span><h3>Two panes</h3><p>Two folders side by side, each with its own tabs, sort and filter. Drag between them, or copy with Shift F5.</p></div>
         <div class="keycard"><span class="kbd">F1</span><h3>Help built in</h3><p>A searchable Help Centre and context help for every panel, offline.</p></div>
         <div class="keycard"><span class="kbd">--cli</span><h3>Reports from a terminal</h3><p>Print the largest folders or compare snapshots from the command line.</p></div>
       </div>
@@ -368,14 +493,15 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
         <div class="copy">
           <span class="eyebrow">For VFX and post</span>
           <h2>Frame sequences are one row, not 240.</h2>
-          <p>Filescape folds numbered frames into a single sequence with its range, size and any missing frames. Copy or move the whole shot at once, and play it straight from the list.</p>
+          <p>Filescape folds numbered frames into a single sequence with its range, size and any missing frames. Copy or move the whole shot at once, and play it straight from the list. 3D models, CAD drawings and Gaussian splat scenes preview too.</p>
           <ul class="ticks">
             <li>Player for EXR, DPX (8 to 16 bit), PNG and TIFF, played from memory</li>
             <li>sRGB, Rec.709 and Cineon log display, exposure, and .cube LUTs</li>
             <li>A/B wipe to compare a plate against the comp</li>
           </ul>
+          <a class="more" href="/vfx">Filescape for VFX and 3D</a>
         </div>
-        <div class="shot"><img src="img/player.webp" alt="The sequence player comparing a DPX plate and a PNG comp with an A/B wipe, at frame 11 of 30" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="/img/player.webp" alt="The sequence player comparing a DPX plate and a PNG comp with an A/B wipe, at frame 11 of 30" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="vfx" role="region" aria-label="Example of sequences folded in the file list">
@@ -400,17 +526,19 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
       <div class="section-head">
         <span class="eyebrow">Pricing</span>
         <h2>Free to look. <span class="js-price">$4.99</span> to do everything.</h2>
-        <p class="lede">No subscription. Buy Pro once and use it on up to 3 of your computers at once.</p>
+        <p class="lede">Curiosity is free: exploring, previewing and looking inside your files and models costs nothing. Pro is for getting through a lot at once. No subscription; buy it once and use it on up to 3 of your computers.</p>
       </div>
       <div class="plans">
         <div class="plan">
           <div><h3>Free</h3><p class="small">Forever, no sign-up</p></div>
           <div class="price"><b>$0</b></div>
           <ul>
-            <li>The disk map: treemap and sunburst</li>
-            <li>The file browser</li>
-            <li>Zoom, browse and preview by hand</li>
-            <li>Scan exclusions</li>
+            <li>The disk map: treemap, sunburst and file types</li>
+            <li>The file manager: browse, copy, move, rename, delete, undo</li>
+            <li>Previews and Quick Look for 300+ file types</li>
+            <li>Cloud sizes and status icons, freeing up one file at a time</li>
+            <li>AI Models: find, inspect, health checks, Ask AI and the Lab</li>
+            <li>What system files are, and scan exclusions</li>
           </ul>
           <a class="btn btn-ghost" href="#download">Download free</a>
         </div>
@@ -419,10 +547,11 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <div class="price"><s class="js-list">$9.99</s><b class="js-price">$4.99</b><span>once<span class="js-launch">, launch price</span></span></div>
           <ul>
             <li>Everything in Free</li>
-            <li>Two-pane file management, batch rename, Compare Folders</li>
-            <li>SFTP, FTP(S) and WebDAV with the transfer queue</li>
             <li>Filter by type, by size or with your own pattern</li>
-            <li>Sequence player, duplicates and snapshots</li>
+            <li>Batch rename, Compare Folders and sync, duplicates, snapshots</li>
+            <li>SFTP, FTP(S) and WebDAV with the transfer queue</li>
+            <li>Frame sequences and the sequence player</li>
+            <li>Archives, saved searches, and cloud folders freed up in bulk</li>
             <li>Active on 3 of your computers at once</li>
             <li>Every update for a year, then keep the version you have</li>
           </ul>
@@ -462,27 +591,18 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
       <p class="small" style="margin-top:16px">Memory: allow about 150 MB per million files scanned. Graphics: any GPU with Vulkan, Direct3D 12, Metal or OpenGL 3.3.</p>
 
       <div class="faq">
-        <details><summary>Do my files leave my computer?</summary><p>No. Scanning, the map and previews all run locally. Filescape only goes online to activate a Pro licence, or when you connect to a server yourself.</p></details>
+        <details><summary>Do my files leave my computer?</summary><p>No. Scanning, the map and previews all run locally. Filescape only goes online to check for a new version (which you can turn off), to activate a Pro licence, or when you ask it to connect to a server or download an AI model.</p></details>
         <details><summary>My Mac says Filescape can't be opened. Is it safe?</summary><p>Yes. Filescape isn't notarised by Apple yet, so macOS asks you to allow it once. Try to open it, click <b>Done</b>, then go to <b>System Settings &gt; Privacy &amp; Security</b> and click <b>Open Anyway</b>. <a href="/mac">Step-by-step instructions</a>.</p></details>
         <details><summary>Is this a subscription?</summary><p>No. Pro is a single <span class="js-price">$4.99</span> payment. There's nothing to renew.</p></details>
         <details><summary>I replaced my computer. Can I move my licence?</summary><p>Yes. Deactivate Filescape on the old computer, or release it from your account at account.filescape.app, and activate on the new one. A licence can be active on 3 computers at once.</p></details>
-        <details><summary>How is size calculated?</summary><p>Filescape adds up file sizes. Hard links count once per name, and compressed, sparse or cloud-only files show their full size, so totals can differ from what your system reports as used.</p></details>
+        <details><summary>How is size calculated?</summary><p>By default Filescape shows each file's size on disk, what it really takes on this computer, as Explorer's "Size on disk" and <span class="mono">du</span> count it. So files that are only in the cloud take almost no space. Switch to <b>Logical</b> for full file sizes, or <b>Cloud only</b> to see what isn't on this computer, without rescanning.</p></details>
+        <details><summary>Are previews and the AI features free?</summary><p>Yes. Every preview is free, and so are the AI Models workspace, Ask AI and the Lab, with no limits on model size. Pro is for filters, batch work, servers, sequences and doing many things at once.</p></details>
+        <details><summary>Does Ask AI send my files or questions anywhere?</summary><p>No. Ask AI runs the model inside Filescape on your own computer, with no internet connection needed. Reading what's inside a file is a tick box you choose for each question.</p></details>
       </div>
     </div>
   </section>
 </main>
 
-<footer>
-  <div class="wrap foot">
-    <a class="brand" href="#top"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
-    <a href="https://account.filescape.app/">Your licence</a>
-    <a href="/terms">Terms</a>
-    <a href="/privacy">Privacy</a>
-    <a href="/refunds">Refunds</a>
-    <a href="/contact">Contact</a>
-    <span class="ver">© 2026 Filescape</span>
-  </div>
-</footer>
 
 <script>
 (() => {
@@ -1268,5 +1388,19 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   if (document.fonts) document.fonts.ready.then(() => { mono = getComputedStyle(document.body).getPropertyValue("--mono") || mono; draw(); });
 })();
 </script>
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+    <a href="/formats">Supported formats</a>
+    <a href="/ai-models">AI models</a>
+    <a href="/vfx">VFX and 3D</a>
+    <a href="https://account.filescape.app/">Your licence</a>
+    <a href="/terms">Terms</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/refunds">Refunds</a>
+    <a href="/contact">Contact</a>
+    <span class="ver">© 2026 Filescape</span>
+  </div>
+</footer>
 </body>
 </html>
