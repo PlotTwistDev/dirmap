@@ -216,4 +216,5 @@ GPX, KML outlines); DICOM and FITS; disk images read-only; email (eml, mbox, vcf
 | iWork and creative apps: saved pictures and details | #78 | Merged |
 | Music projects: Ableton, REAPER, FL Studio, Cubase | #79 | Merged |
 | DICOM and FITS images | #80 | Merged |
-| Disk images: ISO contents, virtual disks, DMG, WIM | #82 | In review |
+| Disk images: ISO contents, virtual disks, DMG, WIM | #82 | Merged |
+| UDF disc listing (DVD, Blu-ray, Windows install) | #83 | In review |

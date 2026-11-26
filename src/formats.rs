@@ -114,7 +114,7 @@ impl Format {
                 Category::Model => ("A shaded model to turn about", "Filescape (gltf for glTF)"),
                 Category::Cad => ("What the file says: the program that made it, units, author and parts (not drawn)", "Filescape"),
                 Category::Saved => ("The picture the app saved inside the file, and the version that saved it", "Filescape"),
-                Category::DiskImage => ("A disc's files and folders with sizes; a virtual disk's size, type and partitions; a Windows image's editions", "Filescape"),
+                Category::DiskImage => ("A disc's files and folders with sizes (ISO 9660 and UDF); a virtual disk's size, type and partitions; a Windows image's editions", "Filescape"),
                 Category::Science => ("The picture, with the scan's or telescope's details", "Filescape"),
                 Category::Map => ("The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks", "Filescape"),
                 Category::Text | Category::Spreadsheet | Category::Document => ("A preview", "Filescape"),
