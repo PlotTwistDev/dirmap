@@ -1,5 +1,5 @@
-//! Music projects: Ableton Live (.als), REAPER (.rpp), FL Studio (.flp) and Cubase/Nuendo
-//! (.cpr, .npr). Shows the version that saved the project, tempo, tracks, plugins and the sound
+//! Music projects: Ableton Live (.als), REAPER (.rpp), FL Studio (.flp), Cubase/Nuendo
+//! (.cpr, .npr) and Logic Pro (.logicx, a folder package). Shows the version that saved the project, tempo, tracks, plugins and the sound
 //! files it uses, marking any that are missing from this computer.
 //!
 //! Projects are only read. Plugins aren't loaded, and sound files are only checked for.
@@ -31,7 +31,79 @@ pub struct Project {
 }
 
 pub fn is_project(name: &str) -> bool {
-    matches!(crate::scan::ext_of(name).to_ascii_lowercase().as_str(), "als" | "rpp" | "flp" | "cpr" | "npr")
+    matches!(crate::scan::ext_of(name).to_ascii_lowercase().as_str(), "als" | "rpp" | "flp" | "cpr" | "npr" | "logicx")
+}
+
+/// A Logic Pro project: a folder that the Finder shows as one file.
+pub fn is_logic(name: &str) -> bool {
+    crate::scan::ext_of(name).eq_ignore_ascii_case("logicx")
+}
+
+/// The alternative (version) of a Logic project to show: 000 when there is one, otherwise the
+/// first that has its details saved.
+fn logic_alternative(pkg: &Path) -> Option<PathBuf> {
+    let alts = pkg.join("Alternatives");
+    let first = alts.join("000");
+    if first.join("MetaData.plist").is_file() {
+        return Some(first);
+    }
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&alts).ok()?.flatten().map(|e| e.path()).filter(|p| p.join("MetaData.plist").is_file()).collect();
+    dirs.sort();
+    dirs.into_iter().next()
+}
+
+/// Logic's own picture of the project's window, saved with each alternative.
+pub fn logic_window(pkg: &Path) -> Option<image::RgbaImage> {
+    let p = logic_alternative(pkg)?.join("WindowImage.jpg");
+    if std::fs::metadata(&p).ok()?.len() > FILE_MAX {
+        return None;
+    }
+    image::load_from_memory_with_format(&std::fs::read(p).ok()?, image::ImageFormat::Jpeg).ok().map(|i| i.to_rgba8())
+}
+
+fn logic(pkg: &Path) -> Result<Project, String> {
+    let alt = logic_alternative(pkg).ok_or("Logic project details not found in the package")?;
+    let meta = plist::Value::from_file(alt.join("MetaData.plist")).map_err(|e| format!("Couldn't read the project's details: {e}"))?;
+    let d = meta.as_dictionary().ok_or("Couldn't read the project's details")?;
+    let num = |k: &str| d.get(k).and_then(|v| v.as_real().or_else(|| v.as_signed_integer().map(|i| i as f64)));
+    let text = |k: &str| d.get(k).and_then(|v| v.as_string()).map(str::to_string).filter(|s| !s.is_empty());
+    let list = |k: &str| -> Vec<String> { d.get(k).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_string().map(str::to_string)).collect()).unwrap_or_default() };
+    let mut p = Project { app: "Logic Pro", tempo: num("BeatsPerMinute"), ..Default::default() };
+    if let (Some(n), Some(dn)) = (num("SongSignatureNumerator"), num("SongSignatureDenominator")) {
+        p.signature = Some(format!("{n}/{dn}"));
+    }
+    if let Some(key) = text("SongKey") {
+        let mode = text("SongGenderKey").map(|g| format!(" {}", g.to_lowercase())).unwrap_or_default();
+        p.extra.push(("Key", format!("{key}{mode}")));
+    }
+    if let Some(n) = num("NumberOfTracks") {
+        p.extra.push(("Tracks", group(n as usize)));
+    }
+    if let Some(r) = num("SampleRate") {
+        p.extra.push(("Sample rate", format!("{} kHz", r / 1000.0)));
+    }
+    // Sound files are listed relative to the package (or as full paths).
+    p.samples = list("AudioFiles");
+    for (k, label) in [("SamplerInstrumentsFiles", "Sampler instruments"), ("UltrabeatFiles", "Ultrabeat files"), ("AlchemyFiles", "Alchemy files"), ("ImpulsResponsesFiles", "Impulse responses")] {
+        let n = list(k).len();
+        if n > 0 {
+            p.extra.push((label, group(n)));
+        }
+    }
+    let unused = list("UnusedAudioFiles").len();
+    if unused > 0 {
+        p.extra.push(("Unused sound files", group(unused)));
+    }
+    if let Ok(info) = plist::Value::from_file(pkg.join("Resources/ProjectInformation.plist"))
+        && let Some(v) = info.as_dictionary().and_then(|d| d.get("LastSavedFrom")).and_then(|v| v.as_string())
+    {
+        p.version = v.to_string();
+    }
+    let alts = std::fs::read_dir(pkg.join("Alternatives")).map(|r| r.flatten().filter(|e| e.path().join("MetaData.plist").is_file()).count()).unwrap_or(0);
+    if alts > 1 {
+        p.extra.push(("Alternatives", format!("{alts} (the first is shown)")));
+    }
+    Ok(p)
 }
 
 fn slurp(path: &Path) -> Result<Vec<u8>, String> {
@@ -47,6 +119,12 @@ fn slurp(path: &Path) -> Result<Vec<u8>, String> {
 /// The project's blocks and details for the preview.
 pub fn read(path: &Path) -> Result<(Vec<Block>, Vec<(&'static str, String)>), String> {
     let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if ext == "logicx" {
+        let mut p = logic(path)?;
+        p.title = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        // Its sound files are inside the package.
+        return Ok(p.render(Some(path)));
+    }
     let raw = slurp(path)?;
     let mut p = match ext.as_str() {
         "als" => ableton(&raw)?,
@@ -503,5 +581,36 @@ mod tests {
         assert_eq!(fact(&facts, "App"), Some("Cubase"));
         assert_eq!(fact(&facts, "Saved with"), Some("Cubase 13.0.30"));
         assert_eq!(fact(&facts, "Sound files"), Some("1 (1 not on this computer)"));
+    }
+
+    #[test]
+    fn logic_package() {
+        let pkg = std::env::temp_dir().join(format!("fs-logic-{}/Song.logicx", std::process::id()));
+        std::fs::create_dir_all(pkg.join("Alternatives/000")).unwrap();
+        std::fs::create_dir_all(pkg.join("Resources")).unwrap();
+        std::fs::create_dir_all(pkg.join("Media")).unwrap();
+        std::fs::write(pkg.join("Media/a.wav"), b"RIFF").unwrap();
+        let mut meta = plist::Dictionary::new();
+        meta.insert("BeatsPerMinute".into(), 98.5.into());
+        meta.insert("SongSignatureNumerator".into(), 6i64.into());
+        meta.insert("SongSignatureDenominator".into(), 8i64.into());
+        meta.insert("SongKey".into(), "C".into());
+        meta.insert("SongGenderKey".into(), "major".into());
+        meta.insert("NumberOfTracks".into(), 3i64.into());
+        meta.insert("AudioFiles".into(), plist::Value::Array(vec!["Media/a.wav".into(), "Media/b.wav".into()]));
+        plist::Value::Dictionary(meta).to_file_binary(pkg.join("Alternatives/000/MetaData.plist")).unwrap();
+        let mut info = plist::Dictionary::new();
+        info.insert("LastSavedFrom".into(), "Logic Pro 11.1".into());
+        plist::Value::Dictionary(info).to_file_xml(pkg.join("Resources/ProjectInformation.plist")).unwrap();
+        let (_, facts) = read(&pkg).unwrap();
+        let f = |k: &str| facts.iter().find(|x| x.0 == k).map(|x| x.1.as_str());
+        assert_eq!(f("Saved with"), Some("Logic Pro 11.1"));
+        assert_eq!(f("Tempo"), Some("98.50 BPM"));
+        assert_eq!(f("Time signature"), Some("6/8"));
+        assert_eq!(f("Key"), Some("C major"));
+        assert_eq!(f("Tracks"), Some("3"));
+        assert_eq!(f("Sound files"), Some("2 (1 not on this computer)"));
+        assert!(logic_window(&pkg).is_none());
+        let _ = std::fs::remove_dir_all(pkg.parent().unwrap());
     }
 }

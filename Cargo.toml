@@ -59,6 +59,7 @@ gltf = { version = "1.4", default-features = false, features = ["import", "utils
 hayro-jpeg2000 = { version = "0.5", default-features = false, features = ["std", "simd"] }
 jpeg-decoder = "0.3"
 pure_jpegls = "2.1"
+plist = "1"
 
 [features]
 default = []

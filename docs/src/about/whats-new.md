@@ -117,6 +117,8 @@
   too.
 - JPEG 2000 pictures (.jp2, .j2k) preview, and DICOM scans compressed with JPEG 2000,
   JPEG-LS or lossless JPEG now show their picture.
+- Logic Pro projects preview with Logic's picture of the project window, tempo, key and
+  sound files.
 - **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
   shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the

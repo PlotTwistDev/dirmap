@@ -48,7 +48,7 @@ for the settings.
 | CAD model (DWG, STEP, IGES) | `.dwg` `.step` `.stp` `.p21` `.iges` `.igs` | What the file says: the program that made it, units, author and parts (not drawn) | Filescape |
 | Pages, Numbers and Keynote | `.pages` `.numbers` `.key` | The picture the app saved inside the file, and the version that saved it | Filescape |
 | Design and 3D app files (Sketch, Affinity, CorelDRAW, SketchUp, Blender, Cinema 4D, 3ds Max, Maya, Houdini) | `.sketch` `.afdesign` `.afphoto` `.afpub` `.aftemplate` `.cdr` `.skp` `.blend` `.c4d` `.max` `.ma` `.mb` `.hip` `.hipnc` `.hiplc` | The picture the app saved inside the file, and the version that saved it | Filescape |
-| Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo) | `.als` `.rpp` `.flp` `.cpr` `.npr` | The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones) | Filescape |
+| Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo, Logic Pro) | `.als` `.rpp` `.flp` `.cpr` `.npr` `.logicx` | The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones) | Filescape |
 | DICOM medical image | `.dcm` `.dicom` | The scan (uncompressed, RLE, JPEG, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown | Filescape |
 | Disk image | `.iso` `.img` `.dmg` `.vhd` `.vhdx` `.avhdx` `.vmdk` `.qcow2` `.qcow` `.vdi` `.wim` `.esd` | A disc's files and folders with sizes (ISO 9660 and UDF); a virtual disk's size, type and partitions; a Windows image's editions | Filescape |
 | FITS astronomy image | `.fits` `.fit` `.fts` | The first picture, stretched so faint detail shows, with the object, telescope and exposure | Filescape |
