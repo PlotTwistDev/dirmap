@@ -187,6 +187,11 @@ impl Header {
         self.elements.iter().find(|e| e.name == "vertex")
     }
 
+    /// How many points (vertices) the file says it has.
+    pub fn vertices(&self) -> u64 {
+        self.vertex().map_or(0, |v| v.count)
+    }
+
     pub fn kind(&self) -> PlyKind {
         if self.elements.iter().any(|e| e.name == "face" && e.count > 0) {
             return PlyKind::Mesh;

@@ -903,6 +903,7 @@ impl App {
         let size = vec2((screen.width() * 0.72).max(420.0), (screen.height() * 0.78).max(320.0));
         let full = self.files.look.full;
         let mut open = true;
+        let mut step = 0i64;
         let mut win = egui::Window::new(egui::RichText::new(format!("{}", e.name)).strong())
             // A window of its own when full, so it comes back to its old size and place.
             .id(egui::Id::new(("quick-look", full)))
@@ -925,6 +926,16 @@ impl App {
                         if ui.button(icon).on_hover_text(tip).clicked() {
                             self.files.look.full = !full;
                         }
+                        // Previous and next file, as the arrow keys do (not from the map,
+                        // which has no order to walk).
+                        if !self.files.look.from_map {
+                            if ui.button("▶").on_hover_text("Next file (↓)").clicked() {
+                                step = 1;
+                            }
+                            if ui.button("◀").on_hover_text("Previous file (↑)").clicked() {
+                                step = -1;
+                            }
+                        }
                         let next = if self.files.look.from_map { "" } else { "⏶⏷ next · " };
                         ui.weak(if cfg!(target_os = "macos") { format!("{next}Space closes") } else { format!("{next}Space or Esc closes") });
                     });
@@ -936,6 +947,9 @@ impl App {
         if !open {
             self.files.look.open = false;
             self.files.look.full = false;
+        }
+        if step != 0 {
+            self.files_move_cursor(|pos, _| pos.map(|p| p as i64 + step).unwrap_or(0), false);
         }
     }
 
@@ -1842,8 +1856,18 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
         None => *tex = Some(ui.ctx().load_texture(format!("splat:{}", path.display()), img, egui::TextureOptions::LINEAR)),
     };
     let gpu_ok = !matches!(gpu::status(), gpu::Status::Unavailable(_)) && scene.kind != SceneKind::PointCloud;
+    // The same scene can be on screen twice (Quick Look over the preview pane), sharing one
+    // picture. Only the bigger view draws; the other shows its picture stretched, so the two
+    // don't take turns asking for their own size for ever.
+    let claim_id = egui::Id::new(("splat-claim", path));
+    let pass = ui.ctx().cumulative_pass_nr();
+    let claim: Option<(u64, usize)> = ui.data(|d| d.get_temp(claim_id));
+    let follower = claim.is_some_and(|(p, area)| p + 1 >= pass && area > px[0] * px[1]);
+    if !follower {
+        ui.data_mut(|d| d.insert_temp(claim_id, (pass, px[0] * px[1])));
+    }
     // A finished GPU picture.
-    if gpu_ok {
+    if gpu_ok && !follower {
         if let Some(pic) = gpu::take() {
             if let Some((id, v, s)) = drawn.pending {
                 if pic.id == id {
@@ -1856,7 +1880,7 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
         }
     }
     let want = (view, px);
-    if drawn.shown.map(|(v, s, _)| (v, s)) != Some(want) || tex.is_none() {
+    if !follower && (drawn.shown.map(|(v, s, _)| (v, s)) != Some(want) || tex.is_none()) {
         if gpu_ok {
             if drawn.pending.map(|(_, v, s)| (v, s)) != Some(want) {
                 let id = gpu::want(scene.clone(), view, [px[0] as u32, px[1] as u32], Some(ui.ctx().clone()));
@@ -1907,7 +1931,109 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
     let at = r.left_bottom() + vec2(8.0, -6.0 - galley.size().y);
     p.rect_filled(Rect::from_min_size(at - vec2(4.0, 2.0), galley.size() + vec2(8.0, 4.0)), 3.0, Color32::from_black_alpha(150));
     p.galley(at, galley, Color32::from_gray(220));
-    resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text("Drag to turn it, right-drag or shift-drag to move it, scroll to zoom, double-click to put it back");
+    let on_button = ui.rect_contains_pointer(save_button_rect(r));
+    let resp = resp.on_hover_cursor(egui::CursorIcon::Grab);
+    let resp = if on_button { resp } else { resp.on_hover_text("Drag to turn it, right-drag or shift-drag to move it, scroll to zoom, double-click to put it back") };
+    save_view_button(ui, path, scene, view, r, px, resp.hovered());
+}
+
+/// Where a saved picture of a splat view is up to: the picker's answer, then the drawing.
+#[derive(Clone)]
+struct SavingView {
+    picked: crate::asking::Mailbox,
+    view: crate::splat::View,
+    px: [usize; 2],
+    /// What happened, once the picture has been drawn and written.
+    said: Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>>,
+    started: bool,
+}
+
+fn save_button_rect(r: Rect) -> Rect {
+    Rect::from_min_size(pos2(r.right() - 34.0, r.top() + 8.0), vec2(26.0, 26.0))
+}
+
+/// The biggest side of a saved picture of a splat view.
+const SAVED_VIEW_MAX: f32 = 3840.0;
+
+/// A "Save picture" button in the top right corner of a splat view: the view as it is, drawn
+/// again at up to twice its size (up to 4K) and saved as a PNG where the person picks.
+fn save_view_button(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, view: crate::splat::View, r: Rect, px: [usize; 2], hovered: bool) {
+    let id = egui::Id::new(("splat-save", path));
+    let mut st: Option<SavingView> = ui.data(|d| d.get_temp(id));
+    let said = st.as_ref().and_then(|s| s.said.lock().unwrap().clone());
+    let fresh_said = said.as_ref().filter(|(_, t)| t.elapsed().as_secs() < 6);
+    let busy = st.as_ref().is_some_and(|s| s.started && s.said.lock().unwrap().is_none());
+    let button = save_button_rect(r);
+    let over = ui.rect_contains_pointer(button);
+    if hovered || over || busy || fresh_said.is_some() {
+        let p = ui.painter();
+        p.rect_filled(button, 6.0, Color32::from_black_alpha(if over { 200 } else { 140 }));
+        p.text(button.center(), Align2::CENTER_CENTER, if busy { "…" } else { "📷" }, FontId::proportional(14.0), Color32::from_gray(230));
+        let b = ui.interact(button, id.with("button"), Sense::click()).on_hover_text("Save this view as a picture (PNG, up to 4K)");
+        if b.clicked() && !busy {
+            let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Scene".into());
+            let mut d = crate::asking::Dialog::new().set_file_name(format!("{stem} view.png")).add_filter("PNG picture", &["png"]);
+            if let Some(dir) = path.parent() {
+                d = d.set_directory(dir);
+            }
+            st = Some(SavingView { picked: crate::asking::ask_into(d, crate::asking::Pick::Save, ui.ctx()), view, px, said: Default::default(), started: false });
+        }
+    }
+    if let Some(s) = st.as_mut().filter(|s| !s.started) {
+        let picked = s.picked.lock().unwrap().take();
+        if let Some(dest) = picked {
+            s.started = true;
+            let (scene, view, said, ctx) = (scene.clone(), s.view, s.said.clone(), ui.ctx().clone());
+            let k = (SAVED_VIEW_MAX / s.px[0].max(s.px[1]) as f32).min(2.0);
+            let size = [(s.px[0] as f32 * k) as usize, (s.px[1] as f32 * k) as usize];
+            std::thread::spawn(move || {
+                let msg = match save_view(&scene, view, size, &dest) {
+                    Ok(()) => format!("Saved {}", dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
+                    Err(e) => format!("Couldn't save the picture: {e}"),
+                };
+                *said.lock().unwrap() = Some((msg, std::time::Instant::now()));
+                ctx.request_repaint();
+            });
+        }
+    }
+    if let Some((msg, _)) = fresh_said {
+        let p = ui.painter();
+        let galley = p.layout_no_wrap(msg.clone(), FontId::proportional(11.0), Color32::from_gray(230));
+        let at = pos2(button.left() - 8.0 - galley.size().x, button.center().y - galley.size().y / 2.0);
+        p.rect_filled(Rect::from_min_size(at - vec2(5.0, 3.0), galley.size() + vec2(10.0, 6.0)), 4.0, Color32::from_black_alpha(170));
+        p.galley(at, galley, Color32::from_gray(230));
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+    }
+    if busy || st.as_ref().is_some_and(|s| !s.started) {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+    }
+    if let Some(s) = st {
+        ui.data_mut(|d| d.insert_temp(id, s));
+    }
+}
+
+/// Draw a splat view at `size` (on the graphics chip, or as points where it can't be used) and
+/// write it as a PNG.
+pub(super) fn save_view(scene: &Arc<crate::splat::Scene>, view: crate::splat::View, size: [usize; 2], dest: &Path) -> Result<(), String> {
+    use crate::splat::{SceneKind, gpu};
+    let gpu_pic = if scene.kind == SceneKind::Splat { gpu::picture_now(scene.clone(), view, [size[0] as u32, size[1] as u32], std::time::Duration::from_secs(60)) } else { None };
+    let (w, h, rgba) = match gpu_pic {
+        Some(p) => {
+            // Premultiplied to straight alpha.
+            let mut rgba = p.rgba;
+            for c in rgba.chunks_exact_mut(4) {
+                if c[3] > 0 && c[3] < 255 {
+                    for k in 0..3 {
+                        c[k] = ((c[k] as u32 * 255 + c[3] as u32 / 2) / c[3] as u32).min(255) as u8;
+                    }
+                }
+            }
+            (p.size[0], p.size[1], rgba)
+        }
+        None => (size[0], size[1], scene.draw(size[0], size[1], &view, 1)),
+    };
+    let img = image::RgbaImage::from_raw(w as u32, h as u32, rgba).ok_or("the picture came back the wrong size")?;
+    img.save_with_format(dest, image::ImageFormat::Png).map_err(|e| e.to_string())
 }
 
 /// Text laid out in its syntax colours; what the spans don't cover is in `plain`.
@@ -2394,5 +2520,36 @@ mod tests {
         assert!((srgb(1.0) - 1.0).abs() < 1e-4);
         assert!((srgb(0.18) - 0.46).abs() < 0.01);
         assert_eq!(srgb(-1.0), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod splat_save_tests {
+    #[test]
+    fn a_splat_view_saves_as_a_png() {
+        let dir = std::env::temp_dir().join(format!("filescape-save-view-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ply = b"ply\nformat binary_little_endian 1.0\nelement vertex 200\n".to_vec();
+        let props = ["x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"];
+        for p in props {
+            ply.extend_from_slice(format!("property float {p}\n").as_bytes());
+        }
+        ply.extend_from_slice(b"end_header\n");
+        for i in 0..200u32 {
+            let v = [(i % 20) as f32 * 0.1, (i / 20) as f32 * 0.1, 0.0, 1.0, 0.5, 0.0, 4.0, -3.0, -3.0, -3.0, 1.0, 0.0, 0.0, 0.0];
+            for x in v {
+                ply.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        let src = dir.join("scene.ply");
+        std::fs::write(&src, ply).unwrap();
+        let scene = std::sync::Arc::new(crate::splat::read(&src, crate::splat::Limits::PREVIEW).unwrap());
+        let dest = dir.join("scene view.png");
+        super::save_view(&scene, crate::splat::View::default(), [160, 100], &dest).unwrap();
+        let img = image::open(&dest).unwrap().to_rgba8();
+        assert_eq!(img.dimensions(), (160, 100));
+        // Something was drawn.
+        assert!(img.pixels().filter(|p| p[3] > 100 && p[0] > 60).count() > 200);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

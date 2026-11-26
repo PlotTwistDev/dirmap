@@ -664,6 +664,7 @@ fn damaged_s3_files_fail_cleanly() {
             d[i] ^= 0x5a;
         }
         let _ = read(&tmp(name, &d), Limits::PREVIEW);
+        let _ = badge(&tmp(name, &d));
     }
     assert!(read(&tmp("y.splat", &[0u8; 31]), Limits::PREVIEW).is_err());
 }
@@ -723,5 +724,47 @@ fn s3_real_scenes_look_the_same() {
             eprintln!("{name} as {ext}: {} bytes, read in {took:?}, mean difference {diff:.2} of 255", data.len());
             std::fs::remove_file(&f).ok();
         }
+    }
+}
+
+#[test]
+fn badges_name_the_format_and_count_from_the_header() {
+    let ts = test_splats(1234);
+    let sog = enc_sog(&ts);
+    let cases: Vec<(String, Vec<u8>, &str)> = vec![
+        ("b.splat".into(), enc_splat(&ts), "SPLAT · 1K splats"),
+        ("b.ply".into(), enc_compressed_ply(&ts), "Compressed PLY · 1K splats"),
+        ("b2.ply".into(), splat_ply(2500, 0, None, plain), "PLY · 3K splats"),
+        ("b.sog".into(), sog.clone(), "SOG · 1K splats"),
+        ("b.glb".into(), enc_glb(&ts), "GLB · 1K splats"),
+        ("b.html".into(), enc_html(&sog, "s.sog"), "Splat web page"),
+        ("b.ksplat".into(), MIN_KSPLAT.to_vec(), "KSPLAT · 4 splats"),
+    ];
+    for (name, data, want) in cases {
+        assert_eq!(badge(&tmp(&name, &data)).as_deref(), Some(want), "{name}");
+    }
+    // Every SPZ version, the count read without decompressing the rest.
+    for (i, f) in [MIN_RAW, MIN_V2, MIN_V3, MIN_V4].iter().enumerate() {
+        let p = tmp(&format!("b{i}.spz"), f);
+        assert_eq!(badge(&p), Some(format!("SPZ · {} splats", read(&p, Limits::PREVIEW).unwrap().total)));
+    }
+    assert_eq!(badge(&tmp("b.txt", b"hello")), None);
+    assert_eq!((short_count(999), short_count(48_400), short_count(999_600), short_count(1_250_000), short_count(12_400_000)), ("999".into(), "48K".into(), "1.0M".into(), "1.2M".into(), "12M".into()));
+}
+
+#[test]
+fn gpu_pictures_for_thumbnails_come_back_on_their_own() {
+    let ts = test_splats(300);
+    let a = Arc::new(read(&tmp("side-a.splat", &enc_splat(&ts)), Limits::PREVIEW).unwrap());
+    let b = Arc::new(read(&tmp("side-b.splat", &enc_splat(&ts[..100])), Limits::THUMB).unwrap());
+    // Two thumbnails at once (the preview's own slot is left alone): each gets its own picture.
+    let t = |s: Arc<Scene>, size: u32| std::thread::spawn(move || gpu::picture_now(s, View::default(), [size, size], std::time::Duration::from_secs(45)));
+    let (ja, jb) = (t(a, 80), t(b, 48));
+    match (ja.join().unwrap(), jb.join().unwrap()) {
+        (Some(m), Some(s)) => {
+            assert_eq!((m.size, m.drawn), ([80, 80], 300));
+            assert_eq!((s.size, s.drawn), ([48, 48], 100));
+        }
+        _ => assert!(matches!(gpu::status(), gpu::Status::Unavailable(_)), "no picture and no reason: {:?}", gpu::status()),
     }
 }

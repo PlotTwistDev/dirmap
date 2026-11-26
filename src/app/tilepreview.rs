@@ -145,6 +145,7 @@ impl App {
                 }
             };
             let Some(got) = got else { continue };
+            let badge = tp.sharp.badge(&path).or_else(|| tp.small.badge(&path));
             let born = *tp.born.entry(path.clone()).or_insert(now);
             seen.insert(path.clone());
             let fade_in = (now.duration_since(born).as_secs_f32() / FADE_IN).min(1.0);
@@ -223,6 +224,14 @@ impl App {
                     let shown_text = wrap(&text, cols, rows);
                     p.text(inner.min + vec2(6.0, 5.0), Align2::LEFT_TOP, shown_text, font, Color32::from_rgb(214, 218, 224).gamma_multiply(alpha));
                 }
+            }
+            // A splat scene's format and splat count, in a pill at the top left.
+            if let Some(b) = badge.filter(|_| inner.width() >= 110.0 && inner.height() >= 70.0) {
+                let font = FontId::proportional((r.width() / 26.0).clamp(10.0, 13.0));
+                let galley = p.layout_no_wrap(b.to_string(), font, Color32::from_white_alpha(240).gamma_multiply(alpha));
+                let pill = Rect::from_min_size(inner.min + vec2(6.0, 6.0), galley.size() + vec2(12.0, 6.0));
+                p.rect_filled(pill, pill.height() / 2.0, Color32::from_black_alpha((170.0 * alpha) as u8));
+                p.galley(pill.min + vec2(6.0, 3.0), galley, Color32::WHITE);
             }
             // The name on a dark strip along the bottom.
             if inner.height() >= 60.0 {

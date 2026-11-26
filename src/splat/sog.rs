@@ -74,6 +74,26 @@ pub fn is_meta(text: &[u8]) -> bool {
     s.contains("\"means\"") && s.contains("\"quats\"") && s.contains("\"sh0\"")
 }
 
+fn meta_count(meta: &Value) -> Option<u64> {
+    if meta["version"].as_u64().unwrap_or(1) >= 2 { meta["count"].as_u64() } else { meta["means"]["shape"][0].as_u64() }
+}
+
+/// How many splats a SOG scene (a `.sog` bundle or a loose `meta.json`) says it has, from its
+/// `meta.json` alone.
+pub fn count(path: &Path) -> Option<u64> {
+    let bytes = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("sog")) {
+        let mut z = zip::ZipArchive::new(std::fs::File::open(path).ok()?).ok()?;
+        let mut out = Vec::new();
+        z.by_name("meta.json").ok()?.take(16 << 20).read_to_end(&mut out).ok()?;
+        out
+    } else {
+        let mut out = Vec::new();
+        std::fs::File::open(path).ok()?.take(16 << 20).read_to_end(&mut out).ok()?;
+        out
+    };
+    meta_count(&serde_json::from_slice(&bytes).ok()?)
+}
+
 fn nums(v: &Value) -> Vec<f32> {
     v.as_array().map(|a| a.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect()).unwrap_or_default()
 }
@@ -122,7 +142,7 @@ fn read_parts<R: Read + Seek>(mut parts: Parts<R>, limits: Limits) -> Result<Sce
     let meta_bytes = parts.get("meta.json")?;
     let meta: Value = serde_json::from_slice(&meta_bytes).map_err(|e| format!("This SOG scene's meta.json is damaged: {e}"))?;
     let version = meta["version"].as_u64().unwrap_or(1);
-    let count = if version >= 2 { meta["count"].as_u64() } else { meta["means"]["shape"][0].as_u64() }.ok_or("This SOG scene doesn't say how many splats it has.")? as usize;
+    let count = meta_count(&meta).ok_or("This SOG scene doesn't say how many splats it has.")? as usize;
     if count == 0 || count > 1 << 28 {
         return Err("This SOG scene's splat count isn't believable.".into());
     }

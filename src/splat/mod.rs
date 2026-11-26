@@ -252,6 +252,44 @@ pub fn claims(path: &Path) -> bool {
     }
 }
 
+/// A short label for a thumbnail or map tile, from the file's header alone (a few KB, never
+/// the whole scene): the format and how many splats, such as "SPZ · 1.2M splats".
+pub fn badge(path: &Path) -> Option<String> {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
+    let (format, n, noun) = match ext {
+        "ply" => {
+            let h = ply::Header::read(path).ok()?;
+            match h.kind() {
+                PlyKind::PointCloud => ("PLY", h.vertices(), "points"),
+                PlyKind::Splat4d => ("4D PLY", h.vertices(), "splats"),
+                PlyKind::CompressedSplat => ("Compressed PLY", h.vertices(), "splats"),
+                PlyKind::Splat => ("PLY", h.vertices(), "splats"),
+                _ => return None,
+            }
+        }
+        "spz" => ("SPZ", spz::count(path)?, "splats"),
+        "splat" => ("SPLAT", std::fs::metadata(path).ok()?.len() / 32, "splats"),
+        "ksplat" => ("KSPLAT", splat::ksplat_count(path)?, "splats"),
+        "sog" | "json" => ("SOG", sog::count(path)?, "splats"),
+        "glb" => ("GLB", glb::count(path)?, "splats"),
+        // The scene is buried in the page's text: no count without decoding all of it.
+        "html" | "htm" => return Some("Splat web page".into()),
+        _ => return None,
+    };
+    Some(format!("{format} · {} {noun}", short_count(n)))
+}
+
+/// 312, 48K, 1.2M.
+pub fn short_count(n: u64) -> String {
+    match n {
+        0..1_000 => n.to_string(),
+        1_000..999_500 => format!("{}K", (n as f64 / 1e3).round()),
+        _ if n < 9_950_000 => format!("{:.1}M", n as f64 / 1e6),
+        _ => format!("{}M", (n as f64 / 1e6).round()),
+    }
+}
+
 /// Read a scene, keeping what `limits` allows.
 pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
     let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
