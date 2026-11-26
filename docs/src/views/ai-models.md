@@ -88,6 +88,23 @@ downloaded file by its SHA-256 checksum. For those, **Verify checksum** reads th
 compares, which proves not a single byte has changed since it was downloaded. It takes a while for
 a large model; **Cancel** stops it.
 
+**Will it run?** estimates how much memory the model needs on this computer, and where it would
+run:
+
+- **This computer** shows its memory and its graphics card's memory. On a Mac with Apple silicon
+  the two are shared. If Filescape can't find the graphics card's memory, type it in.
+- Move **Context** to choose how much text the model reads at once, in tokens (about ¾ of a word
+  each). The memory a model needs grows with it, because it keeps a cache of everything it has
+  read. **Compact (Q8)** stores that cache in about half the space.
+- The result says whether the model runs fully on the graphics chip (fast), split between the
+  graphics card and main memory, in main memory on the processor (slow), or not at all. The bar
+  shows the model itself, the cache and working space, against the memory available.
+- **At other context lengths** lists the same for each length, and **Smaller versions of this
+  model** what a compressed version would need, such as Q4_K_M.
+
+These are estimates for apps based on llama.cpp, such as Ollama and LM Studio. Each app adds a
+little of its own.
+
 **Structure** shows how the model is built and where its space goes:
 
 - The strip at the top shows the model's layers in order, left to right. A taller column takes

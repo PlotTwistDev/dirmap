@@ -41,6 +41,11 @@ struct ModelPage {
     verify: Option<Verify>,
     /// Each checked file's result: (file index, Ok(matches) or why it couldn't be read).
     verified: Vec<(usize, Result<bool, String>)>,
+    /// Will it run: the context length and cache precision chosen, and graphics memory typed in
+    /// when none was found (GB).
+    context: u64,
+    cache_q8: bool,
+    vram_typed: f32,
     /// The model as layers, for the Structure tab.
     structure: Option<Arc<inspect::Structure>>,
     /// The group (index into `structure.groups`) the map is zoomed into.
@@ -68,6 +73,7 @@ enum ColourBy {
 enum PageTab {
     Overview,
     Health,
+    Fit,
     Structure,
     Tensors,
     Metadata,
@@ -482,6 +488,9 @@ impl App {
             shown_for: None,
             structure: None,
             health: Vec::new(),
+            context: 0,
+            cache_q8: false,
+            vram_typed: 0.0,
             verify: None,
             verified: Vec::new(),
             zoom: None,
@@ -538,6 +547,9 @@ impl App {
         if page.data.is_some() {
             tabs.push((PageTab::Health, health_label.as_str()));
         }
+        if page.data.as_ref().is_some_and(|d| d.shape.kv_per_token(2.0).is_some()) && !m.info.companion {
+            tabs.push((PageTab::Fit, "Will it run?"));
+        }
         if tensors > 0 {
             tabs.push((PageTab::Structure, "Structure"));
             tabs.push((PageTab::Tensors, tensors_label.as_str()));
@@ -566,6 +578,10 @@ impl App {
             }
             (Some(_), PageTab::Health) => {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| page_health(ui, &mut page, m));
+            }
+            (Some(d), PageTab::Fit) => {
+                let d = d.clone();
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| page_fit(ui, &mut page, m, &d));
             }
             (Some(d), PageTab::Structure) => {
                 let d = d.clone();
@@ -770,6 +786,195 @@ fn page_health(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model) {
     if ui.small_button("Check again").clicked() {
         page.verified.clear();
     }
+}
+
+/// The computer's memory and graphics memory, found once in the background.
+fn hardware(ctx: &egui::Context) -> Option<&'static crate::fit::Hardware> {
+    static HW: std::sync::OnceLock<crate::fit::Hardware> = std::sync::OnceLock::new();
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if HW.get().is_none() && !STARTED.swap(true, Ordering::Relaxed) {
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = HW.set(crate::fit::detect());
+            ctx.request_repaint();
+        });
+    }
+    HW.get()
+}
+
+/// Will it run? Memory needed at a chosen context length, against this computer.
+fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) {
+    use crate::fit::{self, Verdict};
+    let Some(hw) = hardware(ui.ctx()) else {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label("Looking at this computer's memory…");
+        });
+        return;
+    };
+    let weights = match d.tensors.iter().map(|t| t.bytes).sum::<u64>() {
+        0 => m.size,
+        w => w,
+    };
+    let contexts = fit::contexts(d.shape.context);
+    if !contexts.contains(&page.context) {
+        page.context = contexts.iter().copied().filter(|&c| c <= 8192).max().unwrap_or(contexts[0]);
+    }
+
+    // This computer.
+    let detected = hw.usable_vram();
+    let vram = if detected > 0 {
+        detected
+    } else {
+        // As for a card found: less what the screen and other apps keep.
+        let v = (page.vram_typed.max(0.0) as f64 * (1u64 << 30) as f64) as u64;
+        crate::fit::Hardware { ram: 0, gpus: vec![crate::fit::Gpu { name: String::new(), vram: v }], unified: false }.usable_vram()
+    };
+    ui.strong("This computer");
+    if hw.unified {
+        ui.label(format!(
+            "{} of memory, shared with the graphics chip. About {} of it can hold a model.",
+            scan::human(hw.ram),
+            scan::human(detected)
+        ));
+    } else {
+        let gpus = hw.gpus.iter().map(|g| format!("{} ({})", g.name, scan::human(g.vram))).collect::<Vec<_>>().join(", ");
+        if gpus.is_empty() {
+            ui.label(format!("{} of memory. Filescape couldn't find how much memory the graphics card has.", scan::human(hw.ram)));
+            ui.horizontal(|ui| {
+                ui.label("Graphics memory:");
+                ui.add(egui::DragValue::new(&mut page.vram_typed).range(0.0..=256.0).speed(0.5).suffix(" GB"));
+                ui.weak("(0 if none, or if it shares main memory)");
+            });
+        } else {
+            ui.label(format!("{} of memory, and {gpus}.", scan::human(hw.ram)));
+        }
+    }
+    ui.add_space(10.0);
+
+    // The choices.
+    let mut idx = contexts.iter().position(|&c| c == page.context).unwrap_or(0);
+    ui.horizontal(|ui| {
+        ui.label("Context");
+        let max = contexts.len() - 1;
+        ui.spacing_mut().slider_width = 280.0;
+        ui.add(egui::Slider::new(&mut idx, 0..=max).show_value(false));
+        ui.strong(format!("{} tokens", fit::tokens(contexts[idx])));
+        ui.weak(format!("about {} words", group(contexts[idx] * 3 / 4)));
+    });
+    page.context = contexts[idx];
+    ui.horizontal(|ui| {
+        ui.label("Cache");
+        let mut q8 = page.cache_q8;
+        kit::segmented(ui, &mut q8, &[(false, "Full (F16)"), (true, "Compact (Q8)")], false)
+            .on_hover_text("How the model's memory of the conversation is stored. Compact halves it, with little effect on answers.");
+        page.cache_q8 = q8;
+    });
+    ui.add_space(8.0);
+
+    let cache_bytes = if page.cache_q8 { 1.0625 } else { 2.0 };
+    let Some(n) = fit::need(d, weights, page.context, cache_bytes) else { return };
+    let verdict = fit::verdict(&n, hw, vram);
+    let (tone, text) = match verdict {
+        Verdict::Gpu => (Tone::Success, format!("Runs fully on the graphics chip: fast. It needs about {}.", scan::human(n.total()))),
+        Verdict::Split(f) => (
+            Tone::Warn,
+            format!("Runs, split between the graphics card and main memory (about {:.0}% on the card): slower than all on the card. It needs about {}.", f * 100.0, scan::human(n.total())),
+        ),
+        Verdict::Cpu => (Tone::Warn, format!("Runs in main memory on the processor: it works, but slowly. It needs about {}.", scan::human(n.total()))),
+        Verdict::TooBig => (Tone::Danger, format!("Too big for this computer: it needs about {}. Try a shorter context, a compact cache, or a smaller version of the model.", scan::human(n.total()))),
+    };
+    kit::callout(ui, tone, text);
+    ui.add_space(8.0);
+
+    // The need as a bar, with what fits marked.
+    let w = ui.available_width().min(760.0);
+    let scale_max = n.total().max(vram).max(hw.usable_ram()) as f32 * 1.05;
+    let (bar, _) = ui.allocate_exact_size(vec2(w, 22.0), Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(bar, 4.0, ui.visuals().faint_bg_color);
+    let mut x = bar.left();
+    let parts = [
+        (n.weights, Color32::from_rgb(0x4d, 0x8e, 0xf7), "Weights", "The model itself."),
+        (n.cache, Color32::from_rgb(0xee, 0x8a, 0x3c), "Cache", "Its memory of the conversation, which grows with the context."),
+        (n.work, Color32::from_rgb(0x8c, 0x91, 0x9b), "Working space", "Room for the calculations."),
+    ];
+    for (b, c, _, _) in parts {
+        let pw = bar.width() * b as f32 / scale_max;
+        painter.rect_filled(Rect::from_min_size(pos2(x, bar.top()), vec2(pw, bar.height())), 0.0, c);
+        x += pw;
+    }
+    let weak = ui.visuals().weak_text_color();
+    let mark = |v: u64, label: String| {
+        if v == 0 {
+            return;
+        }
+        let mx = bar.left() + bar.width() * v as f32 / scale_max;
+        painter.vline(mx, bar.top() - 4.0..=bar.bottom() + 16.0, Stroke::new(1.5, ui.visuals().strong_text_color()));
+        painter.text(pos2(mx + 3.0, bar.bottom() + 2.0), Align2::LEFT_TOP, label, FontId::proportional(11.5), weak);
+    };
+    if vram > 0 {
+        mark(vram, if hw.unified { "for models".into() } else { "graphics".into() });
+    }
+    if !hw.unified {
+        mark(hw.usable_ram(), "main memory".into());
+    }
+    ui.add_space(20.0);
+    ui.horizontal_wrapped(|ui| {
+        for (b, c, label, tip) in parts {
+            swatch(ui, c, &format!("{label} {}", scan::human(b))).on_hover_text(tip);
+        }
+    });
+    ui.add_space(12.0);
+
+    // At other context lengths.
+    ui.strong("At other context lengths");
+    egui::Grid::new("fit-table").num_columns(3).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
+        ui.weak("Context");
+        ui.weak("Needs");
+        ui.weak("On this computer");
+        ui.end_row();
+        for &c in contexts.iter().filter(|&&c| c >= 2048 || contexts.len() < 4) {
+            let Some(n) = fit::need(d, weights, c, cache_bytes) else { continue };
+            let v = match fit::verdict(&n, hw, vram) {
+                Verdict::Gpu => "On the graphics chip",
+                Verdict::Split(_) => "Split",
+                Verdict::Cpu => "On the processor",
+                Verdict::TooBig => "Too big",
+            };
+            let row = if c == page.context { egui::RichText::new(fit::tokens(c)).strong() } else { egui::RichText::new(fit::tokens(c)) };
+            ui.label(row);
+            ui.label(scan::human(n.total()));
+            ui.label(v);
+            ui.end_row();
+        }
+    });
+
+    // Smaller versions.
+    let elements: u64 = d.tensors.iter().map(|t| t.elements).sum();
+    if elements > 0 {
+        ui.add_space(12.0);
+        ui.strong("Smaller versions of this model");
+        ui.weak("Most models are also published compressed. At the same context, roughly:");
+        let stored = weights as f64 * 8.0 / elements as f64;
+        for (q, bpw) in [("Q8_0", 8.5), ("Q6_K", 6.56), ("Q4_K_M", 4.85), ("Q3_K_M", 3.9)] {
+            if bpw >= stored - 0.2 {
+                continue;
+            }
+            let wq = (elements as f64 * bpw / 8.0) as u64;
+            if let Some(n) = fit::need(d, wq, page.context, cache_bytes) {
+                let v = match fit::verdict(&n, hw, vram) {
+                    Verdict::Gpu => "on the graphics chip",
+                    Verdict::Split(_) => "split",
+                    Verdict::Cpu => "on the processor",
+                    Verdict::TooBig => "too big",
+                };
+                ui.label(format!("{q} ({}): about {}, {v}", precision_words(q), scan::human(n.total())));
+            }
+        }
+    }
+    ui.add_space(8.0);
+    ui.weak("These are estimates for llama.cpp-based apps such as Ollama and LM Studio; each app adds a little of its own.");
 }
 
 /// Colours for the parts of a model, readable in both themes.
