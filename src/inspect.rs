@@ -374,7 +374,7 @@ fn dtype_bytes(d: &str) -> Option<u64> {
 
 /// The folder holding config.json and README.md for this model: a Hugging Face repository's
 /// newest snapshot, or the model file's own folder.
-fn publisher_dir(m: &Model) -> Option<PathBuf> {
+pub(crate) fn publisher_dir(m: &Model) -> Option<PathBuf> {
     let first = &m.files.first()?.path;
     let dir = first.parent()?;
     if is_blob(first) {
