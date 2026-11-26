@@ -63,6 +63,8 @@ pub(super) enum Content {
     Archive(Arc<crate::archtree::Tree>),
     /// A 3D model, drawn from the angle it's turned to.
     Model { mesh: Arc<crate::model3d::Mesh>, tex: Option<egui::TextureHandle>, drawn: Option<(crate::model3d::Angle, [usize; 2], usize)> },
+    /// A Gaussian splat scene or point cloud, drawn as points from the angle it's turned to.
+    Splat { scene: Arc<crate::splat::Scene>, tex: Option<egui::TextureHandle>, drawn: Option<(crate::model3d::Angle, [usize; 2], usize)> },
     Binary,
     /// Nothing to show beyond the facts.
     None,
@@ -79,6 +81,7 @@ impl Content {
             Content::Sheet(b) => &b.facts,
             Content::Archive(t) => &t.facts,
             Content::Model { mesh, .. } => &mesh.facts,
+            Content::Splat { scene, .. } => &scene.facts,
             _ => &[],
         }
     }
@@ -171,6 +174,8 @@ pub(super) enum Kind {
     Database,
     /// A 3D model: drawn, to turn about.
     Model,
+    /// A Gaussian splat scene: drawn as points, to turn about.
+    Splat,
     /// Word, PowerPoint or OpenDocument: formatted.
     Doc,
     /// MIDI: a piano roll.
@@ -219,6 +224,18 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::DiskImage => Kind::DiskImage,
         C::Database => Kind::Database,
         C::Model => Kind::Model,
+        C::Splat => Kind::Splat,
+    }
+}
+
+fn is_ply(path: &Path) -> bool {
+    path.extension().is_some_and(|x| x.eq_ignore_ascii_case("ply"))
+}
+
+fn load_splat(path: &Path) -> Content {
+    match crate::splat::read(path, crate::splat::Limits::PREVIEW) {
+        Ok(scene) => Content::Splat { scene: Arc::new(scene), tex: None, drawn: None },
+        Err(e) => Content::Error(e),
     }
 }
 
@@ -274,6 +291,9 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Ok(b) => Content::Sheet(Arc::new(b)),
             Err(e) => Content::Error(e),
         },
+        // PLY files can hold meshes, point clouds or splat scenes: the header says which.
+        Kind::Model if is_ply(path) && crate::splat::classify_ply(path).is_ok_and(|k| k != crate::splat::PlyKind::Mesh) => load_splat(path),
+        Kind::Splat => load_splat(path),
         Kind::Model => match crate::model3d::read(path) {
             Ok(mesh) => Content::Model { mesh: Arc::new(mesh), tex: None, drawn: None },
             // A Windows object file (.obj) and the like: shown as any other file.
@@ -1381,6 +1401,7 @@ impl App {
                 archive_view(ui, path, &tree, size);
             }
             Content::Model { mesh, tex, drawn } => model_view(ui, path, mesh, tex, drawn, size),
+            Content::Splat { scene, tex, drawn } => splat_view(ui, path, scene, tex, drawn, size),
             Content::Doc { blocks, .. } => {
                 let blocks = blocks.clone();
                 let pal = style::pal(ui);
@@ -1735,6 +1756,49 @@ fn model_view(ui: &mut egui::Ui, path: &Path, mesh: &crate::model3d::Mesh, tex: 
     if let Some(t) = tex {
         p.image(t.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
+    resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text("Drag to turn it, double-click to put it back");
+}
+
+/// A splat scene or point cloud drawn as points, turned by dragging like a 3D model.
+fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &crate::splat::Scene, tex: &mut Option<egui::TextureHandle>, drawn: &mut Option<(crate::model3d::Angle, [usize; 2], usize)>, size: Vec2) {
+    use crate::model3d::Angle;
+    let pal = style::pal(ui);
+    let angle_id = egui::Id::new(("splat-angle", path));
+    let mut angle: Angle = ui.data(|d| d.get_temp(angle_id)).unwrap_or_default();
+    let (r, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    let turning = resp.dragged();
+    if turning {
+        let d = resp.drag_delta();
+        angle.yaw += d.x * 0.01;
+        angle.pitch = (angle.pitch + d.y * 0.01).clamp(-1.5, 1.5);
+    }
+    if resp.double_clicked() {
+        angle = Angle::default();
+    }
+    ui.data_mut(|d| d.insert_temp(angle_id, angle));
+    let ppp = ui.ctx().pixels_per_point();
+    let px = [((r.width() * ppp) as usize).clamp(16, 1600), ((r.height() * ppp) as usize).clamp(16, 1600)];
+    // While it's turning, a sample of big scenes so it keeps up.
+    let step = if turning { (scene.len() / 150_000).max(1) } else { 1 };
+    if *drawn != Some((angle, px, step)) || tex.is_none() {
+        let rgba = scene.draw(px[0], px[1], angle, step);
+        let img = egui::ColorImage::from_rgba_unmultiplied(px, &rgba);
+        match tex {
+            Some(t) => t.set(img, egui::TextureOptions::LINEAR),
+            None => *tex = Some(ui.ctx().load_texture(format!("splat:{}", path.display()), img, egui::TextureOptions::LINEAR)),
+        }
+        *drawn = Some((angle, px, step));
+        if step > 1 {
+            ui.ctx().request_repaint();
+        }
+    }
+    let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
+    p.rect_filled(r, style::RADIUS, pal.well);
+    if let Some(t) = tex {
+        p.image(t.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    }
+    let what = if scene.kind == crate::splat::SceneKind::PointCloud { "Points" } else { "Splat centres, drawn as points" };
+    p.text(r.left_bottom() + vec2(8.0, -6.0), egui::Align2::LEFT_BOTTOM, what, FontId::proportional(11.0), pal.weak);
     resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text("Drag to turn it, double-click to put it back");
 }
 
