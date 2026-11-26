@@ -32,7 +32,7 @@ pub(super) fn stamp(size: u64, modified: i64) -> u64 {
 /// a picture of them.
 pub(super) fn wants_thumb(name: &str) -> bool {
     match preview::kind_of(name) {
-        Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Media(_) => true,
+        Kind::Image | Kind::LinearImage | Kind::Drawing | Kind::Font | Kind::Raw | Kind::Psd | Kind::Doc | Kind::Saved | Kind::Media(_) => true,
         Kind::Midi | Kind::Model | Kind::Map => crate::thumbcache::rich(),
         Kind::Cad => crate::thumbcache::rich() && name.to_ascii_lowercase().ends_with(".dxf"),
         _ => false,
@@ -336,6 +336,11 @@ fn picture(job: &Job, config: Config, kind: Kind, name: &str) -> Option<Decoded>
         Kind::Cad => crate::cadview::read_dxf(&local).ok().map(|d| {
             let (w, h) = d.fit(max.min(512));
             Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &d.draw(w, h)))
+        }),
+        Kind::Saved => crate::savedpic::read(&local).ok().and_then(|s| s.picture).map(|img| {
+            let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };
+            let rgba = img.to_rgba8();
+            Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba))
         }),
         Kind::Map => crate::geoview::read(&local).ok().map(|g| {
             let (w, h) = g.fit(max.min(512));

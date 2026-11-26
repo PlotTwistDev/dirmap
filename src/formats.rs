@@ -50,6 +50,8 @@ pub enum Category {
     Map,
     /// CAD: DXF drawn here; DWG, STEP and IGES described from what they say about themselves.
     Cad,
+    /// Apps' own formats (iWork, Sketch, Blender…): the picture they save inside, and details.
+    Saved,
 }
 
 /// One format.
@@ -104,6 +106,7 @@ impl Format {
                 Category::Database => ("Each table's columns and first rows, read-only", "SQLite (rusqlite)"),
                 Category::Model => ("A shaded model to turn about", "Filescape (gltf for glTF)"),
                 Category::Cad => ("What the file says: the program that made it, units, author and parts (not drawn)", "Filescape"),
+                Category::Saved => ("The picture the app saved inside the file, and the version that saved it", "Filescape"),
                 Category::Map => ("The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks", "Filescape"),
                 Category::Text | Category::Spreadsheet | Category::Document => ("A preview", "Filescape"),
             },
@@ -186,6 +189,13 @@ pub static FORMATS: &[Format] = &[
     Format { id: "model3d", name: "3D model", category: Category::Model, exts: &["stl", "obj", "ply", "gltf", "glb", "3mf"] },
     Format { id: "dxf", name: "DXF drawing", category: Category::Cad, exts: &["dxf"] },
     Format { id: "cad", name: "CAD model (DWG, STEP, IGES)", category: Category::Cad, exts: &["dwg", "step", "stp", "p21", "iges", "igs"] },
+    Format { id: "iwork", name: "Pages, Numbers and Keynote", category: Category::Saved, exts: &["pages", "numbers", "key"] },
+    Format {
+        id: "creative",
+        name: "Design and 3D app files (Sketch, Affinity, CorelDRAW, SketchUp, Blender, Cinema 4D, 3ds Max, Maya, Houdini)",
+        category: Category::Saved,
+        exts: &["sketch", "afdesign", "afphoto", "afpub", "aftemplate", "cdr", "skp", "blend", "c4d", "max", "ma", "mb", "hip", "hipnc", "hiplc"],
+    },
     Format { id: "map", name: "Map data (GeoJSON, GPX, KML)", category: Category::Map, exts: &["geojson", "gpx", "kml", "kmz"] },
     Format { id: "midi", name: "MIDI music", category: Category::Midi, exts: &["mid", "midi", "kar"] },
     Format { id: "pdf", name: "PDF document", category: Category::Pdf, exts: &["pdf"] },
@@ -254,6 +264,8 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "ical"
     } else if at(0, b"Return-Path: ") || at(0, b"Received: ") || at(0, b"MIME-Version: ") {
         "mail"
+    } else if at(0, b"BLENDER") {
+        "creative"
     } else if at(0, b"ISO-10303-21;") {
         "cad"
     } else if at(0, b"%PDF-") {

@@ -61,6 +61,7 @@ mod sheets;
 mod tables;
 mod shellmenu;
 mod subset;
+mod savedpic;
 mod scan;
 mod sequences;
 mod snapshot;
