@@ -397,6 +397,8 @@ pub(super) fn decode_image(path: &Path, linear: bool, size: u64, max: u32) -> Re
     if size > IMAGE_MAX_FILE {
         return Err(format!("Too big to preview ({}).", crate::scan::human(size)));
     }
+    // JPEG XL is read through a hook (done once; also at start-up).
+    jxl_oxide::integration::register_image_decoding_hook();
     let mut reader = image::ImageReader::open(path).and_then(|r| r.with_guessed_format()).map_err(|e| format!("Couldn't open it: {e}"))?;
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(16_384);
@@ -1533,6 +1535,23 @@ fn checkerboard(p: &egui::Painter, r: Rect, pal: style::Pal) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jpeg_xl_decodes() {
+        // An 8 × 6 red picture, lossless, from libjxl.
+        const RED: &[u8] = b"\xff\x0a\x28\x30\x10\x09\x08\x02\x01\x00\x54\x00\x4b\x18\x8b\x15\xc2\x49\x02\xe6\x05\x22\x00\x58\xff\xfc\xcc\x00\x00\x00\x00\x00\x00";
+        let dir = std::env::temp_dir().join(format!("filescape-jxl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("red");
+        std::fs::write(&p, RED).unwrap();
+        assert_eq!(crate::formats::sniff(RED).map(|f| f.id), Some("jxl"));
+        let (px, size, _) = decode_image(&p, false, RED.len() as u64, 64).unwrap();
+        assert_eq!(size, [8, 6]);
+        // Red, give or take JPEG XL's colour maths.
+        let c = px.pixels[0];
+        assert!(c.r() > 245 && c.g() < 10 && c.b() < 10, "{c:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn kinds_by_extension() {
