@@ -6,9 +6,14 @@
 //! and reads big files by sampling blocks rather than all of it when only a picture is needed.
 //! Nothing in a file is run. See `docs/design/filescape-splats.md`.
 
-pub mod gpu;
 pub mod facts;
+pub mod glb;
+pub mod gpu;
+pub mod html;
 pub mod ply;
+#[allow(clippy::module_inception)]
+pub mod splat;
+pub mod sog;
 pub mod spz;
 
 use std::path::Path;
@@ -158,6 +163,48 @@ impl Scene {
     }
 }
 
+impl Scene {
+    /// Keeps a splat given its base colour as display RGB (0–1), linear opacity, linear scale,
+    /// an x y z w rotation and its higher harmonics in our order (may be empty).
+    #[allow(clippy::too_many_arguments)]
+    fn push_rgb(&mut self, pos: [f32; 3], rgb: [f32; 3], alpha: f32, scale: [f32; 3], rot: [f32; 4], sh: &[f32]) {
+        let color = [to_u8(rgb[0]), to_u8(rgb[1]), to_u8(rgb[2]), to_u8(alpha)];
+        self.push(pos, color, Some(scale), Some(rot), sh);
+    }
+
+    /// As [`Scene::push_rgb`], with the base colour as the 0th harmonic (`f_dc`).
+    fn push_dc(&mut self, pos: [f32; 3], dc: [f32; 3], alpha: f32, scale: [f32; 3], rot: [f32; 4], sh: &[f32]) {
+        self.push_rgb(pos, [dc[0] * SH_C0 + 0.5, dc[1] * SH_C0 + 0.5, dc[2] * SH_C0 + 0.5], alpha, scale, rot, sh);
+    }
+
+    /// Whether to keep this scene's harmonics (`rest` per channel), noting it when they're
+    /// left out to save memory.
+    fn plan_sh(&mut self, limits: Limits, rest: usize) -> bool {
+        let keep = limits.keeps_sh(self.total as u64, rest);
+        if limits.keep_sh && rest > 0 && !keep {
+            self.notes.push(SH_DROPPED.into());
+        }
+        keep
+    }
+}
+
+/// Keep every this-many splats of `total` to stay within `limits`.
+fn every(total: u64, limits: Limits) -> u64 {
+    total.div_ceil(limits.max_points.min(HARD_MAX_POINTS).max(1) as u64).max(1)
+}
+
+/// The degree of spherical harmonics with this many higher values per channel.
+fn degree_for(rest_per_channel: usize) -> Option<u8> {
+    match rest_per_channel {
+        0 => Some(0),
+        3 => Some(1),
+        8 => Some(2),
+        15 => Some(3),
+        24 => Some(4),
+        _ => None,
+    }
+}
+
 /// Spherical-harmonic coefficients per colour channel beyond the base one, by degree.
 pub fn sh_rest(degree: u8) -> usize {
     match degree {
@@ -186,10 +233,39 @@ pub fn classify_ply(path: &Path) -> Result<PlyKind, String> {
     Ok(head.kind())
 }
 
+/// Whether a file that could be something else (a PLY mesh, a GLB model, a web page, a
+/// `meta.json`) holds a splat scene. Files with splat-only extensions say so by their name.
+pub fn claims(path: &Path) -> bool {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
+    match ext {
+        "ply" => classify_ply(path).is_ok_and(|k| k != PlyKind::Mesh && k != PlyKind::Unknown),
+        "glb" => glb::is_splat_glb(path),
+        "html" | "htm" => html::has_scene(path),
+        "json" if name == "meta.json" => std::fs::File::open(path).is_ok_and(|f| {
+            use std::io::Read;
+            let mut head = Vec::new();
+            f.take(64 << 10).read_to_end(&mut head).is_ok() && sog::is_meta(&head)
+        }),
+        "splat" | "ksplat" | "sog" | "spz" => true,
+        _ => false,
+    }
+}
+
 /// Read a scene, keeping what `limits` allows.
 pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
     let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    let mut scene = if name.ends_with(".spz") { spz::read(path, limits)? } else { ply::read(path, limits)? };
+    let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
+    let mut scene = match ext {
+        "spz" => spz::read(path, limits)?,
+        "splat" => splat::read_splat(path, limits)?,
+        "ksplat" => splat::read_ksplat(path, limits)?,
+        "sog" => sog::read_bundle(path, limits)?,
+        "json" => sog::read_folder(path, limits)?,
+        "glb" => glb::read(path, limits)?,
+        "html" | "htm" => html::read(path, limits)?,
+        _ => ply::read(path, limits)?,
+    };
     facts::describe(&mut scene, path);
     Ok(scene)
 }

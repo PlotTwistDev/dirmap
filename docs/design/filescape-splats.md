@@ -1,6 +1,6 @@
 # Gaussian Splat viewing and inspection: research and plan
 
-Status: S1 (#96) and S2 (#98) merged 26 Nov 2026; S2 benchmarks on Rich's Mac and PC still to come. Free/Pro split decided (section 10). Later stages need Rich's go-ahead.
+Status: S1 (#96), S2 (#98) and S3 merged or in review, 26 Nov 2026; S2 benchmarks on Rich's Mac and PC still to come. Free/Pro split decided (section 10). S4 approved.
 
 This answers section 28 of Rich's brief "Native Gaussian Splatting Viewer and Scene Inspection": items 1 to 6 and 9 are in this document; item 7 (prototype) is a headless spike described below; items 8, 10 and 11 belong to the build stages.
 

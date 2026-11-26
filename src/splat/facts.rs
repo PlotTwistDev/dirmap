@@ -105,11 +105,13 @@ pub fn describe(scene: &mut Scene, path: &Path) {
         if scene.antialiased {
             f.push(("Trained", "With antialiasing (Mip-Splatting)".into()));
         }
-        if scene.total > 0 && file_len > 0 {
+        // A loose SOG's meta.json and a web page aren't the scene's real size.
+        let whole_file = !path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("meta.json")) && !scene.format.ends_with("inside a web page");
+        if scene.total > 0 && file_len > 0 && whole_file {
             let per = file_len as f64 / scene.total as f64;
             f.push(("Bytes per splat", format!("{per:.1}")));
             let ply = scene.total as u64 * ply_bytes_per_splat(scene.sh_degree);
-            if !scene.format.starts_with("PLY") && ply > file_len {
+            if !scene.format.starts_with("PLY") && ply as f64 > file_len as f64 * 1.5 {
                 f.push(("As a standard PLY", format!("about {} ({:.0} times bigger, calculated)", human(ply), ply as f64 / file_len as f64)));
             }
         }

@@ -210,6 +210,7 @@ pub static FORMATS: &[Format] = &[
     Format { id: "sqlite", name: "SQLite database", category: Category::Database, exts: &["sqlite", "sqlite3", "db", "db3", "s3db", "sl3"] },
     Format { id: "model3d", name: "3D model", category: Category::Model, exts: &["stl", "obj", "ply", "gltf", "glb", "3mf", "fbx", "dae", "abc"] },
     Format { id: "spz", name: "Gaussian splat scene (SPZ)", category: Category::Splat, exts: &["spz"] },
+    Format { id: "splat", name: "Gaussian splat scene (SPLAT, KSPLAT, SOG)", category: Category::Splat, exts: &["splat", "ksplat", "sog"] },
     Format { id: "dxf", name: "DXF drawing", category: Category::Cad, exts: &["dxf"] },
     Format { id: "cad", name: "CAD model (DWG, STEP, IGES)", category: Category::Cad, exts: &["dwg", "step", "stp", "p21", "iges", "igs"] },
     Format { id: "iwork", name: "Pages, Numbers and Keynote", category: Category::Saved, exts: &["pages", "numbers", "key"] },

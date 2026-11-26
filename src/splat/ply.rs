@@ -115,11 +115,17 @@ pub struct Header {
 impl Header {
     /// Read and parse the header at the start of a file.
     pub fn read(path: &Path) -> Result<Header, String> {
-        let file = std::fs::File::open(path).map_err(|e| format!("Couldn't read it: {e}"))?;
+        let mut file = std::fs::File::open(path).map_err(|e| format!("Couldn't read it: {e}"))?;
         let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+        Header::from_reader(&mut file, file_len)
+    }
+
+    /// Parse the header at the start of `r` (left anywhere), for data `len` bytes long.
+    fn from_reader<R: Read + Seek>(r: &mut R, len: u64) -> Result<Header, String> {
+        r.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
         let mut head = Vec::new();
-        file.take(MAX_HEADER as u64).read_to_end(&mut head).map_err(|e| format!("Couldn't read it: {e}"))?;
-        Header::parse(&head, file_len)
+        r.take(MAX_HEADER as u64).read_to_end(&mut head).map_err(|e| format!("Couldn't read it: {e}"))?;
+        Header::parse(&head, len)
     }
 
     fn parse(head: &[u8], file_len: u64) -> Result<Header, String> {
@@ -217,14 +223,25 @@ struct Wanted {
 
 /// Read a splat scene or point cloud from a PLY file.
 pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
-    let head = Header::read(path)?;
+    let mut file = std::fs::File::open(path).map_err(|e| format!("Couldn't read it: {e}"))?;
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    read_from(&mut file, len, limits)
+}
+
+/// Read a splat scene or point cloud from PLY data `len` bytes long (a file, or a scene
+/// embedded in a page).
+pub fn read_from<R: Read + Seek>(src: &mut R, len: u64, limits: Limits) -> Result<Scene, String> {
+    let head = Header::from_reader(src, len)?;
     let kind = head.kind();
+    if kind == PlyKind::CompressedSplat {
+        return read_compressed(&head, src, limits);
+    }
     let scene_kind = match kind {
         PlyKind::Splat => SceneKind::Splat,
         PlyKind::Splat4d => SceneKind::Splat4d,
         PlyKind::PointCloud => SceneKind::PointCloud,
         PlyKind::Mesh => return Err("This PLY file is a mesh.".into()),
-        PlyKind::CompressedSplat => return Err("This is a compressed PLY splat scene (PlayCanvas's format). Filescape will show these in a later version.".into()),
+        PlyKind::CompressedSplat => unreachable!(),
         PlyKind::Unknown => return Err("This PLY file has no points to show.".into()),
     };
     // Elements before the vertices are skipped, so they need a fixed size in binary files.
@@ -347,8 +364,7 @@ pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
 
     match head.encoding {
         Encoding::Ascii => {
-            let file = std::fs::File::open(path).map_err(|e| format!("Couldn't read it: {e}"))?;
-            let mut r = BufReader::new(file);
+            let mut r = BufReader::new(&mut *src);
             r.seek(SeekFrom::Start(head.data_at)).map_err(|e| e.to_string())?;
             // Text PLYs are rarely big; still keep to the limit, evenly.
             let every = total.div_ceil(cap.max(1)).max(1);
@@ -387,8 +403,7 @@ pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
             if present < total {
                 scene.notes.push(format!("The file ends early: {present} of {total} points are there"));
             }
-            let file = std::fs::File::open(path).map_err(|e| format!("Couldn't read it: {e}"))?;
-            let mut r = BufReader::with_capacity(1 << 20, file);
+            let mut r = BufReader::with_capacity(1 << 20, &mut *src);
             r.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
             // Read in blocks; when there are more points than the limit, read evenly spaced
             // blocks and skip the rest, so a sample of a huge file is quick.
@@ -422,6 +437,126 @@ pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
                     break;
                 }
             }
+        }
+    }
+    Ok(scene)
+}
+
+/// PlayCanvas's compressed PLY (SuperSplat's export): splats in chunks of 256, each chunk
+/// with its own bounds, every splat packed into four 32-bit words, and optional harmonics as
+/// bytes in a third element.
+fn read_compressed<R: Read + Seek>(head: &Header, src: &mut R, limits: Limits) -> Result<Scene, String> {
+    const CHUNK: u64 = 256;
+    if head.encoding != Encoding::Little {
+        return Err("This compressed PLY isn't stored the usual way (little-endian binary).".into());
+    }
+    let el = |n: &str| head.elements.iter().find(|e| e.name == n);
+    let (chunk, vertex) = (el("chunk").ok_or("Bad compressed PLY.")?, el("vertex").ok_or("Bad compressed PLY.")?);
+    let sh = el("sh");
+    let all_f32 = |e: &Element| e.props.iter().all(|p| p.ty == Type::F32 && p.list.is_none());
+    let packed = ["packed_position", "packed_rotation", "packed_scale", "packed_color"];
+    if !all_f32(chunk) || vertex.props.len() != 4 || !vertex.props.iter().zip(packed).all(|(p, n)| p.name == n && p.ty == Type::U32 && p.list.is_none()) {
+        return Err("This compressed PLY has a layout Filescape doesn't know.".into());
+    }
+    if vertex.count.div_ceil(CHUNK) != chunk.count {
+        return Err("This compressed PLY's chunk count doesn't match its splats.".into());
+    }
+    let ci = |n: &str| chunk.props.iter().position(|p| p.name == n);
+    let need = ["min_x", "min_y", "min_z", "max_x", "max_y", "max_z", "min_scale_x", "min_scale_y", "min_scale_z", "max_scale_x", "max_scale_y", "max_scale_z"];
+    let cols: Vec<usize> = need.iter().map(|n| ci(n)).collect::<Option<_>>().ok_or("This compressed PLY is missing chunk bounds.")?;
+    let colour: Option<Vec<usize>> = ["min_r", "min_g", "min_b", "max_r", "max_g", "max_b"].iter().map(|n| ci(n)).collect();
+    let rest_n = match sh {
+        Some(e) if e.props.iter().all(|p| p.ty == Type::U8 && p.list.is_none()) && e.count == vertex.count => e.props.len(),
+        Some(_) => return Err("This compressed PLY's harmonics have a layout Filescape doesn't know.".into()),
+        None => 0,
+    };
+    let degree = super::degree_for(rest_n / 3).filter(|_| rest_n % 3 == 0).ok_or("This compressed PLY has an unusual number of harmonics.")?;
+    // Everything in order: chunks, splats, harmonics. Check it fits the data before reading.
+    let chunk_bytes = chunk.count.checked_mul(chunk.props.len() as u64 * 4).ok_or("Bad compressed PLY.")?;
+    let vertex_at = head.data_at + chunk_bytes;
+    let sh_at = vertex.count.checked_mul(16).and_then(|b| vertex_at.checked_add(b)).ok_or("Bad compressed PLY.")?;
+    let end = sh_at + vertex.count * rest_n as u64;
+    if end > head.file_len || head.elements.iter().any(|e| !["chunk", "vertex", "sh"].contains(&e.name.as_str())) {
+        return Err("This compressed PLY is cut short or has extra parts.".into());
+    }
+    let total = vertex.count;
+    let mut scene = Scene::new(SceneKind::Splat, "Compressed PLY (PlayCanvas)".into(), Frame::RightDownForward, total as usize);
+    scene.sh_degree = degree;
+    let rest = super::sh_rest(degree);
+    let keep_sh = scene.plan_sh(limits, rest);
+    for c in &head.comments {
+        scene.said.push(("Comment", c.clone()));
+    }
+    // The chunk table, whole: 48 or 72 bytes for each 256 splats.
+    let mut table = vec![0u8; chunk_bytes as usize];
+    src.seek(SeekFrom::Start(head.data_at)).map_err(|e| e.to_string())?;
+    src.read_exact(&mut table).map_err(|e| format!("Couldn't read it: {e}"))?;
+    let stride = chunk.props.len();
+    let cv = |c: usize, k: usize| f32::from_le_bytes(table[(c * stride + k) * 4..][..4].try_into().unwrap());
+    let every = super::every(total, limits);
+    // The harmonics first (only those kept), in our order.
+    let mut shv: Vec<f32> = Vec::new();
+    if keep_sh {
+        let mut r = BufReader::with_capacity(1 << 20, &mut *src);
+        r.seek(SeekFrom::Start(sh_at)).map_err(|e| e.to_string())?;
+        let mut rec = vec![0u8; rest_n];
+        let mut i = 0u64;
+        while i < total {
+            r.read_exact(&mut rec).map_err(|e| format!("Couldn't read it: {e}"))?;
+            for k in 0..rest {
+                for ch in 0..3 {
+                    let b = rec[ch * rest + k];
+                    let n = match b {
+                        0 => 0.0,
+                        255 => 1.0,
+                        b => (b as f32 + 0.5) / 256.0,
+                    };
+                    shv.push((n - 0.5) * 8.0);
+                }
+            }
+            i += every;
+            if every > 1 && i < total {
+                r.seek_relative(((every - 1) * rest_n as u64) as i64).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    let unorm = |v: u32, bits: u32| (v & ((1 << bits) - 1)) as f32 / ((1u32 << bits) - 1) as f32;
+    let lerp = |a: f32, b: f32, t: f32| a * (1.0 - t) + b * t;
+    let mut r = BufReader::with_capacity(1 << 20, &mut *src);
+    r.seek(SeekFrom::Start(vertex_at)).map_err(|e| e.to_string())?;
+    let mut rec = [0u8; 16];
+    let mut i = 0u64;
+    let mut kept = 0usize;
+    while i < total {
+        r.read_exact(&mut rec).map_err(|e| format!("Couldn't read it: {e}"))?;
+        let w = |k: usize| u32::from_le_bytes(rec[k * 4..k * 4 + 4].try_into().unwrap());
+        let (p, q, s, c) = (w(0), w(1), w(2), w(3));
+        let ch = (i / CHUNK) as usize;
+        let b = |k: usize| cv(ch, cols[k]);
+        let pos = [lerp(b(0), b(3), unorm(p >> 21, 11)), lerp(b(1), b(4), unorm(p >> 11, 10)), lerp(b(2), b(5), unorm(p, 11))];
+        let scale = [lerp(b(6), b(9), unorm(s >> 21, 11)).exp(), lerp(b(7), b(10), unorm(s >> 11, 10)).exp(), lerp(b(8), b(11), unorm(s, 11)).exp()];
+        // Smallest three, 10 bits each; the top two bits say which of w x y z was left out.
+        let norm = std::f32::consts::SQRT_2;
+        let (a1, a2, a3) = ((unorm(q >> 20, 10) - 0.5) * norm, (unorm(q >> 10, 10) - 0.5) * norm, (unorm(q, 10) - 0.5) * norm);
+        let m = (1.0 - (a1 * a1 + a2 * a2 + a3 * a3)).max(0.0).sqrt();
+        let wxyz = match q >> 30 {
+            0 => [m, a1, a2, a3],
+            1 => [a1, m, a2, a3],
+            2 => [a1, a2, m, a3],
+            _ => [a1, a2, a3, m],
+        };
+        let mut rgb = [unorm(c >> 24, 8), unorm(c >> 16, 8), unorm(c >> 8, 8)];
+        if let Some(cc) = &colour {
+            for (k, v) in rgb.iter_mut().enumerate() {
+                *v = lerp(cv(ch, cc[k]), cv(ch, cc[k + 3]), *v);
+            }
+        }
+        let sh_slice = if keep_sh { &shv[kept * rest * 3..(kept + 1) * rest * 3] } else { &[][..] };
+        scene.push_rgb(pos, rgb, unorm(c, 8), scale, [wxyz[1], wxyz[2], wxyz[3], wxyz[0]], sh_slice);
+        kept += 1;
+        i += every;
+        if every > 1 && i < total {
+            r.seek_relative(((every - 1) * 16) as i64).map_err(|e| e.to_string())?;
         }
     }
     Ok(scene)
