@@ -52,6 +52,8 @@ pub enum Category {
     Cad,
     /// Apps' own formats (iWork, Sketch, Blender…): the picture they save inside, and details.
     Saved,
+    /// DICOM and FITS: scientific pictures, decoded here.
+    Science,
 }
 
 /// One format.
@@ -91,6 +93,8 @@ impl Format {
             "jxl" => ("The picture; channels one by one", "jxl-oxide"),
             "dxf" => ("The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size", "Filescape"),
             "daw" => ("The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones)", "Filescape"),
+            "dicom" => ("The scan (uncompressed or baseline JPEG) in its window, and what kind of scan it is; patient details are never shown", "Filescape"),
+            "fits" => ("The first picture, stretched so faint detail shows, with the object, telescope and exposure", "Filescape"),
             "heif" => ("The picture", "The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg)"),
             _ => match self.category {
                 Category::Picture => ("The picture; channels one by one", "image"),
@@ -108,6 +112,7 @@ impl Format {
                 Category::Model => ("A shaded model to turn about", "Filescape (gltf for glTF)"),
                 Category::Cad => ("What the file says: the program that made it, units, author and parts (not drawn)", "Filescape"),
                 Category::Saved => ("The picture the app saved inside the file, and the version that saved it", "Filescape"),
+                Category::Science => ("The picture, with the scan's or telescope's details", "Filescape"),
                 Category::Map => ("The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks", "Filescape"),
                 Category::Text | Category::Spreadsheet | Category::Document => ("A preview", "Filescape"),
             },
@@ -198,6 +203,8 @@ pub static FORMATS: &[Format] = &[
         exts: &["sketch", "afdesign", "afphoto", "afpub", "aftemplate", "cdr", "skp", "blend", "c4d", "max", "ma", "mb", "hip", "hipnc", "hiplc"],
     },
     Format { id: "daw", name: "Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo)", category: Category::Document, exts: &["als", "rpp", "flp", "cpr", "npr"] },
+    Format { id: "dicom", name: "DICOM medical image", category: Category::Science, exts: &["dcm", "dicom"] },
+    Format { id: "fits", name: "FITS astronomy image", category: Category::Science, exts: &["fits", "fit", "fts"] },
     Format { id: "map", name: "Map data (GeoJSON, GPX, KML)", category: Category::Map, exts: &["geojson", "gpx", "kml", "kmz"] },
     Format { id: "midi", name: "MIDI music", category: Category::Midi, exts: &["mid", "midi", "kar"] },
     Format { id: "pdf", name: "PDF document", category: Category::Pdf, exts: &["pdf"] },
@@ -270,6 +277,10 @@ pub fn sniff(head: &[u8]) -> Option<&'static Format> {
         "daw"
     } else if at(0, b"<REAPER_PROJECT") {
         "daw"
+    } else if at(128, b"DICM") {
+        "dicom"
+    } else if at(0, b"SIMPLE  =") {
+        "fits"
     } else if at(0, b"BLENDER") {
         "creative"
     } else if at(0, b"ISO-10303-21;") {
