@@ -1,6 +1,6 @@
 # Gaussian Splat viewing and inspection: research and plan
 
-Status: research done 26 Nov 2026. Nothing is built yet. The roadmap at the end needs Rich's approval.
+Status: S1 (#96) and S2 (#98) merged 26 Nov 2026; S2 benchmarks on Rich's Mac and PC still to come. Free/Pro split decided (section 10). Later stages need Rich's go-ahead.
 
 This answers section 28 of Rich's brief "Native Gaussian Splatting Viewer and Scene Inspection": items 1 to 6 and 9 are in this document; item 7 (prototype) is a headless spike described below; items 8, 10 and 11 belong to the build stages.
 
@@ -177,17 +177,15 @@ Picture: `/mnt/project-files/gaussian-splats/spike-headless-render.png`. These a
 
 ## 10. Free and Pro
 
-The house rule is "make curiosity free, charge for productivity", and all previews are free. Proposed split, **to confirm with Rich**:
+The house rule is "make curiosity free, charge for productivity", and all previews are free. Decided with Rich on 26 Nov 2026: converting a single file is **free**, like freeing up one cloud file. Batch work and the productivity tools are Pro.
 
 | Free | Pro |
 |---|---|
-| Recognising splats, map tile pictures, the preview pane, Quick Look, the full viewer | Converting formats, batch conversion |
+| Recognising splats, map tile pictures, the preview pane, Quick Look, the full viewer | Batch conversion (many files at once) |
 | All view modes (splat, point, ellipse, opacity, scale, density, depth) | Side-by-side comparison with synced cameras and image metrics |
 | Scene facts and the single-scene quality report | Reconstruction project breakdowns and checkpoint timelines |
-| The storage optimiser card with measured estimates for one file | Storage reports across folders, optimiser recommendations in bulk |
+| The storage optimiser card with measured estimates for one file, and converting that one file | Storage reports across folders, optimiser recommendations in bulk |
 | Open in external apps, camera viewpoints saved locally | 4D and animation inspection tools |
-
-Converting one file is a fair candidate for free (like freeing up one cloud file is free today); worth deciding up front.
 
 ## 11. Roadmap
 
