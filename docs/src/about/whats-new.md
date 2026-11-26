@@ -2,6 +2,14 @@
 
 ## Next version
 
+### Storage Analysis keeps up with changes
+
+- Files added, changed or removed after a scan now show in Storage Analysis by themselves: a
+  download appears in the map a second or so after it finishes, and a file deleted in another
+  app disappears. Downloads still being written (.crdownload, .part, Safari's .download) are left
+  out until they're done. Turn it off under **Settings > General > Keep up with changes**. See
+  [Changes after the scan](../getting-started/scanning.md#changes-after-the-scan).
+
 ### Gaussian splat scenes
 
 - **SPZ** files (every version) and **PLY** splat scenes now preview in Files and Storage

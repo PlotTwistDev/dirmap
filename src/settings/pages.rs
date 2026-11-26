@@ -65,6 +65,7 @@ pub fn general(ui: &mut egui::Ui, cx: &mut PageCx, licence: &mut crate::licence:
 
     kit::section(ui, Icon::Drive, "Scanning", f.of("scanning"), |ui| {
         kit::toggle_row(ui, "Live scan results", Some("Fill in the folder list while a scan runs. Off shows only the progress until it finishes."), &mut d.live_tree);
+        kit::toggle_row(ui, "Keep up with changes", Some("Add, update and remove items in the analysis as files change after the scan (downloads, files deleted or moved in other apps), without scanning again. Only the changed items are read, and cloud files are never downloaded."), &mut d.watch_changes);
     });
 
     updates(ui, cx, licence);
