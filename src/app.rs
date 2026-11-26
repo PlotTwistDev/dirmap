@@ -56,6 +56,7 @@ mod cloud;
 mod models;
 mod ask;
 mod lab;
+mod storage;
 mod explain;
 pub(crate) mod style;
 use files::Workspace;
@@ -2974,6 +2975,7 @@ impl eframe::App for App {
         self.drive_filter(&ctx);
         self.poll_sequences(&ctx);
         self.poll_models(&ctx);
+        self.poll_storage(&ctx);
         self.poll_ask(&ctx);
 
         self.licence.banner(ui);
