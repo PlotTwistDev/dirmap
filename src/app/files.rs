@@ -1220,7 +1220,7 @@ impl App {
 
     /// Ctrl/⌘+1 to 4 switch workspace from anywhere.
     pub(super) fn workspace_keys(&mut self, ctx: &egui::Context) {
-        if self.ops.modal() {
+        if self.blocked() {
             return;
         }
         let (files, remote, analysis, models) = ctx.input_mut(|i| {
@@ -1907,8 +1907,7 @@ impl App {
         });
         let here = self.files.here().clone();
         ui.spacing_mut().item_spacing.y = 1.0;
-        let pressed = ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| ui.max_rect().contains(p)));
-        if pressed {
+        if super::pressed_in(ui, ui.max_rect()) {
             self.files.focused = true;
         }
 
@@ -2151,8 +2150,7 @@ impl App {
     fn pane_ui(&mut self, ui: &mut egui::Ui, pane: usize) {
         let rect = ui.max_rect();
         let pal = style::pal(ui);
-        let pressed = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
-        if pressed.is_some_and(|p| rect.contains(p)) {
+        if super::pressed_in(ui, rect) {
             self.files.set_focus(pane);
             self.files.focused = true;
         }
@@ -3045,7 +3043,7 @@ impl App {
     fn files_keys(&mut self, ctx: &egui::Context, pointer_in: bool, picks: &mut FPicks) {
         use egui::{Key, Modifiers as M};
         // Not while a box is open over the list (Connect to Server, a server's question).
-        if self.ops.modal() || self.files.connect.is_some() || self.files.asking.is_some() || self.files.player.is_some() || self.files.compare.is_some() || self.files.mark_edit.is_some() || self.files.apps_box.is_some() {
+        if self.blocked() || self.files.connect.is_some() || self.files.asking.is_some() || self.files.player.is_some() || self.files.compare.is_some() || self.files.mark_edit.is_some() || self.files.apps_box.is_some() {
             return;
         }
         // The mouse's side buttons go to the file manager when the pointer is over it.
