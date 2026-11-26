@@ -822,7 +822,10 @@ impl App {
         let tree = self.shown_tree().unwrap();
         let mut n: &Node = &tree;
         for &i in path {
-            n = &n.children[i as usize];
+            // A path kept from before the tree changed (a rescan, a filter, a delete) can point
+            // past the end: stop there rather than crash.
+            let Some(c) = n.children.get(i as usize) else { break };
+            n = c;
             p.push(&*n.name);
         }
         p
