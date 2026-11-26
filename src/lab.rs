@@ -153,6 +153,80 @@ pub fn step(logits: &[f32], s: &Settings, rng: &mut Rng, n: usize) -> (usize, f3
     (chosen, raw[chosen], adj_of(chosen), top, adjusted.len())
 }
 
+/// What a speed test measures.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BenchSettings {
+    /// Tokens of text to read, as when a long question or document is sent.
+    pub read: u32,
+    /// Tokens to write.
+    pub write: u32,
+    /// The test is run this many times and the middle result kept.
+    pub runs: u32,
+}
+
+impl Default for BenchSettings {
+    fn default() -> Self {
+        BenchSettings { read: 512, write: 128, runs: 3 }
+    }
+}
+
+/// One speed test, as kept in the results file.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BenchResult {
+    pub model: String,
+    pub path: std::path::PathBuf,
+    /// When it ran, seconds since 1970.
+    pub when: i64,
+    pub context: u32,
+    /// On the graphics chip (Apple silicon) rather than the processor.
+    pub gpu: bool,
+    pub threads: u32,
+    pub read: u32,
+    pub write: u32,
+    pub runs: u32,
+    /// Tokens read a second (the middle run).
+    pub read_speed: f32,
+    /// Tokens written a second (the middle run).
+    pub write_speed: f32,
+    /// Seconds before the first token of an answer: reading the text, then one token.
+    pub first_token: f32,
+}
+
+/// The middle value (the mean of the two middle ones for an even count).
+pub fn median(v: &[f32]) -> f32 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    let mut v = v.to_vec();
+    v.sort_by(f32::total_cmp);
+    let n = v.len();
+    if n % 2 == 1 { v[n / 2] } else { (v[n / 2 - 1] + v[n / 2]) / 2.0 }
+}
+
+/// Where speed test results are kept: beside Filescape's settings.
+pub fn results_file() -> Option<std::path::PathBuf> {
+    Some(crate::templates::app_folder()?.join("lab-speed.json"))
+}
+
+/// Results kept so far, newest first. A missing or unreadable file is no results.
+pub fn load_results(file: &std::path::Path) -> Vec<BenchResult> {
+    std::fs::read(file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// Adds a result (newest first, at most 200 kept) and saves.
+pub fn save_result(file: &std::path::Path, r: BenchResult) -> Result<Vec<BenchResult>, String> {
+    let mut all = load_results(file);
+    all.insert(0, r);
+    all.truncate(200);
+    if let Some(d) = file.parent() {
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&all).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, file).map_err(|e| e.to_string())?;
+    Ok(all)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,6 +285,42 @@ mod tests {
         assert!((raw - softmax(&L, 1.0)[0]).abs() < 1e-6);
         assert_eq!(top.iter().map(|t| t.0).collect::<Vec<_>>(), [0, 1, 2, 3]);
         assert_eq!(top[3].2, 0.0, "left out by the settings");
+    }
+
+    #[test]
+    fn medians() {
+        assert_eq!(median(&[]), 0.0);
+        assert_eq!(median(&[3.0, 1.0, 2.0]), 2.0);
+        assert_eq!(median(&[4.0, 1.0, 2.0, 3.0]), 2.5);
+    }
+
+    #[test]
+    fn results_are_kept_newest_first() {
+        let d = std::env::temp_dir().join(format!("filescape-lab-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let f = d.join("lab-speed.json");
+        assert!(load_results(&f).is_empty());
+        let r = |when| BenchResult {
+            model: "M".into(),
+            path: "/m.gguf".into(),
+            when,
+            context: 4096,
+            gpu: false,
+            threads: 4,
+            read: 512,
+            write: 128,
+            runs: 3,
+            read_speed: 100.0,
+            write_speed: 10.0,
+            first_token: 5.2,
+        };
+        save_result(&f, r(1)).unwrap();
+        let all = save_result(&f, r(2)).unwrap();
+        assert_eq!(all.iter().map(|r| r.when).collect::<Vec<_>>(), [2, 1]);
+        assert_eq!(load_results(&f), all);
+        std::fs::write(&f, "not json").unwrap();
+        assert!(load_results(&f).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
