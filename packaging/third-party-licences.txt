@@ -309,6 +309,7 @@ md5 0.8.1	Apache-2.0 OR MIT
 memchr 2.8.3	Unlicense OR MIT
 memmap2 0.9.11	MIT OR Apache-2.0
 memoffset 0.9.1	MIT
+midly 0.5.3	Unlicense
 miniz_oxide 0.8.9	MIT OR Zlib OR Apache-2.0
 miniz_oxide 0.9.1	MIT OR Zlib OR Apache-2.0
 mio 1.2.5	MIT
@@ -11996,6 +11997,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+========================================================================
+Used by: midly 0.5.3
+========================================================================
+Copyright (c) negamartin
+
+Licensed under Unlicense. The crate ships no licence file; see https://github.com/negamartin/midly.
 
 ========================================================================
 Used by: miniz_oxide 0.8.9, miniz_oxide 0.9.1

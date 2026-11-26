@@ -148,6 +148,8 @@ pub(super) enum Kind {
     Sheet,
     /// Word, PowerPoint or OpenDocument: formatted.
     Doc,
+    /// MIDI: a piano roll.
+    Midi,
     /// Video, sound or PDF: a picture or sound from the system.
     Media(crate::media::Media),
     Other,
@@ -175,6 +177,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
         C::Pdf => Kind::Media(Media::Pdf),
         C::SystemPicture => Kind::Media(Media::Picture),
         C::Document => Kind::Doc,
+        C::Midi => Kind::Midi,
     }
 }
 
@@ -274,6 +277,21 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                     poster: true,
                     source: None,
                     facts: r.facts,
+                }
+            }
+            Err(e) => Content::Error(e),
+        },
+        Kind::Midi => match crate::midiview::read(path) {
+            Ok(song) => {
+                let (w, h) = (1200, 400);
+                Content::Image {
+                    pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &song.roll(w, h))),
+                    tex: None,
+                    size: [w, h],
+                    info: "Every note against time (across) and pitch (up), coloured by channel".into(),
+                    poster: true,
+                    source: None,
+                    facts: song.facts,
                 }
             }
             Err(e) => Content::Error(e),
@@ -1567,6 +1585,7 @@ mod tests {
         assert_eq!(kind_of("song.FLAC"), Kind::Media(crate::media::Media::Audio));
         assert_eq!(kind_of("logo.svg"), Kind::Drawing);
         assert_eq!(kind_of("Inter.otf"), Kind::Font);
+        assert_eq!(kind_of("tune.mid"), Kind::Midi);
         assert_eq!(kind_of("IMG_0001.CR3"), Kind::Raw);
         assert_eq!(kind_of("poster.psd"), Kind::Psd);
         assert_eq!(kind_of("Budget.XLSX"), Kind::Sheet);

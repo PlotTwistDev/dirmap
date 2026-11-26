@@ -41,6 +41,7 @@ mod weights;
 mod vocab;
 mod modeldiff;
 mod inspect;
+mod midiview;
 mod models;
 mod mapview;
 mod netdrives;
