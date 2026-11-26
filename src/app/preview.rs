@@ -1862,6 +1862,10 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
             }
         }
     }
+    if drawn.pending.is_some() {
+        // Look again now and then, in case the graphics chip has stopped answering.
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+    }
     let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
     p.rect_filled(r, style::RADIUS, pal.well);
     if let Some(t) = tex {

@@ -333,9 +333,10 @@ fn gpu_draws_splats_or_says_why_not() {
         _ => plain(i, p),
     })), Limits::PREVIEW).unwrap());
     let id = gpu::want(s.clone(), View::default(), [96, 64], None);
-    let Some(pic) = gpu::wait_for(id, std::time::Duration::from_secs(120)) else {
+    // Longer than the 30 s after which a hung driver is given up on.
+    let Some(pic) = gpu::wait_for(id, std::time::Duration::from_secs(45)) else {
         eprintln!("no GPU picture: {:?}", gpu::status());
-        assert!(matches!(gpu::status(), gpu::Status::Unavailable(_)));
+        assert!(matches!(gpu::status(), gpu::Status::Unavailable(_)), "neither a picture nor a reason");
         return;
     };
     assert_eq!(pic.size, [96, 64]);

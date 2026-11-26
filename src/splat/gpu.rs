@@ -54,14 +54,27 @@ struct Shared {
     ready: Condvar,
     done: Mutex<Option<Picture>>,
     status: Mutex<Status>,
+    /// When the job being drawn started; a job that runs past [`STUCK`] means the driver hung.
+    busy_since: Mutex<Option<Instant>>,
 }
 
+/// How long one picture (with opening the device and loading the scene) may take before the
+/// graphics chip is given up on for this run, and the preview draws points instead.
+const STUCK: Duration = Duration::from_secs(30);
+
 static SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
+/// What the worker is doing, for the message when the driver stops answering.
+static STAGE: Mutex<&'static str> = Mutex::new("starting");
+
+fn stage(what: &'static str) {
+    *STAGE.lock().unwrap() = what;
+}
+
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 fn shared() -> &'static Arc<Shared> {
     SHARED.get_or_init(|| {
-        let s = Arc::new(Shared { wish: Mutex::new(None), ready: Condvar::new(), done: Mutex::new(None), status: Mutex::new(Status::Unknown) });
+        let s = Arc::new(Shared { wish: Mutex::new(None), ready: Condvar::new(), done: Mutex::new(None), status: Mutex::new(Status::Unknown), busy_since: Mutex::new(None) });
         let w = s.clone();
         let _ = std::thread::Builder::new().name("splat-gpu".into()).spawn(move || worker(w));
         s
@@ -69,7 +82,14 @@ fn shared() -> &'static Arc<Shared> {
 }
 
 pub fn status() -> Status {
-    shared().status.lock().unwrap().clone()
+    let s = shared();
+    if s.busy_since.lock().unwrap().is_some_and(|t| t.elapsed() > STUCK) {
+        let mut st = s.status.lock().unwrap();
+        if !matches!(*st, Status::Unavailable(_)) {
+            *st = Status::Unavailable(format!("The graphics chip didn't answer in time ({})", STAGE.lock().unwrap()));
+        }
+    }
+    s.status.lock().unwrap().clone()
 }
 
 /// Ask for a picture of `scene` from `view`, `size` pixels. Returns the wish's id; the
@@ -264,7 +284,13 @@ fn worker(s: Arc<Shared>) {
             continue;
         }
         let ctx = wish.ctx.clone();
+        *s.busy_since.lock().unwrap() = Some(Instant::now());
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| draw(&mut dev, &mut cur, &wish)));
+        *s.busy_since.lock().unwrap() = None;
+        if matches!(*s.status.lock().unwrap(), Status::Unavailable(_)) {
+            // Given up on while it was stuck; stay with points.
+            continue;
+        }
         let outcome = match result {
             Ok(r) => r,
             Err(_) => Err("The splat renderer stopped unexpectedly".to_string()),
@@ -295,16 +321,19 @@ fn draw(dev: &mut Option<Device>, cur: &mut Option<Current>, wish: &Wish) -> Res
         *cur = None;
     }
     if dev.is_none() {
+        stage("opening the device");
         *dev = Some(open_device()?);
     }
     let d = dev.as_ref().unwrap();
     let format = wgpu::TextureFormat::Rgba8Unorm;
     if cur.as_ref().is_none_or(|c| !Arc::ptr_eq(&c.scene, &wish.scene)) {
         *cur = None; // free the old scene's buffers first
+        stage("loading the scene");
         *cur = Some(load(d, &wish.scene, format)?);
     }
     let c = cur.as_mut().unwrap();
     let [w, h] = [wish.size[0].clamp(16, 4096), wish.size[1].clamp(16, 4096)];
+    stage("drawing");
     let scope = d.device.push_error_scope(wgpu::ErrorFilter::Validation);
     let oom = d.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
     c.loaded.update_camera(&d.queue, &orbit(&wish.scene, &wish.view), UVec2::new(w, h));
@@ -332,12 +361,14 @@ fn draw(dev: &mut Option<Device>, cur: &mut Option<Current>, wish: &Wish) -> Res
     c.loaded.render(&mut enc, &tv);
     enc.copy_texture_to_buffer(tex.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } }, tex.size());
     d.queue.submit([enc.finish()]);
+    stage("checking for errors");
     if let Some(e) = pollster::block_on(oom.pop()) {
         return Err(format!("Out of graphics memory ({e})"));
     }
     if let Some(e) = pollster::block_on(scope.pop()) {
         return Err(format!("The graphics driver refused the scene ({e})"));
     }
+    stage("reading the picture back");
     buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
     d.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| format!("The graphics adapter stopped ({e})"))?;
     if let Some(e) = d.failed.lock().unwrap().take() {
@@ -366,6 +397,7 @@ fn load(d: &Device, scene: &Arc<Scene>, format: wgpu::TextureFormat) -> Result<C
     let drawn = n.div_ceil(step);
     let scope = d.device.push_error_scope(wgpu::ErrorFilter::Validation);
     let oom = d.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    stage("loading the scene");
     let mut loaded = if has_sh {
         Loaded::Sh(gs::Viewer::<ShPod>::new(&d.device, format, &splats).map_err(|e| e.to_string())?)
     } else {
@@ -388,6 +420,7 @@ fn load(d: &Device, scene: &Arc<Scene>, format: wgpu::TextureFormat) -> Result<C
             v.update_gaussian_transform(&d.queue, 1.0, gs::core::GaussianDisplayMode::Splat, degree, false, std_dev);
         }
     }
+    stage("checking the scene loaded");
     if let Some(e) = pollster::block_on(oom.pop()) {
         return Err(format!("Out of graphics memory for {} splats ({e})", drawn));
     }
