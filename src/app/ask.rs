@@ -375,7 +375,10 @@ impl App {
         });
         self.help_regions.push((r.response.rect, if self.ask.lab { topics::LAB } else { topics::ASK_AI }));
         let frame = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::same(10));
-        let r = egui::CentralPanel::default().frame(frame).show(ui, |ui| if self.ask.lab { self.lab_chat(ui) } else { self.ask_chat(ui) });
+        let r = egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+            // "Get a small model…" is on the left beside the Lab too: its screen shows here either way.
+            if self.ask.lab && !(self.ask.offer || self.ask.fetch.is_some()) { self.lab_chat(ui) } else { self.ask_chat(ui) }
+        });
         self.help_regions.push((r.response.rect, if self.ask.lab { topics::LAB } else { topics::ASK_AI }));
     }
 
