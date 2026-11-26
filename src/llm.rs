@@ -73,6 +73,10 @@ pub enum Request {
     Predict { text: String, chat: bool, continuation: String, steps: u32, settings: crate::lab::Settings },
     /// The Lab's speed test.
     Bench(crate::lab::BenchSettings),
+    /// The Lab: read `text` (as a chat message when `chat`) and catch every layer's output.
+    Look { text: String, chat: bool },
+    /// The Lab: what each layer would predict after token `n` of the last look.
+    Lens(usize),
     Unload,
 }
 
@@ -90,6 +94,11 @@ pub enum Event {
     Benching(u32, u32),
     /// A speed test's middle results: (read speed, write speed, first token seconds, threads).
     Benched { read_speed: f32, write_speed: f32, first_token: f32, threads: u32 },
+    /// A look inside: the tokens and how much each layer changed them.
+    Looked(crate::lens::Inside),
+    /// What each layer would predict after token `token`: per layer, the likeliest tokens and
+    /// their probabilities.
+    Lensed { token: usize, layers: Vec<Vec<(String, f32)>> },
     Unloaded,
     Error(String),
 }
@@ -147,7 +156,7 @@ pub fn processor_problem() -> Option<&'static str> {
 }
 
 /// The engine, set up once per run of the app.
-fn backend() -> Result<&'static LlamaBackend, String> {
+pub(crate) fn backend() -> Result<&'static LlamaBackend, String> {
     static B: std::sync::OnceLock<Result<LlamaBackend, String>> = std::sync::OnceLock::new();
     B.get_or_init(|| {
         let mut b = LlamaBackend::init().map_err(|e| e.to_string())?;
@@ -165,7 +174,7 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
             Some(r) => r,
             None => match rx.recv() {
                 Ok(Request::Load(r)) => r,
-                Ok(Request::Ask { .. } | Request::Predict { .. } | Request::Bench(_)) => {
+                Ok(Request::Ask { .. } | Request::Predict { .. } | Request::Bench(_) | Request::Look { .. } | Request::Lens(_)) => {
                     let _ = tx.send(Event::Error("No model is loaded.".into()));
                     continue;
                 }
@@ -212,6 +221,9 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
         let _ = tx.send(Event::Loaded { context, seconds: t.elapsed().as_secs_f32() });
         // Tokens already in the context, from the previous turn.
         let mut cached: Vec<LlamaToken> = Vec::new();
+        // The Lab's last look inside, and the model's last steps (read when first needed).
+        let mut looked: Option<crate::probe::Layers> = None;
+        let mut head: Option<Result<crate::lens::Head, String>> = None;
         loop {
             match rx.recv() {
                 Ok(Request::Ask { conversation, sampling }) => {
@@ -247,6 +259,26 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
                         Ok(None) => Event::Error("The speed test was stopped.".into()),
                         Err(e) => Event::Error(e),
                     });
+                }
+                Ok(Request::Look { text, chat }) => {
+                    let full = if chat { prompt(&model, template.as_ref(), &[Message { role: Role::User, text }]) } else { text };
+                    looked = None;
+                    match look(&model, &full, threads) {
+                        Ok((layers, inside)) => {
+                            let last = layers.tokens - 1;
+                            looked = Some(layers);
+                            let _ = tx.send(Event::Looked(inside));
+                            let head = head.get_or_insert_with(|| crate::lens::Head::read(&req.path));
+                            let _ = tx.send(lens(&model, head, looked.as_ref(), last, threads));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(Event::Error(e));
+                        }
+                    }
+                }
+                Ok(Request::Lens(n)) => {
+                    let head = head.get_or_insert_with(|| crate::lens::Head::read(&req.path));
+                    let _ = tx.send(lens(&model, head, looked.as_ref(), n, threads));
                 }
                 Ok(Request::Load(r)) => {
                     next = Some(r);
@@ -458,6 +490,42 @@ fn predict(
     Ok(crate::lab::Run { steps: out, prompt_tokens: tokens.len(), seconds: t.elapsed().as_secs_f32() })
 }
 
+/// The Lab: reads `text` in a context of its own and catches every layer's output.
+fn look(model: &LlamaModel, text: &str, threads: i32) -> Result<(crate::probe::Layers, crate::lens::Inside), String> {
+    let t = Instant::now();
+    let tokens = model.vocab().tokenize(text.as_bytes(), true, true);
+    let layers = crate::probe::layers(model, &tokens, threads)?;
+    let inside = crate::lens::Inside {
+        tokens: tokens.iter().map(|t| String::from_utf8_lossy(&model.vocab().token_to_piece(*t, false, None)).into_owned()).collect(),
+        change: crate::lens::changes(&layers),
+        seconds: t.elapsed().as_secs_f32(),
+    };
+    Ok((layers, inside))
+}
+
+/// How many guesses the Lab shows for each layer.
+const LENS_TOP: usize = 5;
+
+/// What each layer would predict after token `n` of the last look.
+fn lens(model: &LlamaModel, head: &Result<crate::lens::Head, String>, layers: Option<&crate::probe::Layers>, n: usize, threads: i32) -> Event {
+    let head = match head {
+        Ok(h) => h,
+        Err(e) => return Event::Error(e.clone()),
+    };
+    let Some(l) = layers.filter(|l| n < l.tokens) else { return Event::Error("Look inside first.".into()) };
+    if l.n_embd != head.n_embd() {
+        return Event::Error("The model's output weights don't match its layers.".into());
+    }
+    let xs: Vec<Vec<f32>> = (0..l.states.len()).map(|layer| head.normalise(l.at(layer, n))).collect();
+    match head.top(&xs, LENS_TOP, threads as usize) {
+        Ok(guesses) => {
+            let piece = |id: u32| String::from_utf8_lossy(&model.vocab().token_to_piece(LlamaToken(id as i32), false, None)).into_owned();
+            Event::Lensed { token: n, layers: guesses.into_iter().map(|g| g.top.into_iter().map(|(id, p)| (piece(id), p)).collect()).collect() }
+        }
+        Err(e) => Event::Error(e),
+    }
+}
+
 /// The Lab's speed test: reads `read` tokens of ordinary text and writes `write` more, `runs`
 /// times from an empty context. Returns the middle read speed, write speed and time to the first
 /// token, or None if stopped.
@@ -623,6 +691,41 @@ mod tests {
         assert_eq!(run(&e, "", 5).steps.iter().map(|s| s.chosen.id).collect::<Vec<_>>(), a.steps.iter().map(|s| s.chosen.id).collect::<Vec<_>>());
         let b = run(&e, &a.steps[0].chosen.text, 1);
         assert_eq!(b.steps.len(), 1);
+    }
+
+    /// Looking inside a real model: the last layer's guess matches what the model itself writes.
+    #[test]
+    #[ignore]
+    fn looks_inside() {
+        let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
+        let e = Engine::start();
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 512, gpu: false }));
+        let next = |e: &Engine| loop {
+            match e.rx.recv_timeout(std::time::Duration::from_secs(120)).unwrap() {
+                Event::Error(err) => panic!("{err}"),
+                Event::Loading | Event::Loaded { .. } => {}
+                ev => return ev,
+            }
+        };
+        e.send(Request::Look { text: "The capital of France is".into(), chat: false });
+        let Event::Looked(inside) = next(&e) else { panic!("expected a look") };
+        assert!(!inside.tokens.is_empty());
+        assert!(inside.change.iter().skip(1).flatten().all(|c| c.is_finite() && *c >= 0.0));
+        let Event::Lensed { token, layers } = next(&e) else { panic!("expected the layers' guesses") };
+        assert_eq!(token, inside.tokens.len() - 1);
+        assert_eq!(layers.len(), inside.change.len());
+        for l in &layers {
+            assert!(!l.is_empty() && l.windows(2).all(|w| w[0].1 >= w[1].1) && l[0].1 <= 1.0);
+        }
+        let settings = crate::lab::Settings { temperature: 0.0, ..Default::default() };
+        e.send(Request::Predict { text: "The capital of France is".into(), chat: false, continuation: String::new(), steps: 1, settings });
+        let Event::Predicted(run) = next(&e) else { panic!("expected a prediction") };
+        let last = layers.last().unwrap();
+        assert_eq!(last[0].0, run.steps[0].chosen.text, "the last layer's guess is the model's own");
+        assert!((last[0].1 - run.steps[0].chosen.raw).abs() < 0.02, "{} vs {}", last[0].1, run.steps[0].chosen.raw);
+        // Another token of the same look.
+        e.send(Request::Lens(0));
+        let Event::Lensed { token: 0, .. } = next(&e) else { panic!("expected token 0") };
     }
 
     /// The Lab's speed test on a real model.

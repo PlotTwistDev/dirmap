@@ -1993,6 +1993,7 @@ dependencies = [
  "keyring",
  "libc",
  "llama-cpp-2",
+ "llama-cpp-sys-2",
  "lofty",
  "lzma-rust2",
  "midly",
