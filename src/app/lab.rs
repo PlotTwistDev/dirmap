@@ -6,6 +6,7 @@
 use super::*;
 
 mod inside;
+mod steer;
 use crate::kit::{self, Tone};
 use crate::lab::{BenchResult, BenchSettings, Run, Settings, Step};
 use crate::llm::Request;
@@ -30,6 +31,11 @@ pub(super) struct LabState {
     /// The last look inside, and the token whose layers' guesses are shown.
     pub inside: Option<crate::lens::Inside>,
     pub lensed: Option<(usize, Vec<Vec<(String, f32)>>)>,
+    /// Steering: the loaded model's layers, what to steer with, and the last result (without,
+    /// with, and how long the push was).
+    layers: usize,
+    steer: steer::Steering,
+    pub steered: Option<(Run, Run, f32)>,
     bench: BenchSettings,
     /// The speed test running: (run, of runs).
     pub bench_progress: Option<(u32, u32)>,
@@ -53,6 +59,9 @@ impl Default for LabState {
             page: Page::Next,
             inside: None,
             lensed: None,
+            layers: 0,
+            steer: steer::Steering::default(),
+            steered: None,
             bench: BenchSettings::default(),
             bench_progress: None,
             bench_asked: BenchSettings::default(),
@@ -65,7 +74,21 @@ impl Default for LabState {
 enum Page {
     Next,
     Inside,
+    Steer,
     Speed,
+}
+
+impl LabState {
+    /// A model was loaded: forget what was found inside the last one.
+    pub fn loaded_layers(&mut self, layers: usize) {
+        if layers != self.layers {
+            self.steer.layer = steer::default_layer(layers);
+        }
+        self.layers = layers;
+        self.inside = None;
+        self.lensed = None;
+        self.steered = None;
+    }
 }
 
 /// Green for a confident choice, through amber, to red for an unlikely one.
@@ -116,12 +139,13 @@ impl App {
             ui.add_space(8.0);
             let busy = self.ask.phase != super::ask::Phase::Idle;
             ui.add_enabled_ui(!busy, |ui| {
-                kit::segmented(ui, &mut self.ask.lab_state.page, &[(Page::Next, "Next token"), (Page::Inside, "Inside"), (Page::Speed, "Speed")], false);
+                kit::segmented(ui, &mut self.ask.lab_state.page, &[(Page::Next, "Next token"), (Page::Inside, "Inside"), (Page::Steer, "Steer"), (Page::Speed, "Speed")], false);
             });
         });
         match self.ask.lab_state.page {
             Page::Speed => return self.lab_speed(ui, name),
             Page::Inside => return self.lab_inside(ui, name),
+            Page::Steer => return self.lab_steer(ui, name),
             Page::Next => {}
         }
         ui.weak("What the model would write next, and how sure it is.");

@@ -1301,6 +1301,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-aep"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=3b09a644a560ca526dfd0c7d8a1d107cdde26324#3b09a644a560ca526dfd0c7d8a1d107cdde26324"
+
+[[package]]
 name = "craft-doc"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=3b09a644a560ca526dfd0c7d8a1d107cdde26324#3b09a644a560ca526dfd0c7d8a1d107cdde26324"
@@ -2200,6 +2205,7 @@ dependencies = [
  "bzip2",
  "calamine",
  "chrono",
+ "craft-aep",
  "craft-doc",
  "csv",
  "data-encoding",

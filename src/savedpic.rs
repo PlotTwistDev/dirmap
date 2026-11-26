@@ -73,11 +73,16 @@ pub struct Saved {
     pub facts: Vec<(&'static str, String)>,
     /// Said instead of the usual line when there's no picture (why there isn't one).
     pub note: Option<String>,
+    /// The files a project uses, checked (Craft Apps projects).
+    pub refs: Option<crate::projrefs::Refs>,
 }
 
 pub fn read(path: &Path) -> Result<Saved, String> {
     if path.file_name().is_some_and(|n| crate::craftfile::of(&n.to_string_lossy()).is_some()) {
         return crate::craftfile::read(path);
+    }
+    if path.file_name().is_some_and(|n| crate::aepfile::is_project(&n.to_string_lossy())) {
+        return crate::aepfile::read(path);
     }
     let app = path.file_name().and_then(|n| app_of(&n.to_string_lossy())).ok_or("Not a file Filescape knows")?;
     if path.is_dir() {
@@ -109,7 +114,7 @@ pub fn read(path: &Path) -> Result<Saved, String> {
     if let Some(p) = &picture {
         facts.push(("Saved picture", format!("{} × {}", p.width(), p.height())));
     }
-    Ok(Saved { picture, facts, note: None })
+    Ok(Saved { picture, facts, note: None, refs: None })
 }
 
 pub(crate) fn zip_open(path: &Path) -> Option<zip::ZipArchive<std::fs::File>> {

@@ -18,7 +18,8 @@
   probability, the ten likeliest alternatives, and what temperature, top-k, top-p and min-p do to
   them. Pick a different token to see where the text goes instead. **Inside** shows how much each
   of the model's layers changes each word, and what each layer would predict if the model stopped
-  there. **Speed** tests how fast a
+  there. **Steer** pushes a model towards one idea and away from another while it writes, beside
+  what it writes unpushed. **Speed** tests how fast a
   model reads and writes on this computer, and keeps the results to compare. Free. See
   [The Lab](../views/model-lab.md).
 - **💬 Ask AI** chats with a model already on this computer, run by Filescape itself: no Ollama,
@@ -127,6 +128,14 @@
   TextureCraft, DeckCraft, AniCraft, MaterialCraft, FilmCraft and SoundCraft) preview from the
   picture or PDF the app saved inside them, with their pages, layers, size, length and the version
   that saved them. Filescape reads them itself, without the apps.
+- Music projects, and FilmCraft, SoundCraft and EffectCraft projects, list the footage and sound
+  files they use: where each one is (this drive, another drive, a network drive or the cloud), which
+  are missing or only in the cloud, and their size together. Click one to show it in Files.
+- After Effects projects (.aep, .aepx) show the version that saved them, their compositions and
+  the footage files they use.
+- LightCraft library folders preview like a file: their photos and albums, what the catalogue,
+  thumbnail cache and imported photos take, and the photos used from other folders. PhotoCraft
+  documents saved as a folder preview like the single-file ones.
 - Music projects from Ableton Live (.als), REAPER (.rpp), FL Studio (.flp) and Cubase or Nuendo
   (.cpr, .npr) show the version that saved them, the tempo, tracks, plugins and the sound files
   they use, marking any that aren't on this computer.
