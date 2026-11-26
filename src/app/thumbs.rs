@@ -296,6 +296,7 @@ fn decode(job: &Job, config: Config) -> Option<Decoded> {
     };
     let max = config.max;
     match kind {
+        Kind::Media(crate::media::Media::Video) => crate::video::poster(&local, max).ok().map(|(w, h, rgba)| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba))),
         Kind::Media(_) => crate::media::thumbnail(&local, max).ok().map(|(w, h, rgba)| Decoded::Image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba))),
         Kind::Image | Kind::LinearImage => preview::decode_image(&local, kind == Kind::LinearImage, job.size, max).ok().map(|r| Decoded::Image(r.0)),
         Kind::Psd => crate::psdview::picture(&local, max).ok().map(|p| {

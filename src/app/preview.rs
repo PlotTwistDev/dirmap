@@ -119,7 +119,19 @@ pub(super) struct Look {
     pub download_ok: std::collections::HashSet<PathBuf>,
     /// A video playing in the preview.
     pub video: Option<VideoView>,
+    /// Frames from across the video being previewed.
+    strip: Option<StripView>,
 }
+
+/// A video's filmstrip: being read, then its frames.
+struct StripView {
+    path: PathBuf,
+    rx: Option<mpsc::Receiver<Result<Vec<crate::video::Frame>, String>>>,
+    frames: Vec<(f64, egui::TextureHandle)>,
+}
+
+/// The filmstrip's height.
+const STRIP_H: f32 = 56.0;
 
 /// A video playing in a preview, and its picture.
 pub(super) struct VideoView {
@@ -355,7 +367,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
                 Err(_) => Content::Error(e),
             },
         },
-        Kind::Media(m) => match crate::media::thumbnail(path, 1024) {
+        Kind::Media(m) => match if m == crate::media::Media::Video { crate::video::poster(path, 1024) } else { crate::media::thumbnail(path, 1024) } {
             Ok((w, h, rgba)) => Content::Image {
                 look: None,
                 pixels: Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)),
@@ -920,7 +932,96 @@ impl App {
     }
 
     /// The preview itself: an image, text, or a large icon.
-    pub(super) fn preview_body(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
+    /// The preview of a file, filling `size`. Videos get a filmstrip under the picture.
+    pub(super) fn preview_body(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, size: Vec2) {
+        let strip = !e.is_dir
+            && crate::media::media_of(&e.name) == Some(crate::media::Media::Video)
+            && !e.not_local()
+            && !crate::fsys::remote::is_remote(path)
+            && !crate::fsys::archive::inside(path)
+            && size.y > 240.0
+            && crate::video::supported();
+        if !strip {
+            if self.files.look.strip.as_ref().is_some_and(|s| s.path != path) {
+                self.files.look.strip = None;
+            }
+            return self.preview_main(ui, path, e, size);
+        }
+        self.preview_main(ui, path, e, vec2(size.x, size.y - STRIP_H - ui.spacing().item_spacing.y));
+        self.filmstrip(ui, path, vec2(size.x, STRIP_H));
+    }
+
+    /// Frames from across a video; clicking one plays from there.
+    fn filmstrip(&mut self, ui: &mut egui::Ui, path: &Path, size: Vec2) {
+        const N: usize = 8;
+        let pal = style::pal(ui);
+        if self.files.look.strip.as_ref().is_none_or(|s| s.path != path) {
+            let (tx, rx) = mpsc::channel();
+            let (p, ctx) = (path.to_path_buf(), ui.ctx().clone());
+            let h = (STRIP_H * ui.ctx().pixels_per_point()).round() as u32;
+            let _ = std::thread::Builder::new().name("filescape-filmstrip".into()).spawn(move || {
+                let _ = tx.send(crate::video::filmstrip(&p, N, h).map(|(_, f)| f));
+                ctx.request_repaint();
+            });
+            self.files.look.strip = Some(StripView { path: path.to_path_buf(), rx: Some(rx), frames: Vec::new() });
+        }
+        let st = self.files.look.strip.as_mut().expect("just set");
+        if let Some(rx) = &st.rx
+            && let Ok(res) = rx.try_recv()
+        {
+            st.rx = None;
+            for (i, f) in res.unwrap_or_default().into_iter().enumerate() {
+                let img = egui::ColorImage::from_rgba_unmultiplied(f.size, &f.rgba);
+                st.frames.push((f.pts, ui.ctx().load_texture(format!("strip:{}:{i}", path.display()), img, egui::TextureOptions::LINEAR)));
+            }
+        }
+        let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+        let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
+        p.rect_filled(r, style::RADIUS, Color32::BLACK);
+        if st.rx.is_some() {
+            ui.put(Rect::from_center_size(r.center(), vec2(18.0, 18.0)), egui::Spinner::new());
+            return;
+        }
+        if st.frames.is_empty() {
+            return;
+        }
+        // As many as fit at a useful size: every other one in a narrow pane.
+        let total = st.frames.len();
+        let fit = ((r.width() / (STRIP_H * 1.5)).floor() as usize).clamp(3, total.max(3)).min(total);
+        let shown: Vec<usize> = (0..fit).map(|k| (k * total + total / 2) / fit).map(|i| i.min(total - 1)).collect();
+        let cell = r.width() / fit as f32;
+        let mut seek = None;
+        for (i, (t, tex)) in shown.iter().map(|&j| &st.frames[j]).enumerate() {
+            let c = Rect::from_min_size(pos2(r.left() + i as f32 * cell, r.top()), vec2(cell, r.height())).shrink(1.0);
+            let ts = tex.size_vec2();
+            let s = (c.width() / ts.x).min(c.height() / ts.y);
+            let img = Rect::from_center_size(c.center(), ts * s);
+            p.image(tex.id(), img, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            let resp = ui.interact(c, ui.id().with(("strip", path, i)), Sense::click());
+            if resp.hovered() {
+                p.rect_stroke(img, 2.0, Stroke::new(2.0, pal.accent), egui::StrokeKind::Inside);
+            }
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(format!("Play from {}", crate::media::clock(*t))).clicked() {
+                seek = Some(*t);
+            }
+        }
+        if let Some(t) = seek {
+            match &self.files.look.video {
+                Some(v) if v.video.path == path => {
+                    v.video.seek(t);
+                    v.video.play();
+                }
+                _ => {
+                    let ctx = ui.ctx().clone();
+                    let video = crate::video::Video::start(path, true, move || ctx.request_repaint());
+                    video.seek(t);
+                    self.files.look.video = Some(VideoView { video, tex: None, serial: 0 });
+                }
+            }
+        }
+    }
+
+    fn preview_main(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
         let pal = style::pal(ui);
         if e.is_dir {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
