@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::fsys::PathShow;
+use crate::getmodel::{self, STARTER};
 use crate::kit::{self, Tone};
 use crate::llm::{self, Event, Message, Request, Role};
 use crate::models::Model;
@@ -36,6 +37,19 @@ pub(super) struct AskState {
     actual_context: u32,
     /// The last thing that went wrong.
     problem: Option<String>,
+    /// "Get a small model" is on screen.
+    offer: bool,
+    fetch: Option<Fetch>,
+    /// How the last download ended, when it didn't finish: stopped by the user, or went wrong.
+    fetch_problem: Option<(Tone, String)>,
+    /// A model just downloaded, to load once the library has found it.
+    fetched: Option<PathBuf>,
+}
+
+/// The starter model downloading.
+struct Fetch {
+    progress: Arc<getmodel::Progress>,
+    rx: mpsc::Receiver<Result<PathBuf, String>>,
 }
 
 #[derive(Default, PartialEq)]
@@ -79,6 +93,7 @@ impl App {
     }
 
     pub(super) fn poll_ask(&mut self, ctx: &egui::Context) {
+        self.poll_fetch(ctx);
         if let Some(rx) = &self.ask.check {
             match rx.try_recv() {
                 Ok(Ok(req)) => {
@@ -137,6 +152,53 @@ impl App {
         if got || self.ask.phase != Phase::Idle {
             ctx.request_repaint_after(Duration::from_millis(30));
         }
+    }
+
+    fn poll_fetch(&mut self, ctx: &egui::Context) {
+        if let Some(f) = &self.ask.fetch {
+            match f.rx.try_recv() {
+                Ok(Ok(path)) => {
+                    self.ask.fetch = None;
+                    self.ask.offer = false;
+                    self.ask.fetched = Some(path);
+                    // Look again so the library lists it, then load it (below).
+                    self.start_models();
+                }
+                Ok(Err(e)) => {
+                    let tone = if f.progress.cancel.load(Ordering::Relaxed) { Tone::Neutral } else { Tone::Warn };
+                    self.ask.fetch = None;
+                    self.ask.fetch_problem = Some((tone, e));
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
+                Err(mpsc::TryRecvError::Disconnected) => self.ask.fetch = None,
+            }
+        }
+        if let Some(path) = self.ask.fetched.clone()
+            && let Some(list) = &self.models.list
+        {
+            self.ask.fetched = None;
+            let found = runnable(list).into_iter().find(|(_, m)| m.files.first().is_some_and(|f| f.path == path)).map(|(_, m)| m.clone());
+            match found {
+                Some(m) if self.ask.phase == Phase::Idle && self.ask.check.is_none() => self.load_model(&m),
+                Some(m) => self.ask.picked = m.files.first().map(|f| (f.path.clone(), m.name.clone())),
+                None => self.ask.problem = Some(format!("{} was downloaded to {}, but the model list doesn't show it.", STARTER.name, path.shown())),
+            }
+        }
+    }
+
+    fn start_fetch(&mut self) {
+        let Some(dir) = getmodel::folder() else {
+            self.ask.fetch_problem = Some((Tone::Warn, "Filescape can't tell where to save it on this computer.".into()));
+            return;
+        };
+        self.ask.fetch_problem = None;
+        let progress = Arc::new(getmodel::Progress::default());
+        let (tx, rx) = mpsc::channel();
+        let p = progress.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(getmodel::download(&STARTER, &dir, &p));
+        });
+        self.ask.fetch = Some(Fetch { progress, rx });
     }
 
     /// Checks the picked model fits in memory, then loads it.
@@ -206,13 +268,19 @@ impl App {
         ui.strong("Model");
         ui.add_space(4.0);
         let mut load = None;
+        let has_starter = models.iter().any(|(_, m)| m.files.first().is_some_and(|f| f.path.file_name().is_some_and(|n| n == STARTER.file)));
         if models.is_empty() {
             ui.label("No model Filescape can run was found.");
             ui.add_space(4.0);
             ui.weak(
-                "Ask AI runs GGUF models, the kind Ollama and LM Studio download. Install a model with one of \
-                 them, or put a .gguf file in Downloads, then press Look again.",
+                "Ask AI runs GGUF models, the kind Ollama and LM Studio download. Filescape can download a small \
+                 one for you, or install one with Ollama or LM Studio, or put a .gguf file in Downloads, then press Look again.",
             );
+            ui.add_space(8.0);
+            if kit::button(ui, kit::Kind::Primary, None, "Get a small model…").clicked() {
+                self.ask.offer = true;
+            }
+            ui.add_space(4.0);
         }
         for (_, m) in &models {
             let path = m.files.first().map(|f| f.path.clone());
@@ -248,6 +316,12 @@ impl App {
             }
             if r.double_clicked() && self.ask.phase == Phase::Idle {
                 load = Some((*m).clone());
+            }
+        }
+        if !models.is_empty() && !has_starter {
+            ui.add_space(2.0);
+            if kit::button(ui, kit::Kind::Ghost, None, "Get a small model…").on_hover_text(format!("Download {} ({})", STARTER.name, crate::scan::human(STARTER.size))).clicked() {
+                self.ask.offer = true;
             }
         }
         ui.add_space(10.0);
@@ -304,6 +378,10 @@ impl App {
 
     /// Middle: the conversation and the question box.
     fn ask_chat(&mut self, ui: &mut egui::Ui) {
+        if self.ask.offer || self.ask.fetch.is_some() {
+            self.get_model(ui);
+            return;
+        }
         let name = self.ask.loaded.as_ref().map(|(_, n, _)| n.clone());
         ui.horizontal(|ui| {
             match (&self.ask.phase, &name) {
@@ -346,6 +424,8 @@ impl App {
                 ui.vertical_centered(|ui| {
                     if name.is_some() {
                         ui.label("Ask anything. Press Enter to send, Shift+Enter for a new line.");
+                    } else if self.ask.phase == Phase::Idle && self.models.list.as_ref().is_some_and(|l| runnable(l).is_empty()) {
+                        ui.label("To start, get a small model on the left, or install one with Ollama or LM Studio.");
                     } else if self.ask.phase == Phase::Idle {
                         ui.label("Pick a model on the left and press Load.");
                     }
@@ -402,6 +482,93 @@ impl App {
         if send {
             self.send_question();
         }
+    }
+}
+
+impl App {
+    /// "Get a small model": everything about the download, for the user to approve, then its
+    /// progress.
+    fn get_model(&mut self, ui: &mut egui::Ui) {
+        let s = &STARTER;
+        let folder = getmodel::folder();
+        let part = folder.as_ref().and_then(|f| std::fs::metadata(f.join(format!("{}.part", s.file))).ok()).map_or(0, |m| m.len());
+        ui.heading("Get a small model");
+        ui.add_space(6.0);
+        egui::ScrollArea::vertical().id_salt("ask-get").auto_shrink(false).show(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(640.0));
+            ui.label("Filescape can download one small model, so Ask AI works without installing anything else. This is what it would download:");
+            ui.add_space(10.0);
+            egui::Grid::new("ask-starter").num_columns(2).spacing([18.0, 7.0]).show(ui, |ui| {
+                ui.weak("Model");
+                ui.strong(s.name);
+                ui.end_row();
+                ui.weak("Made by");
+                ui.label(s.publisher);
+                ui.end_row();
+                ui.weak("Download");
+                ui.label(format!("{} ({})", crate::scan::human(s.size), s.file));
+                ui.end_row();
+                ui.weak("Memory to run it");
+                ui.label(format!("About {}", crate::scan::human(s.memory)));
+                ui.end_row();
+                ui.weak("Licence");
+                ui.hyperlink_to(s.licence, s.licence_url).on_hover_text(s.licence_url);
+                ui.end_row();
+                ui.weak("From");
+                ui.hyperlink_to(s.page.trim_start_matches("https://"), s.page).on_hover_text("The publisher's own page on Hugging Face");
+                ui.end_row();
+                ui.weak("Saved in");
+                ui.label(folder.as_ref().map_or_else(|| "Unknown".into(), |f| f.shown()));
+                ui.end_row();
+            });
+            ui.add_space(10.0);
+            ui.label(s.about);
+            ui.add_space(10.0);
+            ui.weak(
+                "This is the only time Ask AI goes online. The file comes from the publisher's own page, at a fixed \
+                 version, and Filescape checks its checksum before using it. Nothing about you or your files is sent.",
+            );
+            ui.add_space(12.0);
+            if let Some((tone, e)) = &self.ask.fetch_problem {
+                kit::callout(ui, *tone, e.clone());
+                ui.add_space(8.0);
+            }
+            if let Some(f) = &self.ask.fetch {
+                let done = f.progress.done.load(Ordering::Relaxed);
+                let stage = *f.progress.stage.lock().unwrap();
+                let frac = done as f32 / s.size as f32;
+                ui.add(egui::ProgressBar::new(frac).desired_width(ui.available_width().min(480.0)).text(format!(
+                    "{} of {}",
+                    crate::scan::human(done),
+                    crate::scan::human(s.size)
+                )));
+                ui.add_space(4.0);
+                ui.weak(if stage.is_empty() { "Starting…" } else { stage });
+                ui.add_space(8.0);
+                let stopping = f.progress.cancel.load(Ordering::Relaxed);
+                let r = ui.add_enabled_ui(!stopping, |ui| kit::button(ui, kit::Kind::Secondary, None, if stopping { "Stopping…" } else { "Stop" })).inner;
+                if r.on_hover_text("What has downloaded is kept, so it carries on from there next time").clicked() {
+                    f.progress.cancel.store(true, Ordering::Relaxed);
+                }
+            } else {
+                let label = if part > 0 {
+                    format!("Carry on downloading ({} left)", crate::scan::human(s.size.saturating_sub(part)))
+                } else {
+                    format!("Download {}", crate::scan::human(s.size))
+                };
+                ui.horizontal(|ui| {
+                    if kit::button(ui, kit::Kind::Primary, None, &label).clicked() {
+                        self.start_fetch();
+                    }
+                    if kit::button(ui, kit::Kind::Secondary, None, "Not now").clicked() {
+                        self.ask.offer = false;
+                        self.ask.fetch_problem = None;
+                    }
+                });
+                ui.add_space(6.0);
+                ui.weak("When it has downloaded, Filescape loads it, ready for your first question.");
+            }
+        });
     }
 }
 

@@ -168,3 +168,23 @@ pub fn wsl() -> Vec<PathBuf> {
 pub fn wsl() -> Vec<PathBuf> {
     Vec::new()
 }
+
+/// Free space available to this user on the volume holding `path` (which must exist).
+#[cfg(unix)]
+pub fn free_at(path: &std::path::Path) -> Option<u64> {
+    statvfs(path).map(|(_, free)| free)
+}
+
+#[cfg(windows)]
+pub fn free_at(path: &std::path::Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let (mut avail, mut total, mut free) = (0u64, 0u64, 0u64);
+    (unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut avail, &mut total, &mut free) } != 0).then_some(avail)
+}
+
+#[cfg(not(any(windows, unix)))]
+pub fn free_at(_path: &std::path::Path) -> Option<u64> {
+    None
+}
