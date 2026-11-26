@@ -80,6 +80,8 @@
 - Thumbnails are kept on disk between runs, so folders you've seen show their pictures at once.
   A new **Previews & thumbnails** page in Settings has presets, the cache's size and **Clear**,
   and switches for filmstrips, video pictures and 3D and MIDI thumbnails.
+- **Help › Supported Formats** lists every kind of file Filescape previews, what the preview
+  shows and what reads it.
 - MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the
   details.
 - Quick Look works in Storage Analysis too: click a tile and press **Space**. **Full screen** (or

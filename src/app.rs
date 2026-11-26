@@ -973,6 +973,7 @@ impl App {
                 ("Getting Started", "", topics::QUICK_START),
                 ("Keyboard Shortcuts", "", topics::KEYBOARD),
                 ("Mouse Controls", "", topics::MOUSE),
+                ("Supported Formats", "", topics::FORMATS),
                 ("Search and Filter Examples", "", topics::EXAMPLES),
                 ("Troubleshooting", "", topics::TROUBLESHOOTING),
                 ("What's New", "", topics::WHATS_NEW),

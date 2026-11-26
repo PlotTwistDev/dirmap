@@ -53,8 +53,7 @@ pub enum Category {
 pub struct Format {
     /// Short name, used in code to single out a format ("docx", "svg").
     pub id: &'static str,
-    /// What people call it. For the Supported Formats list (phase 1 of the roadmap).
-    #[allow(dead_code)]
+    /// What people call it, for the Supported formats page.
     pub name: &'static str,
     pub category: Category,
     /// Lower-case extensions, without the dot.
@@ -66,6 +65,54 @@ impl Format {
     pub fn get(id: &str) -> &'static Format {
         FORMATS.iter().find(|f| f.id == id).unwrap_or_else(|| panic!("no format {id}"))
     }
+}
+
+impl Format {
+    /// What its preview shows, and what reads it: for the Supported formats page.
+    pub fn about(&self) -> (&'static str, &'static str) {
+        match self.id {
+            "markdown" => ("Formatted text, with the source a click away", "Filescape"),
+            "text" => ("The text, in syntax colours for code (about 200 languages)", "Filescape (syntect, two-face)"),
+            "csv" => ("A table, with column names from the first row", "Filescape (csv)"),
+            "sheet" => ("Each sheet's cells, as last saved", "calamine"),
+            "docx" | "odt" => ("Formatted text: headings, lists, tables", "Filescape"),
+            "pptx" | "odp" => ("Each slide's title and points", "Filescape"),
+            "epub" => ("Chapters, formatted; the cover in Icons view", "Filescape"),
+            "jxl" => ("The picture; channels one by one", "jxl-oxide"),
+            "heif" => ("The picture", "The system (macOS; Windows with the HEIF and AV1 extensions; Linux with libheif or ffmpeg)"),
+            _ => match self.category {
+                Category::Picture => ("The picture; channels one by one", "image"),
+                Category::LinearPicture => ("The picture with an exposure slider; every layer of a multilayer EXR", "image, exr"),
+                Category::Drawing => ("The drawing, with its source a click away", "resvg"),
+                Category::Font => ("A specimen: the alphabet and sample text", "Filescape (ttf-parser, ab_glyph)"),
+                Category::Raw => ("The camera's own preview, and the camera, lens and exposure", "Filescape (kamadak-exif)"),
+                Category::Photoshop => ("The flattened picture", "Filescape"),
+                Category::SystemPicture => ("The picture", "The system"),
+                Category::Video => ("A frame, playback and a filmstrip", "The system (AVFoundation, Media Foundation, or ffmpeg on Linux)"),
+                Category::Audio => ("Cover, waveform, tags and playback", "The system, with lofty for tags"),
+                Category::Pdf => ("Every page", "hayro (the system for protected PDFs)"),
+                Category::Midi => ("A piano roll, with tempo and instruments", "midly"),
+                Category::Database => ("Each table's columns and first rows, read-only", "SQLite (rusqlite)"),
+                Category::Model => ("A shaded model to turn about", "Filescape (gltf for glTF)"),
+                Category::Text | Category::Spreadsheet | Category::Document => ("A preview", "Filescape"),
+            },
+        }
+    }
+}
+
+/// The Supported formats page's table (see `docs/src/reference/formats.md`).
+pub fn markdown() -> String {
+    let mut out = String::from("| Format | Extensions | What the preview shows | Read by |\n|---|---|---|---|\n");
+    let exts = |e: &[&str]| e.iter().map(|x| format!("`.{x}`")).collect::<Vec<_>>().join(" ");
+    for f in FORMATS {
+        let (see, by) = f.about();
+        out.push_str(&format!("| {} | {} | {see} | {by} |\n", f.name, exts(f.exts)));
+    }
+    out.push_str(&format!(
+        "| Archives | {} | A tree of what's inside, with sizes and how much was saved | Filescape (zip, sevenz-rust2, tar) |\n",
+        exts(&["zip", "7z", "tar", "tar.gz", "tgz", "tar.xz", "txz", "tar.bz2", "tbz2"])
+    ));
+    out
 }
 
 /// Files with no extension that are text by name.
