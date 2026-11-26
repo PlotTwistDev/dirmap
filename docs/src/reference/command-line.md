@@ -28,7 +28,7 @@ filescape --help                                  show the usage line
 | `--keep` | With `--cli`: keep the cloud files in PATH on this computer, downloading what isn't here, as **Always Keep on This Device** (Windows) or **Download Now** (macOS) does. Needs Filescape Professional, like `--free-up`. |
 | `--models` | With `--cli`: list the AI models in PATH instead of the usual report: each model's size, name, details and where it's from, its files, and which are copies or unused Ollama downloads. See [AI models](../views/ai-models.md). |
 | `--cloud-mounts` | Also walk into cloud drives mounted inside the folder (rclone, FUSE), which are left out by default. See [Mounted cloud drives](../disk-usage/cloud-files.md#mounted-cloud-drives). |
-| `--save-snapshot FILE` | With `--cli`: also save the scan as a snapshot file for comparing later. |
+| `--save-snapshot FILE` | With `--cli`: also save the scan as a snapshot file for comparing later. Needs Filescape Professional, as saving a snapshot in the window does; without it, nothing is scanned and Filescape exits with 3. |
 | `--compare FILE` | Open the window with this snapshot loaded, so the scan is compared with it. See [Comparing with a snapshot](../analysis/snapshots.md). |
 | `--all-fs` | Include other drives mounted inside the scanned folder (Linux and macOS), for this run only. Overrides **Stay on the scanned drive**. |
 | `-h`, `--help` | Print the usage line and exit. |

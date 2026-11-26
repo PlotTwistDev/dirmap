@@ -48,9 +48,137 @@ a line of details:
 | Context | The longest text the model can read at once, in tokens (roughly ¾ of a word each). |
 | Add-on | A vision projector or adapter that works together with a model, not on its own. |
 
-Click a model to see everything known about it on the right, with the full path of each of its
-files. Double-click it, or right-click and choose **Show in Files**, to open the folder it's in
-with the file selected. **Copy path** copies the path of its first file.
+Click a model to see what's known about it on the right, with the full path of each of its files.
+Right-click it and choose **Show in Files**, or press **Show in Files** on the right, to open the
+folder it's in with the file selected. **Copy path** copies the path of its first file.
+
+## Inspecting a model
+
+Double-click a model, or press **🔍 Inspect**, to see what's inside it. Filescape reads only the
+part of each file where the model describes itself and lists its pieces, never the weights, so
+this takes a moment even for a model of many gigabytes. **⏴ All models** or **Esc** goes back to the
+list.
+
+**Overview** lists what's known about the model, such as its architecture, layers, attention
+heads, context length, vocabulary, licence and number of parameters. A tag beside each fact says
+where it comes from:
+
+| Tag | Meaning |
+|---|---|
+| **file** | Read from the model file itself. |
+| **calculated** | Worked out by Filescape from the model file, for example the number of parameters, by adding up its tensors. |
+| **publisher** | Stated in the publisher's files beside the model (`config.json` or the README of a Hugging Face download). Filescape hasn't checked it against the weights. |
+
+Below, **How the numbers are stored** shows how much of the model is kept in each number type. A
+**Q4_K_M** model, for example, keeps most of its numbers as Q4_K and a few important ones at the
+higher Q6_K precision.
+
+**Health** checks the model and lists what it found, problems first:
+
+- whether every part of a model split into several files is there;
+- whether a file is cut short, as a stopped download leaves it, or damaged, with tensors that
+  overlap or are out of place;
+- whether the format is safe to open (GGUF and safetensors) or can contain code (PyTorch
+  checkpoints);
+- whether the number of parameters matches the model's size label, and whether a GGUF model has a
+  vocabulary and a chat template.
+
+These checks only use what was already read, so they're instant. Ollama and Hugging Face name each
+downloaded file by its SHA-256 checksum. For those, **Verify checksum** reads the whole model and
+compares, which proves not a single byte has changed since it was downloaded. It takes a while for
+a large model; **Cancel** stops it.
+
+**Check the numbers** reads a small sample of every tensor (about 128 KB of each) and looks for
+broken values (NaN or infinite, which make a model give wrong answers) and tensors that are all
+zeros, which usually means their data was damaged or left out. Click a tensor it lists to see it
+in **Tensors**.
+
+**Will it run?** estimates how much memory the model needs on this computer, and where it would
+run:
+
+- **This computer** shows its memory and its graphics card's memory. On a Mac with Apple silicon
+  the two are shared. If Filescape can't find the graphics card's memory, type it in.
+- Move **Context** to choose how much text the model reads at once, in tokens (about ¾ of a word
+  each). The memory a model needs grows with it, because it keeps a cache of everything it has
+  read. **Compact (Q8)** stores that cache in about half the space.
+- The result says whether the model runs fully on the graphics chip (fast), split between the
+  graphics card and main memory, in main memory on the processor (slow), or not at all. The bar
+  shows the model itself, the cache and working space, against the memory available.
+- **At other context lengths** lists the same for each length, and **Smaller versions of this
+  model** what a compressed version would need, such as Q4_K_M.
+
+These are estimates for apps based on llama.cpp, such as Ollama and LM Studio. Each app adds a
+little of its own.
+
+**Structure** shows how the model is built and where its space goes:
+
+- The strip at the top shows the model's layers in order, left to right. A taller column takes
+  more space, which shows at a glance which layers were kept at a higher precision.
+- Below, the model is drawn as a map, like the [treemap](treemap.md) of a drive: each box is a
+  layer, the embeddings or the output, sized by the space it takes and divided into its tensors.
+  Click a box, or a column of the strip, to see that layer on its own, with each tensor named.
+  **⏴ Whole model**, or a right-click on the map, goes back. Click a tensor to find it in the
+  Tensors list.
+- **Colour by** switches between **What it does** (embeddings, attention, feed-forward,
+  mixture-of-experts, normalisation and output) and **Number type** (such as Q4_K or Q6_K).
+  Rest the pointer on a colour in the key to see what it means.
+
+**Tensors** lists every tensor (block of numbers) in the model with its type, shape, number of
+values and size. Type in the box to show only some, such as `attn` for the attention tensors or
+`Q6_K` for one type. Click a column heading to sort by it, and again to reverse. Right-click a
+tensor to copy its name.
+
+Click a tensor to see more about it on the right, with its numbers: their average, spread,
+smallest and largest, how many are zero, and a histogram of their values. For a large tensor
+Filescape reads a sample from across it, which takes a moment. It reads full and half precision
+(F32, F16, BF16) and the common compressed types (Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q4_K, Q5_K and
+Q6_K); for other types only the facts are shown.
+
+**Tokens** shows the model's vocabulary: the pieces of text, called tokens, that it reads and
+writes. Filescape reads it from a GGUF file, or from `tokenizer.json` beside a Hugging Face model.
+
+- The summary gives the number of tokens, the kind of tokenizer, how many tokens start a new word,
+  and the special tokens that mark the start and end of text and of each turn in a conversation.
+- **What the tokens are** sorts every token by its first letter: Latin, Chinese and Japanese,
+  Cyrillic, Arabic and so on, numbers, punctuation and indentation. It's a quick guide to which
+  languages a model handles well, since a language with few tokens takes many more of them to
+  write, which is slower and fills the context sooner. Click a line to list only those tokens.
+- **How long the tokens are** is a histogram of their lengths in characters, and **Longest**
+  shows the longest ones.
+- **Chat template** shows how a conversation is laid out for the model, and says which format it
+  uses (such as ChatML or Llama 3) and whether it mentions tool calls, a thinking mode or images.
+- On the right, every token is listed with its number. A space is shown as `·`, a new line as `↵`
+  and a tab as `⇥`. Type in the box to find tokens, or `#` and a number to find one by its number.
+  Right-click a token to copy it. Letters the app's fonts can't show, such as Chinese, are shown
+  by their code points (`U+4E2D`); copy the token to see it elsewhere.
+
+Some tokens are only part of a character: a Chinese character or an emoji takes several bytes,
+and a model joins these pieces to spell anything its vocabulary lacks.
+
+**Metadata** lists every entry the model file carries, such as its training settings and
+tokenizer, with a box to find one.
+
+**Compare with…**, at the top right, puts this model beside another one from the list, in a
+**Compare** tab:
+
+- A sentence sums up what they share, for example "Same architecture and size, stored at
+  different precisions" for two downloads of one model compressed two ways, or "The same kind of
+  model at a different size".
+- Their facts side by side, with the ones that differ highlighted.
+- **Where the space goes**: the embeddings, attention, feed-forward and other parts of each.
+- **How the numbers are stored** in each, by number type.
+- **Metadata that differs**, entry by entry.
+- **Tensors**, matched by name, showing those stored differently (another number type or shape)
+  and those only one of them has. A Hugging Face model's tensor names are translated to GGUF's, so
+  a GGUF download can be compared with the original it was made from.
+
+Only what the files say about themselves is compared, not the weights. **Stop comparing** closes
+the tab.
+
+GGUF and safetensors models can be inspected. PyTorch checkpoints (`.ckpt`, `.pt`, `.pth` and
+`.bin`) are never opened, because they are saved with Python's pickle, which can run code when a
+file is opened. Their names and sizes are shown, and the same model in safetensors or GGUF format
+can be inspected instead. Files only in the cloud aren't read, so as not to download them.
 
 ## Copies and unused downloads
 

@@ -12,6 +12,25 @@
 - Files that are byte-for-byte copies of another model are marked, as are Ollama downloads no
   installed model uses.
 - `filescape --cli --models PATH` prints the same list.
+- Double-click a model to inspect it: its architecture, layers, heads, vocabulary, licence and
+  parameters, each tagged with where it comes from (the file, Filescape's own count, or the
+  publisher's notes), how its numbers are stored, and every tensor and metadata entry, searchable
+  and sortable. PyTorch checkpoints are never opened, since they can run code. See
+  [Inspecting a model](../views/ai-models.md#inspecting-a-model).
+- A model's **Health** finds missing parts, files cut short by a stopped download, damaged
+  files, unsafe formats and size labels that don't add up, and can verify Ollama and Hugging Face
+  downloads against their checksums.
+- **Will it run?** estimates the memory a model needs at any context length and says whether it
+  runs on this computer's graphics chip, split, on the processor, or not at all.
+- Click a tensor to see a histogram and statistics of its numbers, and **Check the numbers** in
+  Health samples every tensor for broken values or missing data.
+- A model's **Tokens** show its vocabulary: which languages and kinds of text it covers, its
+  special tokens and chat template, and every token, searchable.
+- **Compare with…** puts two models side by side: their facts, where their space goes, how their
+  numbers are stored, and which tensors and metadata differ, so you can tell two compressions of
+  one model from two different models.
+- A model's **Structure** shows its layers in order and draws the model as a map of its layers
+  and tensors, coloured by what each part does or by how its numbers are stored.
 
 ### See what's in files on the map
 

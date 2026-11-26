@@ -9,7 +9,7 @@
 
 use crate::scan::{self, Node};
 use std::collections::HashMap;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -678,66 +678,27 @@ fn mark_copies(models: &mut [Model], progress: &Progress) -> Option<()> {
 
 // ---------- GGUF ----------
 
-/// Reads the metadata at the start of a GGUF file. Arrays (the tokenizer's vocabulary, often a
-/// few MB) are skipped without being kept.
+/// What a GGUF file says about itself, from its metadata (the tensor directory isn't read).
 pub fn gguf_info(path: &Path) -> Option<Info> {
-    let f = std::fs::File::open(path).ok()?;
-    let mut r = BufReader::with_capacity(256 * 1024, f);
-    let mut magic = [0u8; 4];
-    r.read_exact(&mut magic).ok()?;
-    if &magic != b"GGUF" {
-        return None;
-    }
-    let version = read_u32(&mut r)?;
-    if version < 2 {
-        return None;
-    }
-    read_u64(&mut r)?; // tensor count
-    let kvs = read_u64(&mut r)?;
-    if kvs > 100_000 {
-        return None;
-    }
-    let mut strings: HashMap<String, String> = HashMap::new();
-    let mut numbers: HashMap<String, u64> = HashMap::new();
-    for _ in 0..kvs {
-        let key = read_str(&mut r)?;
-        let ty = read_u32(&mut r)?;
-        match ty {
-            8 => {
-                let v = read_str(&mut r)?;
-                strings.insert(key, v);
-            }
-            9 => {
-                let item = read_u32(&mut r)?;
-                let n = read_u64(&mut r)?;
-                skip_array(&mut r, item, n)?;
-            }
-            _ => {
-                if let Some(v) = read_scalar(&mut r, ty)? {
-                    numbers.insert(key, v);
-                }
-            }
-        }
-    }
-    let arch = strings.get("general.architecture").cloned();
+    let h = crate::gguf::read(path, false).ok()?;
+    Some(info_of(&h))
+}
+
+/// The model facts the list shows, from a GGUF header.
+pub fn info_of(h: &crate::gguf::Header) -> Info {
+    let arch = h.str("general.architecture").map(str::to_string);
     let mut info = Info {
-        name: strings.get("general.name").cloned().filter(|s| !s.trim().is_empty()),
-        params: strings.get("general.size_label").cloned().filter(|s| !s.is_empty()),
-        quant: numbers.get("general.file_type").and_then(|&t| ftype_name(t)).map(str::to_string),
-        context: arch.as_ref().and_then(|a| numbers.get(&format!("{a}.context_length")).copied()),
-        companion: matches!(arch.as_deref(), Some("clip" | "mllama_vision")) || strings.get("general.type").is_some_and(|t| t == "adapter" || t == "mmproj"),
+        name: h.str("general.name").map(str::to_string).filter(|s| !s.trim().is_empty()),
+        params: h.str("general.size_label").map(str::to_string).filter(|s| !s.is_empty()),
+        quant: h.u64("general.file_type").and_then(ftype_name).map(str::to_string),
+        context: h.arch_u64("context_length"),
+        companion: matches!(arch.as_deref(), Some("clip" | "mllama_vision")) || h.str("general.type").is_some_and(|t| t == "adapter" || t == "mmproj"),
         arch,
     };
     if info.arch.as_deref() == Some("clip") {
         info.arch = Some("vision projector".into());
     }
-    Some(info)
-}
-
-fn read_u32(r: &mut impl Read) -> Option<u32> {
-    let mut b = [0u8; 4];
-    r.read_exact(&mut b).ok()?;
-    Some(u32::from_le_bytes(b))
+    info
 }
 
 fn read_u64(r: &mut impl Read) -> Option<u64> {
@@ -746,79 +707,8 @@ fn read_u64(r: &mut impl Read) -> Option<u64> {
     Some(u64::from_le_bytes(b))
 }
 
-fn read_str(r: &mut impl Read) -> Option<String> {
-    let n = read_u64(r)?;
-    if n > 1 << 20 {
-        return None;
-    }
-    let mut b = vec![0u8; n as usize];
-    r.read_exact(&mut b).ok()?;
-    Some(String::from_utf8_lossy(&b).into_owned())
-}
-
-/// Size in bytes of a fixed-size GGUF value type.
-fn scalar_size(ty: u32) -> Option<u64> {
-    Some(match ty {
-        0 | 1 | 7 => 1,
-        2 | 3 => 2,
-        4..=6 => 4,
-        10..=12 => 8,
-        _ => return None,
-    })
-}
-
-/// Integer scalars as u64 (others are read and dropped).
-fn read_scalar(r: &mut impl Read, ty: u32) -> Option<Option<u64>> {
-    let n = scalar_size(ty)?;
-    let mut b = [0u8; 8];
-    r.read_exact(&mut b[..n as usize]).ok()?;
-    Some(match ty {
-        0 | 2 | 4 | 10 => Some(u64::from_le_bytes(b)),
-        1 | 3 | 5 | 11 => {
-            // Sign-extend, then keep only non-negative values.
-            let v = match n {
-                1 => b[0] as i8 as i64,
-                2 => i16::from_le_bytes([b[0], b[1]]) as i64,
-                4 => i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as i64,
-                _ => i64::from_le_bytes(b),
-            };
-            u64::try_from(v).ok()
-        }
-        _ => None,
-    })
-}
-
-fn skip_array<R: Read + Seek>(r: &mut BufReader<R>, item: u32, n: u64) -> Option<()> {
-    match item {
-        8 => {
-            for _ in 0..n {
-                let len = read_u64(r)?;
-                if len > 1 << 20 {
-                    return None;
-                }
-                r.seek_relative(len as i64).ok()?;
-            }
-        }
-        9 => {
-            for _ in 0..n {
-                let inner = read_u32(r)?;
-                let m = read_u64(r)?;
-                skip_array(r, inner, m)?;
-            }
-        }
-        t => {
-            let bytes = scalar_size(t)?.checked_mul(n)?;
-            if bytes > 1 << 30 {
-                return None;
-            }
-            r.seek(SeekFrom::Current(bytes as i64)).ok()?;
-        }
-    }
-    Some(())
-}
-
 /// llama.cpp's `llama_ftype`: what most of the weights are stored as.
-fn ftype_name(t: u64) -> Option<&'static str> {
+pub(crate) fn ftype_name(t: u64) -> Option<&'static str> {
     Some(match t {
         0 => "F32",
         1 => "F16",
