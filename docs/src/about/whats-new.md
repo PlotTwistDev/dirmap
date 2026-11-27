@@ -2,6 +2,17 @@
 
 ## Next version
 
+### One map, two places
+
+- The analysis dock in Files has the same toolbar as Storage Analysis, in a compact form:
+  **Treemap** / **Sunburst**, **Follow**, **Colour**, and display options under **⋯**. It keeps its
+  own colours.
+- **Follow** can now follow the **left** or **right** pane as well as the active one or the
+  selection, or be **Locked** on one folder.
+- **Open in Storage Analysis** takes the dock's folder, view, colours and selection with it, and
+  **Reveal in Files** (on Storage Analysis's right-click menu and Preview pane) goes the other way.
+- The dock's information line says how much of a folder is only in the cloud.
+
 ### Panes that make room for the map
 
 - The Preview pane beside the Storage Analysis map has **Preview** and **Details** tabs, opens by

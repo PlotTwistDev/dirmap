@@ -231,7 +231,7 @@ pub(super) fn pill(ui: &mut egui::Ui, icon: Option<Icon>, text: &str, on: bool, 
 }
 
 /// Two-way switch drawn as joined pills (Treemap | Sunburst, Highlight | Only).
-fn switch<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, Option<Icon>, &str, &str)]) -> bool {
+pub(super) fn switch<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, Option<Icon>, &str, &str)]) -> bool {
     let t = kit::tokens(ui);
     let mut changed = false;
     egui::Frame::new().fill(style::blend(t.pal.chrome, t.pal.hover, 0.55)).corner_radius(kit::CONTROL_RADIUS).inner_margin(2).show(ui, |ui| {

@@ -126,7 +126,7 @@ impl ViewFilter {
 }
 
 /// What the colors on the maps mean.
-#[derive(Clone, Copy, PartialEq, Hash)]
+#[derive(Clone, Copy, PartialEq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 enum ColorMode {
     Type,
     Age,

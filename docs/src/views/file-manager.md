@@ -541,9 +541,16 @@ You can see where the space goes while you browse, without switching to Storage 
   on a Mac).
 - **Resize it** by dragging the line above it. The list and the dock each keep at least a few
   rows.
-- **🗖** makes the dock as tall as possible, and **🗗** puts it back.
-- **⛶** opens the same folder in the full Storage Analysis workspace.
-- **✖** closes it.
+- **↑** makes the dock as tall as possible, and **⌄** puts it back.
+- **⧉** (Open in Storage Analysis) opens the same folder in the full Storage Analysis workspace,
+  with the dock's view (treemap or sunburst), colours and selection.
+- **✕** closes it.
+- **⋯** has the display options: file names and previews on tiles (shared with Storage
+  Analysis). In a narrow dock it also holds **Follow** and **Colour**.
+
+The dock's toolbar uses the same controls as the one above the Storage Analysis map: **Treemap**
+/ **Sunburst**, **Follow**, **Colour**, zoom to the selection and the whole folder. The dock
+keeps its own view and colours, so colouring it by age doesn't change Storage Analysis.
 
 Filescape remembers whether the dock is open, and its height.
 
@@ -578,9 +585,10 @@ Choose with the menu on the dock's toolbar:
 
 | Mode | The map shows |
 |---|---|
-| **Follow folder** (the usual) | The folder open in the list. Switching tabs switches the map too. |
-| **Pinned** | The folder that was on the map when you chose Pinned, wherever you browse. **📌** shows which. |
+| **Follow active pane** (the usual) | The folder open in the pane you're working in. Switching tabs or panes switches the map too. |
+| **Follow left pane** / **Follow right pane** | With two panes, the folder open in that pane, whichever pane you're working in. Double-clicking a tile opens its folder in that pane. |
 | **Follow selection** | The folder selected in the list, without opening it. With a file selected, the open folder, with the file outlined. |
+| **Locked** | The folder that was on the map when you chose Locked, wherever you browse. The menu's label names it. |
 
 Moving between a folder and its subfolders zooms the map in or out, so you can see where you
 went.
@@ -609,7 +617,8 @@ The line above the map shows:
 
 - **Analysed**, **Changed since analysis**, **Analysed with filters**, **Scanning** or **Not
   analysed**;
-- the folder's size, files and folders;
+- the folder's size, files and folders, and, when it holds cloud files that aren't downloaded,
+  how much is only in the cloud (never counted as on this computer);
 - its largest subfolder and largest file;
 - when it was analysed.
 
@@ -622,6 +631,10 @@ colours: the same legend as in Storage Analysis. Point to one to see where those
 it to highlight them, and click it again to stop; **Ctrl+click** (**⌘-click**) highlights several.
 **All N types** lists every type in the folder. **Colour**
 on the dock's toolbar switches to colouring by age, or by change since a snapshot.
+
+To go the other way, right-click an item in Storage Analysis (on the map or in its folder tree)
+and choose **Reveal in Files**, or use **Reveal in Files** in its Preview pane: the Files
+workspace opens with the item selected in its folder.
 
 ## Copying, moving and deleting
 
