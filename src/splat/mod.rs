@@ -11,6 +11,7 @@ pub mod glb;
 pub mod gpu;
 pub mod html;
 pub mod inspect;
+pub mod lod;
 pub mod ply;
 pub mod project;
 #[allow(clippy::module_inception)]
@@ -252,6 +253,8 @@ pub fn claims(path: &Path) -> bool {
         "ply" => classify_ply(path).is_ok_and(|k| k != PlyKind::Mesh && k != PlyKind::Unknown),
         "glb" => glb::is_splat_glb(path),
         "html" | "htm" => html::has_scene(path),
+        "json" if name == "lod-meta.json" => lod::count(path).is_some(),
+        "lcc" | "lcc2" => true,
         "json" if name == "meta.json" => std::fs::File::open(path).is_ok_and(|f| {
             use std::io::Read;
             let mut head = Vec::new();
@@ -266,7 +269,7 @@ pub fn claims(path: &Path) -> bool {
 pub fn may_hold_scene(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
-    matches!(ext, "spz" | "splat" | "ksplat" | "sog" | "ply" | "glb" | "html" | "htm") || name == "meta.json"
+    matches!(ext, "spz" | "splat" | "ksplat" | "sog" | "ply" | "glb" | "html" | "htm" | "lcc" | "lcc2") || name == "meta.json" || name == "lod-meta.json"
 }
 
 /// A short label for a thumbnail or map tile, from the file's header alone (a few KB, never
@@ -274,6 +277,10 @@ pub fn may_hold_scene(name: &str) -> bool {
 pub fn badge(path: &Path) -> Option<String> {
     let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
+    if lod::is_entry(&name) {
+        let (format, n) = lod::count(path)?;
+        return Some(format!("{format} · {} splats", short_count(n)));
+    }
     let (format, n, noun) = match ext {
         "ply" => {
             let h = ply::Header::read(path).ok()?;
@@ -316,7 +323,10 @@ pub fn read(path: &Path, limits: Limits) -> Result<Scene, String> {
         "splat" => splat::read_splat(path, limits)?,
         "ksplat" => splat::read_ksplat(path, limits)?,
         "sog" => sog::read_bundle(path, limits)?,
+        "json" if name == "lod-meta.json" => lod::read_streamed_sog(path, limits)?,
         "json" => sog::read_folder(path, limits)?,
+        "lcc" => lod::read_lcc(path, limits)?,
+        "lcc2" => lod::read_lcc2(path, limits)?,
         "glb" => glb::read(path, limits)?,
         "html" | "htm" => html::read(path, limits)?,
         _ => ply::read(path, limits)?,

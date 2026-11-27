@@ -244,7 +244,7 @@ pub(super) fn kind_for(f: &crate::formats::Format) -> Kind {
 /// meta.json.
 fn may_be_splat(path: &Path) -> bool {
     let ext = path.extension().map(|x| x.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    matches!(ext.as_str(), "ply" | "glb" | "html" | "htm") || path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("meta.json"))
+    matches!(ext.as_str(), "ply" | "glb" | "html" | "htm") || path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("meta.json") || n.eq_ignore_ascii_case("lod-meta.json"))
 }
 
 fn load_splat(path: &Path) -> Content {

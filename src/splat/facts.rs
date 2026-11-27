@@ -85,7 +85,8 @@ pub fn describe(scene: &mut Scene, path: &Path) {
             f.push(("Trained", "With antialiasing (Mip-Splatting)".into()));
         }
         // A loose SOG's meta.json and a web page aren't the scene's real size.
-        let whole_file = !path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("meta.json")) && !scene.format.ends_with("inside a web page");
+        // Nor are the descriptions of scenes kept in chunks.
+        let whole_file = !path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("meta.json") || super::lod::is_entry(&n.to_string_lossy())) && !scene.format.ends_with("inside a web page");
         if scene.total > 0 && file_len > 0 && whole_file {
             let per = file_len as f64 / scene.total as f64;
             f.push(("Bytes per splat", format!("{per:.1}")));
