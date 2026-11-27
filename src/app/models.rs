@@ -56,6 +56,8 @@ struct ModelPage {
     context: u64,
     cache_q8: bool,
     vram_typed: f32,
+    /// The newest Lab speed test of this model on this computer, read once.
+    measured: Option<Option<crate::lab::BenchResult>>,
     /// The tensor picked in Tensors, and its weight statistics (being read, or read).
     picked: Option<usize>,
     stats_job: Option<(usize, mpsc::Receiver<Result<crate::weights::Stats, String>>)>,
@@ -336,6 +338,7 @@ impl App {
             scan_all: None,
             scanned: None,
             vram_typed: 0.0,
+            measured: None,
             verify: None,
             verified: Vec::new(),
             zoom: None,
@@ -856,6 +859,69 @@ fn hardware(ctx: &egui::Context) -> Option<&'static crate::fit::Hardware> {
     HW.get()
 }
 
+/// A small uppercase heading, as on the Overview.
+fn heading_small(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text).size(10.5).strong().color(kit::tokens(ui).weak));
+    ui.add_space(2.0);
+}
+
+/// What this computer has, and where Filescape's own runtime runs a model on it.
+fn this_computer(ui: &mut egui::Ui, hw: &crate::fit::Hardware, detected: u64, vram_typed: &mut f32) {
+    let t = kit::tokens(ui);
+    heading_small(ui, "THIS COMPUTER");
+    kit::card_frame(&t).show(ui, |ui| {
+        ui.set_width(ui.available_width().min(760.0));
+        egui::Grid::new("fit-hw").num_columns(2).spacing([14.0, 5.0]).show(ui, |ui| {
+            ui.weak("Processor");
+            let mut cpu = if hw.cpu.is_empty() { "Not known".to_string() } else { hw.cpu.clone() };
+            cpu += &format!(" · {} threads", hw.threads);
+            if !hw.cpu_features.is_empty() {
+                cpu += &format!(" · {}", hw.cpu_features.join(", "));
+            }
+            ui.label(cpu).on_hover_text("Instruction sets listed are ones Filescape's AI runtime uses to run models faster.");
+            ui.end_row();
+            ui.weak("Memory");
+            ui.label(match hw.ram_free {
+                Some(f) => format!("{} · {} free now", scan::human(hw.ram), scan::human(f)),
+                None => scan::human(hw.ram),
+            });
+            ui.end_row();
+            ui.weak("Graphics");
+            if hw.unified {
+                ui.label(format!("Shares main memory; about {} of it can hold a model", scan::human(detected)));
+            } else if hw.gpus.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label("Not found. Graphics memory:");
+                    ui.add(egui::DragValue::new(vram_typed).range(0.0..=256.0).speed(0.5).suffix(" GB"));
+                })
+                .response
+                .on_hover_text("Filescape reads NVIDIA cards through their driver and AMD cards on Linux. Type the card's memory to see what other apps could do (0 if none, or if it shares main memory).");
+            } else {
+                let gpus = hw
+                    .gpus
+                    .iter()
+                    .map(|g| match g.vram_free {
+                        Some(f) => format!("{} ({}, {} free)", g.name, scan::human(g.vram), scan::human(f)),
+                        None => format!("{} ({})", g.name, scan::human(g.vram)),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                ui.label(gpus);
+            }
+            ui.end_row();
+            ui.weak("Filescape runs models on");
+            let gpu = hw.runtime.iter().find(|d| d.gpu);
+            match (crate::fit::filescape_gpu(), gpu) {
+                (true, Some(g)) => ui.label(format!("The graphics chip ({}, {})", g.backend, g.description)),
+                (true, None) => ui.label("The graphics chip (Metal)"),
+                _ if crate::llm::processor_problem().is_some() => ui.label("Nothing: this processor lacks AVX2, which Filescape's AI runtime needs"),
+                _ => ui.label("The processor. Filescape's AI runtime doesn't use graphics cards on this computer yet; Ollama and LM Studio can."),
+            };
+            ui.end_row();
+        });
+    });
+}
+
 /// Will it run? Memory needed at a chosen context length, against this computer.
 fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) {
     use crate::fit::{self, Verdict};
@@ -882,28 +948,9 @@ fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) 
     } else {
         // As for a card found: less what the screen and other apps keep.
         let v = (page.vram_typed.max(0.0) as f64 * (1u64 << 30) as f64) as u64;
-        crate::fit::Hardware { ram: 0, gpus: vec![crate::fit::Gpu { name: String::new(), vram: v }], unified: false }.usable_vram()
+        crate::fit::Hardware { gpus: vec![crate::fit::Gpu { vram: v, ..Default::default() }], ..Default::default() }.usable_vram()
     };
-    ui.strong("This computer");
-    if hw.unified {
-        ui.label(format!(
-            "{} of memory, shared with the graphics chip. About {} of it can hold a model.",
-            scan::human(hw.ram),
-            scan::human(detected)
-        ));
-    } else {
-        let gpus = hw.gpus.iter().map(|g| format!("{} ({})", g.name, scan::human(g.vram))).collect::<Vec<_>>().join(", ");
-        if gpus.is_empty() {
-            ui.label(format!("{} of memory. Filescape couldn't find how much memory the graphics card has.", scan::human(hw.ram)));
-            ui.horizontal(|ui| {
-                ui.label("Graphics memory:");
-                ui.add(egui::DragValue::new(&mut page.vram_typed).range(0.0..=256.0).speed(0.5).suffix(" GB"));
-                ui.weak("(0 if none, or if it shares main memory)");
-            });
-        } else {
-            ui.label(format!("{} of memory, and {gpus}.", scan::human(hw.ram)));
-        }
-    }
+    this_computer(ui, hw, detected, &mut page.vram_typed);
     ui.add_space(10.0);
 
     // The choices.
@@ -928,23 +975,73 @@ fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) 
 
     let cache_bytes = if page.cache_q8 { 1.0625 } else { 2.0 };
     let Some(n) = fit::need(d, weights, page.context, cache_bytes) else { return };
-    let verdict = fit::verdict(&n, hw, vram);
-    let (tone, text) = match verdict {
-        Verdict::Gpu => (Tone::Success, format!("Runs fully on the graphics chip: fast. It needs about {}.", scan::human(n.total()))),
-        Verdict::Split(f) => (
-            Tone::Warn,
-            format!("Runs, split between the graphics card and main memory (about {:.0}% on the card): slower than all on the card. It needs about {}.", f * 100.0, scan::human(n.total())),
-        ),
-        Verdict::Cpu => (Tone::Warn, format!("Runs in main memory on the processor: it works, but slowly. It needs about {}.", scan::human(n.total()))),
-        Verdict::TooBig => (Tone::Danger, format!("Too big for this computer: it needs about {}. Try a shorter context, a compact cache, or a smaller version of the model.", scan::human(n.total()))),
-    };
-    kit::callout(ui, tone, text);
-    if matches!(verdict, Verdict::Gpu | Verdict::Split(_)) && !super::ask::use_gpu() {
-        ui.add_space(4.0);
-        kit::note(
-            ui,
-            "That's for apps that use the graphics card, such as Ollama and LM Studio. Filescape's own Ask AI and Lab run models on the processor on this computer, so there they need main memory instead.",
-        );
+    let here = fit::verdict_here(&n, hw);
+    let other = fit::verdict(&n, hw, vram);
+    let total = scan::human(n.total());
+    let runs_here = m.runnable();
+    heading_small(ui, if runs_here { "IN FILESCAPE (ASK AI AND THE LAB)" } else { "IN FILESCAPE" });
+    if !runs_here {
+        kit::callout(ui, Tone::Neutral, "Filescape runs whole GGUF models only, so it can't run this one itself. Below is what an app that runs it would need.");
+    } else {
+        let (tone, text) = match here {
+            Verdict::Gpu => (Tone::Success, format!("Runs on the graphics chip: fast. It needs about {total}.")),
+            Verdict::Split(_) | Verdict::Cpu => (Tone::Warn, format!("Runs on the processor, in main memory: it works, more slowly than on a graphics chip. It needs about {total}.")),
+            Verdict::TooBig => (Tone::Danger, format!("Too big for this computer: it needs about {total}. Try a shorter context, a compact cache, or a smaller version of the model.")),
+        };
+        kit::callout(ui, tone, text);
+        if here != Verdict::TooBig
+            && let Some(free) = hw.ram_free
+            && n.total() > free
+        {
+            ui.add_space(4.0);
+            kit::note(ui, format!("Only {} of memory is free right now. Close other apps before loading it, or the computer will slow down while it makes room.", scan::human(free)));
+        }
+    }
+    if !fit::filescape_gpu() {
+        ui.add_space(8.0);
+        heading_small(ui, "IN APPS THAT USE THE GRAPHICS CARD (OLLAMA, LM STUDIO)");
+        let (tone, text) = match other {
+            Verdict::Gpu => (Tone::Success, format!("Runs fully on the graphics card: fast. It needs about {total}.")),
+            Verdict::Split(f) => (Tone::Warn, format!("Runs split between the graphics card and main memory (about {:.0}% on the card): slower than all on the card.", f * 100.0)),
+            Verdict::Cpu => (Tone::Warn, if vram == 0 { "No graphics memory found, so these apps run it on the processor too.".to_string() } else { "Too big for the graphics card, so it runs on the processor.".to_string() }),
+            Verdict::TooBig => (Tone::Danger, "Too big for this computer.".to_string()),
+        };
+        kit::callout(ui, tone, text);
+    }
+
+    // What the Lab measured, when it has.
+    if runs_here {
+        let path = m.files.first().map(|f| f.path.clone());
+        let measured = page.measured.get_or_insert_with(|| {
+            let file = crate::lab::results_file()?;
+            crate::lab::load_results(&file).into_iter().find(|r| Some(&r.path) == path.as_ref())
+        });
+        ui.add_space(8.0);
+        match measured {
+            Some(r) => {
+                let when = chrono::DateTime::from_timestamp(r.when, 0).map(|d| d.with_timezone(&chrono::Local).format("%-d %b %Y").to_string()).unwrap_or_default();
+                kit::note(
+                    ui,
+                    format!(
+                        "Measured in the Lab on {when}: it writes {:.1} tokens a second and reads {:.0}, and starts answering after {:.1} s. That was at a {}-token context, on the {}, with {} threads.",
+                        r.write_speed,
+                        r.read_speed,
+                        r.first_token,
+                        group(r.context as u64),
+                        match (r.gpu, r.device.is_empty()) {
+                            (true, true) => "graphics chip".to_string(),
+                            (false, true) => "processor".to_string(),
+                            (true, false) => format!("graphics chip ({})", r.device),
+                            (false, false) => format!("processor ({})", r.device),
+                        },
+                        r.threads
+                    ),
+                );
+            }
+            None => {
+                ui.weak("Its speed here hasn't been measured. The Lab's Speed tab measures it on this computer.");
+            }
+        }
     }
     ui.add_space(8.0);
 
@@ -990,23 +1087,30 @@ fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) 
 
     // At other context lengths.
     ui.strong("At other context lengths");
-    egui::Grid::new("fit-table").num_columns(3).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
+    let two = !fit::filescape_gpu();
+    let words = |v: Verdict| match v {
+        Verdict::Gpu => "On the graphics chip",
+        Verdict::Split(_) => "Split",
+        Verdict::Cpu => "On the processor",
+        Verdict::TooBig => "Too big",
+    };
+    egui::Grid::new("fit-table").num_columns(if two { 4 } else { 3 }).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
         ui.weak("Context");
         ui.weak("Needs");
-        ui.weak("On this computer");
+        ui.weak("In Filescape");
+        if two {
+            ui.weak("In Ollama, LM Studio");
+        }
         ui.end_row();
         for &c in contexts.iter().filter(|&&c| c >= 2048 || contexts.len() < 4) {
             let Some(n) = fit::need(d, weights, c, cache_bytes) else { continue };
-            let v = match fit::verdict(&n, hw, vram) {
-                Verdict::Gpu => "On the graphics chip",
-                Verdict::Split(_) => "Split",
-                Verdict::Cpu => "On the processor",
-                Verdict::TooBig => "Too big",
-            };
             let row = if c == page.context { egui::RichText::new(fit::tokens(c)).strong() } else { egui::RichText::new(fit::tokens(c)) };
             ui.label(row);
             ui.label(scan::human(n.total()));
-            ui.label(v);
+            ui.label(if runs_here { words(fit::verdict_here(&n, hw)) } else { "Can't run it" });
+            if two {
+                ui.label(words(fit::verdict(&n, hw, vram)));
+            }
             ui.end_row();
         }
     });
@@ -1024,18 +1128,24 @@ fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) 
             }
             let wq = (elements as f64 * bpw / 8.0) as u64;
             if let Some(n) = fit::need(d, wq, page.context, cache_bytes) {
-                let v = match fit::verdict(&n, hw, vram) {
+                let v = |v: Verdict| match v {
                     Verdict::Gpu => "on the graphics chip",
                     Verdict::Split(_) => "split",
                     Verdict::Cpu => "on the processor",
                     Verdict::TooBig => "too big",
                 };
-                ui.label(format!("{q} ({}): about {}, {v}", precision_words(q), scan::human(n.total())));
+                let mut line = format!("{q} ({}): about {}", precision_words(q), scan::human(n.total()));
+                if fit::filescape_gpu() {
+                    line += &format!(", {}", v(fit::verdict(&n, hw, vram)));
+                } else {
+                    line += &format!(", in Filescape {}; in Ollama or LM Studio {}", v(fit::verdict_here(&n, hw)), v(fit::verdict(&n, hw, vram)));
+                }
+                ui.label(line);
             }
         }
     }
     ui.add_space(8.0);
-    ui.weak("These are estimates for llama.cpp-based apps such as Ollama and LM Studio; each app adds a little of its own.");
+    ui.weak("These are estimates in the way llama.cpp lays a model out, which Filescape, Ollama and LM Studio all use. Each app adds a little of its own, and the system and other open apps need memory too.");
 }
 
 /// The picked tensor: its facts, and a sample of its numbers as statistics and a histogram.

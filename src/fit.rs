@@ -9,15 +9,40 @@ use crate::inspect::Inspection;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Hardware {
     pub ram: u64,
+    /// Main memory free for a model now, without closing anything (None when unknown).
+    pub ram_free: Option<u64>,
     pub gpus: Vec<Gpu>,
     /// The graphics chip shares the main memory (Apple silicon).
     pub unified: bool,
+    /// The processor's name, as llama.cpp reports it ("" when unknown).
+    pub cpu: String,
+    /// Threads the processor runs at once.
+    pub threads: usize,
+    /// Instruction sets the runtime uses that this processor has (AVX2, NEON, ...).
+    pub cpu_features: Vec<&'static str>,
+    /// Where Filescape's own runtime (llama.cpp) can run a model, as it lists them.
+    pub runtime: Vec<Device>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Gpu {
     pub name: String,
     pub vram: u64,
+    /// Free now, when the driver says.
+    pub vram_free: Option<u64>,
+}
+
+/// One of the places llama.cpp can run a model: the processor, or a graphics chip it was built
+/// for (Metal on Apple silicon).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Device {
+    /// "CPU", "Metal", ...
+    pub backend: String,
+    /// "Apple M2", "Intel(R) Core(TM) i7-…".
+    pub description: String,
+    pub total: u64,
+    pub free: u64,
+    pub gpu: bool,
 }
 
 impl Hardware {
@@ -35,6 +60,18 @@ impl Hardware {
     pub fn usable_ram(&self) -> u64 {
         self.ram.saturating_sub((self.ram / 5).max(2 << 30))
     }
+
+    /// Memory Filescape's own runtime can give a model: graphics memory where it uses the
+    /// graphics chip (Apple silicon), main memory elsewhere.
+    pub fn usable_here(&self) -> u64 {
+        if filescape_gpu() && self.unified { self.usable_vram() } else { self.usable_ram() }
+    }
+}
+
+/// Whether Filescape's own runtime puts models on the graphics chip: on Apple silicon, where
+/// llama.cpp uses Metal. Elsewhere it is built for the processor only.
+pub fn filescape_gpu() -> bool {
+    cfg!(all(target_os = "macos", target_arch = "aarch64"))
 }
 
 pub fn detect() -> Hardware {
@@ -46,13 +83,116 @@ pub fn detect() -> Hardware {
         #[cfg(target_os = "linux")]
         gpus.extend(amd_linux());
     }
-    Hardware { ram, gpus, unified }
+    let runtime = runtime_devices();
+    let cpu = runtime.iter().find(|d| d.backend.eq_ignore_ascii_case("cpu")).map(|d| d.description.trim().to_string()).unwrap_or_default();
+    Hardware {
+        ram,
+        ram_free: free_ram(),
+        gpus,
+        unified,
+        cpu,
+        threads: std::thread::available_parallelism().map_or(1, |n| n.get()),
+        cpu_features: cpu_features(),
+        runtime,
+    }
+}
+
+/// The name of what Filescape's runtime runs a model on: the graphics chip when `gpu`, else the
+/// processor.
+pub fn device_name(gpu: bool) -> String {
+    runtime_devices().into_iter().find(|d| if gpu { d.gpu } else { d.backend.eq_ignore_ascii_case("cpu") }).map(|d| d.description.trim().to_string()).unwrap_or_default()
+}
+
+/// The devices llama.cpp lists. Not asked on a processor it can't run on, where its code
+/// would stop the app.
+fn runtime_devices() -> Vec<Device> {
+    if crate::llm::processor_problem().is_some() {
+        return Vec::new();
+    }
+    llama_cpp_2::list_llama_ggml_backend_devices()
+        .into_iter()
+        .map(|d| Device {
+            gpu: matches!(d.device_type, llama_cpp_2::LlamaBackendDeviceType::Gpu | llama_cpp_2::LlamaBackendDeviceType::IntegratedGpu),
+            backend: d.backend,
+            description: d.description,
+            total: d.memory_total as u64,
+            free: d.memory_free as u64,
+        })
+        .collect()
+}
+
+/// Instruction sets that make models faster, among those this build of llama.cpp uses.
+fn cpu_features() -> Vec<&'static str> {
+    #[allow(unused_mut)]
+    let mut v = Vec::new();
+    #[cfg(target_arch = "x86_64")]
+    {
+        for (f, on) in [("AVX2", std::is_x86_feature_detected!("avx2")), ("FMA", std::is_x86_feature_detected!("fma")), ("F16C", std::is_x86_feature_detected!("f16c"))] {
+            if on {
+                v.push(f);
+            }
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        v.push("NEON");
+        if std::arch::is_aarch64_feature_detected!("dotprod") {
+            v.push("dot product");
+        }
+    }
+    v
+}
+
+/// Main memory free now, counting what the system would hand back from its caches.
+pub fn free_ram() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let s = std::fs::read_to_string("/proc/meminfo").ok()?;
+        let kb = s.lines().find(|l| l.starts_with("MemAvailable:"))?.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+        Some(kb * 1024)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("/usr/bin/vm_stat").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()?;
+        parse_vm_stat(&String::from_utf8_lossy(&out.stdout))
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        // SAFETY: the struct is plain data with its length set, as the call needs.
+        unsafe {
+            let mut m: MEMORYSTATUSEX = std::mem::zeroed();
+            m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+            if GlobalMemoryStatusEx(&mut m) != 0 { Some(m.ullAvailPhys) } else { None }
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        None
+    }
+}
+
+/// Free, inactive, speculative and purgeable pages from macOS's `vm_stat`: what a new program
+/// can have without the system swapping.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn parse_vm_stat(s: &str) -> Option<u64> {
+    let page: u64 = s.lines().next()?.split("page size of ").nth(1)?.split_whitespace().next()?.parse().ok()?;
+    let mut pages = 0u64;
+    let mut found = false;
+    for l in s.lines() {
+        let Some((k, v)) = l.split_once(':') else { continue };
+        if matches!(k.trim(), "Pages free" | "Pages inactive" | "Pages speculative" | "Pages purgeable") {
+            pages += v.trim().trim_end_matches('.').parse::<u64>().ok()?;
+            found = true;
+        }
+    }
+    found.then_some(pages * page)
 }
 
 /// NVIDIA cards, from nvidia-smi when it's installed (it comes with the driver).
 fn nvidia() -> Vec<Gpu> {
     let mut cmd = std::process::Command::new("nvidia-smi");
-    cmd.args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    cmd.args(["--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"]).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -62,8 +202,9 @@ fn nvidia() -> Vec<Gpu> {
     String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|l| {
-            let (name, mib) = l.rsplit_once(',')?;
-            Some(Gpu { name: name.trim().to_string(), vram: mib.trim().parse::<u64>().ok()? << 20 })
+            let (rest, free) = l.rsplit_once(',')?;
+            let (name, total) = rest.rsplit_once(',')?;
+            Some(Gpu { name: name.trim().to_string(), vram: total.trim().parse::<u64>().ok()? << 20, vram_free: free.trim().parse::<u64>().ok().map(|m| m << 20) })
         })
         .collect()
 }
@@ -79,7 +220,8 @@ fn amd_linux() -> Vec<Gpu> {
         if let Some(v) = std::fs::read_to_string(e.path().join("device/mem_info_vram_total")).ok().and_then(|s| s.trim().parse::<u64>().ok())
             && v > 512 << 20
         {
-            out.push(Gpu { name: "AMD graphics".into(), vram: v });
+            let used = std::fs::read_to_string(e.path().join("device/mem_info_vram_used")).ok().and_then(|s| s.trim().parse::<u64>().ok());
+            out.push(Gpu { name: "AMD graphics".into(), vram: v, vram_free: used.map(|u| v.saturating_sub(u)) });
         }
     }
     out
@@ -137,6 +279,23 @@ pub fn verdict(n: &Need, hw: &Hardware, vram: u64) -> Verdict {
     if total <= ram { Verdict::Cpu } else { Verdict::TooBig }
 }
 
+/// Where Filescape's own Ask AI and Lab would run it: on the graphics chip only where its
+/// runtime uses one (Apple silicon), otherwise in main memory on the processor.
+pub fn verdict_here(n: &Need, hw: &Hardware) -> Verdict {
+    if filescape_gpu() {
+        return verdict(n, hw, hw.usable_vram());
+    }
+    if n.total() <= hw.usable_ram() { Verdict::Cpu } else { Verdict::TooBig }
+}
+
+/// A quick check from the file size alone, for the library's "Fits this computer" filter:
+/// the weights, working space and the cache at a short context (a few thousand tokens) fit in
+/// the memory Filescape can give a model.
+pub fn fits_roughly(size: u64, hw: &Hardware) -> bool {
+    let need = size + size / 50 + (256 << 20) + (512 << 20);
+    hw.usable_here() > 0 && need <= hw.usable_here()
+}
+
 /// Context lengths to offer, up to the model's own longest.
 pub fn contexts(max: Option<u64>) -> Vec<u64> {
     let max = max.unwrap_or(8192).max(512);
@@ -182,18 +341,37 @@ mod tests {
     #[test]
     fn verdicts() {
         let n = Need { weights: 5 << 30, cache: 1 << 30, work: 1 << 28 };
-        let pc = Hardware { ram: 32 << 30, gpus: vec![Gpu { name: "x".into(), vram: 8 << 30 }], unified: false };
+        let pc = Hardware { ram: 32 << 30, gpus: vec![Gpu { name: "x".into(), vram: 8 << 30, vram_free: None }], unified: false, ..Default::default() };
         assert_eq!(verdict(&n, &pc, pc.usable_vram()), Verdict::Gpu);
-        let small = Hardware { ram: 16 << 30, gpus: vec![Gpu { name: "x".into(), vram: 4 << 30 }], unified: false };
+        let small = Hardware { ram: 16 << 30, gpus: vec![Gpu { name: "x".into(), vram: 4 << 30, vram_free: None }], unified: false, ..Default::default() };
         assert!(matches!(verdict(&n, &small, small.usable_vram()), Verdict::Split(s) if s > 0.4 && s < 0.7));
-        let none = Hardware { ram: 16 << 30, gpus: vec![], unified: false };
+        let none = Hardware { ram: 16 << 30, gpus: vec![], unified: false, ..Default::default() };
         assert_eq!(verdict(&n, &none, 0), Verdict::Cpu);
-        let tiny = Hardware { ram: 8 << 30, gpus: vec![], unified: false };
+        let tiny = Hardware { ram: 8 << 30, gpus: vec![], unified: false, ..Default::default() };
         assert_eq!(verdict(&n, &tiny, 0), Verdict::TooBig);
-        let mac = Hardware { ram: 16 << 30, gpus: vec![], unified: true };
+        let mac = Hardware { ram: 16 << 30, gpus: vec![], unified: true, ..Default::default() };
         assert_eq!(verdict(&n, &mac, mac.usable_vram()), Verdict::Gpu);
         assert_eq!(contexts(Some(40960)), [512, 1024, 2048, 4096, 8192, 16384, 32768, 40960]);
         assert_eq!(tokens(40960), "40K");
         assert_eq!(tokens(131072), "128K");
+    }
+
+    #[test]
+    fn filescape_itself_runs_on_the_processor_off_apple_silicon() {
+        let n = Need { weights: 5 << 30, cache: 1 << 30, work: 1 << 28 };
+        let pc = Hardware { ram: 32 << 30, gpus: vec![Gpu { name: "x".into(), vram: 24 << 30, vram_free: None }], unified: false, ..Default::default() };
+        assert_eq!(verdict(&n, &pc, pc.usable_vram()), Verdict::Gpu);
+        if !filescape_gpu() {
+            assert_eq!(verdict_here(&n, &pc), Verdict::Cpu);
+            assert!(fits_roughly(4 << 30, &pc));
+            assert!(!fits_roughly(40 << 30, &pc));
+        }
+    }
+
+    #[test]
+    fn free_memory_from_vm_stat() {
+        let s = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                               10.\nPages active:                            500.\nPages inactive:                           20.\nPages speculative:                         5.\nPages purgeable:                           1.\n";
+        assert_eq!(parse_vm_stat(s), Some(36 * 16384));
+        assert_eq!(parse_vm_stat("nonsense"), None);
     }
 }

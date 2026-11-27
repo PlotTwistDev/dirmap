@@ -190,6 +190,9 @@ pub struct BenchResult {
     pub write_speed: f32,
     /// Seconds before the first token of an answer: reading the text, then one token.
     pub first_token: f32,
+    /// The processor or graphics chip it ran on, as llama.cpp names it ("" in older results).
+    #[serde(default)]
+    pub device: String,
 }
 
 /// The middle value (the mean of the two middle ones for an even count).
@@ -313,6 +316,7 @@ mod tests {
             read_speed: 100.0,
             write_speed: 10.0,
             first_token: 5.2,
+            device: String::new(),
         };
         save_result(&f, r(1)).unwrap();
         let all = save_result(&f, r(2)).unwrap();

@@ -41,6 +41,8 @@ pub(in crate::app) struct Library {
     runnable: bool,
     /// Only models with something to look at: extra copies, unused downloads.
     attention: bool,
+    /// Only models that would fit this computer's memory in Filescape, at a short context.
+    fits: bool,
     /// Versions and precisions of one model under one heading.
     pub grouped: bool,
     /// Group headings opened (by key).
@@ -51,10 +53,10 @@ pub(in crate::app) struct Library {
 
 impl Library {
     fn filtering(&self) -> bool {
-        self.source.is_some() || self.format.is_some() || self.runnable || self.attention
+        self.source.is_some() || self.format.is_some() || self.runnable || self.attention || self.fits
     }
 
-    fn matches(&self, m: &Model, kind: Kind) -> bool {
+    fn matches(&self, m: &Model, kind: Kind, hw: Option<&crate::fit::Hardware>) -> bool {
         if self.kind.is_some_and(|k| k != kind) || self.source.is_some_and(|s| s != m.source) || self.format.is_some_and(|f| f != m.format) {
             return false;
         }
@@ -62,6 +64,9 @@ impl Library {
             return false;
         }
         if self.attention && m.extra == 0 && !m.orphan {
+            return false;
+        }
+        if self.fits && !(m.runnable() && hw.is_some_and(|hw| crate::fit::fits_roughly(m.size, hw))) {
             return false;
         }
         let q = self.search.trim().to_lowercase();
@@ -382,7 +387,7 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                let n = [lib.source.is_some(), lib.format.is_some(), lib.runnable, lib.attention].iter().filter(|b| **b).count();
+                let n = [lib.source.is_some(), lib.format.is_some(), lib.runnable, lib.attention, lib.fits].iter().filter(|b| **b).count();
                 let label = if n > 0 { format!("Filters  {n}") } else { "Filters".to_string() };
                 let r = viz::pill(ui, Some(Icon::Filter), &label, n > 0, false, true).on_hover_text("Show only some models: by app, format, or what Filescape can run");
                 egui::Popup::menu(&r).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
@@ -404,6 +409,9 @@ impl App {
                     }
                     ui.separator();
                     ui.checkbox(&mut lib.runnable, "Runs in Filescape").on_hover_text("Whole GGUF models on this computer: Ask AI and the Lab can load them");
+                    ui.checkbox(&mut lib.fits, "Fits this computer").on_hover_text(
+                        "Models Filescape can run whose size, with room for a short conversation (a few thousand tokens), fits the memory it can use here. An estimate from the file size; Will it run? on a model's page gives the details.",
+                    );
                     ui.checkbox(&mut lib.attention, "Copies and unused downloads").on_hover_text("Models with space that can be freed");
                     if lib.filtering() {
                         ui.separator();
@@ -411,6 +419,7 @@ impl App {
                             lib.source = None;
                             lib.format = None;
                             lib.runnable = false;
+                            lib.fits = false;
                             lib.attention = false;
                         }
                     }
@@ -430,7 +439,8 @@ impl App {
         ui.add_space(6.0);
 
         // The lines to show.
-        let shown: Vec<usize> = (0..list.len()).filter(|&i| lib.matches(&list[i], kinds[i].0)).collect();
+        let hw = super::hardware(ui.ctx());
+        let shown: Vec<usize> = (0..list.len()).filter(|&i| lib.matches(&list[i], kinds[i].0, hw)).collect();
         let mut order = shown.clone();
         let by = |a: &usize, b: &usize| -> std::cmp::Ordering {
             let (ma, mb) = (&list[*a], &list[*b]);
@@ -478,6 +488,7 @@ impl App {
                     lib.source = None;
                     lib.format = None;
                     lib.runnable = false;
+                            lib.fits = false;
                     lib.attention = false;
                 }
             });
