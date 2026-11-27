@@ -123,7 +123,7 @@ The totals, the file-type legend and the storage breakdown under the Storage Ana
 | **Ctrl+click a file type** | **⌘-click** | Add it to the highlight, or take it out. |
 | **Click a part of the storage breakdown** | **Click a part of the storage breakdown** | Show only those files on the map; click again to stop. |
 
-### Side panel and other lists
+### Insights panel and other lists
 
 | Input | Action |
 |---|---|
@@ -132,7 +132,8 @@ The totals, the file-type legend and the storage breakdown under the Storage Ana
 | **Click a size range (Sizes tab)** | Show only files in that range; click again to stop. |
 | **Click a change, duplicate or listed file** | Select it in the folder list and on the map. |
 | **Click a sequence** | Filter the map to that sequence and select its folder. |
-| **Drag the panel's left edge** | Make the side panel wider or narrower. |
+| **Drag the panel's left edge** | Make the Insights panel or the Preview pane wider or narrower; the width is remembered. |
+| **Click a button on the rail at the window's edge** | Bring back the folded Preview pane, or the Insights panel at that tab. |
 
 ### Size boxes
 

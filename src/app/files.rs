@@ -118,8 +118,17 @@ pub(super) struct FilesPrefs {
     /// The preview pane at the right.
     pub preview: bool,
     pub preview_width: f32,
-    /// The preview pane beside the map in Storage Analysis.
+    /// The preview pane beside the map in Storage Analysis: open, or folded to the rail.
     pub map_preview: bool,
+    /// Pinned: it stays open with nothing selected. Unpinned, it opens when a tile is picked and
+    /// folds away when nothing is.
+    pub map_preview_pin: bool,
+    pub map_preview_width: f32,
+    pub map_preview_tab: super::rails::PreviewTab,
+    /// Storage Analysis's Insights panel (File types, Sizes, Changes…): open, or folded to the
+    /// rail, and its width.
+    pub insights_open: bool,
+    pub insights_width: f32,
     /// The first pane's view (the second pane's is in `second`), and the Icons view's size.
     pub view: FView,
     pub icon_size: f32,
@@ -198,6 +207,11 @@ impl Default for FilesPrefs {
             preview: false,
             preview_width: 300.0,
             map_preview: true,
+            map_preview_pin: false,
+            map_preview_width: 300.0,
+            map_preview_tab: super::rails::PreviewTab::Preview,
+            insights_open: true,
+            insights_width: 330.0,
             view: FView::Details,
             icon_size: 96.0,
             remember_looks: true,

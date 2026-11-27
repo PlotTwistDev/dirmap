@@ -2,6 +2,15 @@
 
 ## Next version
 
+### Panes that make room for the map
+
+- The Preview pane beside the Storage Analysis map has **Preview** and **Details** tabs, opens by
+  itself when you click a tile and folds away when nothing is selected. Pin it to keep it open.
+  It remembers its width and tab, and has **Reveal in Files** to jump to the item in the Files
+  workspace. See [The preview pane](../views/treemap.md#the-preview-pane).
+- The Insights panel (File types, Sizes, Changes, Duplicates, Sequences) folds away too, with
+  **Alt+I** (**⌥I**). Folded panes leave a narrow rail at the window's edge with a button for each.
+
 ### Totals, legend and storage under the map
 
 - Under the Storage Analysis map, a strip of totals: **On disk**, **Logical size**, **Cloud only**,

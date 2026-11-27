@@ -104,16 +104,28 @@ tiles** in Settings > Treemap.
 
 ## The preview pane
 
-The **Preview** pane at the right of the map shows the item you clicked: a large preview of the
-file (pictures can be zoomed and dragged, text scrolls, sound plays with the controls under it,
-and a video's frame has a play button that plays it right there, with its sound, a bar to jump
-about and **Open** to watch it in Quick Look on macOS or your video app elsewhere (on Linux,
-playing in the pane needs `ffmpeg`; on Windows the pane plays the picture only, so use **Open**
-for sound); a cloud file that isn't downloaded is only fetched if you ask), and its kind, size in bytes, size on disk, share of the analysis, date, where
-it is and, for a cloud file, how it's stored. For a folder it lists the largest items inside;
-click one to select it. **Open** opens the item and **Show in folder** (**Show in Finder** on macOS)
-shows it in your file manager. Hide or show the pane with **Preview pane** above the map or
-**Alt+P** (**⌥P** on macOS).
+The **Preview** pane beside the map shows the item you clicked. It has two tabs:
+
+- **Preview**: a large preview of the file, with its name, kind and size under it. Pictures can
+  be zoomed and dragged, text scrolls, sound plays with the controls under it, and a video's frame
+  has a play button that plays it right there, with its sound, a bar to jump about and **Open** to
+  watch it in Quick Look on macOS or your video app elsewhere (on Linux, playing in the pane
+  needs `ffmpeg`; on Windows the pane plays the picture only, so use **Open** for sound). A cloud
+  file that isn't downloaded is only fetched if you ask.
+- **Details**: everything known about it: kind, size in bytes, size on disk, share of the
+  analysis, date, where it is, how a cloud file is stored, and what the file says about itself
+  (picture dimensions, audio and video details, fonts). For a folder it lists the largest items
+  inside; click one to select it.
+
+Under both, **Open** opens the item, **Quick Look** shows a large preview, **Reveal in Files**
+switches to the Files workspace with the item selected in its folder, and **⋯** has **Show in
+folder** (**Show in Finder** on macOS) and **Copy path**. With nothing selected the pane says how
+to pick something.
+
+The pane **opens by itself** when you click a tile and **folds away** when nothing is selected.
+Click the **pin** at its top to keep it open all the time; **›|** (or **Alt+P**, **⌥P** on macOS)
+folds it away to a narrow rail at the window's edge, where the eye button brings it back. It
+remembers its width, its tab and whether it's pinned.
 
 ### Quick Look on the map
 

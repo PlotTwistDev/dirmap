@@ -67,6 +67,10 @@ pub enum Icon {
     Layers,
     /// More controls (overflow menu): three dots.
     More,
+    /// Keep a pane open: a push pin.
+    Pin,
+    /// Fold a pane away to the side: a chevron towards the edge.
+    FoldRight,
 }
 
 /// Draw `icon` filling `rect` (best square), in `color`.
@@ -346,6 +350,15 @@ pub fn paint(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             for x in [3.5, 8.0, 12.5] {
                 dot((x, 8.0), 1.25);
             }
+        }
+        Icon::Pin => {
+            line((5.0, 2.2), (11.0, 2.2));
+            poly(&[(6.2, 2.2), (6.2, 6.6), (3.6, 9.2), (12.4, 9.2), (9.8, 6.6), (9.8, 2.2)], false);
+            line((8.0, 9.2), (8.0, 14.2));
+        }
+        Icon::FoldRight => {
+            poly(&[(4.5, 3.5), (9.0, 8.0), (4.5, 12.5)], false);
+            line((12.5, 3.0), (12.5, 13.0));
         }
     }
 }
