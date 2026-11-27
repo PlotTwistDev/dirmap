@@ -107,6 +107,9 @@ pub struct Info {
     pub context: Option<u64>,
     /// GGUF vision projectors (mmproj) and LoRA adapters go with a model; they don't run alone.
     pub companion: bool,
+    /// The class a Hugging Face `config.json` names (`Qwen3ForCausalLM`), or `diffusers:` and
+    /// the pipeline a `model_index.json` names. Says what kind of model it is (`crate::modelkind`).
+    pub hint: Option<String>,
 }
 
 /// One file of a model.
@@ -215,6 +218,38 @@ pub fn finish(models: &mut Vec<Model>, progress: &Progress) -> Option<()> {
         m.same_as.clear();
     }
     mark_copies(models, progress)
+}
+
+/// Space the models in a list take, counted the way the drive counts it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Footprint {
+    /// Every file's size added up, as the list shows it.
+    pub logical: u64,
+    /// Space on the drive: each file once however many names (hard links) it has, at its
+    /// allocated size (smaller for sparse or compressed files). Cloud-only files count nothing.
+    pub on_disk: u64,
+    /// Bytes counted more than once in `logical` because files are shared as hard links.
+    pub shared: u64,
+}
+
+/// Works out a list's [`Footprint`]: one metadata read per file, no file contents.
+pub fn footprint(models: &[Model]) -> Footprint {
+    let mut fp = Footprint::default();
+    let mut seen = std::collections::HashSet::new();
+    for f in models.iter().flat_map(|m| &m.files) {
+        fp.logical += f.size;
+        if f.not_local {
+            continue;
+        }
+        if let Some(id) = crate::cleanup::file_id(&f.path)
+            && !seen.insert(id)
+        {
+            fp.shared += f.size;
+            continue;
+        }
+        fp.on_disk += std::fs::metadata(&f.path).map(|md| scan::on_disk(&md, || f.path.clone(), 0).0).unwrap_or(f.size);
+    }
+    fp
 }
 
 /// Where Ollama, LM Studio and Hugging Face keep models on this computer, and Downloads (where
@@ -469,10 +504,34 @@ fn read_info(format: Format, files: &[File]) -> Info {
                 info.params = Some(params_label(total));
                 info.quant = dtypes.into_iter().max_by_key(|(_, n)| *n).map(|(d, _)| d);
             }
+            info.hint = first.path.parent().and_then(config_hint);
             info
         }
-        _ => Info::default(),
+        _ => Info { hint: first.path.parent().and_then(config_hint), ..Default::default() },
     }
+}
+
+/// What the small config files beside a model say it is: `architectures` in a Hugging Face
+/// `config.json`, or the pipeline in a diffusers `model_index.json` (beside the part's folder,
+/// one up). Files over 1 MB aren't configs and aren't read.
+fn config_hint(dir: &Path) -> Option<String> {
+    let read = |p: PathBuf| -> Option<serde_json::Value> {
+        let md = std::fs::metadata(&p).ok()?;
+        if !md.is_file() || md.len() > 1 << 20 {
+            return None;
+        }
+        serde_json::from_str(&std::fs::read_to_string(&p).ok()?).ok()
+    };
+    for d in [Some(dir), dir.parent()].into_iter().flatten() {
+        if let Some(j) = read(d.join("model_index.json"))
+            && let Some(c) = j["_class_name"].as_str()
+        {
+            return Some(format!("diffusers:{c}"));
+        }
+    }
+    let j = read(dir.join("config.json"))?;
+    let class = j["architectures"].as_array().and_then(|a| a.first()).and_then(|v| v.as_str()).or_else(|| j["model_type"].as_str())?;
+    Some(class.chars().take(80).collect())
 }
 
 /// 8_030_261_248 → "8B"; 1_720_000_000 → "1.7B"; 335_000_000 → "335M".
@@ -712,6 +771,7 @@ pub fn info_of(h: &crate::gguf::Header) -> Info {
         context: h.arch_u64("context_length"),
         companion: matches!(arch.as_deref(), Some("clip" | "mllama_vision")) || h.str("general.type").is_some_and(|t| t == "adapter" || t == "mmproj"),
         arch,
+        hint: None,
     };
     if info.arch.as_deref() == Some("clip") {
         info.arch = Some("vision projector".into());
@@ -858,6 +918,26 @@ mod tests {
         assert_eq!(i.context, Some(40960));
         assert!(!i.companion);
         std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn footprint_counts_shared_files_once() {
+        let d = dir("footprint");
+        let a = d.join("a.gguf");
+        std::fs::write(&a, vec![7u8; 64 * 1024]).unwrap();
+        std::fs::hard_link(&a, d.join("b.gguf")).unwrap();
+        let file = |p: PathBuf| File { path: p, size: 64 * 1024, not_local: false };
+        let m = |p: PathBuf| Model { name: "m".into(), source: Source::Folder, format: Format::Gguf, info: Info::default(), files: vec![file(p)], size: 64 * 1024, copies: Vec::new(), extra: 0, same_as: Vec::new(), orphan: false };
+        let fp = footprint(&[m(a.clone()), m(d.join("b.gguf"))]);
+        assert_eq!(fp.logical, 128 * 1024);
+        assert_eq!(fp.shared, 64 * 1024);
+        assert!(fp.on_disk >= 64 * 1024 && fp.on_disk < 128 * 1024, "{fp:?}");
+        // A config beside safetensors names the model's class.
+        std::fs::write(d.join("config.json"), r#"{"architectures":["Qwen3ForCausalLM"],"model_type":"qwen3"}"#).unwrap();
+        assert_eq!(config_hint(&d).as_deref(), Some("Qwen3ForCausalLM"));
+        std::fs::write(d.join("model_index.json"), r#"{"_class_name":"FluxPipeline"}"#).unwrap();
+        assert_eq!(config_hint(&d.join("transformer")).as_deref(), Some("diffusers:FluxPipeline"));
     }
 
     #[test]

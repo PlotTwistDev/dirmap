@@ -71,6 +71,26 @@ pub enum Icon {
     Pin,
     /// Fold a pane away to the side: a chevron towards the edge.
     FoldRight,
+    /// Fold a pane away to the left.
+    FoldLeft,
+    /// Language models, Ask AI: a speech bubble.
+    Chat,
+    /// Image models: a framed picture with a hill and a sun.
+    Image,
+    /// Video models: a strip of film.
+    Film,
+    /// Audio and speech models: a sound wave.
+    Wave,
+    /// Embedding models: points scattered in a space.
+    Points,
+    /// Adapters and LoRAs: a plug.
+    Plug,
+    /// The Lab: a flask.
+    Flask,
+    /// Will it run?: a gauge.
+    Gauge,
+    /// Multimodal models: a four-point sparkle.
+    Sparkle,
 }
 
 /// Draw `icon` filling `rect` (best square), in `color`.
@@ -359,6 +379,65 @@ pub fn paint(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::FoldRight => {
             poly(&[(4.5, 3.5), (9.0, 8.0), (4.5, 12.5)], false);
             line((12.5, 3.0), (12.5, 13.0));
+        }
+        Icon::FoldLeft => {
+            poly(&[(11.5, 3.5), (7.0, 8.0), (11.5, 12.5)], false);
+            line((3.5, 3.0), (3.5, 13.0));
+        }
+        Icon::Chat => {
+            poly(&[(3.5, 2.5), (12.5, 2.5), (14.5, 4.5), (14.5, 9.5), (12.5, 11.5), (7.0, 11.5), (3.5, 14.0), (4.2, 11.5), (3.5, 11.5), (1.5, 9.5), (1.5, 4.5)], true);
+            for x in [5.2, 8.0, 10.8] {
+                dot((x, 7.0), 0.85);
+            }
+        }
+        Icon::Image => {
+            rrect(1.5, 2.5, 14.5, 13.5, 1.6);
+            poly(&[(1.8, 11.8), (6.0, 7.6), (9.0, 10.6), (10.8, 8.8), (14.2, 12.2)], false);
+            circle((10.8, 5.6), 1.3);
+        }
+        Icon::Film => {
+            rrect(2.5, 1.5, 13.5, 14.5, 1.2);
+            line((5.2, 1.5), (5.2, 14.5));
+            line((10.8, 1.5), (10.8, 14.5));
+            line((5.2, 8.0), (10.8, 8.0));
+            for y in [4.0, 8.0, 12.0] {
+                dot((3.85, y), 0.6);
+                dot((12.15, y), 0.6);
+            }
+        }
+        Icon::Wave => {
+            for (x, h) in [(2.0, 2.0), (4.4, 5.0), (6.8, 9.5), (9.2, 6.5), (11.6, 4.0), (14.0, 1.6)] {
+                line((x, 8.0 - h / 2.0), (x, 8.0 + h / 2.0));
+            }
+        }
+        Icon::Points => {
+            for (x, y) in [(3.0, 11.5), (5.0, 9.6), (4.3, 13.4), (11.0, 4.0), (12.8, 5.8), (10.2, 6.2), (8.6, 11.6)] {
+                dot((x, y), 1.05);
+            }
+            line((1.5, 1.5), (1.5, 14.5));
+            line((1.5, 14.5), (14.5, 14.5));
+        }
+        Icon::Plug => {
+            line((6.0, 1.5), (6.0, 4.5));
+            line((10.0, 1.5), (10.0, 4.5));
+            poly(&[(3.5, 4.5), (12.5, 4.5), (12.5, 7.5), (10.0, 10.5), (6.0, 10.5), (3.5, 7.5)], true);
+            line((8.0, 10.5), (8.0, 14.5));
+        }
+        Icon::Flask => {
+            poly(&[(6.0, 1.8), (6.0, 6.5), (2.2, 13.0), (3.2, 14.4), (12.8, 14.4), (13.8, 13.0), (10.0, 6.5), (10.0, 1.8)], false);
+            line((4.8, 1.8), (11.2, 1.8));
+            line((4.2, 10.2), (11.8, 10.2));
+        }
+        Icon::Gauge => {
+            arc((8.0, 10.0), 6.3, PI, TAU);
+            line((1.7, 10.0), (3.2, 10.0));
+            line((12.8, 10.0), (14.3, 10.0));
+            line((8.0, 10.0), (11.2, 5.8));
+            dot((8.0, 10.0), 1.2);
+            line((3.0, 13.5), (13.0, 13.5));
+        }
+        Icon::Sparkle => {
+            poly(&[(8.0, 1.5), (9.4, 6.6), (14.5, 8.0), (9.4, 9.4), (8.0, 14.5), (6.6, 9.4), (1.5, 8.0), (6.6, 6.6)], true);
         }
     }
 }

@@ -87,8 +87,25 @@ fn card(ui: &mut egui::Ui, c: &Card, active: bool) -> egui::Response {
     resp.on_hover_text(format!("{}{more}", c.tip))
 }
 
+/// A total in the same style as the summary's cards, for other workspaces (the AI Models
+/// library): a small label over a large value, coloured when the value carries a meaning.
+pub(super) fn stat(ui: &mut egui::Ui, label: &str, value: &str, tip: &str, colour: Option<Color32>) -> egui::Response {
+    let t = kit::tokens(ui);
+    let label_g = ui.painter().layout_no_wrap(label.to_uppercase(), FontId::proportional(10.0), t.weak);
+    let value_g = ui.painter().layout_no_wrap(value.to_string(), FontId::proportional(15.5), colour.unwrap_or(t.strong));
+    let w = label_g.size().x.max(value_g.size().x) + 22.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 42.0), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let x = rect.left() + 11.0;
+        ui.painter().galley(pos2(x, rect.top() + 6.0), label_g, t.weak);
+        ui.painter().galley(pos2(x, rect.top() + 19.0), value_g, t.strong);
+    }
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{label} {value}")));
+    resp.on_hover_text(tip)
+}
+
 /// A thin divider between groups of totals.
-fn divider(ui: &mut egui::Ui) {
+pub(super) fn divider(ui: &mut egui::Ui) {
     let t = kit::tokens(ui);
     let (r, _) = ui.allocate_exact_size(vec2(9.0, 28.0), Sense::hover());
     ui.painter().vline(r.center().x, r.y_range(), egui::Stroke::new(1.0, t.divider));

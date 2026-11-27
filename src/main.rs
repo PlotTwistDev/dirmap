@@ -63,6 +63,7 @@ mod inspect;
 mod mailview;
 mod midiview;
 mod models;
+mod modelkind;
 mod mapview;
 mod model3d;
 mod splat;
