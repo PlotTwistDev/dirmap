@@ -23,12 +23,19 @@ the ten tokens the model thought likeliest:
 - The grey bar is the model's probability; the coloured bar is the one after the settings.
 
 **Use this** writes a different token in its place and shows what the model would write after it,
-so you can follow a road the model didn't take. **Start again** forgets the tokens you've chosen.
+so you can follow a road the model didn't take. **⏴ Step back** takes off the last token you chose
+and shows the choices there again, so you can try another road. **Start again** forgets the tokens
+you've chosen.
+
+Beside the alternatives, **uncertainty** says how spread out the model's guesses were, in bits,
+before the settings: 0 bits means it was certain, 1 bit is as unsure as a coin toss, and n bits is
+as unsure as a fair pick among 2ⁿ tokens ("like a fair pick among 169 tokens"). It measures how
+sure the model was, not whether the text is true.
 
 **Write 30 tokens** (or 10, 100 or 300) writes several tokens at once. Each is coloured by how sure the
 model was of it: green for confident, amber, then red for unlikely. Click a token to see its
 alternatives. **Keep these** adds what was written to the text, to carry on from there. The line
-under the text gives the average confidence and the speed.
+under the text gives the average confidence, the average uncertainty and the speed.
 
 Tick **As a chat message** to send the text the way Ask AI sends a question, wrapped in the model's
 chat template. You then see how the model starts an answer rather than how it carries on a
@@ -61,7 +68,9 @@ text and press **Look inside** to watch this happen. The Lab reads up to 256 tok
 
 The map shows a column for each token and a row for each layer, the first at the top. The brighter
 a square, the more that layer changed the token: a small nudge is dark, a big rewrite is bright
-orange. Hover over a square for the exact amount. The first row stays dark, because it is where
+orange; the scale under the map shows the range, from a change of 2% of the token's length or
+less to 200%. Hover over a square for the exact amount. The **average** column on the right shows
+how much each layer changes the tokens on average; hover over it for the figure. The first row stays dark, because it is where
 each token's meaning starts. Look for the layers where many tokens change at once, and for tokens
 that keep changing late (often the ones the next word depends on).
 
@@ -116,7 +125,9 @@ The result shows:
 
 Every result is kept, with the model, where it ran (the graphics chip, or the processor and how
 many threads), the context length and the date, so you can compare models and settings in the
-**All results** table. The results are kept in `lab-speed.json` in Filescape's settings folder.
+**All results** table; hover over **Where** to see the processor or graphics chip by name. The
+results are kept in `lab-speed.json` in Filescape's settings folder. **Export…** saves them all as a
+CSV file for a spreadsheet, with every setting and the hardware each test ran with.
 
 Other busy apps slow the test down, and the test slows them down while it runs.
 

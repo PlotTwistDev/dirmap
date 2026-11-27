@@ -19,6 +19,8 @@ pub(super) struct LabState {
     pub settings: Settings,
     /// Tokens chosen after the text so far (by "Use this" or "Keep"), as text.
     continuation: String,
+    /// Where each token of `continuation` starts, so "Step back" can take off the last one.
+    marks: Vec<usize>,
     /// How many tokens "Write" asks for.
     steps: u32,
     pub run: Option<Run>,
@@ -52,6 +54,7 @@ impl Default for LabState {
             chat: false,
             settings: Settings::default(),
             continuation: String::new(),
+            marks: Vec::new(),
             steps: 30,
             run: None,
             asked: None,
@@ -79,6 +82,17 @@ enum Page {
 }
 
 impl LabState {
+    /// Adds a chosen token to the text the model carries on from.
+    fn push_token(&mut self, t: &str) {
+        self.marks.push(self.continuation.len());
+        self.continuation.push_str(t);
+    }
+
+    fn clear_tokens(&mut self) {
+        self.continuation.clear();
+        self.marks.clear();
+    }
+
     /// A model was loaded: forget what was found inside the last one.
     pub fn loaded_layers(&mut self, layers: usize) {
         if layers != self.layers {
@@ -101,6 +115,17 @@ fn confidence(p: f32) -> Color32 {
         let t = p * 2.0;
         Color32::from_rgb(230, (80.0 + 100.0 * t) as u8, 70)
     }
+}
+
+/// What the uncertainty figure means.
+const UNCERTAINTY: &str = "Uncertainty is the entropy of the model's own probabilities over every token, before the settings, in bits. \
+0 bits: it was certain. 1 bit: as unsure as a coin toss. n bits: as unsure as a fair pick among 2^n tokens. \
+It measures how spread out the model's guesses were, not whether the text is true.";
+
+/// How many equally likely tokens would be as uncertain as `bits`.
+fn equally_likely(bits: f32) -> String {
+    let n = 2f32.powf(bits.max(0.0));
+    if n < 1.05 { "1 token".into() } else if n < 10.0 { format!("{n:.1} tokens") } else if n < 1e6 { format!("{:.0} tokens", n) } else { "millions".into() }
 }
 
 fn percent(p: f32) -> String {
@@ -177,11 +202,11 @@ impl App {
             let l = &mut self.ask.lab_state;
             let r = ui.add(egui::TextEdit::multiline(&mut l.text).desired_rows(2).desired_width(f32::INFINITY).hint_text("Text for the model to carry on…"));
             if r.changed() {
-                l.continuation.clear();
+                l.clear_tokens();
             }
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut l.chat, "As a chat message").on_hover_text("On: the text is wrapped in the model's chat template, as Ask AI sends a question, so you see how it starts an answer. Off: the model just carries on the text.").changed() {
-                    l.continuation.clear();
+                    l.clear_tokens();
                 }
                 ui.separator();
                 // Buttons that look like buttons: the page's own tab is also called Next token.
@@ -201,9 +226,18 @@ impl App {
                 if busy {
                     ui.spinner();
                 }
-                if !l.continuation.is_empty() && ui.add_enabled(!busy, egui::Button::new("Start again")).on_hover_text("Forget the tokens chosen so far").clicked() {
-                    l.continuation.clear();
-                    l.run = None;
+                if !l.continuation.is_empty() {
+                    if ui.add_enabled(!busy, egui::Button::new("⏴ Step back")).on_hover_text("Take off the last token chosen, and see the choices there again").clicked()
+                        && let Some(m) = l.marks.pop()
+                    {
+                        l.continuation.truncate(m);
+                        l.shown = 0;
+                        run = Some(1);
+                    }
+                    if ui.add_enabled(!busy, egui::Button::new("Start again")).on_hover_text("Forget the tokens chosen so far").clicked() {
+                        l.clear_tokens();
+                        l.run = None;
+                    }
                 }
             });
         }
@@ -253,7 +287,9 @@ impl App {
         let shown = self.ask.lab_state.shown.min(r.steps.len().saturating_sub(1));
         ui.horizontal(|ui| {
             let avg = if r.steps.is_empty() { 0.0 } else { r.steps.iter().map(|s| s.chosen.raw).sum::<f32>() / r.steps.len() as f32 };
-            ui.weak(format!("{} tokens in {:.1} s · read {} tokens · average confidence {}", r.steps.len(), r.seconds, r.prompt_tokens, percent(avg)));
+            let bits = if r.steps.is_empty() { 0.0 } else { r.steps.iter().map(|s| s.entropy).sum::<f32>() / r.steps.len() as f32 };
+            ui.weak(format!("{} in {:.1} s · read {} tokens · average confidence {} · average uncertainty {:.1} bits", if r.steps.len() == 1 { "1 token".to_string() } else { format!("{} tokens", r.steps.len()) }, r.seconds, r.prompt_tokens, percent(avg), bits))
+                .on_hover_text(UNCERTAINTY);
             if r.steps.len() > 1 && ui.add_enabled(!busy, egui::Button::new("Keep these")).on_hover_text("Add the written tokens to the text, to carry on from there").clicked() {
                 keep = true;
             }
@@ -266,15 +302,19 @@ impl App {
         }
         if keep {
             let l = &mut self.ask.lab_state;
-            l.continuation.extend(r.steps.iter().filter(|s| !s.end).map(|s| s.chosen.text.clone()));
+            for st in r.steps.iter().filter(|s| !s.end) {
+                l.push_token(&st.chosen.text);
+            }
             l.run = None;
             l.shown = 0;
             run = Some(1);
         }
         if let Some((i, t)) = use_token {
             let l = &mut self.ask.lab_state;
-            l.continuation.extend(r.steps[..i].iter().map(|s| s.chosen.text.clone()));
-            l.continuation.push_str(&t);
+            for st in &r.steps[..i] {
+                l.push_token(&st.chosen.text);
+            }
+            l.push_token(&t);
             l.shown = 0;
             run = Some(1);
         }
@@ -382,9 +422,21 @@ impl App {
         if results.is_empty() {
             ui.weak("No results yet.");
         } else {
-            ui.strong("All results");
+            let mut export = false;
+            ui.horizontal(|ui| {
+                ui.strong("All results");
+                export = ui.small_button("Export…").on_hover_text("Save every result, with the settings and hardware it ran with, as a CSV file for a spreadsheet").clicked();
+            });
             ui.add_space(2.0);
             results_table(ui, &results, current.as_deref());
+            if export {
+                let csv = crate::lab::results_csv(&results);
+                self.ask_path(super::dialogs::Dialog::new().set_title("Export speed results").set_file_name("filescape-speed.csv"), super::dialogs::Pick::Save, move |app, p| {
+                    if let Err(e) = std::fs::write(&p, csv.as_bytes()) {
+                        app.ask.problem = Some(format!("The results couldn't be saved: {e}"));
+                    }
+                });
+            }
         }
         if stop && let Some(e) = &self.ask.engine {
             e.stop.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -528,7 +580,8 @@ fn results_table(ui: &mut egui::Ui, results: &[BenchResult], current: Option<&st
                 ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, vec2(rect.width() * r.write_speed / fastest, rect.height())), 3.0, t.accent);
                 ui.label(format!("{:.0}/s", r.read_speed));
                 ui.label(format!("{:.1}", r.first_token));
-                ui.label(place(r)).on_hover_text(format!("{} tokens of context; read {}, wrote {}, middle of {} runs", r.context, r.read, r.write, r.runs));
+                let device = if r.device.is_empty() { String::new() } else { format!("{}\n", r.device) };
+                ui.label(place(r)).on_hover_text(format!("{device}{} tokens of context; read {}, wrote {}, middle of {} runs", r.context, r.read, r.write, r.runs));
                 let when = chrono::DateTime::from_timestamp(r.when, 0).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
                 ui.weak(when);
                 ui.end_row();
@@ -545,6 +598,7 @@ fn choices(ui: &mut egui::Ui, s: &Step, i: usize, n: usize, busy: bool) -> Optio
     ui.horizontal(|ui| {
         ui.strong(if n > 1 { format!("Token {} of {n}: the alternatives", i + 1) } else { "The next token: the alternatives".to_string() });
         ui.weak(format!("· the settings leave {} to pick from", s.kept));
+        ui.weak(format!("· uncertainty {:.1} bits, like a fair pick among {}", s.entropy, equally_likely(s.entropy))).on_hover_text(UNCERTAINTY);
     });
     ui.add_space(2.0);
     let bar_w = (ui.available_width() - 330.0).clamp(80.0, 420.0);

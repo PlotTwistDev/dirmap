@@ -504,7 +504,7 @@ fn predict(
         let choice = |i: usize, raw: f32, adjusted: f32| Choice { id: i as i32, text: piece(i as i32), raw, adjusted };
         let tok = LlamaToken(chosen as i32);
         let end = model.vocab().is_eog(tok);
-        out.push(Step { chosen: choice(chosen, raw, adjusted), top: top.into_iter().map(|(i, r, a)| choice(i, r, a)).collect(), kept, end });
+        out.push(Step { chosen: choice(chosen, raw, adjusted), top: top.into_iter().map(|(i, r, a)| choice(i, r, a)).collect(), kept, end, entropy: crate::lab::entropy_bits(logits) });
         if end || cached.len() + 1 >= n_ctx {
             break;
         }
