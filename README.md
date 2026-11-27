@@ -140,8 +140,10 @@ The binary ends up in `target/release/`. The same commands work on Windows, Linu
 
 On Windows and Linux the AI engine is built with Vulkan, so the build also needs CMake and the
 Vulkan SDK (on Ubuntu 24.04: `sudo apt install cmake libvulkan-dev glslc spirv-headers`; on
-Windows, the LunarG installer, which sets `VULKAN_SDK`). Use `cargo run` there: it finds the
-engine's libraries in the build folder, which a bare `target/release/filescape` doesn't.
+Windows, the LunarG installer, which sets `VULKAN_SDK`, plus Ninja: set `CMAKE_GENERATOR=Ninja`
+in a Developer PowerShell). The engine's libraries are copied beside the program. With a recent
+Cargo, run `mkdir -p target/release/build/deps target/debug/build/deps` once first: the engine's
+build script looks for that folder.
 
 Flags: `--all-fs` descends into other mounted filesystems, `--top N` sets the CLI row count,
 `--save-snapshot FILE` (with `--cli`) saves the scan for comparing later, `--compare FILE` opens the GUI
