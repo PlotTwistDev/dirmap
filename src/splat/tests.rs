@@ -1117,3 +1117,353 @@ fn other_layouts_are_told_apart() {
     // An ordinary folder isn't one.
     assert_eq!(layout(&project_dir("plain")), None);
 }
+
+// ---- S9: scenes kept as levels of detail in chunks.
+
+fn lod_dir(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("filescape-splat-lod-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// A SOG bundle's parts, loose in a folder, as streamed SOG keeps its chunks.
+fn unzip_to(bytes: &[u8], dir: &std::path::Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).unwrap();
+        let name = f.name().unwrap().to_string();
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut f, &mut out).unwrap();
+        std::fs::write(dir.join(&name), out).unwrap();
+    }
+}
+
+fn pretend_cloud(paths: &[std::path::PathBuf]) {
+    lod::CLOUD_FOR_TESTS.with(|c| *c.borrow_mut() = paths.to_vec());
+}
+
+/// The splats `ts` turned the way XGRIDS scenes are turned upright on reading.
+fn stood_up(ts: &[T]) -> Vec<T> {
+    let h = std::f32::consts::FRAC_1_SQRT_2;
+    ts.iter()
+        .map(|t| {
+            let q = lod::qmul([h, 0.0, 0.0, h], [t.wxyz[1], t.wxyz[2], t.wxyz[3], t.wxyz[0]]);
+            T { pos: [t.pos[0], -t.pos[2], t.pos[1]], wxyz: [q[3], q[0], q[1], q[2]], ..*t }
+        })
+        .collect()
+}
+
+/// An LCC scene laid out as XGRIDS's whitepaper and splat-transform's reader describe it:
+/// `levels[l]` holds each unit's splats at level l.
+fn enc_lcc(dir: &std::path::Path, levels: &[Vec<Vec<T>>], sh: bool) {
+    let units = levels[0].len();
+    let mut smin = [f32::MAX; 3];
+    let mut smax = [f32::MIN; 3];
+    for t in levels.iter().flatten().flatten() {
+        for k in 0..3 {
+            smin[k] = smin[k].min(t.scale[k]);
+            smax[k] = smax[k].max(t.scale[k] * 1.0001 + 1e-6);
+        }
+    }
+    let mut data = Vec::new();
+    let mut shc = Vec::new();
+    // index.bin: per unit, x and y, then per level the count, offset and size.
+    let mut index = Vec::new();
+    let mut refs = vec![vec![(0u32, 0u64, 0u32); levels.len()]; units];
+    for (l, lv) in levels.iter().enumerate() {
+        for (u, splats) in lv.iter().enumerate() {
+            refs[u][l] = (splats.len() as u32, data.len() as u64, splats.len() as u32 * 32);
+            for t in splats {
+                let mut r = Vec::with_capacity(32);
+                for v in t.pos {
+                    r.extend_from_slice(&v.to_le_bytes());
+                }
+                r.extend_from_slice(&[to_u8(t.rgb[0]), to_u8(t.rgb[1]), to_u8(t.rgb[2]), to_u8(t.alpha)]);
+                for k in 0..3 {
+                    let s = ((t.scale[k] - smin[k]) / (smax[k] - smin[k]) * 65535.0).round() as u16;
+                    r.extend_from_slice(&s.to_le_bytes());
+                }
+                // Smallest three, the largest left out, the rest in x y z w order.
+                let q = [t.wxyz[1], t.wxyz[2], t.wxyz[3], t.wxyz[0]];
+                let big = (0..4).max_by(|&a, &b| q[a].abs().total_cmp(&q[b].abs())).unwrap();
+                let sign = if q[big] < 0.0 { -1.0 } else { 1.0 };
+                let mut v = (big as u32) << 30;
+                for (slot, k) in (0..4).filter(|&k| k != big).enumerate() {
+                    let e = ((q[k] * sign + std::f32::consts::FRAC_1_SQRT_2) / std::f32::consts::SQRT_2 * 1023.0).round().clamp(0.0, 1023.0) as u32;
+                    v |= e << (10 * slot);
+                }
+                r.extend_from_slice(&v.to_le_bytes());
+                r.extend_from_slice(&[0; 6]);
+                assert_eq!(r.len(), 32);
+                data.extend_from_slice(&r);
+                // Harmonics: 15 packed values and a spare, all at the middle of the range.
+                for _ in 0..15 {
+                    shc.extend_from_slice(&(1024u32 | (512 << 11) | (1024 << 21)).to_le_bytes());
+                }
+                shc.extend_from_slice(&[0; 4]);
+            }
+        }
+    }
+    for (u, r) in refs.iter().enumerate() {
+        index.extend_from_slice(&(u as i16).to_le_bytes());
+        index.extend_from_slice(&0i16.to_le_bytes());
+        for &(n, off, size) in r {
+            index.extend_from_slice(&(n as i32).to_le_bytes());
+            index.extend_from_slice(&(off as i64).to_le_bytes());
+            index.extend_from_slice(&(size as i32).to_le_bytes());
+        }
+    }
+    let splats: Vec<usize> = levels.iter().map(|l| l.iter().map(Vec::len).sum()).collect();
+    let mut attrs = vec![serde_json::json!({"name": "scale", "min": smin, "max": smax})];
+    if sh {
+        attrs.push(serde_json::json!({"name": "shcoef", "min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0]}));
+    }
+    let meta = serde_json::json!({"version": 4, "totalLevel": levels.len(), "splats": splats, "fileType": if sh { "Quality" } else { "Portable" }, "attributes": attrs});
+    std::fs::write(dir.join("meta.lcc"), meta.to_string()).unwrap();
+    std::fs::write(dir.join("index.bin"), index).unwrap();
+    std::fs::write(dir.join("data.bin"), data).unwrap();
+    if sh {
+        std::fs::write(dir.join("shcoef.bin"), shc).unwrap();
+    }
+}
+
+#[test]
+fn turning_a_scene_turns_its_view_dependent_colour_too() {
+    let mut s = Scene::new(SceneKind::Splat, "test".into(), Frame::RightDownForward, 1);
+    s.sh_degree = 3;
+    let sh: Vec<f32> = (0..45).map(|i| ((i as f32) * 0.37).sin() * 0.3).collect();
+    s.push([1.0, 2.0, 3.0], [128; 4], Some([0.1; 3]), Some([0.0, 0.0, 0.0, 1.0]), &sh);
+    let before = s.sh.clone();
+    let eval = |coeffs: &[half::f16], d: [f64; 3], c: usize| -> f64 {
+        let mut k = 0;
+        let mut acc = 0.0;
+        for l in 1..=3 {
+            for y in lod::sh_basis(l, d) {
+                acc += coeffs[k * 3 + c].to_f64() * y;
+                k += 1;
+            }
+        }
+        acc
+    };
+    lod::up_is_z(&mut s);
+    assert_eq!(s.pos[0], [1.0, -3.0, 2.0]);
+    for i in 0..20 {
+        let a = i as f64 * 0.9;
+        let d = [a.cos() * (a * 0.3).sin(), (a * 0.3).cos(), a.sin() * (a * 0.3).sin()];
+        let turned = [d[0], -d[2], d[1]];
+        for c in 0..3 {
+            let (old, new) = (eval(&before, d, c), eval(&s.sh, turned, c));
+            assert!((old - new).abs() < 0.01, "direction {d:?} channel {c}: {old} vs {new}");
+        }
+    }
+    // Three more quarter turns bring everything back.
+    for _ in 0..3 {
+        lod::up_is_z(&mut s);
+    }
+    assert!(s.pos[0].iter().zip([1.0, 2.0, 3.0]).all(|(a, b)| (a - b).abs() < 1e-5));
+    assert!(s.sh.iter().zip(&before).all(|(a, b)| (a.to_f32() - b.to_f32()).abs() < 0.01));
+    assert!((s.rot[0][3].abs() - 1.0).abs() < 1e-5);
+}
+
+#[test]
+fn lcc_scenes_show_the_most_detailed_level_that_fits() {
+    let d = lod_dir("lcc");
+    let all = test_splats(300);
+    // Level 0: two units of 150; level 1: 50 + 50; level 2: 15 + 15.
+    let levels: Vec<Vec<Vec<T>>> = [150, 50, 15].iter().map(|&n| vec![all[..n].to_vec(), all[150..150 + n].to_vec()]).collect();
+    enc_lcc(&d, &levels, true);
+    let meta = d.join("meta.lcc");
+    assert!(claims(&meta) && may_hold_scene("meta.lcc"));
+    assert_eq!(badge(&meta).as_deref(), Some("LCC · 300 splats"));
+    let s = read(&meta, Limits::PREVIEW).unwrap();
+    let want: Vec<T> = stood_up(&[&all[..150], &all[150..300]].concat());
+    check_against(&s, &want, 1e-6, 1);
+    assert_eq!((s.format.as_str(), s.sh_degree, s.sh.len()), ("LCC (XGRIDS)", 3, 300 * 45));
+    assert!(s.facts.iter().any(|(k, v)| *k == "Detail levels" && v.starts_with("3, the most detailed with 300")), "{:?}", s.facts);
+    assert!(!s.facts.iter().any(|(k, _)| *k == "Bytes per splat"));
+    // A smaller budget takes the middle level whole rather than a sample of the finest.
+    let s = read(&meta, Limits { max_points: 120, ..Limits::PREVIEW }).unwrap();
+    check_against(&s, &stood_up(&[&all[..50], &all[150..200]].concat()), 1e-6, 1);
+    assert!(s.facts.iter().any(|(k, v)| *k == "Showing" && v.contains("level 2 of 3") && v.contains("too big")), "{:?}", s.facts);
+    // Too small for any level: the coarsest, sampled.
+    let s = read(&meta, Limits { max_points: 10, ..Limits::PREVIEW }).unwrap();
+    assert!(s.len() <= 10 && s.total == 30, "{} of {}", s.len(), s.total);
+
+    // Harmonics only in the cloud: base colour, and it says why.
+    pretend_cloud(&[d.join("shcoef.bin")]);
+    let s = read(&meta, Limits::PREVIEW).unwrap();
+    assert!(s.sh.is_empty() && s.notes.iter().any(|n| n.contains("only in the cloud")), "{:?}", s.notes);
+    // The data only in the cloud: nothing is opened.
+    pretend_cloud(&[d.join("data.bin")]);
+    let e = read(&meta, Limits::PREVIEW).unwrap_err();
+    assert!(e.contains("only in the cloud"), "{e}");
+    pretend_cloud(&[]);
+    // Damage fails cleanly.
+    let idx = std::fs::read(d.join("index.bin")).unwrap();
+    std::fs::write(d.join("index.bin"), &idx[..idx.len() - 3]).unwrap();
+    assert!(read(&meta, Limits::PREVIEW).is_err());
+    let mut bad = idx.clone();
+    bad[8..16].copy_from_slice(&(1i64 << 40).to_le_bytes());
+    std::fs::write(d.join("index.bin"), &bad).unwrap();
+    let s = read(&meta, Limits::PREVIEW).unwrap();
+    assert!(s.notes.iter().any(|n| n.contains("ends early")));
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+#[test]
+fn streamed_sog_reads_chunks_on_this_computer_and_counts_the_rest() {
+    let d = lod_dir("sog");
+    let all = test_splats(120);
+    unzip_to(&enc_sog(&all[..50]), &d.join("0_0"));
+    unzip_to(&enc_sog(&all[50..100]), &d.join("0_1"));
+    unzip_to(&enc_sog(&all[100..120]), &d.join("1_0"));
+    let meta = serde_json::json!({
+        "version": 1, "count": 120, "lodLevels": 2, "counts": [100, 20],
+        "filenames": ["0_0/meta.json", "0_1/meta.json", "1_0/meta.json"],
+        "tree": {"children": [
+            {"lods": {"0": {"file": 0, "offset": 0, "count": 30}, "1": {"file": 2, "offset": 0, "count": 12}}},
+            {"lods": {"0": {"file": 0, "offset": 30, "count": 20}}},
+            {"lods": {"0": {"file": 1, "offset": 0, "count": 50}, "1": {"file": 2, "offset": 12, "count": 8}}}
+        ]}
+    });
+    let lm = d.join("lod-meta.json");
+    std::fs::write(&lm, meta.to_string()).unwrap();
+    assert!(claims(&lm) && may_hold_scene("lod-meta.json"));
+    assert_eq!(badge(&lm).as_deref(), Some("Streamed SOG · 100 splats"));
+    let s = read(&lm, Limits::PREVIEW).unwrap();
+    check_against(&s, &all[..100], 0.05, 3);
+    assert_eq!(s.format, "Streamed SOG");
+    assert!(!s.facts.iter().any(|(k, _)| *k == "Only in the cloud"));
+    // One of the detailed chunks only in the cloud: the coarse level, which is all here.
+    pretend_cloud(&[d.join("0_1/means_l.webp")]);
+    let s = read(&lm, Limits::PREVIEW).unwrap();
+    check_against(&s, &all[100..120], 0.05, 3);
+    assert!(s.facts.iter().any(|(k, v)| *k == "Only in the cloud" && v.starts_with("1 of 3 chunks")), "{:?}", s.facts);
+    assert!(s.notes.iter().any(|n| n.contains("only in the cloud")));
+    // The coarse one too: what's here of the detailed level.
+    pretend_cloud(&[d.join("0_1/means_l.webp"), d.join("1_0/meta.json")]);
+    let s = read(&lm, Limits::PREVIEW).unwrap();
+    check_against(&s, &all[..50], 0.05, 3);
+    // Nothing here.
+    pretend_cloud(&[d.join("0_0/meta.json"), d.join("0_1/meta.json"), d.join("1_0/meta.json")]);
+    assert!(read(&lm, Limits::PREVIEW).unwrap_err().contains("only in the cloud"));
+    pretend_cloud(&[]);
+    // Chunk names that climb out of the folder are refused, not followed.
+    std::fs::write(&lm, meta.to_string().replace("0_0/meta.json", "../0_0/meta.json")).unwrap();
+    let s = read(&lm, Limits::PREVIEW).unwrap();
+    assert_eq!(s.len(), 50);
+    std::fs::write(&lm, b"{\"lodLevels\": 0}").unwrap();
+    assert!(read(&lm, Limits::PREVIEW).is_err());
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+#[test]
+fn lcc2_reads_spz_and_sog_chunks_upright() {
+    let d = lod_dir("lcc2");
+    let all = test_splats(120);
+    // SPZ chunks, made from SOG bundles read and written again.
+    let spz_of = |ts: &[T]| {
+        let src = tmp(&format!("lcc2-src-{}.sog", ts.len()), &enc_sog(ts));
+        write::encode(&read(&src, Limits::CONVERT).unwrap(), write::Target::Spz).unwrap()
+    };
+    std::fs::write(d.join("a.spz"), spz_of(&all[..50])).unwrap();
+    std::fs::write(d.join("b.spz"), spz_of(&all[50..100])).unwrap();
+    std::fs::write(d.join("c.spz"), spz_of(&all[100..120])).unwrap();
+    // Trailing commas, as some exporters write them.
+    let meta = r#"{"totalSplats": 120, "lodSplats": [100, 20], "totalLevels": 2, "splatType": ".spz",
+        "root": {"splatFiles": ["a.spz", "b.spz", "chunks/c.spz",], "child": [
+            {"data": {"3dgs": {"name": 2, "start": 0, "count": 20}}, "child": {
+                "0": {"data": {"3dgs": {"name": 0, "start": 0, "count": 50}}},
+                "1": {"data": {"3dgs": {"name": 1, "start": 0, "count": 50}}},
+            }},
+        ]},
+    }"#;
+    let p = d.join("scene.lcc2");
+    std::fs::write(&p, meta).unwrap();
+    assert!(claims(&p));
+    assert_eq!(badge(&p).as_deref(), Some("LCC2 · 100 splats"));
+    let s = read(&p, Limits::PREVIEW).unwrap();
+    assert_eq!((s.len(), s.format.as_str()), (100, "LCC2 (XGRIDS, SPZ chunks)"));
+    // SPZ chunks' numbers are taken as they are, then stood up.
+    let raw = spz::read(&d.join("a.spz"), Limits::PREVIEW).unwrap();
+    for i in 0..50 {
+        let r = raw.pos[i];
+        assert!((s.pos[i][0] - r[0]).abs() < 1e-6 && (s.pos[i][1] + r[2]).abs() < 1e-6 && (s.pos[i][2] - r[1]).abs() < 1e-6);
+    }
+    // The coarse level: its chunk named under a folder that isn't there, found beside it.
+    let s = read(&p, Limits { max_points: 40, ..Limits::PREVIEW }).unwrap();
+    assert_eq!(s.len(), 20);
+
+    // The old layout, with SOG chunks named without their extension.
+    std::fs::write(d.join("x.sog"), enc_sog(&all[..30])).unwrap();
+    let old = serde_json::json!({"total_splats": 30, "lod_3dgs_info": [30], "lod_level": 1,
+        "root": {"files": ["/x"], "child": [{"data": {"3dgs": {"name": 0}}}]}});
+    let p = d.join("old.lcc2");
+    std::fs::write(&p, old.to_string()).unwrap();
+    let s = read(&p, Limits::PREVIEW).unwrap();
+    check_against(&s, &stood_up(&all[..30]), 0.05, 3);
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+/// Makes demo scenes from a real one for looking at in the app: an LCC (lying on its back, as
+/// XGRIDS scenes do, so reading it must stand it up) and a streamed SOG, each with three
+/// levels. FILESCAPE_SPLAT_DEMO=<scene file>, written next to it in lcc-demo and sog-demo.
+#[test]
+#[ignore]
+fn s9_demo_scenes() {
+    let Ok(src) = std::env::var("FILESCAPE_SPLAT_DEMO") else { return };
+    let src = std::path::PathBuf::from(src);
+    let mut s = read(&src, Limits { max_points: 400_000, ..Limits::THUMB }).unwrap();
+    if s.frame == Frame::RightUpBack {
+        for p in &mut s.pos {
+            *p = [p[0], -p[1], -p[2]];
+        }
+        for q in &mut s.rot {
+            *q = [q[0], -q[1], -q[2], q[3]];
+        }
+    }
+    // Lay it down: the opposite quarter turn to the one reading does.
+    let h = std::f32::consts::FRAC_1_SQRT_2;
+    lod::rotate(&mut s, [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]], [-h, 0.0, 0.0, h]);
+    let ts: Vec<T> = (0..s.len())
+        .map(|i| {
+            let (c, q) = (s.color[i], s.rot[i]);
+            T { pos: s.pos[i], scale: s.scale[i].map(|v| v.max(1e-6)), rgb: [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0], alpha: c[3] as f32 / 255.0, wxyz: [q[3], q[0], q[1], q[2]] }
+        })
+        .collect();
+    let dir = src.parent().unwrap();
+    let lcc = dir.join("lcc-demo");
+    let _ = std::fs::remove_dir_all(&lcc);
+    std::fs::create_dir_all(&lcc).unwrap();
+    // Four units by x, at full, quarter and sixteenth detail.
+    let mut sorted = ts.clone();
+    sorted.sort_by(|a, b| a.pos[0].total_cmp(&b.pos[0]));
+    let units: Vec<Vec<T>> = sorted.chunks(sorted.len().div_ceil(4)).map(|c| c.to_vec()).collect();
+    let levels: Vec<Vec<Vec<T>>> = [1, 4, 16].iter().map(|&k| units.iter().map(|u| u.iter().step_by(k).copied().collect()).collect()).collect();
+    enc_lcc(&lcc, &levels, false);
+    // The streamed SOG, upright (SOG keeps the trainers' axes).
+    let up: Vec<T> = stood_up(&ts);
+    let sog = dir.join("sog-demo");
+    let _ = std::fs::remove_dir_all(&sog);
+    let mut names = Vec::new();
+    let mut nodes = Vec::new();
+    let mut counts = vec![0usize; 3];
+    for (l, k) in [1usize, 4, 16].into_iter().enumerate() {
+        for (u, chunk) in up.chunks(up.len().div_ceil(4)).enumerate() {
+            let part: Vec<T> = chunk.iter().step_by(k).copied().collect();
+            let name = format!("{l}_{u}/meta.json");
+            unzip_to(&enc_sog(&part), &sog.join(format!("{l}_{u}")));
+            nodes.push(serde_json::json!({"lods": {l.to_string(): {"file": names.len(), "offset": 0, "count": part.len()}}}));
+            counts[l] += part.len();
+            names.push(name);
+        }
+    }
+    let meta = serde_json::json!({"version": 1, "count": counts.iter().sum::<usize>(), "lodLevels": 3, "counts": counts, "filenames": names, "tree": {"children": nodes}});
+    std::fs::write(sog.join("lod-meta.json"), meta.to_string()).unwrap();
+    for p in [lcc.join("meta.lcc"), sog.join("lod-meta.json")] {
+        let r = read(&p, Limits::PREVIEW).unwrap();
+        println!("{}: {} splats, {:?}", p.display(), r.len(), r.facts);
+    }
+}
