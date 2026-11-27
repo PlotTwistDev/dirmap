@@ -8,6 +8,9 @@ Open the [AI Models workspace](ai-models.md) (**Ctrl+4**, **⌘4** on a Mac) and
 the toolbar. The models on the left are the ones Ask AI lists; load one the same way. The Lab and
 Ask AI share the loaded model, so switching between them doesn't load it again.
 
+Each tab has an **About** section under its name that explains what it shows and what it
+doesn't: a probability is how likely the model thinks a token is, not whether it's true.
+
 ## Seeing what comes next
 
 Type some text, such as "The capital of France is", and press **Show next token**. A model writes in

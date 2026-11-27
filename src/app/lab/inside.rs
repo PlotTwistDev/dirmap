@@ -94,7 +94,7 @@ impl App {
             ui.strong("How much each layer changed each token");
             ui.weak(format!("· {} tokens, {} layers, read in {:.2} s", inside.tokens.len(), inside.change.len(), inside.seconds));
         });
-        ui.weak("Brighter: the layer changed the token's meaning more. Click a token to see what each layer would predict after it.");
+        ui.weak("Brighter: the layer changed the numbers that represent the token more. Click a token to see what each layer's output would predict after it.");
         ui.add_space(4.0);
         let map_h = (ui.available_height() * 0.45).clamp(120.0, 420.0);
         egui::ScrollArea::horizontal().id_salt("inside-map").show(ui, |ui| {

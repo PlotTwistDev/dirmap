@@ -264,8 +264,10 @@ aren't checked for copies. Reading them would download them.
 
 ## Freeing space
 
-Press **🖴 Storage** in the toolbar to see how much space models take, by app (Ollama, LM Studio,
-Hugging Face and other folders), and what can be freed:
+Press **🖴 Storage** in the toolbar to see how much space models take. The strip at the top shows
+**On disk** (files shared as one are counted once), **Can be freed** and how many **Apps** keep
+models; below it is the space by app (Ollama, LM Studio, Hugging Face and other folders), and what
+can be freed:
 
 - **Downloads no model uses**: Ollama files none of its models needs, usually left behind by a
   removed model or a stopped download.
@@ -325,7 +327,8 @@ A folder that has already been moved shows where its link leads.
 
 ## Shrinking a model
 
-Right-click a GGUF model in the list and choose **Shrink (quantise)…** to make a smaller copy with
+Right-click a GGUF model in the list and choose **Optimise size (quantise)…** to open **Optimise
+model size**, which makes a smaller copy with
 less precise weights: it loads faster, needs less memory, and writes slightly worse. This is part
 of model quantisation (Professional).
 

@@ -31,7 +31,7 @@ pub(super) struct ModelsState {
     /// The library's search, filters and layout.
     lib: library::Library,
     /// The space the models take, worked out with the list.
-    footprint: models::Footprint,
+    pub footprint: models::Footprint,
     /// A file to show in Files once the details panel is drawn.
     reveal_later: Option<PathBuf>,
 }
@@ -458,7 +458,7 @@ impl App {
                 if kit::icon_button(ui, kit::Icon::Folder, "Show in Files").clicked() {
                     act = Some(library::Act::ShowFiles);
                 }
-                if m.runnable() {
+                if m.runnable() && crate::modelkind::chats(m) {
                     if kit::button(ui, kit::Kind::Secondary, Some(kit::Icon::Flask), "Open in Lab").clicked() {
                         act = Some(library::Act::Lab);
                     }

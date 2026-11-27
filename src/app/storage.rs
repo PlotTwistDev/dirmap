@@ -127,9 +127,8 @@ impl App {
         if self.models.storage.items.is_none() && self.models.storage.rx.is_none() {
             self.storage_look();
         }
-        ui.heading("Model storage");
-        ui.weak("How much space AI models take on this computer, and what can be freed.");
-        ui.add_space(6.0);
+        self.storage_header(ui, &list);
+        ui.add_space(8.0);
         if let Some((tone, text)) = self.models.storage.outcome.clone() {
             kit::callout(ui, tone, text);
             if ui.small_button("Hide").clicked() {
@@ -155,7 +154,7 @@ impl App {
             return;
         }
         ui.horizontal(|ui| {
-            ui.heading(format!("{} can be freed", scan::human(total)));
+            ui.label(egui::RichText::new(format!("{} CAN BE FREED", scan::human(total))).size(11.0).strong().color(kit::tokens(ui).weak));
             if busy {
                 ui.spinner();
                 ui.label("Removing…");
@@ -361,6 +360,47 @@ fn kind_words(k: Kind) -> &'static str {
 }
 
 /// Space by app, as bars.
+impl App {
+    /// The title row and the totals strip, styled like the Library's.
+    fn storage_header(&mut self, ui: &mut egui::Ui, list: &[Model]) {
+        let t = kit::tokens(ui);
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+            crate::kit::icons::paint(ui.painter(), r, crate::kit::icons::Icon::Layers, t.accent);
+            ui.label(egui::RichText::new("Storage").size(18.0).strong());
+            ui.weak("· how much space AI models take, and what can be freed");
+        });
+        ui.add_space(6.0);
+        let fp = self.models.footprint;
+        let apps = {
+            let mut a: Vec<&str> = list.iter().map(|m| m.source.label()).collect();
+            a.sort();
+            a.dedup();
+            a.len()
+        };
+        let freeable = self.models.storage.items.as_ref().map(|i| i.iter().map(|x| x.bytes).sum::<u64>());
+        kit::card_frame(&t).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let tip = if fp.shared > 0 {
+                    format!("Space the model files take on the drive, counting files shared as one (hard links) once. Their sizes add up to {}.", scan::human(fp.logical))
+                } else {
+                    "Space the model files take on the drive.".to_string()
+                };
+                super::summary::stat(ui, "On disk", &scan::human(fp.on_disk), &tip, None);
+                super::summary::divider(ui);
+                match freeable {
+                    Some(b) => super::summary::stat(ui, "Can be freed", &scan::human(b), "Unused and unfinished downloads, older versions and loose copies listed below.", (b > 0).then_some(t.success)),
+                    None => super::summary::stat(ui, "Can be freed", "…", "Still looking.", None),
+                };
+                super::summary::divider(ui);
+                super::summary::stat(ui, "Apps", &apps.to_string(), "Apps and folders that keep models.", None);
+            });
+        });
+    }
+}
+
 fn by_app(ui: &mut egui::Ui, list: &[Model]) {
     let mut apps: Vec<(&'static str, u64, usize)> = Vec::new();
     for m in list {

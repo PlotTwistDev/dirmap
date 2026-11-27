@@ -678,7 +678,9 @@ impl App {
         ui.add_space(10.0);
 
         // Whether Filescape can run it.
-        let (tone, text) = if m.runnable() {
+        let (tone, text) = if m.runnable() && !modelkind::chats(m) {
+            (Tone::Neutral, "Filescape can load this model, but it doesn't write text, so Ask AI and the Lab can't use it.".to_string())
+        } else if m.runnable() {
             (Tone::Success, "Filescape can run this model: chat with it in Ask AI, or look inside it in the Lab.".to_string())
         } else {
             (Tone::Neutral, why_not_runnable(m))
@@ -695,7 +697,7 @@ impl App {
             if kit::button(ui, kit::Kind::Primary, Some(Icon::Search), "Inspect").on_hover_text("What's inside: its architecture, layers, tensors and metadata").clicked() {
                 act = Some(Act::Inspect);
             }
-            if m.runnable() {
+            if m.runnable() && modelkind::chats(m) {
                 if kit::button(ui, kit::Kind::Secondary, Some(Icon::Chat), "Ask AI").on_hover_text("Chat with this model, run by Filescape on this computer").clicked() {
                     act = Some(Act::Ask);
                 }
@@ -872,7 +874,7 @@ fn actions_menu(ui: &mut egui::Ui, list: &[Model], i: usize) -> Option<Act> {
         }
     };
     item(ui, Icon::Search, "Inspect", Act::Inspect, &mut act);
-    if m.runnable() {
+    if m.runnable() && modelkind::chats(m) {
         item(ui, Icon::Chat, "Ask AI", Act::Ask, &mut act);
         item(ui, Icon::Flask, "Open in Lab", Act::Lab, &mut act);
     }

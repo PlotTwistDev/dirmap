@@ -134,14 +134,25 @@ impl App {
     /// The Lab, beside the model list it shares with Ask AI.
     pub(super) fn lab_chat(&mut self, ui: &mut egui::Ui) {
         let name = self.ask.loaded.as_ref().map(|(_, n, _)| n.clone());
+        let t = kit::tokens(ui);
         ui.horizontal(|ui| {
-            ui.heading(name.as_deref().map_or("Lab".to_string(), |n| format!("Lab · {n}")));
+            crate::kit::icons::show(ui, crate::kit::Icon::Flask, 20.0, t.accent);
+            ui.label(egui::RichText::new("Lab").size(kit::TITLE - 2.0).color(t.strong));
+            if let Some(n) = &name {
+                ui.label(egui::RichText::new(format!("·  {n}")).size(14.0).color(t.weak));
+            }
             ui.add_space(8.0);
             let busy = self.ask.phase != super::ask::Phase::Idle;
             ui.add_enabled_ui(!busy, |ui| {
                 kit::segmented(ui, &mut self.ask.lab_state.page, &[(Page::Next, "Next token"), (Page::Inside, "Inside"), (Page::Steer, "Steer"), (Page::Speed, "Speed")], false);
             });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                kit::badge(ui, "Free", Tone::Success).on_hover_text("Everything in the Lab is free: it's for learning how models work.");
+            });
         });
+        ui.add_space(2.0);
+        about_page(ui, self.ask.lab_state.page);
+        ui.add_space(2.0);
         match self.ask.lab_state.page {
             Page::Speed => return self.lab_speed(ui, name),
             Page::Inside => return self.lab_inside(ui, name),
@@ -178,7 +189,7 @@ impl App {
                     if kit::button(ui, kit::Kind::Primary, None, "▶ Show next token").on_hover_text("What the model would write next, and the alternatives").clicked() {
                         run = Some(1);
                     }
-                    if kit::button(ui, kit::Kind::Secondary, None, &format!("Write {} tokens", l.steps)).on_hover_text("Write several tokens, each coloured by how likely the model thought it was").clicked() {
+                    if kit::button(ui, kit::Kind::Secondary, None, &format!("Write {} tokens", l.steps)).on_hover_text("Write several tokens, each coloured by the probability the model gave it").clicked() {
                         run = Some(l.steps);
                     }
                 });
@@ -416,6 +427,50 @@ impl App {
 }
 
 /// Roughly how many words a speed in tokens is: about ¾ of a word a token, in English.
+/// A folded section under the Lab's tabs: what the page shows, how to read it, and what it
+/// doesn't mean. Accurate rather than impressive: these are read by people learning.
+fn about_page(ui: &mut egui::Ui, page: Page) {
+    let (title, lines): (&str, &[&str]) = match page {
+        Page::Next => (
+            "About Next token",
+            &[
+                "A language model writes one token at a time. For each, it gives every token in its vocabulary a probability; then one is picked from them.",
+                "The bars show those probabilities. Temperature, Top-K, Top-P and Min-P reshape them before the pick: low temperature favours the likeliest token, higher gives others more of a chance. With the same seed and settings, the same tokens are picked again.",
+                "A high probability means the model expects that token there, not that what it writes is true. Models can be very sure of wrong facts.",
+            ],
+        ),
+        Page::Inside => (
+            "About Inside",
+            &[
+                "Each token is represented inside the model by a long list of numbers, which every layer changes a little. The map shows how much each layer changed each token's numbers.",
+                "\"What each layer would predict\" passes a layer's output straight to the model's final step (a technique called the logit lens). It's a diagnostic view: early layers were never trained to be read this way, so their guesses are rough.",
+                "Neither is a direct view of meaning or of anything like thought. They're measurements of numbers inside the model, from the model you loaded.",
+            ],
+        ),
+        Page::Steer => (
+            "About Steer",
+            &[
+                "Steering adds a direction to one layer's numbers while the model writes, worked out from the difference between how the model represents two words.",
+                "It changes nothing in the model file, and only lasts for that answer. The effect is experimental: some directions change the tone clearly, others do little or make the text worse.",
+            ],
+        ),
+        Page::Speed => (
+            "About Speed",
+            &[
+                "Reading (prompt processing) is how fast the model takes in text; writing (generation) is how fast it produces new tokens, one at a time. They differ a lot, so they're measured apart.",
+                "Speeds are in tokens a second, not words: a token is about three quarters of an English word. Results depend on the model, its precision, the context length, the threads used and what else the computer is doing.",
+            ],
+        ),
+    };
+    egui::CollapsingHeader::new(egui::RichText::new(title).size(12.0)).id_salt(("lab-about", title)).default_open(false).show(ui, |ui| {
+        ui.set_max_width(760.0);
+        for l in lines {
+            ui.label(egui::RichText::new(*l).size(12.5));
+            ui.add_space(3.0);
+        }
+    });
+}
+
 fn words(tokens_per_sec: f32) -> f32 {
     tokens_per_sec * 0.75
 }
@@ -426,9 +481,9 @@ fn speed_card(ui: &mut egui::Ui, r: &BenchResult) {
     egui::Frame::new().fill(ui.visuals().faint_bg_color).corner_radius(6.0).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
         ui.horizontal(|ui| {
             for (big, what, tip) in [
-                (format!("{:.1}", r.write_speed), "tokens a second written", format!("About {:.0} words a second. People read about 4.", words(r.write_speed))),
+                (format!("{:.1}", r.write_speed), "tokens a second written", format!("Roughly {:.0} English words a second, as a token is about ¾ of a word. People read about 4.", words(r.write_speed))),
                 (format!("{:.0}", r.read_speed), "tokens a second read", "How fast it takes in a question or a document before answering".to_string()),
-                (format!("{:.1} s", r.first_token), "to the first word", format!("After reading {} tokens", r.read)),
+                (format!("{:.1}", r.first_token), "seconds to the first token", format!("After reading {} tokens", r.read)),
             ] {
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(big).size(22.0).color(t.accent).strong());
@@ -471,7 +526,7 @@ fn results_table(ui: &mut egui::Ui, results: &[BenchResult], current: Option<&st
                 ui.painter().rect_filled(rect, 3.0, ui.visuals().faint_bg_color);
                 ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, vec2(rect.width() * r.write_speed / fastest, rect.height())), 3.0, t.accent);
                 ui.label(format!("{:.0}/s", r.read_speed));
-                ui.label(format!("{:.1} s", r.first_token));
+                ui.label(format!("{:.1}", r.first_token));
                 ui.label(place(r)).on_hover_text(format!("{} tokens of context; read {}, wrote {}, middle of {} runs", r.context, r.read, r.write, r.runs));
                 let when = chrono::DateTime::from_timestamp(r.when, 0).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
                 ui.weak(when);
