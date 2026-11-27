@@ -1467,3 +1467,126 @@ fn s9_demo_scenes() {
         println!("{}: {} splats, {:?}", p.display(), r.len(), r.facts);
     }
 }
+
+// ---- S10: scenes that change over time.
+
+/// An STG Lite PLY: the 3DGS properties (no harmonics) plus each splat's motion.
+fn stg_ply(n: u64, value: impl Fn(u64, &str) -> f32) -> Vec<u8> {
+    let mut names: Vec<String> = SPLAT_PROPS.iter().map(|s| s.to_string()).collect();
+    names.extend(time::STG_LITE.iter().map(|s| s.to_string()));
+    names.extend(["opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"].map(String::from));
+    let mut out = format!("ply\nformat binary_little_endian 1.0\nelement vertex {n}\n").into_bytes();
+    for p in &names {
+        writeln!(out, "property float {p}").unwrap();
+    }
+    out.extend_from_slice(b"end_header\n");
+    for i in 0..n {
+        for p in &names {
+            out.extend_from_slice(&value(i, p).to_le_bytes());
+        }
+    }
+    out
+}
+
+#[test]
+fn stg_lite_scenes_move_and_fade_through_time() {
+    // Splat i is centred on time i/4, moving along x at speed 1 with a little acceleration
+    // and jerk on y and z, turning about z, with plain colours.
+    let data = stg_ply(5, |i, p| match p {
+        "x" => i as f32,
+        "trbf_center" => i as f32 / 4.0,
+        "trbf_scale" => (0.1f32).ln(),
+        "motion_0" => 1.0,
+        "motion_4" => 2.0,
+        "motion_8" => 3.0,
+        "omega_3" => 1.0,
+        "rot_0" => 1.0,
+        "f_dc_0" => 0.2,
+        "f_dc_1" => 0.6,
+        "f_dc_2" => 1.0,
+        "opacity" => 10.0,
+        _ => plain(i, p),
+    });
+    let path = tmp("stg.ply", &data);
+    assert_eq!(classify_ply(&path).unwrap(), PlyKind::Splat4d);
+    let s = read(&path, Limits::PREVIEW).unwrap();
+    assert_eq!((s.kind, s.format.as_str()), (SceneKind::Splat4d, "PLY (Space-Time Gaussians Lite)"));
+    let tm = s.timed.as_ref().unwrap();
+    assert_eq!((tm.len(), tm.from, tm.to), (5, 0.0, 1.0));
+    // Plain colours, not harmonics.
+    assert_eq!(&s.color[0][..3], &[51, 153, 255]);
+    // At the start only the first splat is there; the last is long gone (or yet to come).
+    assert!(s.color[0][3] > 250 && s.color[4][3] == 0, "{:?}", s.color);
+    // Half a unit of time later, splat 2 (centred on 0.5) is in full view at its own place,
+    // and splat 0 has moved on and faded.
+    let m = s.at(0.5).unwrap();
+    assert_eq!(m.pos[2], [2.0, 2.0, -1.0]);
+    assert!(m.color[2][3] > 250 && m.color[0][3] == 0);
+    let (p, r, a) = time::splat_at(tm, 0, 0.5);
+    assert!((p[0] - 0.5).abs() < 1e-6 && (p[1] - 2.5).abs() < 1e-6 && (p[2] - (-1.0 + 3.0 * 0.125)).abs() < 1e-6, "{p:?}");
+    // Turned about z: w 1 and z 0.5 before normalising.
+    assert!((r[2] * 2.0 - r[3]).abs() < 1e-6 && (r[2] * r[2] + r[3] * r[3] - 1.0).abs() < 1e-6, "{r:?}");
+    assert!(a < 1e-6);
+    // The details are the whole scene's.
+    assert_eq!(m.facts, s.facts);
+}
+
+/// Makes demo scenes that change over time from a real one: twelve numbered PLYs of it
+/// turning (seq-demo/turn.0001.ply…), and an STG Lite PLY where it sweeps into view while
+/// rising (stg-demo/sweep.ply). FILESCAPE_SPLAT_DEMO=<scene file>, written next to it.
+#[test]
+#[ignore]
+fn s10_demo_scenes() {
+    let Ok(src) = std::env::var("FILESCAPE_SPLAT_DEMO") else { return };
+    let src = std::path::PathBuf::from(src);
+    let s = read(&src, Limits { max_points: 60_000, keep_sh: false, ..Limits::THUMB }).unwrap();
+    let dir = src.parent().unwrap();
+    let seq = dir.join("seq-demo");
+    let _ = std::fs::remove_dir_all(&seq);
+    std::fs::create_dir_all(&seq).unwrap();
+    for f in 0..12 {
+        let mut fr = read(&src, Limits { max_points: 60_000, keep_sh: false, ..Limits::THUMB }).unwrap();
+        let a = f as f32 / 12.0 * std::f32::consts::TAU;
+        let (c, sn) = (a.cos(), a.sin());
+        // A turn about y, positions and rotations with it.
+        fr.total = fr.len();
+        fr.sh_degree = 0;
+        lod::rotate(&mut fr, [[c, 0.0, sn], [0.0, 1.0, 0.0], [-sn, 0.0, c]], [0.0, (a / 2.0).sin(), 0.0, (a / 2.0).cos()]);
+        std::fs::write(seq.join(format!("turn.{:04}.ply", f + 1)), write::encode(&fr, write::Target::Ply).unwrap()).unwrap();
+    }
+    let stg = dir.join("stg-demo");
+    let _ = std::fs::remove_dir_all(&stg);
+    std::fs::create_dir_all(&stg).unwrap();
+    let (lo, hi) = s.pos.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p[0]), b.max(p[0])));
+    let data = stg_ply(s.len() as u64, |i, p| {
+        let i = i as usize;
+        let (pos, c, sc, q) = (s.pos[i], s.color[i], s.scale[i], s.rot[i]);
+        let a = (c[3] as f32 / 255.0).clamp(0.001, 0.999);
+        match p {
+            "x" => pos[0],
+            "y" => pos[1],
+            "z" => pos[2],
+            "f_dc_0" => c[0] as f32 / 255.0,
+            "f_dc_1" => c[1] as f32 / 255.0,
+            "f_dc_2" => c[2] as f32 / 255.0,
+            "opacity" => (a / (1.0 - a)).ln(),
+            "scale_0" => sc[0].ln(),
+            "scale_1" => sc[1].ln(),
+            "scale_2" => sc[2].ln(),
+            "rot_0" => q[3],
+            "rot_1" => q[0],
+            "rot_2" => q[1],
+            "rot_3" => q[2],
+            // Swept in from left to right, each lasting a third of the time, rising as it goes
+            // (y is down in these axes).
+            "trbf_center" => (pos[0] - lo) / (hi - lo).max(1e-6),
+            "trbf_scale" => (0.3f32).ln(),
+            "motion_1" => -0.4,
+            "omega_1" => 0.5,
+            _ => 0.0,
+        }
+    });
+    std::fs::write(stg.join("sweep.ply"), data).unwrap();
+    let r = read(&stg.join("sweep.ply"), Limits::PREVIEW).unwrap();
+    println!("{}: {} splats, {:?}", r.format, r.len(), r.facts);
+}

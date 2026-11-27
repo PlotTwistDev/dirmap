@@ -97,6 +97,9 @@
 - **Compare Scenes** (Professional): select two splat scenes and right-click to see them side
   by side, split by a line you drag, or as their difference, turning together, with how alike
   the pictures are and both scenes' details side by side.
+- **Splat scenes that change over time** play in the preview: 4D scenes (Space-Time
+  Gaussians Lite PLYs) and numbered splat files in a folder, with a play button and a
+  slider under the picture.
 - **Big splat scenes** kept in chunks preview: streamed SOG (`lod-meta.json`), and XGRIDS LCC
   and LCC2, showing the most detailed level that fits. Chunks only in the cloud are counted,
   never downloaded.

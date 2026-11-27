@@ -18,6 +18,7 @@ pub mod project;
 pub mod splat;
 pub mod sog;
 pub mod spz;
+pub mod time;
 pub mod write;
 
 use std::path::Path;
@@ -123,6 +124,9 @@ pub struct Scene {
     pub facts: Vec<(&'static str, String)>,
     /// The checks and measures per splat, also filled in by [`facts::describe`].
     pub analysis: inspect::Analysis,
+    /// For a scene that changes over time: what each splat does (see [`time`]). The arrays
+    /// above hold the scene at its start.
+    pub timed: Option<std::sync::Arc<time::Timed>>,
 }
 
 impl Scene {
@@ -144,6 +148,7 @@ impl Scene {
             said: Vec::new(),
             facts: Vec::new(),
             analysis: Default::default(),
+            timed: None,
         }
     }
 

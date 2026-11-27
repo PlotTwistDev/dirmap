@@ -302,6 +302,13 @@ pub fn read_from<R: Read + Seek>(src: &mut R, len: u64, limits: Limits) -> Resul
         },
     };
     let is_splat = scene_kind != SceneKind::PointCloud;
+    // Space-Time Gaussians Lite: motion per splat, and plain colours (see `time`).
+    let stg: Option<Vec<usize>> = if scene_kind == SceneKind::Splat4d && want.dc.is_some() && want.opacity.is_some() && want.rot.is_some() && want.scale.is_some() {
+        super::time::STG_LITE.iter().map(|n| idx(n)).collect()
+    } else {
+        None
+    };
+    let mut timed = super::time::Timed::default();
     // f_rest holds 3 × (coefficients beyond the first) values.
     let degree = match want.rest.len() {
         0..9 => if want.rest.is_empty() { 0 } else { 1 },
@@ -338,7 +345,9 @@ pub fn read_from<R: Read + Seek>(src: &mut R, len: u64, limits: Limits) -> Resul
     let mut take = |scene: &mut Scene, vals: &dyn Fn(usize) -> f32| {
         let pos = [vals(want.xyz[0]), vals(want.xyz[1]), vals(want.xyz[2])];
         let alpha = want.opacity.map_or(1.0, |i| sigmoid(vals(i)));
-        let rgb = if let Some(dc) = want.dc {
+        let rgb = if let (Some(dc), Some(_)) = (want.dc, &stg) {
+            [vals(dc[0]), vals(dc[1]), vals(dc[2])]
+        } else if let Some(dc) = want.dc {
             [vals(dc[0]) * SH_C0 + 0.5, vals(dc[1]) * SH_C0 + 0.5, vals(dc[2]) * SH_C0 + 0.5]
         } else if let Some((c, full)) = want.rgb {
             [vals(c[0]) / full, vals(c[1]) / full, vals(c[2]) / full]
@@ -364,7 +373,22 @@ pub fn read_from<R: Read + Seek>(src: &mut R, len: u64, limits: Limits) -> Resul
                 }
             }
         }
+        let before = scene.len();
         scene.push(pos, color, scale, rot, &rest_vals);
+        if let Some(t) = &stg
+            && scene.len() > before
+        {
+            // Kept: what it does over time, alongside (centre, span, 9 motion, 4 omega).
+            let g = |k: usize| vals(t[k]);
+            let r = want.rot.unwrap();
+            timed.pos.push(pos);
+            timed.centre.push(g(0));
+            timed.span.push(g(1));
+            timed.motion.push([g(2), g(3), g(4), g(5), g(6), g(7), g(8), g(9), g(10)]);
+            timed.omega.push([g(11), g(12), g(13), g(14)]);
+            timed.rot.push([vals(r[0]), vals(r[1]), vals(r[2]), vals(r[3])]);
+            timed.logit.push(vals(want.opacity.unwrap()));
+        }
     };
 
     match head.encoding {
@@ -442,6 +466,16 @@ pub fn read_from<R: Read + Seek>(src: &mut R, len: u64, limits: Limits) -> Resul
                     break;
                 }
             }
+        }
+    }
+    if stg.is_some() && timed.len() == scene.len() && !timed.pos.is_empty() {
+        timed.settle();
+        let start = timed.from;
+        scene.format = "PLY (Space-Time Gaussians Lite)".into();
+        scene.timed = Some(std::sync::Arc::new(timed));
+        // Shown at its start: splats not yet on stage are see-through.
+        if let Some(s) = scene.at(start) {
+            scene = s;
         }
     }
     Ok(scene)
