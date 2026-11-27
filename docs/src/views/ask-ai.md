@@ -8,6 +8,13 @@ Open the [AI Models workspace](ai-models.md) (**Ctrl+4**, **⌘4** on a Mac) and
 in the toolbar. Press **Library** to go back to the list of models. You can also select a model
 in the library and press **💬 Ask AI** beside **🔍 Inspect**.
 
+Before the first question, Ask AI offers some places to start: **Understand a document**, **Explore
+a folder**, **Explain a script**, **Analyse a log**, **Summarise a folder of documents**,
+**Understand storage use** (after a scan in Storage Analysis) and **Ask about my AI models**. Each
+one asks you to pick the file or folder, attaches it and writes a first question you can change
+before sending. Only models that write text are listed: image, audio and embedding models can't
+chat.
+
 ## Choosing a model
 
 The left side lists the models Filescape can run: GGUF models, the kind Ollama and LM Studio

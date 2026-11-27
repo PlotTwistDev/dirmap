@@ -31,7 +31,7 @@ pub(super) struct ModelsState {
     /// The library's search, filters and layout.
     lib: library::Library,
     /// The space the models take, worked out with the list.
-    footprint: models::Footprint,
+    pub footprint: models::Footprint,
     /// A file to show in Files once the details panel is drawn.
     reveal_later: Option<PathBuf>,
 }
@@ -392,27 +392,57 @@ impl App {
         }
         let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input();
         let mut open = None;
+        let mut act = None;
+        let t = kit::tokens(ui);
+        let (kind, sure) = crate::modelkind::of(m);
+        // The heading: back, the kind's tile, the name and what it is; actions on the right.
         ui.horizontal(|ui| {
-            close |= ui.button("⏴ All models").on_hover_text("Back to the list (Esc)").clicked();
-            ui.add_space(8.0);
+            if kit::icon_button(ui, kit::Icon::ArrowLeft, "Back to all models (Esc)").clicked() {
+                close = true;
+            }
+            ui.add_space(4.0);
+            let (tile, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+            library::kind_tile(ui.painter(), tile, kind, sure, t.dark);
+            ui.add_space(4.0);
+            ui.vertical(|ui| {
+                ui.set_max_width((ui.available_width() - 420.0).max(200.0));
+                ui.add(egui::Label::new(egui::RichText::new(&m.name).size(18.0).color(t.strong)).truncate());
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.label(egui::RichText::new(library::kind_words(kind, sure)).size(12.5).color(library::kind_colour(kind, t.dark)));
+                    let mut rest = vec![m.format.label().to_string()];
+                    rest.extend(m.info.arch.clone());
+                    rest.push(m.source.label().to_string());
+                    ui.label(egui::RichText::new(format!("  ·  {}", rest.join(" · "))).size(12.5).color(t.weak));
+                    if let Some(n) = note(m) {
+                        ui.label(egui::RichText::new(format!("   {n}")).size(12.5).color(t.warn));
+                    }
+                });
+            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
                 if page.data.is_some() && list.len() > 1 {
                     let mut pick = None;
-                    egui::ComboBox::from_id_salt("compare-with")
-                        .selected_text(page.compare_with.and_then(|c| list.get(c)).map_or("Compare with…".to_string(), |o| format!("Compared with {}", o.name)))
-                        .width(220.0)
-                        .show_ui(ui, |ui| {
+                    let r = kit::button(
+                        ui,
+                        kit::Kind::Secondary,
+                        Some(kit::Icon::Columns),
+                        &page.compare_with.and_then(|c| list.get(c)).map_or("Compare…".to_string(), |o| format!("Compared with {}", o.name)),
+                    )
+                    .on_hover_text("Compare this model with another: their facts, layers, tensors and metadata side by side");
+                    egui::Popup::menu(&r).show(|ui| {
+                        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
                             for (i, o) in list.iter().enumerate() {
                                 if i == page.model || o.info.companion || o.files.iter().all(|f| f.not_local) {
                                     continue;
                                 }
                                 if ui.selectable_label(page.compare_with == Some(i), format!("{}  ·  {}", o.name, o.details())).clicked() {
                                     pick = Some(i);
+                                    ui.close();
                                 }
                             }
-                        })
-                        .response
-                        .on_hover_text("Compare this model with another: their facts, layers, tensors and metadata side by side");
+                        });
+                    });
                     if let Some(i) = pick {
                         let (tx, rx) = mpsc::channel();
                         let o = list[i].clone();
@@ -425,18 +455,53 @@ impl App {
                         page.tab = PageTab::Compare;
                     }
                 }
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(egui::Label::new(egui::RichText::new(&m.name).heading()).truncate());
-                });
+                if kit::icon_button(ui, kit::Icon::Folder, "Show in Files").clicked() {
+                    act = Some(library::Act::ShowFiles);
+                }
+                if m.runnable() && crate::modelkind::chats(m) {
+                    if kit::button(ui, kit::Kind::Secondary, Some(kit::Icon::Flask), "Open in Lab").clicked() {
+                        act = Some(library::Act::Lab);
+                    }
+                    if kit::button(ui, kit::Kind::Secondary, Some(kit::Icon::Chat), "Ask AI").clicked() {
+                        act = Some(library::Act::Ask);
+                    }
+                }
             });
         });
+        ui.add_space(8.0);
+
+        // The summary: the facts most people want, before any detail.
+        let d0 = page.data.clone();
+        let layers = d0.as_ref().and_then(|d| d.shape.layers);
+        let context = m.info.context.filter(|&c| c > 0).or(d0.as_ref().and_then(|d| d.shape.context));
+        let precision = m.info.quant.clone();
+        let tiles: Vec<(&str, String, String)> = vec![
+            ("Parameters", m.info.params.clone().unwrap_or_else(|| "Unknown".into()), crate::kit::glossary("Parameters").to_string()),
+            ("Size", scan::human(m.size), format!("The model's files added up{}.", if m.files.len() > 1 { format!(" ({} files)", m.files.len()) } else { String::new() })),
+            (
+                "Precision",
+                precision.clone().unwrap_or_else(|| "Unknown".into()),
+                precision.as_deref().map_or_else(|| crate::kit::glossary("Precision").to_string(), |q| format!("{}: {}", precision_words(q), crate::kit::glossary("Precision"))),
+            ),
+            ("Context", context.map(|c| format!("{} tokens", crate::fit::tokens(c))).unwrap_or_else(|| "Unknown".into()), crate::kit::glossary("Context").to_string()),
+            ("Layers", layers.map(|l| l.to_string()).unwrap_or_else(|| if d0.is_some() { "Unknown".into() } else { "…".into() }), crate::kit::glossary("Layers").to_string()),
+            (
+                "Runs in Filescape",
+                if m.runnable() { "Yes".into() } else { "No".into() },
+                if m.runnable() { "Ask AI and the Lab can load it.".into() } else { "Filescape runs whole GGUF models; this one can be inspected here.".into() },
+            ),
+        ];
+        let n = tiles.len() as f32;
+        let w = ((ui.available_width() - 8.0 * (n - 1.0)) / n).clamp(96.0, 180.0);
         ui.horizontal_wrapped(|ui| {
-            ui.weak(format!("{} · {} · {}", m.details(), scan::human(m.size), m.source.label()));
-            if let Some(n) = note(m) {
-                ui.colored_label(ui.visuals().warn_fg_color, n);
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            for (label, value, tip) in &tiles {
+                library::fact_tile(ui, w, label, value, tip);
             }
         });
-        ui.add_space(6.0);
+        ui.add_space(10.0);
+
+        // Tabs: the main ones, then the detail for experienced users.
         let tensors = page.data.as_ref().map_or(0, |d| d.tensors.len());
         let metas = page.data.as_ref().map_or(0, |d| d.meta.len());
         let tensors_label = format!("Tensors ({})", group(tensors as u64));
@@ -444,6 +509,7 @@ impl App {
         let problems = page.health.iter().filter(|c| c.level == crate::health::Level::Problem).count();
         let health_label = if problems > 0 { format!("Health ({problems} ⚠)") } else { "Health".to_string() };
         let mut tabs = vec![(PageTab::Overview, "Overview")];
+        let mut advanced = Vec::new();
         if page.data.is_some() {
             tabs.push((PageTab::Health, health_label.as_str()));
         }
@@ -452,23 +518,31 @@ impl App {
         }
         if tensors > 0 {
             tabs.push((PageTab::Structure, "Structure"));
-            tabs.push((PageTab::Tensors, tensors_label.as_str()));
+            advanced.push((PageTab::Tensors, tensors_label.as_str()));
         }
         if page.has_vocab {
-            tabs.push((PageTab::Tokens, "Tokens"));
+            advanced.push((PageTab::Tokens, "Tokens"));
         }
         if metas > 0 {
-            tabs.push((PageTab::Metadata, meta_label.as_str()));
+            advanced.push((PageTab::Metadata, meta_label.as_str()));
         }
         if page.compare_with.is_some() {
             tabs.push((PageTab::Compare, "Compare"));
         }
         // A tab asked for before the model was read (Will it run? from the library) may not apply.
-        if page.data.is_some() && !tabs.iter().any(|(t, _)| *t == page.tab) {
+        if page.data.is_some() && !tabs.iter().chain(&advanced).any(|(t, _)| *t == page.tab) {
             page.tab = PageTab::Overview;
         }
-        if tabs.len() > 1 {
-            kit::segmented(ui, &mut page.tab, &tabs, false);
+        if tabs.len() + advanced.len() > 1 {
+            ui.horizontal(|ui| {
+                kit::segmented(ui, &mut page.tab, &tabs, false);
+                if !advanced.is_empty() {
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("ADVANCED").size(10.0).color(t.weak).strong())
+                        .on_hover_text("The model's raw parts: every tensor, its vocabulary and the metadata stored in the file");
+                    kit::segmented(ui, &mut page.tab, &advanced, false);
+                }
+            });
             ui.add_space(8.0);
         }
         match (&page.data, page.tab) {
@@ -523,10 +597,14 @@ impl App {
                 page_metadata(ui, &mut page.filter, &d);
             }
         }
-        self.models.list = Some(list);
+        let model = page.model;
         if !close {
             self.models.page = Some(page);
         }
+        if let Some(a) = act {
+            self.model_act(&list, model, a);
+        }
+        self.models.list = Some(list);
         if let Some(p) = open {
             self.show_model_file(&p);
         }
@@ -546,25 +624,75 @@ fn page_overview(ui: &mut egui::Ui, m: &Model, d: &Inspection) -> Option<PathBuf
         ui.add_space(4.0);
     }
     if !d.facts.is_empty() {
-        egui::Grid::new("inspect-facts").num_columns(3).spacing([14.0, 5.0]).striped(true).show(ui, |ui| {
-            for f in &d.facts {
-                ui.weak(f.label);
-                let tone = match f.how {
-                    How::Verified => Tone::Success,
-                    How::Calculated => Tone::Accent,
-                    How::Documented => Tone::Neutral,
-                };
-                kit::badge(ui, f.how.label(), tone).on_hover_text(f.how.explain());
-                ui.add(egui::Label::new(&f.value).wrap());
-                ui.end_row();
+        // The facts in four groups, side by side when there's room.
+        const GROUPS: [(&str, &[&str]); 3] = [
+            ("About", &["Name", "Made by", "Fine-tuned as", "Architecture", "Size label", "Parameters", "Licence"]),
+            ("Shape", &["Layers", "Hidden size", "Attention heads", "Key/value heads", "Experts", "Feed-forward size", "Context"]),
+            ("Text", &["Vocabulary", "Tokenizer", "Chat template"]),
+        ];
+        let mut groups: Vec<(&str, Vec<&inspect::Fact>)> = GROUPS.iter().map(|(g, _)| (*g, Vec::new())).collect();
+        groups.push(("File", Vec::new()));
+        for f in &d.facts {
+            let g = GROUPS.iter().position(|(_, labels)| labels.contains(&f.label)).unwrap_or(GROUPS.len());
+            groups[g].1.push(f);
+        }
+        groups.retain(|(_, v)| !v.is_empty());
+        let card = |ui: &mut egui::Ui, (title, facts): &(&str, Vec<&inspect::Fact>)| {
+            let t = kit::tokens(ui);
+            kit::card_frame(&t).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(title.to_uppercase()).size(10.5).color(t.weak).strong());
+                ui.add_space(2.0);
+                egui::Grid::new(("inspect-facts", *title)).num_columns(3).spacing([12.0, 6.0]).min_col_width(60.0).show(ui, |ui| {
+                    for f in facts {
+                        let tip = kit::glossary(f.label);
+                        let l = ui.label(egui::RichText::new(f.label).color(t.weak));
+                        if !tip.is_empty() {
+                            l.on_hover_text(tip);
+                        }
+                        let tone = match f.how {
+                            How::Verified => Tone::Success,
+                            How::Calculated => Tone::Accent,
+                            How::Documented => Tone::Neutral,
+                        };
+                        kit::badge(ui, f.how.label(), tone).on_hover_text(f.how.explain());
+                        ui.add(egui::Label::new(egui::RichText::new(&f.value).color(t.strong)).wrap());
+                        ui.end_row();
+                    }
+                });
+                ui.add_space(4.0);
+            });
+        };
+        if ui.available_width() > 760.0 && groups.len() > 1 {
+            let half = groups.len().div_ceil(2);
+            ui.columns(2, |cols| {
+                for (k, g) in groups.iter().enumerate() {
+                    let c = &mut cols[if k < half { 0 } else { 1 }];
+                    card(c, g);
+                    c.add_space(8.0);
+                }
+            });
+        } else {
+            for g in &groups {
+                card(ui, g);
+                ui.add_space(8.0);
             }
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            kit::badge(ui, How::Verified.label(), Tone::Success);
+            ui.weak("read from the model file  ");
+            kit::badge(ui, How::Calculated.label(), Tone::Accent);
+            ui.weak("worked out from it  ");
+            kit::badge(ui, How::Documented.label(), Tone::Neutral);
+            ui.weak("stated by the publisher beside it, not checked");
         });
-        ui.add_space(4.0);
-        ui.weak("file: read from the model file · calculated: worked out from it · publisher: stated beside it, not checked");
     }
     if d.kinds.len() > 1 {
         ui.add_space(12.0);
-        ui.strong("How the numbers are stored");
+        ui.label(egui::RichText::new("HOW THE NUMBERS ARE STORED").size(10.5).color(kit::tokens(ui).weak).strong())
+            .on_hover_text(kit::glossary("Precision"));
         ui.add_space(4.0);
         let total: u64 = d.kinds.iter().map(|k| k.bytes).sum::<u64>().max(1);
         egui::Grid::new("inspect-kinds").num_columns(4).spacing([14.0, 4.0]).show(ui, |ui| {
@@ -583,7 +711,8 @@ fn page_overview(ui: &mut egui::Ui, m: &Model, d: &Inspection) -> Option<PathBuf
         });
     }
     ui.add_space(12.0);
-    ui.strong(if m.files.len() == 1 { "File" } else { "Files" });
+    let t = kit::tokens(ui);
+    ui.label(egui::RichText::new(if m.files.len() == 1 { "FILE" } else { "FILES" }).size(10.5).color(t.weak).strong());
     for f in &m.files {
         let r = ui.add(egui::Label::new(egui::RichText::new(f.path.shown())).wrap().sense(Sense::click())).on_hover_text("Click to show it in Files");
         if r.clicked() {

@@ -183,6 +183,12 @@ fn from_hint(h: &str) -> Option<Kind> {
     })
 }
 
+/// Whether a model writes text, so it can chat (Ask AI) and predict tokens (the Lab): not an
+/// embedding, speech or vision-only model. Unidentified models are given the benefit of the doubt.
+pub fn chats(m: &Model) -> bool {
+    matches!(of(m).0, Kind::Language | Kind::Multimodal | Kind::Unknown)
+}
+
 /// A key that's the same for versions of one model saved at different precisions or by
 /// different apps: "qwen3 8b" for `qwen3:8b`, `Qwen3-8B-Q4_K_M`, `Qwen/Qwen3-8B-GGUF (Q8_0)` and
 /// `Qwen3-8B` (safetensors). The publisher, the precision and words such as "GGUF" are left out;

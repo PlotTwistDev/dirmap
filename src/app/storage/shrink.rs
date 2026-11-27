@@ -105,7 +105,8 @@ impl App {
         let mut close = false;
         egui::Modal::new(egui::Id::new("storage-shrink")).show(ctx, |ui| {
             ui.set_max_width(560.0);
-            ui.heading(format!("Shrink {}", s.name));
+            ui.heading("Optimise model size");
+            ui.weak(format!("Make a smaller copy of {}. The original is kept.", s.name));
             ui.add_space(4.0);
             if let Some(r) = &s.run {
                 let (done, total) = (r.done.load(Ordering::Relaxed), r.total.load(Ordering::Relaxed));

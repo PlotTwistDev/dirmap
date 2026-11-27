@@ -97,7 +97,8 @@ impl AskState {
 
 /// Models that Filescape can run, with the list's index.
 fn runnable(list: &[Model]) -> Vec<(usize, &Model)> {
-    let mut v: Vec<(usize, &Model)> = list.iter().enumerate().filter(|(_, m)| m.runnable() && m.extra == 0).collect();
+    // Models that write text: not embedding, speech or vision-only ones, which can't chat.
+    let mut v: Vec<(usize, &Model)> = list.iter().enumerate().filter(|(_, m)| m.runnable() && m.extra == 0 && crate::modelkind::chats(m)).collect();
     // Smallest first: they load and answer quickest.
     v.sort_by_key(|(_, m)| m.size);
     v
@@ -280,6 +281,92 @@ impl App {
             let _ = tx.send(getmodel::download(&STARTER, &dir, &p));
         });
         self.ask.fetch = Some(Fetch { progress, rx });
+    }
+
+    /// The suggestions in an empty chat: things to ask about this computer's files, its storage
+    /// and its models. Each attaches what it's about (picked, or the facts Filescape already has)
+    /// and fills in a question to edit before sending.
+    fn ask_suggestions(&mut self, ui: &mut egui::Ui) {
+        use super::dialogs::{Dialog, Pick};
+        use crate::kit::Icon;
+        #[derive(Clone, Copy)]
+        enum What {
+            File(&'static str),
+            Folder(&'static str),
+            Storage,
+            Models,
+        }
+        let suggestions: [(Icon, &str, &str, What); 7] = [
+            (Icon::File, "Understand a document", "A summary and its main points", What::File("Summarise this document and list its main points.")),
+            (Icon::Folder, "Explore a folder", "What's in it, and what it's for", What::Folder("What's in this folder, and what does it seem to be for?")),
+            (Icon::Pencil, "Explain a script", "What it does, step by step", What::File("What does this script do? Explain it step by step.")),
+            (Icon::Warning, "Analyse a log", "Its errors and their likely causes", What::File("What errors are in this log, and what are their likely causes?")),
+            (Icon::Clipboard, "Summarise a folder of documents", "One line on each document", What::Folder("Summarise the documents in this folder, one line each.")),
+            (Icon::Treemap, "Understand storage use", "What's using space in the scan", What::Storage),
+            (Icon::Chat, "Ask about my AI models", "What's here, and what could go", What::Models),
+        ];
+        let t = kit::tokens(ui);
+        let cols = if ui.available_width() > 700.0 { 3 } else { 2 };
+        let w = (ui.available_width().min(820.0) - 10.0 * (cols as f32 - 1.0)) / cols as f32;
+        let mut picked = None;
+        let has_scan = self.tree.is_some() && self.job.is_none();
+        let has_models = self.models.list.as_ref().is_some_and(|l| !l.is_empty());
+        egui::Grid::new("ask-suggestions").num_columns(cols).spacing([10.0, 10.0]).show(ui, |ui| {
+            for (k, (icon, title, desc, what)) in suggestions.iter().enumerate() {
+                let enabled = match what {
+                    What::Storage => has_scan,
+                    What::Models => has_models,
+                    _ => true,
+                };
+                let (rect, resp) = ui.allocate_exact_size(vec2(w, 58.0), if enabled { Sense::click() } else { Sense::hover() });
+                let hovered = resp.hovered() && enabled;
+                ui.painter().rect(rect, 8.0, if hovered { t.pal.hover } else { t.card }, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
+                let ic = Rect::from_min_size(rect.left_top() + vec2(12.0, 12.0), vec2(16.0, 16.0));
+                crate::kit::icons::paint(ui.painter(), ic, *icon, if enabled { t.accent } else { t.disabled });
+                let clip = ui.painter().with_clip_rect(rect.shrink(4.0));
+                clip.text(rect.left_top() + vec2(36.0, 11.0), Align2::LEFT_TOP, *title, FontId::proportional(13.0), if enabled { t.strong } else { t.disabled });
+                clip.text(rect.left_top() + vec2(36.0, 31.0), Align2::LEFT_TOP, *desc, FontId::proportional(11.5), t.weak);
+                let resp = match what {
+                    What::Storage if !enabled => resp.on_hover_text("Scan a drive or folder in Storage Analysis first"),
+                    What::Models if !enabled => resp.on_hover_text("No models were found"),
+                    _ => resp,
+                };
+                if resp.clicked() {
+                    picked = Some(*what);
+                }
+                if k % cols == cols - 1 {
+                    ui.end_row();
+                }
+            }
+        });
+        match picked {
+            Some(What::File(q)) => self.ask_path(Dialog::new().set_title("Ask AI about a file"), Pick::File, move |app, p| {
+                app.ask_about_paths(vec![p]);
+                app.ask.draft = q.to_string();
+                // Picking a file to understand is asking for it to be read; the tick stays to untick.
+                if let Some(a) = &mut app.ask.about {
+                    a.read = true;
+                }
+            }),
+            Some(What::Folder(q)) => self.ask_path(Dialog::new().set_title("Ask AI about a folder"), Pick::Folder, move |app, p| {
+                app.ask_about_paths(vec![p]);
+                app.ask.draft = q.to_string();
+            }),
+            Some(What::Storage) => {
+                if let Some(tree) = self.tree.clone() {
+                    let disk = self.scanned_path.clone();
+                    self.ask_about_node(tree, Vec::new(), disk);
+                    self.ask.draft = "What is taking up the most space here, and what could I look at to free some?".into();
+                }
+            }
+            Some(What::Models) => {
+                if let Some(list) = self.models.list.clone() {
+                    self.ask_about_with(move || models_facts(&list));
+                    self.ask.draft = "Which of these AI models could I remove to free space, and why?".into();
+                }
+            }
+            None => {}
+        }
     }
 
     /// Opens Ask AI with files or folders from Files attached to the next question.
@@ -559,13 +646,17 @@ impl App {
                 ui.add_space(20.0);
                 ui.vertical_centered(|ui| {
                     if name.is_some() {
-                        ui.label("Ask anything. Press Enter to send, Shift+Enter for a new line.");
+                        ui.label("Ask anything, or start from one of these. Press Enter to send, Shift+Enter for a new line.");
                     } else if self.ask.phase == Phase::Idle && self.models.list.as_ref().is_some_and(|l| runnable(l).is_empty()) {
                         ui.label("To start, get a small model on the left, or install one with Ollama or LM Studio.");
                     } else if self.ask.phase == Phase::Idle {
-                        ui.label("Pick a model on the left and press Load.");
+                        ui.label("Pick a model on the left and press Load. Then ask anything, or start from one of these.");
                     }
                 });
+                ui.add_space(14.0);
+                if self.ask.about.is_none() {
+                    self.ask_suggestions(ui);
+                }
             }
             let model = name.clone().unwrap_or_else(|| "Model".into());
             for (i, m) in self.ask.conversation.iter().enumerate() {
@@ -806,6 +897,43 @@ fn formatted(ui: &mut egui::Ui, i: usize, text: &str) {
         anchors: Vec::new(),
     };
     render::blocks(ui, &mut out, &blocks);
+}
+
+/// The model library as facts for a question: each model's kind, size, app, and whether it's an
+/// extra copy or an unused download. Worked out by Filescape, so the answer explains these
+/// figures rather than guessing them.
+fn models_facts(list: &[Model]) -> askabout::Facts {
+    let mut text = String::from("AI models found on this computer by Filescape (sizes and copies are measured, not estimates):\n");
+    let total: u64 = list.iter().map(|m| m.size).sum();
+    for m in list.iter().take(200) {
+        let (kind, sure) = crate::modelkind::of(m);
+        let mut notes = Vec::new();
+        if m.extra > 0 {
+            notes.push(format!("extra copy of another model listed here: removing it frees {}", crate::scan::human(m.extra)));
+        }
+        if m.orphan {
+            notes.push("Ollama download that no installed model uses".to_string());
+        }
+        if m.info.companion {
+            notes.push("add-on used with another model".to_string());
+        }
+        text.push_str(&format!(
+            "- {} ({}{}; {}; {}; in {}){}\n",
+            m.name,
+            kind.label(),
+            if sure { "" } else { ", guessed" },
+            m.details(),
+            crate::scan::human(m.size),
+            m.source.label(),
+            if notes.is_empty() { String::new() } else { format!(" [{}]", notes.join("; ")) }
+        ));
+    }
+    askabout::Facts {
+        label: "AI models".into(),
+        summary: format!("{} models, {}", list.len(), crate::scan::human(total)),
+        text,
+        readable: Vec::new(),
+    }
 }
 
 /// Checks the model fits in this computer's memory at `context` tokens, and returns what to load.
