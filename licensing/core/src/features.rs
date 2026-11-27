@@ -24,6 +24,7 @@ pub enum Feature {
     SequencePlayer,
     BatchRename,
     FolderCompare,
+    SplatCompare,
     Duplicates,
     Archives,
     SavedSearches,
@@ -90,7 +91,7 @@ use Tier::{Free, Pro};
 ///   snapshots, experiment results and downloaded models stay where they are.
 /// - Local AI work is never metered: no limits on model size, model count, local inference, GPU
 ///   use or experiments, and installing an optional extension never needs a licence.
-pub const MATRIX: [Entitlement; 22] = [
+pub const MATRIX: [Entitlement; 23] = [
     row(F::FileBrowser, Free, A::Files, "The file browser",
         "The Files workspace: browse, tabs, address bar, the filter box, preview, open, copy, move, rename, delete, New."),
     row(F::DiskMap, Free, A::Storage, "The disk map",
@@ -104,6 +105,8 @@ pub const MATRIX: [Entitlement; 22] = [
     row(F::SequencePlayer, Pro, A::Files, "The sequence player", "Playing numbered image sequences."),
     row(F::BatchRename, Pro, A::Files, "Batch rename", "Renaming several files at once by rules."),
     row(F::FolderCompare, Pro, A::Files, "Folder compare", "Compare Folders."),
+    row(F::SplatCompare, Pro, A::Files, "Comparing splat scenes",
+        "Compare Scenes: two Gaussian splat scenes side by side, split or as their difference, with cameras turning together. Viewing, inspecting and converting one scene is free."),
     row(F::Duplicates, Pro, A::Storage, "The duplicate finder", "Finding duplicate files across a scan."),
     row(F::Archives, Pro, A::Files, "Archives", "Browsing into and extracting archives."),
     row(F::SavedSearches, Pro, A::Files, "Saved searches", "Saving a search to run again."),

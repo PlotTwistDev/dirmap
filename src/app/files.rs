@@ -598,6 +598,8 @@ pub(super) struct Files {
     pub(super) thumbs: thumbs::Thumbs,
     /// The sequence player, while it's open.
     pub(super) player: Option<seqplayer::Player>,
+    /// Compare Scenes (two splat scenes), while it's open.
+    pub(super) scene_compare: Option<super::splatcmp::SceneCompare>,
     /// Compare Folders, while it's open.
     pub(super) compare: Option<compare::Compare>,
     /// Colours, tags and notes.
@@ -666,6 +668,7 @@ impl Files {
             thumbs: Default::default(),
             player: None,
             compare: None,
+            scene_compare: None,
             marks: crate::fsys::marks::Marks::load(),
             mark_edit: None,
             apps_box: None,
@@ -1138,6 +1141,8 @@ pub(super) enum FAction {
     Explain,
     /// Ask AI about the items: their names, sizes and dates.
     AskAi,
+    /// Two splat scenes, in Compare Scenes.
+    CompareScenes,
 }
 
 impl App {
@@ -1619,6 +1624,7 @@ impl App {
         }
         self.sequence_player(&ctx);
         self.compare_window(&ctx);
+        self.scene_compare_window(&ctx);
         self.mark_edit_window(&ctx);
         self.apps_window(&ctx);
         let pal = style::pal(ui);
@@ -3506,7 +3512,7 @@ impl App {
         let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
         let colour = self.files.marks.get(disk).and_then(|m| m.colour);
         let caps = crate::fsys::remote::is_remote(disk).then(|| crate::fsys::remote::caps(disk));
-        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some() };
+        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some(), splats: false };
         let ext = disk
             .file_name()
             .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
@@ -3679,6 +3685,7 @@ impl App {
                 }
             }
             FAction::AskAi => self.ask_about_paths(paths),
+            FAction::CompareScenes => self.open_scene_compare(paths),
             FAction::CopyUnc => {
                 // Asking Windows can wait on the network, so it's done in the background.
                 let (tx, rx) = mpsc::channel();
@@ -3821,6 +3828,8 @@ pub(super) struct RowMenu {
     pub cloud: bool,
     /// A system file or folder Filescape can explain (What Is This?).
     pub known: bool,
+    /// Two files are chosen that may both be splat scenes (Compare Scenes).
+    pub splats: bool,
 }
 
 /// Said when something would change an archive.
@@ -3889,9 +3898,11 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     let colour = c.marks.get(&path).and_then(|m| m.colour);
     let caps = crate::fsys::remote::is_remote(dir).then(|| crate::fsys::remote::caps(dir));
     let server = caps.is_some();
-    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some() };
+    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some(), splats: false };
     let ctx_menu = RowMenu {
         cloud: !server && !read_only && crate::cloudops::supported() && (e.flags & scan::store::ON_DEMAND != 0 || (e.is_dir && super::cloud::on_demand_dir(&path))),
+        // By name only here (it's worked out every frame); Compare Scenes looks inside.
+        splats: selected && count == 2 && !server && !read_only && t.selected.iter().all(|n| crate::splat::may_hold_scene(n)),
         ..ctx_menu
     };
     // Shift+right-click: straight to Windows' own menu, with its Shift extras, as in Explorer.
@@ -3932,6 +3943,8 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
         }
     } else if !many {
         item(ui, true, "Quick Look", k(M::NONE, Key::Space), FAction::QuickLook);
+    } else if m.splats {
+        item(ui, true, "Compare Scenes", String::new(), FAction::CompareScenes);
     }
     let with = if m.seq {
         None

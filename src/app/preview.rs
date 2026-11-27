@@ -1969,51 +1969,10 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
     let (r, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
     let ppp = ui.ctx().pixels_per_point();
     let px = [((r.width() * ppp) as usize).clamp(16, 1600), ((r.height() * ppp) as usize).clamp(16, 1600)];
-    let shift = ui.input(|i| i.modifiers.shift);
-    let moving = resp.dragged_by(egui::PointerButton::Secondary) || resp.dragged_by(egui::PointerButton::Middle) || (shift && resp.dragged_by(egui::PointerButton::Primary));
-    let turning = !moving && resp.dragged_by(egui::PointerButton::Primary);
-    let d = resp.drag_delta();
-    if turning {
-        view.yaw += d.x * 0.01;
-        view.pitch = (view.pitch + d.y * 0.01).clamp(-1.5, 1.5);
-    } else if moving {
-        let k = view.pan_per_pixel(r.height());
-        view.pan[0] -= d.x * k;
-        view.pan[1] += d.y * k;
-    }
-    if resp.hovered() {
-        // Take the scroll for zooming, so the pane around it doesn't scroll as well.
-        let (scroll, pinch) = ui.input_mut(|i| {
-            let s = i.smooth_scroll_delta.y;
-            i.smooth_scroll_delta = Vec2::ZERO;
-            (s, i.zoom_delta())
-        });
-        if scroll != 0.0 || pinch != 1.0 {
-            view.zoom = (view.zoom * (-scroll * 0.002).exp() / pinch).clamp(0.02, 20.0);
-        }
-    }
-    // W A S D to move about (and Q and E down and up) while the pointer is over it.
-    let mut keys_moving = false;
-    if resp.hovered() && !ui.ctx().egui_wants_keyboard_input() {
-        let dt = ui.input(|i| i.stable_dt).min(0.1);
-        let held = |k: egui::Key| ui.input(|i| i.key_down(k) && i.modifiers.is_none());
-        let (fwd, side, up) = (held(egui::Key::W) as i8 - held(egui::Key::S) as i8, held(egui::Key::D) as i8 - held(egui::Key::A) as i8, held(egui::Key::E) as i8 - held(egui::Key::Q) as i8);
-        if fwd != 0 || side != 0 || up != 0 {
-            keys_moving = true;
-            view.zoom = (view.zoom * (-(fwd as f32) * dt * 0.8).exp()).clamp(0.02, 20.0);
-            view.pan[0] += side as f32 * dt * 0.6 * view.zoom;
-            view.pan[1] += up as f32 * dt * 0.6 * view.zoom;
-            ui.ctx().request_repaint();
-        }
-    }
-    if resp.double_clicked() {
-        // Back to the start, keeping the look and field of view.
-        view = View { look: view.look, fov: view.fov, ..View::default() };
-    }
+    let busy = steer_splat_view(ui, &resp, r, &mut view);
     let bounds_id = egui::Id::new(("splat-bounds", path));
     let mut show_bounds: bool = ui.data(|d| d.get_temp(bounds_id)).unwrap_or(false);
     ui.data_mut(|d| d.insert_temp(view_id, view));
-    let busy = turning || moving || keys_moving;
     // A false-colour look's colours, made once when it's picked.
     if !view.look.recolours() {
         drawn.paint = None;
@@ -2128,6 +2087,54 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
         }
     }
     save_view_button(ui, path, scene, paint, view, r, px, resp.hovered());
+}
+
+/// Drag to turn, right-drag (or shift-drag) to move, scroll or pinch to zoom, W A S D Q E to
+/// move about while the pointer is over it, double-click to put it back. Whether it's moving.
+pub(super) fn steer_splat_view(ui: &mut egui::Ui, resp: &egui::Response, r: Rect, view: &mut crate::splat::View) -> bool {
+    use crate::splat::View;
+    let shift = ui.input(|i| i.modifiers.shift);
+    let moving = resp.dragged_by(egui::PointerButton::Secondary) || resp.dragged_by(egui::PointerButton::Middle) || (shift && resp.dragged_by(egui::PointerButton::Primary));
+    let turning = !moving && resp.dragged_by(egui::PointerButton::Primary);
+    let d = resp.drag_delta();
+    if turning {
+        view.yaw += d.x * 0.01;
+        view.pitch = (view.pitch + d.y * 0.01).clamp(-1.5, 1.5);
+    } else if moving {
+        let k = view.pan_per_pixel(r.height());
+        view.pan[0] -= d.x * k;
+        view.pan[1] += d.y * k;
+    }
+    if resp.hovered() {
+        // Take the scroll for zooming, so the pane around it doesn't scroll as well.
+        let (scroll, pinch) = ui.input_mut(|i| {
+            let s = i.smooth_scroll_delta.y;
+            i.smooth_scroll_delta = Vec2::ZERO;
+            (s, i.zoom_delta())
+        });
+        if scroll != 0.0 || pinch != 1.0 {
+            view.zoom = (view.zoom * (-scroll * 0.002).exp() / pinch).clamp(0.02, 20.0);
+        }
+    }
+    // W A S D to move about (and Q and E down and up) while the pointer is over it.
+    let mut keys_moving = false;
+    if resp.hovered() && !ui.ctx().egui_wants_keyboard_input() {
+        let dt = ui.input(|i| i.stable_dt).min(0.1);
+        let held = |k: egui::Key| ui.input(|i| i.key_down(k) && i.modifiers.is_none());
+        let (fwd, side, up) = (held(egui::Key::W) as i8 - held(egui::Key::S) as i8, held(egui::Key::D) as i8 - held(egui::Key::A) as i8, held(egui::Key::E) as i8 - held(egui::Key::Q) as i8);
+        if fwd != 0 || side != 0 || up != 0 {
+            keys_moving = true;
+            view.zoom = (view.zoom * (-(fwd as f32) * dt * 0.8).exp()).clamp(0.02, 20.0);
+            view.pan[0] += side as f32 * dt * 0.6 * view.zoom;
+            view.pan[1] += up as f32 * dt * 0.6 * view.zoom;
+            ui.ctx().request_repaint();
+        }
+    }
+    if resp.double_clicked() {
+        // Back to the start, keeping the look and field of view.
+        *view = View { look: view.look, fov: view.fov, ..View::default() };
+    }
+    turning || moving || keys_moving
 }
 
 /// The look picker, bounds switch and field of view along the top of a splat view: faint

@@ -769,6 +769,28 @@ fn gpu_pictures_for_thumbnails_come_back_on_their_own() {
     }
 }
 
+#[test]
+fn gpu_pairs_for_comparing_come_back_together() {
+    let ts = test_splats(300);
+    let a = Arc::new(read(&tmp("pair-a.splat", &enc_splat(&ts)), Limits::PREVIEW).unwrap());
+    let b = Arc::new(read(&tmp("pair-b.splat", &enc_splat(&ts[..120])), Limits::PREVIEW).unwrap());
+    let id = gpu::want_pair((a, None, View::default(), [64, 40]), (b, None, View::default(), [64, 40]), None);
+    let start = std::time::Instant::now();
+    loop {
+        if let Some([pa, pb]) = gpu::take_pair() {
+            assert_eq!((pa.id, pb.id), (id, id));
+            assert_eq!((pa.size, pa.drawn, pb.size, pb.drawn), ([64, 40], 300, [64, 40], 120));
+            break;
+        }
+        if matches!(gpu::status(), gpu::Status::Unavailable(_)) || start.elapsed().as_secs() > 45 {
+            assert!(matches!(gpu::status(), gpu::Status::Unavailable(_)), "no pictures and no reason: {:?}", gpu::status());
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    gpu::let_go_pair();
+}
+
 // ---- S5: the inspector.
 
 /// A 20 × 20 × 20 block of small splats, with odd ones at the end: one alone just outside the

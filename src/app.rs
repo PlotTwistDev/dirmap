@@ -47,6 +47,7 @@ mod transfers;
 mod siteimport;
 mod preview;
 mod splatopt;
+mod splatcmp;
 mod seqplayer;
 mod thumbs;
 mod tilepreview;

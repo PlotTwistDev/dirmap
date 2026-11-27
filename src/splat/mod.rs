@@ -261,6 +261,13 @@ pub fn claims(path: &Path) -> bool {
     }
 }
 
+/// Whether a file of this name could hold a splat scene, judged by its name alone.
+pub fn may_hold_scene(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
+    matches!(ext, "spz" | "splat" | "ksplat" | "sog" | "ply" | "glb" | "html" | "htm") || name == "meta.json"
+}
+
 /// A short label for a thumbnail or map tile, from the file's header alone (a few KB, never
 /// the whole scene): the format and how many splats, such as "SPZ · 1.2M splats".
 pub fn badge(path: &Path) -> Option<String> {
