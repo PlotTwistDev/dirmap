@@ -13,7 +13,9 @@ filter that's already on can still be turned off. See [Licensing](../settings/li
 
 Click **Filters** on the toolbar above the map to open the Filters panel. It stays open while you
 use the map, so you can watch each change take effect; close it with **×**, **Esc** or the
-**Filters** button. Name patterns are typed in the search box beside it.
+**Filters** button. To keep it out of the way, drag its title (or click **↗**) to snap it off the
+button and float it anywhere over the window; drop it back under the button, or click **↑**, to
+dock it again. Name patterns are typed in the search box beside it.
 
 | Control | Keeps files that… |
 |---|---|
