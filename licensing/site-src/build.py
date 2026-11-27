@@ -117,7 +117,7 @@ def lastmod(*files):
 
 DIST.mkdir(exist_ok=True)
 (DIST / "img").mkdir(exist_ok=True)
-for f in list((SRC / "img").glob("*.webp")) + list((SRC / "img").glob("*.png")):
+for f in [f for ext in ("webp", "png", "mp4", "webm") for f in (SRC / "img").glob("*." + ext)]:
     shutil.copy(f, DIST / "img" / f.name)
 
 table, n_formats, n_exts = formats_table()
