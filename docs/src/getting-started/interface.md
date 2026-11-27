@@ -50,8 +50,8 @@ One row between the file manager and the map:
   [Filtering overview](../filtering/overview.md).
 - The **search box** limits the map to names matching a pattern such as `*.psd`. See
   [Custom filter syntax](../filtering/syntax.md).
-- **Display** has **File names on tiles**, **Previews on tiles**, the cloud marks and the
-  **Preview pane**.
+- **Display** has **File names on tiles**, **Previews on tiles**, the cloud marks, the
+  **Preview pane** (and whether it stays open) and the **Insights panel**.
 
 In a narrow window the Size and Colour menus (and then Display) move into a **⋯** menu at the
 right end, so the row never wraps.
@@ -66,9 +66,11 @@ The treemap (or sunburst) fills the middle of the window. Hover to see what some
 click to select, double-click to open a folder, wheel to zoom, drag to pan and right-click to
 go back up. See [Navigating the treemap](../views/treemap-navigation.md).
 
-## Side panel
+## Insights panel
 
-Five tabs on the right, which can be made wider by dragging their left edge:
+Five tabs on the right, which can be made wider by dragging their left edge. **›|** at its top
+(or **Alt+I**, **⌥I** on macOS) folds it away to give the map room, leaving a narrow rail at the
+window's edge with a button for each tab; click one to bring the panel back on that tab.
 
 | Tab | What it shows |
 |---|---|
@@ -80,9 +82,11 @@ Five tabs on the right, which can be made wider by dragging their left edge:
 
 ## Status bar
 
-Along the bottom. It shows the scan's total size, file count and time, or, while the pointer is
-over the map, the full path, size and date of what's under it. It also shows the selected item's
-path, the result of the last file operation, and **Rescan** when scan settings have changed.
+Along the bottom. While the pointer is over the map it shows the full path, size and date of
+what's under it; otherwise the selected item's path. It also shows the result of the last file
+operation, items that couldn't be read, and **Rescan** when scan settings have changed. The
+scan's totals are under the map; see
+[The summary under the map](../views/treemap.md#the-summary-under-the-map).
 
 ## Related topics
 

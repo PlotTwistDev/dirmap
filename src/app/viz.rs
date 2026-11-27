@@ -111,6 +111,10 @@ pub(super) struct VizUi {
     pub filters_open: bool,
     /// Where the Filters button was last drawn, to hang the panel under it.
     filters_anchor: Option<Rect>,
+    /// The selection as the panes last saw it, to open the Preview pane on a new pick.
+    pub seen_selection: Option<Vec<u32>>,
+    /// The panes have had their first look at the selection.
+    pub rails_started: bool,
 }
 
 /// One active filter, as a chip under the toolbar.
@@ -600,10 +604,17 @@ impl App {
             }
         }
         ui.separator();
-        let shortcut = if cfg!(target_os = "macos") { "⌥P" } else { "Alt+P" };
         let mut pane = self.files.prefs.map_preview;
-        if ui.checkbox(&mut pane, format!("Preview pane ({shortcut})")).on_hover_text("The clicked tile's preview and details, beside the map").changed() {
+        if ui.checkbox(&mut pane, format!("Preview pane ({})", Self::preview_shortcut())).on_hover_text("The clicked tile's preview and details, beside the map").changed() {
             self.files.prefs.map_preview = pane;
+        }
+        let mut pin = self.files.prefs.map_preview_pin;
+        if ui.checkbox(&mut pin, "Keep the Preview pane open").on_hover_text("Off: it opens when you pick a tile and folds away when nothing is selected").changed() {
+            self.files.prefs.map_preview_pin = pin;
+        }
+        let mut ins = self.files.prefs.insights_open;
+        if ui.checkbox(&mut ins, format!("Insights panel ({})", Self::insights_shortcut())).on_hover_text("File types, Sizes, Changes, Duplicates and Sequences, at the right").changed() {
+            self.files.prefs.insights_open = ins;
         }
         ui.separator();
         if ui.button("Moving around the map…").clicked() {

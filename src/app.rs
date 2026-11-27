@@ -60,6 +60,7 @@ mod lab;
 mod storage;
 mod explain;
 mod livescan;
+mod rails;
 mod viz;
 pub(crate) mod style;
 use files::Workspace;
@@ -1600,23 +1601,7 @@ impl App {
     // ---------- right-hand panel ----------
 
     fn side_panel(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            for (tab, label) in
-                [(SideTab::Types, "File types"), (SideTab::Sizes, "Sizes"), (SideTab::Changes, "Changes"), (SideTab::Duplicates, "Duplicates"), (SideTab::Sequences, "Sequences")]
-            {
-                let tip = match tab {
-                    SideTab::Types => "Space used by each file type; click one to highlight it on the map",
-                    SideTab::Sizes => "How many files fall into each size range",
-                    SideTab::Changes => "Compare with a saved snapshot to see what grew or shrank",
-                    SideTab::Duplicates => "Find files with exactly the same contents",
-                    SideTab::Sequences => "Numbered file sequences (renders, scans) and their missing frames",
-                };
-                ui.selectable_value(&mut self.side_tab, tab, label).on_hover_text(tip);
-            }
-            if help::link_button(ui, "Help for this tab") {
-                self.help.show_topic(self.side_topic());
-            }
-        });
+        self.insights_header(ui);
         ui.separator();
         match self.side_tab {
             SideTab::Types => self.ext_panel(ui),
@@ -3039,11 +3024,9 @@ impl eframe::App for App {
         if self.files.look.from_map {
             self.quick_look(&ctx);
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::P)) {
-            self.files.prefs.map_preview = !self.files.prefs.map_preview;
-        }
-        let r = egui::Panel::right("exts").default_size(330.0).resizable(true).show(ui, |ui| self.side_panel(ui));
-        self.help_regions.push((r.response.rect, self.side_topic()));
+        self.rails_update(&ctx);
+        self.right_rail(ui);
+        self.insights_panel(ui);
         let r = egui::Panel::top("tree").default_size(340.0).resizable(true).show(ui, |ui| self.file_manager(ui));
         self.help_regions.push((r.response.rect, if self.browser.layout() == browser::Layout::Tree { topics::TREE } else { topics::BROWSER }));
         // Its own panel, so it gets the theme's background (readable in light and dark themes).
@@ -3068,19 +3051,7 @@ impl eframe::App for App {
         });
         self.help_regions.push((r.response.rect, topics::MAP_SUMMARY));
         // The clicked tile's preview and facts, beside the map.
-        if self.files.prefs.map_preview {
-            let pal = style::pal(ui);
-            let r = egui::Panel::right("map-preview")
-                .resizable(true)
-                .default_size(self.files.prefs.preview_width)
-                .size_range(200.0..=520.0)
-                .frame(egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 8 }))
-                .show(ui, |ui| {
-                    let tall = ui.available_height();
-                    egui::ScrollArea::vertical().id_salt("map-preview-scroll").auto_shrink(false).show(ui, |ui| self.map_preview_pane(ui, tall));
-                });
-            self.help_regions.push((r.response.rect, topics::TREEMAP_NAV));
-        }
+        self.preview_panel(ui);
         let map_topic = match self.map_kind {
             MapKind::Treemap => topics::TREEMAP_NAV,
             MapKind::Sunburst => topics::SUNBURST,

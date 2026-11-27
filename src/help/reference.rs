@@ -28,6 +28,7 @@ const CUSTOM: &str = "src/app/custom.rs";
 const VIZ: &str = "src/app/viz.rs";
 const SUMMARY: &str = "src/app/summary.rs";
 const CLOUD: &str = "src/app/cloud.rs";
+const RAILS: &str = "src/app/rails.rs";
 const HELP: &str = "src/help/mod.rs";
 const BROWSER: &str = "src/app/browser.rs";
 const FILES: &str = "src/app/files.rs";
@@ -92,7 +93,8 @@ pub const KEYBOARD: &[Group] = &[
             b("Alt+Enter", "⌥Enter", "Properties: size, contents and dates.", &[(FILES, "if i.consume_key(M::ALT, Key::Enter) {")]),
             b("Shift+F10", "", "Windows: Windows' own menu for the selected items, with what other apps add to it.", &[(FILES, "if cfg!(windows) && i.consume_key(M::SHIFT, Key::F10) {")]),
             b("Space", "", "Quick Look: a large preview of the selected file. ↑ / ↓ move to the next file while it's open; Space or Escape closes it.", &[(FILES, "if !look && i.consume_key(M::NONE, Key::Space) {"), (PREVIEW, "i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) || i.consume_key(egui::Modifiers::NONE, egui::Key::Space)")]),
-            b("Alt+P", "⌥P", "Show or hide the preview pane (works while typing elsewhere too). In Storage Analysis, the preview pane beside the map.", &[(FILES, "i.consume_key(M::ALT, Key::P)"), (APP, "i.consume_key(egui::Modifiers::ALT, egui::Key::P)")]),
+            b("Alt+P", "⌥P", "Show or hide the preview pane (works while typing elsewhere too). In Storage Analysis, the preview pane beside the map.", &[(FILES, "i.consume_key(M::ALT, Key::P)"), (RAILS, "i.consume_key(egui::Modifiers::ALT, egui::Key::P)")]),
+            b("Alt+I", "⌥I", "In Storage Analysis, fold the Insights panel (File types, Sizes, Changes…) away to the rail at the window's edge, or bring it back.", &[(RAILS, "i.consume_key(egui::Modifiers::ALT, egui::Key::I)")]),
             b("Ctrl+\\", "⌘\\", "One pane or two side by side (works while typing elsewhere too).", &[(FILES, "i.consume_key(M::COMMAND, Key::Backslash)")]),
             b("Tab", "", "Two panes: work in the other pane.", &[(FILES, "if i.consume_key(M::NONE, Key::Tab) {")]),
             b("Shift+F5 / Shift+F6", "⇧F5 / ⇧F6", "Two panes: copy or move the selected items to the other pane's folder.", &[(FILES, "if i.consume_key(M::SHIFT, Key::F5) {"), (FILES, "if i.consume_key(M::SHIFT, Key::F6) {")]),
@@ -330,7 +332,7 @@ pub const MOUSE: &[Group] = &[
         ],
     },
     Group {
-        title: "Side panel and other lists",
+        title: "Insights panel and other lists",
         note: "",
         bindings: &[
             b("Click a file type", "", "Highlight that type on the map; click again to stop.", &[(APP, "toggle = Some(e.ext.clone());")]),
@@ -338,7 +340,8 @@ pub const MOUSE: &[Group] = &[
             b("Click a size range (Sizes tab)", "", "Show only files in that range; click again to stop.", &[(APP, "pick = Some(if on { (0, 0) } else { (lo, hi) });")]),
             b("Click a change, duplicate or listed file", "", "Select it in the folder list and on the map.", &[(APP, "self.select_full(p);")]),
             b("Click a sequence", "", "Filter the map to that sequence and select its folder.", &[(CUSTOM, "self.set_custom(&pattern);")]),
-            b("Drag the panel's left edge", "", "Make the side panel wider or narrower.", &[(APP, "egui::Panel::right(\"exts\").default_size(330.0).resizable(true)")]),
+            b("Drag the panel's left edge", "", "Make the Insights panel or the Preview pane wider or narrower; the width is remembered.", &[(RAILS, "self.files.prefs.insights_width = r.response.rect.width();"), (RAILS, "self.files.prefs.map_preview_width = r.response.rect.width();")]),
+            b("Click a button on the rail at the window's edge", "", "Bring back the folded Preview pane, or the Insights panel at that tab.", &[(RAILS, "self.files.prefs.insights_open = true;")]),
         ],
     },
     Group {
