@@ -2,6 +2,13 @@
 
 ## Next version
 
+### Where a database's space goes
+
+- SQLite previews show how much of the file each table takes, run the tabs largest first and
+  open on the largest table, so a big database whose first table is empty no longer looks empty.
+  Search-index tables are counted with their index, and the details name the three largest
+  tables and any unused space a VACUUM would give back.
+
 ### Easier to read maps
 
 - **Display > Detail on the map**: **Minimal**, **Balanced** or **Detailed** names and sizes on
