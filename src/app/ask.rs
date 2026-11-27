@@ -106,7 +106,7 @@ fn runnable(list: &[Model]) -> Vec<(usize, &Model)> {
 
 /// Whether to put the model on the graphics chip: on Apple silicon, where llama.cpp uses Metal.
 pub(super) fn use_gpu() -> bool {
-    cfg!(all(target_os = "macos", target_arch = "aarch64"))
+    crate::fit::filescape_gpu()
 }
 
 impl App {

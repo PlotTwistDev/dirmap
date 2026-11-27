@@ -75,8 +75,10 @@ an extra copy or an unused download.
   that were found get a chip.
 - **Search models** matches names, details, apps and paths. Every word must match.
 - **Sort** orders by size, name, type or app.
-- **Filters** shows only models from one app, in one format, that run in Filescape, or that are
-  copies and unused downloads.
+- **Filters** shows only models from one app, in one format, that run in Filescape, that **fit this
+  computer**, or that are copies and unused downloads. **Fits this computer** is a quick estimate
+  from the file size: the model, with room for a short conversation, fits the memory Filescape can
+  give it. **Will it run?** on the model's page has the details.
 - The two buttons beside Sort show every model file on its own line, or **versions of one model
   together**: `qwen3:1.7b` from Ollama and `Qwen3-1.7B-Q8_0.gguf` from LM Studio sit under one
   heading with their precisions and apps. Click a heading to open it. Versions are put together by
@@ -159,19 +161,29 @@ in **Tensors**.
 **Will it run?** estimates how much memory the model needs on this computer, and where it would
 run:
 
-- **This computer** shows its memory and its graphics card's memory. On a Mac with Apple silicon
-  the two are shared. If Filescape can't find the graphics card's memory, type it in.
+- **This computer** shows the processor (its name, how many threads it runs at once, and the
+  instruction sets Filescape's AI runtime uses), the memory and how much is free now, and the
+  graphics card with its memory. On a Mac with Apple silicon the memory is shared with the
+  graphics chip. If Filescape can't find the graphics card's memory, type it in. **Filescape runs
+  models on** says where Filescape's own Ask AI and Lab run models, as its runtime reports it: the
+  graphics chip on a Mac with Apple silicon, the processor on Windows, Linux and Intel Macs.
 - Move **Context** to choose how much text the model reads at once, in tokens (about ¾ of a word
   each). The memory a model needs grows with it, because it keeps a cache of everything it has
   read. **Compact (Q8)** stores that cache in about half the space.
-- The result says whether the model runs fully on the graphics chip (fast), split between the
-  graphics card and main memory, in main memory on the processor (slow), or not at all. The bar
-  shows the model itself, the cache and working space, against the memory available.
+- **In Filescape** says whether Ask AI and the Lab can run it here, and where. If it needs more
+  memory than is free right now, it says so: close other apps first.
+- On Windows, Linux and Intel Macs, **In apps that use the graphics card** says the same for
+  Ollama, LM Studio and other apps that put models on a graphics card: fully on the card (fast),
+  split between the card and main memory, on the processor, or not at all. On a Mac with Apple
+  silicon Filescape uses the graphics chip too, so there is one answer.
+- If the Lab's **Speed** tab has measured the model on this computer, its newest result is shown,
+  with the context, the processor or graphics chip and the threads it ran with.
+- The bar shows the model itself, the cache and working space, against the memory available.
 - **At other context lengths** lists the same for each length, and **Smaller versions of this
   model** what a compressed version would need, such as Q4_K_M.
 
-These are estimates for apps based on llama.cpp, such as Ollama and LM Studio. Each app adds a
-little of its own.
+These are estimates in the way llama.cpp lays a model out, which Filescape, Ollama and LM Studio
+all use. Each app adds a little of its own, and the system and other open apps need memory too.
 
 **Structure** shows how the model is built and where its space goes:
 

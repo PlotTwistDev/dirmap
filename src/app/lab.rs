@@ -306,6 +306,7 @@ impl App {
             read_speed,
             write_speed,
             first_token,
+            device: crate::fit::device_name(super::ask::use_gpu()),
         };
         match crate::lab::results_file().map(|f| crate::lab::save_result(&f, r.clone())) {
             Some(Ok(all)) => l.results = Some(all),
