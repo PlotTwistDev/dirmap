@@ -91,7 +91,7 @@ pub const ALONE: u8 = 8;
 pub const PROBLEMS: [(u8, [u8; 3], &str); 4] = [(FAR, [255, 70, 70], "Far out"), (ALONE, [255, 210, 40], "Floaters"), (HUGE, [255, 130, 20], "Oversized"), (FAINT, [220, 90, 255], "Nearly invisible")];
 
 /// The per-splat measures behind the checks and the false-colour looks.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Analysis {
     /// [`FAINT`], [`HUGE`], [`FAR`] and [`ALONE`] bits.
     pub flags: Vec<u8>,

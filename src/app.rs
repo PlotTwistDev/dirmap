@@ -48,6 +48,7 @@ mod siteimport;
 mod preview;
 mod splatopt;
 mod splatcmp;
+mod splattime;
 mod seqplayer;
 mod thumbs;
 mod tilepreview;

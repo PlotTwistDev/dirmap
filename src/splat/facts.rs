@@ -65,6 +65,7 @@ pub fn describe(scene: &mut Scene, path: &Path) {
     let mut f: Vec<(&'static str, String)> = Vec::new();
     let what = match scene.kind {
         SceneKind::Splat => "Gaussian splat scene",
+        SceneKind::Splat4d if scene.timed.is_some() => "Gaussian splat scene that changes over time (play or scrub it under the picture)",
         SceneKind::Splat4d => "Gaussian splat scene that changes over time (shown at its start)",
         SceneKind::PointCloud => "Point cloud",
     };
@@ -108,7 +109,11 @@ pub fn describe(scene: &mut Scene, path: &Path) {
     if scene.bad > 0 {
         f.push(("Unreadable", format!("{} splats have numbers that aren't valid (skipped)", group(scene.bad))));
     }
-    if c.faint > 0 {
+    if let Some(t) = &scene.timed {
+        f.push(("Time", format!("{} to {}, each splat on stage for part of it", t.from, t.to)));
+    }
+    // In a scene that changes, splats off stage are see-through by design.
+    if c.faint > 0 && scene.timed.is_none() {
         f.push(("Nearly invisible", format!("{} ({:.1}%) under 2% opacity", group(c.faint), pct(c.faint))));
     }
     if c.huge > 0 {

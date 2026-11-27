@@ -1719,7 +1719,17 @@ impl App {
                 archive_view(ui, path, &tree, size);
             }
             Content::Model { mesh, tex, drawn } => model_view(ui, path, mesh, tex, drawn, size),
-            Content::Splat { scene, tex, drawn } => splat_view(ui, path, scene, tex, drawn, size),
+            Content::Splat { scene, tex, drawn } => {
+                // Scenes that change over time get a time bar underneath.
+                if super::splattime::wants_bar(ui, path, scene) {
+                    let h = super::splattime::BAR_H;
+                    splat_view(ui, path, scene, tex, drawn, vec2(size.x, (size.y - h).max(60.0)));
+                    let (r, _) = ui.allocate_exact_size(vec2(size.x, h), Sense::hover());
+                    super::splattime::bar(ui, r, path, scene, drawn);
+                } else {
+                    splat_view(ui, path, scene, tex, drawn, size);
+                }
+            }
             Content::Doc { blocks, .. } => {
                 let mut blocks = blocks.clone();
                 // A splat training project's breakdown and timeline are Pro.
@@ -2160,6 +2170,23 @@ pub struct SplatDrawn {
     gpu: Option<(f32, usize)>,
     /// The false colours of the look on show, made when it was picked.
     paint: Option<(crate::splat::inspect::Look, crate::splat::gpu::Paint)>,
+}
+
+impl SplatDrawn {
+    /// Draws again from scratch, for a new moment or frame of a scene that changes; the old
+    /// picture stays up until the new one comes.
+    pub(super) fn restart(&mut self) {
+        // No size matches, so it's drawn again; the picture on show stays labelled as it is.
+        self.shown = self.shown.map(|(v, _, real)| (v, [0, 0], real));
+        self.pending = None;
+        self.asked.clear();
+        self.paint = None;
+    }
+
+    /// Whether the picture on show is of the scene as it is now (not waiting for one).
+    pub(super) fn caught_up(&self) -> bool {
+        self.shown.is_some_and(|(_, s, _)| s != [0, 0]) && self.pending.is_none()
+    }
 }
 
 /// A splat scene or point cloud: drag to turn, right-drag (or shift-drag) to move, scroll to
