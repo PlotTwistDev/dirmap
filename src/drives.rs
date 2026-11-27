@@ -133,6 +133,9 @@ pub struct Info {
     pub container: String,
     /// Hidden from the system's own file manager (macOS `nobrowse`).
     pub hidden: bool,
+    /// The whole physical disk the volume is on (`disk4`, `sdb`), so volumes that share a disk
+    /// can be told apart: ejecting one ejects them all.
+    pub disk: String,
 }
 
 impl Info {
@@ -348,6 +351,16 @@ fn win_storage(letter: char, info: &mut Info) {
     if h == INVALID_HANDLE_VALUE {
         return;
     }
+    // Which physical disk it is, so partitions of one disk are known to go together.
+    {
+        use windows_sys::Win32::System::Ioctl::{IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER};
+        let mut n: STORAGE_DEVICE_NUMBER = unsafe { std::mem::zeroed() };
+        let mut got = 0u32;
+        let ok = unsafe { DeviceIoControl(h, IOCTL_STORAGE_GET_DEVICE_NUMBER, std::ptr::null(), 0, (&mut n as *mut STORAGE_DEVICE_NUMBER).cast(), std::mem::size_of::<STORAGE_DEVICE_NUMBER>() as u32, &mut got, std::ptr::null_mut()) };
+        if ok != 0 {
+            info.disk = format!("PhysicalDrive{}", n.DeviceNumber);
+        }
+    }
     let mut q: STORAGE_PROPERTY_QUERY = unsafe { std::mem::zeroed() };
     q.PropertyId = StorageDeviceProperty;
     q.QueryType = PropertyStandardQuery;
@@ -559,6 +572,7 @@ fn linux_block(dev: &str, info: &mut Info) {
         sys = next;
     }
     let disk = sys.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    info.disk = disk.clone();
     if disk.starts_with("loop") {
         info.kind = Kind::Image;
         info.image = read(&sys.join("loop/backing_file")).map(PathBuf::from);
@@ -786,6 +800,9 @@ mod mac {
                 .and_then(|v| v.as_array())
                 .map(|a| a.iter().filter_map(|s| s.as_dictionary()?.get("APFSPhysicalStore")?.as_string().map(str::to_string)).collect())
                 .unwrap_or_default();
+            // An APFS volume's own whole disk is a synthesised container: the physical store's
+            // disk is the one that is plugged in.
+            i.disk = phys.first().map(|p| whole_disk(p)).unwrap_or_else(|| s("ParentWholeDisk"));
             let mut ids = phys;
             ids.push(s("ParentWholeDisk"));
             ids.push(s("DeviceIdentifier"));
@@ -855,6 +872,16 @@ mod mac {
             }
         }
         phones
+    }
+}
+
+/// `disk4s2` → `disk4`: a macOS partition's whole disk.
+#[cfg(any(test, target_os = "macos"))]
+fn whole_disk(id: &str) -> String {
+    let id = id.trim_start_matches("/dev/");
+    match id.get(4..).and_then(|rest| rest.find('s')) {
+        Some(at) if id.starts_with("disk") => id[..4 + at].to_string(),
+        _ => id.to_string(),
     }
 }
 
@@ -1033,6 +1060,13 @@ mod tests {
             },
         );
         vec![drive("/", "Macintosh HD", 228 * GB, 22 * GB, Info { kind: Kind::Internal, fs: "APFS".into(), ..Default::default() }), img, host]
+    }
+
+    #[test]
+    fn whole_disks() {
+        assert_eq!(whole_disk("disk4s2"), "disk4");
+        assert_eq!(whole_disk("/dev/disk12s1"), "disk12");
+        assert_eq!(whole_disk("disk5"), "disk5");
     }
 
     #[test]

@@ -847,6 +847,39 @@ Filescape still lists one that's plugged in, with how it connects (Apple, MTP or
 to open **Image Capture** on a Mac, or **This PC** in File Explorer on Windows. On Linux, phones
 the desktop has mounted (GVFS) open in Filescape like any folder.
 
+### Ejecting drives
+
+External drives, USB sticks, SD cards, discs and disk images have an **⏏** button at the right of
+their row in the sidebar and on their card in **Computer**, and **Eject** at the end of their
+right-click menu. Ejecting unmounts the drive so it can be unplugged safely. A disk image is
+closed, and its host drive stays.
+
+Before asking the system, Filescape lets go of the drive itself: tabs showing it move to
+**Computer**, and folder watching and live updates of an analysis of it stop. Some things are
+said first, and you choose **Eject** or **Cancel**:
+
+- **Disk images stored on it** are ejected first, or the drive would stay busy. Ejecting
+  *DataHerdA* with the *MixDev* sparse bundle open from it closes *MixDev*, then ejects
+  *DataHerdA*.
+- **Other volumes on the same disk** go too, since the whole disk is ejected.
+- **A scan of it** that's running is stopped.
+
+A copy or move to or from the drive in **Transfers** has to finish, or be stopped, first.
+
+When an app has files open on the drive, Filescape tries once more a moment later (indexers and
+thumbnail readers often let go), then says the drive is in use. On macOS and Linux it names the
+apps holding it, so you can close them and choose **Try Again**. **Force Eject…** unmounts it
+anyway, after a second click that warns that unsaved work in those apps can be lost.
+
+Internal drives, system volumes and network shares have no Eject (network shares have
+**Disconnect**, under [Network & Remote](#network--remote)). Eject is also refused for the
+drive holding the operating system, your home folder, or Filescape itself.
+
+How it's done: `diskutil` and `hdiutil` on macOS; Windows' own Safely Remove Hardware, with disk
+images dismounted through PowerShell's Storage module; GVFS (`gio`) on Linux, or `udisksctl`
+where GVFS isn't installed. A drive mounted by the system rather than the desktop (in `fstab`)
+needs an administrator to unmount it on Linux.
+
 ## Slow and unreachable drives
 
 Folders are read in the background, a batch at a time, so a folder of 100,000 files starts

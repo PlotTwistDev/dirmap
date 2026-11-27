@@ -42,6 +42,7 @@ mod compare;
 mod marksui;
 mod openwith;
 mod netui;
+mod ejectui;
 mod remoteui;
 mod transfers;
 mod siteimport;
@@ -280,6 +281,8 @@ pub struct App {
     expanded: HashSet<Box<[u32]>>,
     rows: Option<Vec<Row>>,
     drives: Vec<Drive>,
+    /// Drives being ejected, and the questions ejecting asks.
+    eject: ejectui::EjectState,
     drives_rx: Option<mpsc::Receiver<(Vec<Drive>, Vec<PathBuf>, Vec<drives::Phone>)>>,
     /// Phones and cameras plugged in, listed with the drives.
     phones: Vec<drives::Phone>,
@@ -437,6 +440,7 @@ impl App {
             expanded: HashSet::new(),
             rows: None,
             drives: Vec::new(),
+            eject: Default::default(),
             drives_rx: None,
             wsl: Vec::new(),
             phones: Vec::new(),
@@ -2779,6 +2783,8 @@ impl eframe::App for App {
         self.licence.update_tick(&ctx, self.settings.check_updates);
         self.cloud_ask_ui(&ctx);
         self.explain_window(&ctx);
+        self.eject_poll(&ctx);
+        self.eject_window(&ctx);
         self.licence.prompt(&ctx);
         if std::mem::take(&mut self.licence.ui.open_settings) {
             self.dialog.open_licensing(&self.settings);
