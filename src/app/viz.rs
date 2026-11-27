@@ -375,7 +375,9 @@ impl App {
             }
             if k == last {
                 let r = ui.add(egui::Button::new(RichText::new(format!("{name}  ⏷")).strong().color(t.strong)).frame_when_inactive(false));
-                let r = r.on_hover_text(format!("{}\n\nClick to scan another folder or drive.", self.full_path(&self.zoom).shown()));
+                // No tree to walk while the first scan runs (or "Only matches" is being worked out).
+                let at = if self.shown_tree().is_some() { self.full_path(&self.zoom) } else { self.scanned_path.clone() };
+                let r = r.on_hover_text(format!("{}\n\nClick to scan another folder or drive.", at.shown()));
                 egui::Popup::menu(&r).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                     ui.set_min_width(460.0);
                     ui.horizontal(|ui| self.scan_controls(ui, 260.0));
