@@ -50,8 +50,8 @@ When any filter is on, two buttons choose how the result is shown:
 ![The same filter with Only matches](../images/filter-only.png)
 
 Switching between the two keeps your place: the folder you're in, the selection and the folders
-you've opened stay as they were (as long as they hold matches). In **Only matches** the
-status bar says how many matching files are shown, and the map says **No files match the
+you've opened stay as they were (as long as they hold matches). With a filter on, the
+**Matching** total under the map says how many files match and their size, and the map says **No files match the
 filter** if there are none.
 
 ## The match count

@@ -1,11 +1,10 @@
 # Interpreting scan results
 
-When a scan finishes, the status bar sums it up, for example:
-
-`D:\: 812.4 GB in 3,512,804 files, scanned in 94.2s. 12 items couldn't be read.`
-
-That is the total size of every file found, how many files there are, how long the scan took
-and, if any, how many folders or files couldn't be read (and so are missing from the totals).
+When a scan finishes, the totals under the map sum it up: the size on disk, the logical size, how
+many files and folders there are and, with cloud files, how much is only in the cloud. **Details**
+beside them adds how long the scan took. If any folders or files couldn't be read (and so are
+missing from the totals), the status bar says **N items couldn't be read**. See
+[The summary under the map](../views/treemap.md#the-summary-under-the-map).
 
 ## Reading the file manager
 

@@ -5,8 +5,8 @@ doesn't match the drive's used space.
 
 ## 1. Compare Filescape's total with the drive's used space
 
-Open **🖴 Drives…**: the **Used** column is what the drive reports. Compare it with the total in the
-status bar after scanning the whole drive. Make sure both use the same units (**⚙ Settings >
+Open **🖴 Drives…**: the **Used** column is what the drive reports. Compare it with the **On disk** total
+under the map after scanning the whole drive. Make sure both use the same units (**⚙ Settings >
 General > Sizes**): a "1 TB" drive is 931 GB in binary units.
 
 ## 2. If Filescape's total is lower: something wasn't counted

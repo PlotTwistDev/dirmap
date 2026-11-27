@@ -490,10 +490,10 @@ impl App {
     pub(super) fn ext_action(&mut self, a: ExtAction, ext: String) {
         match a {
             ExtAction::Highlight => {
-                if self.highlight_ext.as_ref() != Some(&ext) && !self.premium(crate::licence::Feature::Filters) {
+                if !self.highlight_ext.is_picked(&ext) && !self.premium(crate::licence::Feature::Filters) {
                     return;
                 }
-                self.highlight_ext = if self.highlight_ext.as_ref() == Some(&ext) { None } else { Some(ext) };
+                self.highlight_ext.only(&ext);
             }
             ExtAction::Copy => {
                 self.ctx_copy = Some(format!(".{ext}"));

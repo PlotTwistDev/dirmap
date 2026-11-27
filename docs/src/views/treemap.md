@@ -27,23 +27,50 @@ swatches in the **File types** list. Other colour modes show age or change since
 
 ## The summary under the map
 
-A line under the map sums up what it shows, like the map on filescape.app:
+Under the map, a strip of totals sums up the scan:
 
-![The summary under the map, with size filters on](../images/map-summary.png)
+![The summary under the map](../images/map-summary.png)
 
-- the scanned folder, its total size and its number of files;
-- a chip for each of the ten file types taking the most space, with its map colour and how much
-  space those files take.
+| Total | What it is |
+|---|---|
+| **On disk** | Space the files take on this computer's drive. Cloud files that are only online take none. |
+| **Logical size** | Each file's full size, wherever its data is. |
+| **Cloud only** | Data in the cloud that isn't on this computer (only with cloud files in the scan). |
+| **Reclaimable** | Space your cloud app could free up on this computer (Mac and Windows cloud folders only). |
+| **Files**, **Folders** | How many there are in the scan. |
+| **Matching** | With a filter on: the size and number of the files that match. |
 
-The summary **follows the filters.** Pick a category, set **Larger than** or **Smaller than**, or
-type a Custom filter, and the totals become those of the matching files only, written as
-"12.1 GB of 66.2 GB · 311 of 2,411 files", followed by the filters in words. The type chips are
-recounted from the matches too, so raising **Larger than** shows at a glance which types the big
-files are. While a new filter is being counted, a spinner shows beside the whole scan's totals.
+The totals are always the whole scan's, so data that's only in the cloud is never counted as on
+this computer. The total the map is sized by is highlighted; **click another size** to size the
+map by it (the same as the **Size** menu above the map; **Reclaimable** is part of Filescape
+Professional). Hover a total for what it counts. In a narrow window the less important totals
+are left out.
 
-**Click a chip** to highlight that type on the map, as clicking it in the **File types** list does;
-click it again, or **Clear**, to stop. Hover a chip to see its share of the total. With **Color
-by: Age** or **Change** only the totals line is shown, since the colours then mean something else.
+### The legend
+
+Under the totals, the legend lists the file types taking the most space, each with its map
+colour, size and share. It **follows the filters**: with a type, size or Custom filter on, it's
+recounted from the matching files, so raising **Larger than** shows at a glance which types the
+big files are.
+
+- **Point to a type** to see where those files are: the rest of the map dims while the pointer is
+  there.
+- **Click a type** to highlight it on the map, as clicking it in the **File types** list does;
+  click it again, or **Clear**, to stop. **Ctrl+click** (**⌘-click** on a Mac) adds a type to the
+  highlight or takes it out, so you can highlight several. Highlighting is part of Filescape
+  Professional; pointing is free.
+- **All N types** lists every type, in columns, sorted by size, number of files or name.
+  **Fewer** goes back to the short list.
+
+With **Colour: Age** or **Change** the legend is hidden, since the colours then mean something
+else.
+
+### Details and storage
+
+**Details** adds a line with the scanned folder, both sizes, how long the scan took, how many items
+couldn't be read and the active filters in words. With cloud files in the scan, **Storage** shows
+the storage breakdown; see [Cloud files](../disk-usage/cloud-files.md#storage-breakdown). Both
+stay open or closed as you left them.
 
 ## Finding out what something is
 

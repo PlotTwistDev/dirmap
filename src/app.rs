@@ -256,7 +256,7 @@ pub struct App {
     zoom: Vec<u32>,
     sort: SortBy,
     sort_desc: bool,
-    highlight_ext: Option<String>,
+    highlight_ext: viz::Highlight,
     /// The treemap: camera, tiles and navigation.
     map: MapView,
     /// The map is drawn in the File Manager's dock: right-click opens the item menu instead of
@@ -333,6 +333,8 @@ pub struct App {
     dup_skipped: (u64, u64),
     /// The storage breakdown of the current tree, worked out once per tree: (tree pointer, tally).
     cloud_sum: Option<(usize, scan::CloudTally)>,
+    /// Folders in the scan, counted once per tree (keyed by its address).
+    folder_sum: Option<(usize, u64)>,
     /// Show the "run as administrator?" question (first start without admin rights).
     admin_prompt: bool,
     /// Set when a restart as administrator didn't happen, to say so.
@@ -418,7 +420,7 @@ impl App {
             zoom: Vec::new(),
             sort: SortBy::Size,
             sort_desc: true,
-            highlight_ext: None,
+            highlight_ext: viz::Highlight::default(),
             map_in_dock: false,
             tile_prev: Default::default(),
             asking: Vec::new(),
@@ -470,6 +472,7 @@ impl App {
             dup_done: false,
             dup_skipped: (0, 0),
             cloud_sum: None,
+            folder_sum: None,
             admin_prompt,
             admin_declined: false,
             backup_reminder_closed: false,
@@ -625,7 +628,7 @@ impl App {
         self.scan_secs = secs;
         self.selected = None;
         self.zoom.clear();
-        self.highlight_ext = None;
+        self.highlight_ext.clear();
         self.map.clear();
         self.expanded.clear();
         self.expanded.insert(Box::new([]));
@@ -1512,8 +1515,8 @@ impl App {
         if self.shown.is_some() {
             ui.weak("Matching files only");
         }
-        if self.highlight_ext.is_some() && ui.small_button("Clear highlight").clicked() {
-            self.highlight_ext = None;
+        if self.highlight_ext.any_picked() && ui.small_button("Clear highlight").clicked() {
+            self.highlight_ext.clear();
         }
         let mut toggle = None;
         let mut menu_pick = None;
@@ -1538,7 +1541,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW_H, exts.len(), |ui, range| {
             for (k, e) in exts[range.clone()].iter().enumerate() {
                 let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-                let on = self.highlight_ext.as_deref() == Some(e.ext.as_str());
+                let on = self.highlight_ext.is_picked(&e.ext);
                 let vis = ui.visuals().clone();
                 if on {
                     ui.painter().rect_filled(rect, 2.0, vis.selection.bg_fill);
@@ -1582,9 +1585,14 @@ impl App {
             self.ext_action(a, ext);
         }
         if let Some(t) = toggle
-            && (self.highlight_ext.as_ref() == Some(&t) || self.premium(crate::licence::Feature::Filters))
+            && (self.highlight_ext.is_picked(&t) || self.premium(crate::licence::Feature::Filters))
         {
-            self.highlight_ext = if self.highlight_ext.as_ref() == Some(&t) { None } else { Some(t) };
+            // Ctrl/⌘-click adds to the types picked; a plain click picks just this one.
+            if ui.input(|i| i.modifiers.command) {
+                self.highlight_ext.toggle(&t);
+            } else {
+                self.highlight_ext.only(&t);
+            }
         }
     }
 
@@ -2066,10 +2074,8 @@ impl App {
             } else if self.filter.active() && !self.filter.matches(n) {
                 // Hidden, as on the treemap.
                 c = Color32::from_gray(45);
-            } else if let Some(h) = &self.highlight_ext {
-                if !n.ext().eq_ignore_ascii_case(h) {
-                    c = c.gamma_multiply(0.2);
-                }
+            } else if self.highlight_ext.active() && !self.highlight_ext.shows(n.ext()) {
+                c = c.gamma_multiply(0.2);
             }
             if Some(i) == hover {
                 c = lighten(c, 0.3);
@@ -2255,10 +2261,7 @@ impl App {
                 return None;
             }
             let c = if fade { cloud_fade(c, n.flags) } else { c };
-            let fill = match &highlight {
-                Some(h) if !n.ext().eq_ignore_ascii_case(h) => c.gamma_multiply(0.15),
-                _ => c,
-            };
+            let fill = if highlight.active() && !highlight.shows(n.ext()) { c.gamma_multiply(0.15) } else { c };
             Some((fill, c))
         });
         // Matches too small to draw would vanish into their folder's blended patch; light the
@@ -2959,15 +2962,11 @@ impl eframe::App for App {
                 } else if let Some(job) = &self.job {
                     ui.spinner();
                     ui.label(format!("Scanning {}…", job.root.display()));
-                } else if let Some(t) = &self.tree {
-                    let how = "Click a tile to select, double-click to open a folder, right-click to zoom out.";
-                    ui.label(format!(
-                        "{}: {} in {} files, scanned in {:.1}s. {how}",
-                        self.scanned_path.display(),
-                        sizes_text(t, self.metric),
-                        group(t.files),
-                        self.scan_secs
-                    ));
+                } else if self.tree.is_some() {
+                    // The totals are in the strip under the map; here, only what's happening.
+                    if self.selected.is_none() {
+                        ui.weak("Click a tile to select it, double-click to open a folder, right-click to zoom out.");
+                    }
                     if self.scan_errors > 0 {
                         let text = if self.scan_errors == 1 {
                             "1 item couldn't be read.".to_string()
@@ -2989,10 +2988,6 @@ impl eframe::App for App {
                         {
                             crate::elevate::open_full_disk_access_settings();
                         }
-                    }
-                    if let Some(s) = &self.shown {
-                        ui.separator();
-                        ui.label(format!("Showing {} matching files ({})", group(s.tree.files), scan::human(s.tree.size)));
                     }
                     let stale = self.scanned_with.as_ref().is_some_and(|s| s.scan_key() != self.settings.scan_key());
                     if stale {

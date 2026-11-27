@@ -43,6 +43,67 @@ const AGE_PRESETS: [(&str, i64, i64); 6] = [
     ("Over 5 years ago", 0, 5 * 365),
 ];
 
+/// File types picked in the legend (or the File types list) to stand out on the map, plus the
+/// one under the mouse in the legend, which stands out while hovered (free; picking is Pro).
+#[derive(Clone, Default, Hash, PartialEq)]
+pub(super) struct Highlight {
+    /// Lowercased extensions.
+    picked: std::collections::BTreeSet<String>,
+    hover: Option<String>,
+}
+
+impl Highlight {
+    /// Whether anything stands out at the moment (picked, or hovered in the legend).
+    pub fn active(&self) -> bool {
+        self.hover.is_some() || !self.picked.is_empty()
+    }
+
+    /// Whether files of `ext` stand out now. The hovered type wins while there is one.
+    pub fn shows(&self, ext: &str) -> bool {
+        match &self.hover {
+            Some(h) => h.eq_ignore_ascii_case(ext),
+            None => self.picked.iter().any(|p| p.eq_ignore_ascii_case(ext)),
+        }
+    }
+
+    pub fn is_picked(&self, ext: &str) -> bool {
+        self.picked.contains(&ext.to_ascii_lowercase())
+    }
+
+    pub fn any_picked(&self) -> bool {
+        !self.picked.is_empty()
+    }
+
+    /// Pick or unpick one type, keeping the others (Ctrl/⌘-click, or the legend's multi-select).
+    pub fn toggle(&mut self, ext: &str) {
+        let e = ext.to_ascii_lowercase();
+        if !self.picked.remove(&e) {
+            self.picked.insert(e);
+        }
+    }
+
+    /// Pick only this type, or nothing when it was the only one picked.
+    pub fn only(&mut self, ext: &str) {
+        let e = ext.to_ascii_lowercase();
+        let was_only = self.picked.len() == 1 && self.picked.contains(&e);
+        self.picked.clear();
+        if !was_only {
+            self.picked.insert(e);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.picked.clear();
+    }
+
+    pub fn set_hover(&mut self, ext: Option<&str>) {
+        let h = ext.map(str::to_ascii_lowercase);
+        if self.hover != h {
+            self.hover = h;
+        }
+    }
+}
+
 /// What the Storage Analysis toolbar remembers while the app runs.
 #[derive(Default)]
 pub(super) struct VizUi {
@@ -126,7 +187,7 @@ pub(super) fn chips_of(f: &ViewFilter, dupes: bool) -> Vec<(Chip, String)> {
 
 /// A compact toolbar control: an optional icon, a label and an optional ▾, in a soft pill.
 /// `on` tints it (an open panel, a mode in use); `accent` fills it (filters in effect).
-fn pill(ui: &mut egui::Ui, icon: Option<Icon>, text: &str, on: bool, accent: bool, caret: bool) -> egui::Response {
+pub(super) fn pill(ui: &mut egui::Ui, icon: Option<Icon>, text: &str, on: bool, accent: bool, caret: bool) -> egui::Response {
     let t = kit::tokens(ui);
     let font = FontId::proportional(13.0);
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, t.text);
@@ -533,7 +594,7 @@ impl App {
                 self.paint_gen += 1;
             }
             let mut bar = self.settings.cloud_breakdown;
-            if ui.checkbox(&mut bar, "Cloud breakdown under the map").changed() {
+            if ui.checkbox(&mut bar, "Storage breakdown under the map").changed() {
                 self.settings.cloud_breakdown = bar;
                 self.dialog.draft.cloud_breakdown = bar;
             }
@@ -872,6 +933,241 @@ impl App {
             self.custom_menu(ui);
             if help::link_button(ui, "Syntax") {
                 self.help.show_topic(topics::SYNTAX);
+            }
+        });
+    }
+}
+
+// ---------- the file-type legend, shared by Storage Analysis and the Files dock ----------
+
+/// One file type in the legend.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct LegendItem {
+    /// Lowercased extension ("" for files without one).
+    pub ext: String,
+    pub bytes: u64,
+    /// How many files, when known (the match counts of a Highlight filter don't say).
+    pub files: Option<u64>,
+}
+
+/// How the expanded legend is sorted.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, serde::Serialize, serde::Deserialize)]
+pub(super) enum LegendSort {
+    #[default]
+    Size,
+    Count,
+    Name,
+}
+
+/// The order of the expanded legend's entries: indices into `items`.
+pub(super) fn legend_order(items: &[LegendItem], sort: LegendSort) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    match sort {
+        LegendSort::Size => order.sort_by(|&a, &b| items[b].bytes.cmp(&items[a].bytes).then_with(|| items[a].ext.cmp(&items[b].ext))),
+        LegendSort::Count => order.sort_by(|&a, &b| items[b].files.cmp(&items[a].files).then_with(|| items[b].bytes.cmp(&items[a].bytes))),
+        LegendSort::Name => order.sort_by(|&a, &b| {
+            // Files without an extension last.
+            (items[a].ext.is_empty(), &items[a].ext).cmp(&(items[b].ext.is_empty(), &items[b].ext))
+        }),
+    }
+    order
+}
+
+/// The expanded legend's sort switch; returns the sort (kept per legend).
+fn legend_sort(ui: &mut egui::Ui, items: &[LegendItem], id: &str) -> LegendSort {
+    let t = kit::tokens(ui);
+    let sort_id = egui::Id::new(("legend-sort", id));
+    let mut sort = ui.data_mut(|d| *d.get_persisted_mut_or_default::<LegendSort>(sort_id));
+    let counts = items.iter().all(|i| i.files.is_some());
+    if !counts && sort == LegendSort::Count {
+        sort = LegendSort::Size;
+    }
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(format!("{} types · sort by", items.len())).size(11.5).color(t.weak));
+        let mut opts = vec![(LegendSort::Size, "Size")];
+        if counts {
+            opts.push((LegendSort::Count, "Count"));
+        }
+        opts.push((LegendSort::Name, "Name"));
+        kit::segmented(ui, &mut sort, &opts, false);
+    });
+    ui.data_mut(|d| d.insert_persisted(sort_id, sort));
+    sort
+}
+
+/// What a legend entry says about its share, e.g. "12.5%" or "<0.1%".
+pub(super) fn share(bytes: u64, total: u64) -> String {
+    let pct = bytes as f64 * 100.0 / total.max(1) as f64;
+    if bytes > 0 && pct < 0.1 { "<0.1%".into() } else if pct >= 10.0 { format!("{pct:.0}%") } else { format!("{pct:.1}%") }
+}
+
+/// What happened in a legend this frame.
+#[derive(Default)]
+struct LegendHits {
+    hover: Option<String>,
+    /// The type clicked, and whether Ctrl/⌘ was held (add to the highlight).
+    click: Option<(String, bool)>,
+    clear: bool,
+}
+
+impl LegendHits {
+    fn note(&mut self, ui: &egui::Ui, resp: &egui::Response, ext: &str) {
+        if resp.hovered() {
+            self.hover = Some(ext.to_string());
+        }
+        if resp.clicked() {
+            self.click = Some((ext.to_string(), ui.input(|i| i.modifiers.command)));
+        }
+    }
+}
+
+/// How wide a legend entry is in the row (as `legend_entry` lays it out).
+fn legend_width(ui: &egui::Ui, item: &LegendItem, total: u64, compact: bool) -> f32 {
+    let font = FontId::proportional(if compact { 11.5 } else { 12.0 });
+    let name = if item.ext.is_empty() { "(none)".to_string() } else { item.ext.clone() };
+    let w = |s: String, f: FontId| ui.fonts_mut(|x| x.layout_no_wrap(s, f, Color32::WHITE).size().x);
+    let pct = if compact { 0.0 } else { 6.0 + w(share(item.bytes, total), FontId::proportional(11.0)) + 10.0 };
+    22.0 + w(name, font.clone()) + 6.0 + w(scan::human(item.bytes), font) + if compact { 8.0 } else { pct } + 2.0
+}
+
+/// One legend entry: swatch, type, size and (unless compact) its share. Returns its response.
+fn legend_entry(ui: &mut egui::Ui, color: Color32, item: &LegendItem, total: u64, picked: bool, dimmed: bool, compact: bool, width: Option<f32>) -> egui::Response {
+    let t = kit::tokens(ui);
+    let font = FontId::proportional(if compact { 11.5 } else { 12.0 });
+    let name = if item.ext.is_empty() { "(none)".to_string() } else { item.ext.clone() };
+    let size = scan::human(item.bytes);
+    let pct = if compact { String::new() } else { share(item.bytes, total) };
+    let name_g = ui.painter().layout_no_wrap(name.clone(), font.clone(), t.text);
+    let size_g = ui.painter().layout_no_wrap(size.clone(), font.clone(), t.weak);
+    let pct_g = ui.painter().layout_no_wrap(pct.clone(), FontId::proportional(11.0), t.weak);
+    let natural = 22.0 + name_g.size().x + 6.0 + size_g.size().x + if compact { 8.0 } else { 6.0 + pct_g.size().x + 10.0 };
+    let w = width.unwrap_or(natural);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 22.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let fill = if picked { t.accent_soft } else if resp.hovered() { t.pal.hover } else { Color32::TRANSPARENT };
+        ui.painter().rect_filled(rect, 5.0, fill);
+        let a = if dimmed && !resp.hovered() { 0.45 } else { 1.0 };
+        let sw = Rect::from_center_size(pos2(rect.left() + 11.0, rect.center().y), vec2(10.0, 10.0));
+        ui.painter().rect_filled(sw, 2.5, color.gamma_multiply(a));
+        let y = rect.center().y;
+        let mut x = rect.left() + 22.0;
+        let name_c = if picked { t.strong } else { t.text };
+        let name_w = name_g.size().x;
+        ui.painter().galley_with_override_text_color(pos2(x, y - name_g.size().y / 2.0), name_g, name_c.gamma_multiply(a));
+        x += name_w + 6.0;
+        if width.is_some() && !compact {
+            // In the grid, sizes and shares line up on the right.
+            let right = rect.right() - 8.0;
+            let pw = pct_g.size().x;
+            ui.painter().galley_with_override_text_color(pos2(right - pw, y - pct_g.size().y / 2.0), pct_g, t.weak.gamma_multiply(a));
+            let sw = size_g.size().x;
+            ui.painter().galley_with_override_text_color(pos2(right - pw - 8.0 - sw, y - size_g.size().y / 2.0), size_g, t.text.gamma_multiply(a));
+        } else {
+            let sw = size_g.size().x;
+            ui.painter().galley_with_override_text_color(pos2(x, y - size_g.size().y / 2.0), size_g, t.weak.gamma_multiply(a));
+            if !compact {
+                x += sw + 6.0;
+                ui.painter().galley_with_override_text_color(pos2(x, y - pct_g.size().y / 2.0), pct_g, t.weak.gamma_multiply(a * 0.85));
+            }
+        }
+        kit::focus_ring(ui, rect, &resp, 5.0);
+    }
+    let files = item.files.map(|n| format!(", {} file{}", group(n), if n == 1 { "" } else { "s" })).unwrap_or_default();
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{name} {size}")));
+    resp.on_hover_text(format!(
+        "{name}: {size}{files}, {} of what's shown.\n\nPoint to see these files on the map. Click to highlight them; {} to add to the highlight.",
+        share(item.bytes, total),
+        if cfg!(target_os = "macos") { "⌘-click" } else { "Ctrl-click" }
+    ))
+}
+
+impl App {
+    /// The file-type legend: the types taking the most space, each in its map colour with its
+    /// size (and share, unless `compact`). Pointing at one shows those files on the map; clicking
+    /// highlights them (Ctrl/⌘-click adds to the highlight). "All N types" lists every type,
+    /// sortable: below the row, or in a popup when `compact` (the Files dock). `id` keeps each
+    /// legend's expanded state and sort apart. Draws nothing for an empty list.
+    pub(super) fn type_legend(&mut self, ui: &mut egui::Ui, items: &[LegendItem], total: u64, compact: bool, id: &str) {
+        if items.is_empty() {
+            return;
+        }
+        let open_id = egui::Id::new(("legend-open", id));
+        let mut open = !compact && ui.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(open_id));
+        let mut hits = LegendHits::default();
+        let any = self.highlight_ext.any_picked();
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            // Room kept on the right for "All N types" and Clear.
+            let tail = if items.len() > 1 { 100.0 } else { 0.0 } + if any { 52.0 } else { 0.0 };
+            let mut shown = 0;
+            if open {
+                legend_sort(ui, items, id);
+                ui.add_space(6.0);
+            }
+            for item in items.iter().filter(|_| !open) {
+                let probe = legend_width(ui, item, total, compact);
+                if shown > 0 && ui.available_width() - tail < probe {
+                    break;
+                }
+                let picked = self.highlight_ext.is_picked(&item.ext);
+                let resp = legend_entry(ui, self.color_for_ext(&item.ext), item, total, picked, any && !picked, compact, None);
+                hits.note(ui, &resp, &item.ext);
+                shown += 1;
+            }
+            if items.len() > shown || open {
+                let label = if open { "Fewer".to_string() } else { format!("All {} types", items.len()) };
+                let r = pill(ui, None, &label, open, false, true).on_hover_text(if open { "Hide the full list" } else { "Every type here, sortable by size, count or name" });
+                if compact {
+                    egui::Popup::menu(&r).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                        ui.set_width(2.0 * 154.0 + 8.0);
+                        self.legend_grid(ui, items, total, true, id, &mut hits);
+                    });
+                } else if r.clicked() {
+                    open = !open;
+                }
+            }
+            if any && ui.add(egui::Button::new(RichText::new("Clear").size(12.0)).frame_when_inactive(false)).on_hover_text("Stop highlighting").clicked() {
+                hits.clear = true;
+            }
+        });
+        if open {
+            self.legend_grid(ui, items, total, false, id, &mut hits);
+        }
+        if !compact {
+            ui.data_mut(|d| d.insert_persisted(open_id, open));
+        }
+        self.highlight_ext.set_hover(hits.hover.as_deref());
+        if hits.clear {
+            self.highlight_ext.clear();
+        } else if let Some((ext, add)) = hits.click {
+            // Taking a type out is always free; picking one is a Pro filter.
+            let removing = self.highlight_ext.is_picked(&ext);
+            if removing || self.premium(crate::licence::Feature::Filters) {
+                if add { self.highlight_ext.toggle(&ext) } else { self.highlight_ext.only(&ext) }
+            }
+        }
+    }
+
+    /// Every type in the legend, in columns, with a sort switch.
+    fn legend_grid(&self, ui: &mut egui::Ui, items: &[LegendItem], total: u64, compact: bool, id: &str, hits: &mut LegendHits) {
+        // Under the map the switch is in the legend's row; in the dock's popup it heads the list.
+        let sort = if compact { legend_sort(ui, items, id) } else { ui.data_mut(|d| *d.get_persisted_mut_or_default::<LegendSort>(egui::Id::new(("legend-sort", id)))) };
+        let sort = if sort == LegendSort::Count && !items.iter().all(|i| i.files.is_some()) { LegendSort::Size } else { sort };
+        let order = legend_order(items, sort);
+        let col = if compact { 154.0 } else { 200.0 };
+        let cols = ((ui.available_width() / (col + 4.0)).floor() as usize).max(1);
+        let any = self.highlight_ext.any_picked();
+        egui::ScrollArea::vertical().id_salt(("legend-grid", id)).max_height(if compact { 220.0 } else { 140.0 }).auto_shrink([false, true]).show(ui, |ui| {
+            for chunk in order.chunks(cols) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for &i in chunk {
+                        let item = &items[i];
+                        let picked = self.highlight_ext.is_picked(&item.ext);
+                        let resp = legend_entry(ui, self.color_for_ext(&item.ext), item, total, picked, any && !picked, false, Some(col));
+                        hits.note(ui, &resp, &item.ext);
+                    }
+                });
             }
         });
     }

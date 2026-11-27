@@ -150,9 +150,11 @@ impl App {
         self.cloud_sum.map(|c| c.1)
     }
 
-    /// The storage breakdown under the map: a bar split into data that's only on this computer,
-    /// downloaded from the cloud, only in the cloud and unknown, with the services involved.
-    /// Shown only when the scan has cloud files. Clicking a part filters the map to it (Pro).
+    /// The storage breakdown under the map (Storage, in the summary strip): a bar splitting the
+    /// scan's data into what's only on this computer, downloaded from the cloud, only in the
+    /// cloud and unknown, with the services involved and the reclaimable space beside it. Shown
+    /// only when the scan has cloud files. Clicking a part filters the map to it (Pro). Nothing
+    /// here downloads anything.
     pub(super) fn cloud_bar(&mut self, ui: &mut egui::Ui) {
         if !self.view().cloud_breakdown {
             return;
@@ -164,67 +166,83 @@ impl App {
         let downloaded = t.cloud_logical.saturating_sub(away).saturating_sub(t.unknown_bytes);
         let local = tree.logical.saturating_sub(t.cloud_logical);
         let parts = [
-            (local, "Not in the cloud", "Files on this computer that aren't in a cloud folder.", Some(Stored::Local)),
-            (downloaded, "Downloaded", "Cloud files with their data on this computer, pinned ones included.", Some(Stored::Downloaded)),
-            (away, "Only in the cloud", "Data in the cloud that isn't on this computer: online-only files, and the missing part of partly downloaded ones. Opening them downloads it.", Some(Stored::OnlineOnly)),
-            (t.unknown_bytes, "Unknown", "Files on mounted cloud drives, which don't say how much of each file is stored on this computer.", Some(Stored::Unknown)),
+            (local, "Not in the cloud", "Files on this computer that aren't in a cloud folder.", Stored::Local),
+            (downloaded, "Downloaded", "Cloud files with their data on this computer, pinned ones included.", Stored::Downloaded),
+            (away, "Only in the cloud", "Data in the cloud that isn't on this computer: online-only files, and the missing part of partly downloaded ones. Opening them downloads it.", Stored::OnlineOnly),
+            (t.unknown_bytes, "Unknown", "Files on mounted cloud drives, which don't say how much of each file is stored on this computer.", Stored::Unknown),
         ];
         let here = total.saturating_sub(away).saturating_sub(t.unknown_bytes);
-        let pal = style::pal(ui);
-        let mono = FontId::monospace(11.5);
+        let k = crate::kit::tokens(ui);
         let mut pick = None;
         let mut reclaim = false;
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let services = self.services();
-            let label = if services.is_empty() { "Cloud".to_string() } else { services.join(", ") };
-            ui.label(egui::RichText::new(format!("{label}:")).font(mono.clone()).color(pal.strong)).on_hover_text(
-                "Where the data in this scan is, by logical size. The whole scan is counted, whatever the filters.",
-            );
-            let (bar, resp) = ui.allocate_exact_size(vec2(180.0, 10.0), Sense::hover());
-            ui.painter().rect_filled(bar, 3.0, pal.hover);
-            let mut x = bar.left();
-            for (i, (bytes, ..)) in parts.iter().enumerate() {
-                let w = bar.width() * (*bytes as f64 / total as f64) as f32;
-                if w > 0.0 {
-                    let r = Rect::from_min_max(pos2(x, bar.top()), pos2((x + w).min(bar.right()), bar.bottom()));
-                    ui.painter().rect_filled(r, 0.0, BAR[i]);
-                    x += w;
+        let services = self.services();
+        let counts = if t.online_only + t.partial > 0 {
+            format!("{} of {} cloud files aren't fully downloaded ({} online only, {} partly)", group(t.online_only + t.partial), group(t.cloud_files), group(t.online_only), group(t.partial))
+        } else {
+            format!("{} cloud files, all downloaded", group(t.cloud_files))
+        };
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.label(egui::RichText::new("STORAGE").size(10.0).color(k.weak)).on_hover_text("Where the data in this scan is, by logical size. The whole scan is counted, whatever the filters.");
+            let names = if services.is_empty() { "Cloud".to_string() } else { services.join(", ") };
+            ui.label(egui::RichText::new(names).size(12.0).color(k.strong));
+            let pct = here as f64 * 100.0 / total as f64;
+            let pct = if here > 0 && pct < 1.0 { "<1%".to_string() } else { format!("{pct:.0}%") };
+            ui.label(egui::RichText::new(format!("· {pct} on this computer · {counts}")).size(12.0).color(k.weak));
+        });
+        // The bar, as wide as the summary.
+        let (bar, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 8.0), Sense::hover());
+        ui.painter().rect_filled(bar, 4.0, k.track);
+        let mut x = bar.left();
+        let mut hovered = None;
+        for (i, (bytes, ..)) in parts.iter().enumerate() {
+            let w = bar.width() * (*bytes as f64 / total as f64) as f32;
+            if w > 0.0 {
+                let r = Rect::from_min_max(pos2(x, bar.top()), pos2((x + w).min(bar.right()), bar.bottom()));
+                let first = x <= bar.left() + 0.5;
+                let last = x + w >= bar.right() - 0.5;
+                let cr = egui::CornerRadius { nw: if first { 4 } else { 0 }, sw: if first { 4 } else { 0 }, ne: if last { 4 } else { 0 }, se: if last { 4 } else { 0 } };
+                ui.painter().rect_filled(r, cr, BAR[i]);
+                if resp.hover_pos().is_some_and(|p| r.contains(p)) {
+                    hovered = Some(i);
                 }
+                x += w;
             }
-            resp.on_hover_text(format!("{:.0}% of the data in this scan is on this computer.", here as f64 * 100.0 / total as f64));
+        }
+        if let Some(i) = hovered {
+            let (bytes, name, tip, _) = parts[i];
+            resp.on_hover_text(format!("{name}: {} ({:.1}%)\n\n{tip}", scan::human(bytes), bytes as f64 * 100.0 / total as f64));
+        }
+        ui.add_space(2.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let font = FontId::proportional(12.0);
             for (i, (bytes, name, tip, st)) in parts.iter().enumerate() {
                 if *bytes == 0 {
                     continue;
                 }
-                let text = format!("{name} {}", scan::human(*bytes));
-                let w = ui.fonts_mut(|f| f.layout_no_wrap(text.clone(), mono.clone(), pal.text).size().x) + 22.0;
-                let (r, resp) = ui.allocate_exact_size(vec2(w, 20.0), Sense::click());
-                let on = st.is_some_and(|s| self.filter.stored == s.bit() || (s == Stored::Downloaded && self.filter.stored == Stored::Downloaded.bit() | Stored::Pinned.bit()));
+                let text = format!("{name}  {}", scan::human(*bytes));
+                let w = ui.fonts_mut(|f| f.layout_no_wrap(text.clone(), font.clone(), k.text).size().x) + 24.0;
+                let (r, resp) = ui.allocate_exact_size(vec2(w, 22.0), Sense::click());
+                let on = self.filter.stored == st.bit() || (*st == Stored::Downloaded && self.filter.stored == Stored::Downloaded.bit() | Stored::Pinned.bit()) || (*st == Stored::OnlineOnly && self.filter.stored == Stored::OnlineOnly.bit() | Stored::Partial.bit());
                 if on {
-                    ui.painter().rect_filled(r, 4.0, pal.sel);
+                    ui.painter().rect_filled(r, 5.0, k.accent_soft);
                 } else if resp.hovered() {
-                    ui.painter().rect_filled(r, 4.0, pal.hover);
+                    ui.painter().rect_filled(r, 5.0, k.pal.hover);
                 }
-                let sw = Rect::from_center_size(pos2(r.left() + 9.0, r.center().y), vec2(9.0, 9.0));
-                ui.painter().rect_filled(sw, 2.0, BAR[i]);
-                ui.painter().text(pos2(r.left() + 18.0, r.center().y), Align2::LEFT_CENTER, text, mono.clone(), if on { pal.strong } else { pal.text });
+                let sw = Rect::from_center_size(pos2(r.left() + 11.0, r.center().y), vec2(10.0, 10.0));
+                ui.painter().rect_filled(sw, 2.5, BAR[i]);
+                ui.painter().text(pos2(r.left() + 21.0, r.center().y), Align2::LEFT_CENTER, text, font.clone(), if on { k.strong } else { k.text });
                 let more = if on { "Click to show everything again." } else { "Click to show only these files on the map." };
                 if resp.on_hover_text(format!("{tip}\n\n{more}")).clicked() {
                     pick = Some((*st, on));
                 }
             }
-            let counts = if t.online_only + t.partial > 0 {
-                format!("{} of {} cloud files aren't downloaded", group(t.online_only + t.partial), group(t.cloud_files))
-            } else {
-                format!("{} cloud files, all downloaded", group(t.cloud_files))
-            };
-            ui.label(egui::RichText::new(format!("{:.0}% here", here as f64 * 100.0 / total as f64)).font(mono.clone()).color(pal.weak))
-                .on_hover_text(format!("{:.0}% of the data in this scan is on this computer. {counts}.", here as f64 * 100.0 / total as f64));
             if t.reclaimable_bytes > 0 && crate::cloudops::supported() {
-                let text = format!(" · {} can be freed up", scan::human(t.reclaimable_bytes));
-                let r = ui.add(egui::Label::new(egui::RichText::new(text).font(mono.clone()).color(pal.text)).sense(Sense::click()));
+                ui.add_space(8.0);
                 let pinned = if t.pinned_alloc > 0 { format!(" Files set to always stay on this device ({}) aren't counted.", scan::human(t.pinned_alloc)) } else { String::new() };
+                let r = ui.add(egui::Button::new(egui::RichText::new(format!("Reclaimable  {}", scan::human(t.reclaimable_bytes))).size(12.0).color(k.text)).corner_radius(5.0));
                 if r.on_hover_text(format!(
                     "Downloaded cloud files ({}) whose space your cloud app can free up while keeping them in the cloud.{pinned} Click to see where they are (the Reclaimable view), then right-click items and choose {}.",
                     group(t.reclaimable), crate::cloudops::Action::FreeUp.label()
@@ -233,14 +251,15 @@ impl App {
                 }
             }
             if self.cloud_fade_on() {
-                ui.label(egui::RichText::new(" · faded tiles: online only (half-faded: partly downloaded)").font(mono.clone()).color(pal.weak))
-                    .on_hover_text("At Size: Logical, files not on this computer are drawn faded so what's here stands out. Turn this off in Settings > Cloud storage > Fade online-only tiles.");
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("Faded tiles: only in the cloud").size(11.5).color(k.weak))
+                    .on_hover_text("At Logical size, files not on this computer are drawn faded so what's here stands out (half-faded: partly downloaded). Turn this off in Display, or in Settings > Cloud storage.");
             }
         });
         if reclaim && self.premium(crate::licence::Feature::CloudManagement) {
             self.set_metric(scan::Metric::Reclaimable);
         }
-        if let Some((Some(s), on)) = pick
+        if let Some((s, on)) = pick
             && (on || self.premium(crate::licence::Feature::Filters))
         {
             self.filter.stored = match (on, s) {
@@ -249,7 +268,7 @@ impl App {
                 (false, Stored::OnlineOnly) => Stored::OnlineOnly.bit() | Stored::Partial.bit(),
                 (false, s) => s.bit(),
             };
-            // As in the Stored row: online-only files have no area at Size: On disk.
+            // As in the Filters panel: online-only files have no area at Size: On disk.
             if self.filter.stored & AWAY != 0 && self.metric == scan::Metric::Disk {
                 self.set_metric(scan::Metric::Logical);
             }

@@ -618,7 +618,9 @@ gone, a file's size has changed, or something was modified after the analysis. *
 Analysis** brings it up to date.
 
 Under the map, the legend lists the file types taking the most space in the folder, in their map
-colours. Click one to highlight those files on the map, and click it again to stop. **Colour**
+colours: the same legend as in Storage Analysis. Point to one to see where those files are, click
+it to highlight them, and click it again to stop; **Ctrl+click** (**⌘-click**) highlights several.
+**All N types** lists every type in the folder. **Colour**
 on the dock's toolbar switches to colouring by age, or by change since a snapshot.
 
 ## Copying, moving and deleting
