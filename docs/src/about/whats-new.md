@@ -87,6 +87,9 @@
 - The **Storage optimiser** under a splat scene's details measures how big it would be as SPZ,
   compressed PLY or standard PLY, and saves a converted copy, read back and checked, next to
   the original, which is kept. As SPZ, a trainer's PLY is often about a tenth of the size.
+- **Compare Scenes** (Professional): select two splat scenes and right-click to see them side
+  by side, split by a line you drag, or as their difference, turning together, with how alike
+  the pictures are and both scenes' details side by side.
 
 ### The AI Models workspace
 

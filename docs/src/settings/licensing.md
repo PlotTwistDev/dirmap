@@ -13,7 +13,7 @@ good: you can look around and navigate by hand. The rest is **Filescape Professi
 | Scan exclusions | Finding numbered sequences, and the sequence player |
 | Cloud files: sizes on disk, status icons, the storage breakdown, never downloading without asking, and freeing up or keeping one file at a time | Cloud management: the **Stored** filter, the **Reclaimable** view, and freeing up or keeping folders and several items at once |
 | | The Remote workspace: connecting to servers and starting transfers |
-| | Batch rename, Compare Folders and the duplicate finder |
+| | Batch rename, Compare Folders, Compare Scenes (two splat scenes) and the duplicate finder |
 | | Browsing and extracting archives, saved searches and snapshots |
 | The AI Models workspace: finding models, their details and architecture, copies and unused downloads, health checks, will-it-run estimates, and deleting or moving one model at a time | Managing models in bulk: moving several models at once, removing copies automatically and scheduled maintenance |
 | Ask AI: downloading a model when you agree to it and running it on this computer, chat, questions about a file, summaries, image descriptions, search by meaning and a suggested name for one file | Processing many files with AI at once: batch descriptions, AI-suggested batch renaming and automatic organising |

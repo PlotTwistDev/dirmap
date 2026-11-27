@@ -63,6 +63,12 @@ struct Shared {
     /// Pictures wanted by thumbnails, drawn when the preview wants nothing, each answered on
     /// its own channel. Guarded by `wish`'s lock too, so the worker never misses one.
     side: Mutex<std::collections::VecDeque<(Wish, std::sync::mpsc::SyncSender<Picture>)>>,
+    /// Two pictures wanted together, for comparing scenes; the latest pair wins. Guarded by
+    /// `wish`'s lock too. Their scenes stay loaded beside the preview's.
+    pair: Mutex<Option<[Wish; 2]>>,
+    pair_done: Mutex<Option<[Picture; 2]>>,
+    /// Set when the comparison closes, so its scenes' graphics memory is let go.
+    pair_gone: AtomicBool,
 }
 
 /// How long one picture (with opening the device and loading the scene) may take before the
@@ -81,7 +87,7 @@ static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1)
 
 fn shared() -> &'static Arc<Shared> {
     SHARED.get_or_init(|| {
-        let s = Arc::new(Shared { wish: Mutex::new(None), ready: Condvar::new(), done: Mutex::new(None), status: Mutex::new(Status::Unknown), busy_since: Mutex::new(None), side: Mutex::new(Default::default()) });
+        let s = Arc::new(Shared { wish: Mutex::new(None), ready: Condvar::new(), done: Mutex::new(None), status: Mutex::new(Status::Unknown), busy_since: Mutex::new(None), side: Mutex::new(Default::default()), pair: Mutex::new(None), pair_done: Mutex::new(None), pair_gone: AtomicBool::new(false) });
         let w = s.clone();
         let _ = std::thread::Builder::new().name("splat-gpu".into()).spawn(move || worker(w));
         s
@@ -130,6 +136,36 @@ pub fn wait_for(id: u64, limit: Duration) -> Option<Picture> {
         std::thread::sleep(Duration::from_millis(5));
     }
     None
+}
+
+/// One side of a pair of pictures: a scene, its false colours, the view and the size.
+pub type Side = (Arc<Scene>, Option<Paint>, View, [u32; 2]);
+
+/// Ask for pictures of two scenes at once (comparing them). The latest pair wins; both come
+/// from [`take_pair`] together, and `ctx` is asked to repaint then.
+pub fn want_pair(a: Side, b: Side, ctx: Option<eframe::egui::Context>) -> u64 {
+    let s = shared();
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let wish = |(scene, paint, view, size): Side| Wish { id, scene, paint, view, size, ctx: ctx.clone() };
+    let _w = s.wish.lock().unwrap();
+    s.pair_gone.store(false, Ordering::Relaxed);
+    *s.pair.lock().unwrap() = Some([wish(a), wish(b)]);
+    s.ready.notify_one();
+    id
+}
+
+/// The newest finished pair of pictures, if any.
+pub fn take_pair() -> Option<[Picture; 2]> {
+    shared().pair_done.lock().unwrap().take()
+}
+
+/// The comparison has closed: let its scenes go.
+pub fn let_go_pair() {
+    let s = shared();
+    let _w = s.wish.lock().unwrap();
+    *s.pair.lock().unwrap() = None;
+    s.pair_gone.store(true, Ordering::Relaxed);
+    s.ready.notify_one();
 }
 
 /// Thumbnail pictures waiting at most; more are drawn with points instead.
@@ -273,7 +309,11 @@ struct Device {
     max_binding: u64,
     lost: Arc<AtomicBool>,
     failed: Arc<Mutex<Option<String>>>,
+    /// Which device this is, so scenes loaded on an earlier one are loaded again.
+    generation: u64,
 }
+
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 fn open_device() -> Result<Device, String> {
     let inst = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
@@ -295,7 +335,7 @@ fn open_device() -> Result<Device, String> {
     let l = lost.clone();
     device.set_device_lost_callback(move |_, _| l.store(true, Ordering::Relaxed));
     let name = format!("{} ({:?})", info.name.trim(), info.backend);
-    Ok(Device { device, queue, name, max_binding: limits.max_storage_buffer_binding_size.min(limits.max_buffer_size), lost, failed })
+    Ok(Device { device, queue, name, max_binding: limits.max_storage_buffer_binding_size.min(limits.max_buffer_size), lost, failed, generation: GENERATION.fetch_add(1, Ordering::Relaxed) })
 }
 
 struct Current {
@@ -306,18 +346,30 @@ struct Current {
     degree: gs::core::GaussianShDegree,
     loaded: Loaded,
     drawn: usize,
+    /// The device it was loaded on.
+    generation: u64,
 }
 
 fn worker(s: Arc<Shared>) {
     let mut dev: Option<Device> = None;
     let mut cur: Option<Current> = None;
+    // The two scenes being compared, kept apart from the preview's.
+    let mut pair_cur: [Option<Current>; 2] = [None, None];
     loop {
         let mut answer = None;
+        let mut second = None;
         let wish = {
             let mut w = s.wish.lock().unwrap();
             loop {
+                if s.pair_gone.swap(false, Ordering::Relaxed) {
+                    pair_cur = [None, None];
+                }
                 if let Some(x) = w.take() {
                     break Some(x);
+                }
+                if let Some([a, b]) = s.pair.lock().unwrap().take() {
+                    second = Some(b);
+                    break Some(a);
                 }
                 if let Some((x, tx)) = s.side.lock().unwrap().pop_front() {
                     answer = Some(tx);
@@ -333,6 +385,7 @@ fn worker(s: Arc<Shared>) {
         let Some(wish) = wish else {
             // A minute idle: let the graphics memory go.
             cur = None;
+            pair_cur = [None, None];
             dev = None;
             continue;
         };
@@ -345,8 +398,19 @@ fn worker(s: Arc<Shared>) {
         // it is the preview's, as for a saved picture of the view).
         let mut aside = None;
         let same = cur.as_ref().is_some_and(|c| c.holds(&wish.scene, &wish.paint));
-        let slot = if answer.is_some() && !same { &mut aside } else { &mut cur };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| draw(&mut dev, slot, &wish)));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &second {
+            // A pair: each scene in its own slot, both drawn before either is shown.
+            Some(b) => {
+                let [pa, pb] = &mut pair_cur;
+                let first = draw(&mut dev, pa, &wish)?;
+                let other = draw(&mut dev, pb, b)?;
+                Ok((first, Some(other)))
+            }
+            None => {
+                let slot = if answer.is_some() && !same { &mut aside } else { &mut cur };
+                draw(&mut dev, slot, &wish).map(|p| (p, None))
+            }
+        }));
         drop(aside);
         *s.busy_since.lock().unwrap() = None;
         if matches!(*s.status.lock().unwrap(), Status::Unavailable(_)) {
@@ -358,19 +422,21 @@ fn worker(s: Arc<Shared>) {
             Err(_) => Err("The splat renderer stopped unexpectedly".to_string()),
         };
         match outcome {
-            Ok(pic) => {
+            Ok((pic, other)) => {
                 if let Some(d) = &dev {
                     *s.status.lock().unwrap() = Status::Ready(d.name.clone());
                 }
-                match answer {
-                    Some(tx) => {
+                match (answer, other) {
+                    (_, Some(b)) => *s.pair_done.lock().unwrap() = Some([pic, b]),
+                    (Some(tx), None) => {
                         let _ = tx.try_send(pic);
                     }
-                    None => *s.done.lock().unwrap() = Some(pic),
+                    (None, None) => *s.done.lock().unwrap() = Some(pic),
                 }
             }
             Err(e) => {
                 cur = None;
+                pair_cur = [None, None];
                 dev = None;
                 *s.status.lock().unwrap() = Status::Unavailable(e);
             }
@@ -393,7 +459,7 @@ fn draw(dev: &mut Option<Device>, cur: &mut Option<Current>, wish: &Wish) -> Res
     }
     let d = dev.as_ref().unwrap();
     let format = wgpu::TextureFormat::Rgba8Unorm;
-    if cur.as_ref().is_none_or(|c| !c.holds(&wish.scene, &wish.paint)) {
+    if cur.as_ref().is_none_or(|c| !c.holds(&wish.scene, &wish.paint) || c.generation != d.generation) {
         *cur = None; // free the old scene's buffers first
         stage("loading the scene");
         *cur = Some(load(d, &wish.scene, wish.paint.clone(), format)?);
@@ -519,5 +585,5 @@ fn load(d: &Device, scene: &Arc<Scene>, paint: Option<Paint>, format: wgpu::Text
     if let Some(e) = pollster::block_on(scope.pop()) {
         return Err(format!("The graphics driver refused the scene ({e})"));
     }
-    Ok(Current { scene: scene.clone(), paint, display: 0, degree, loaded, drawn })
+    Ok(Current { scene: scene.clone(), paint, display: 0, degree, loaded, drawn, generation: d.generation })
 }
