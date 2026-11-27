@@ -17,6 +17,7 @@ mod aepfile;
 mod asking;
 mod actions;
 mod app;
+mod apps;
 mod archtree;
 mod cadview;
 mod camera;

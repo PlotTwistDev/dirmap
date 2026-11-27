@@ -253,6 +253,15 @@ pub(super) fn storage_state(n: &Node) -> Option<String> {
     Some(s)
 }
 
+/// What the Kind column says for an item of a folder listing: an application or other bundle
+/// by what it is, anything else by its name.
+pub(super) fn entry_kind(e: &crate::fsys::listing::Entry) -> String {
+    match crate::apps::of(e.bundle) {
+        Some(b) => b.kind().into(),
+        None => kind_for(&e.name, e.is_dir),
+    }
+}
+
 pub(super) fn kind_for(name: &str, is_dir: bool) -> String {
     if is_dir {
         return crate::packages::kind(name).unwrap_or("Folder").into();

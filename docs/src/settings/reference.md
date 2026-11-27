@@ -1,7 +1,7 @@
 # Settings reference
 
 Open **⚙ Settings** at the right of the toolbar. The window has a sidebar of pages (**General**,
-**Filtering**, **Folder list**, **Treemap**, **Advanced** and **Licensing**) and opens on the page
+**Files**, **Filtering**, **Folder list**, **Treemap**, **Advanced** and **Licensing**) and opens on the page
 you used last. Each page groups its settings into sections, with a line under every setting
 saying what it does. You can resize the window; long pages scroll.
 
@@ -50,6 +50,18 @@ whether you're up to date. **Check now** asks straight away (even with automatic
 when a newer version is out it says whether your licence covers it, with **Download**. **What's
 new in this version** opens [What's new](../about/whats-new.md); with a newer version found,
 **What's new online** opens its release notes.
+
+## Files
+
+How the Files workspace shows and opens applications. See [Applications](../views/file-manager.md#applications).
+
+| Setting | Default | Effect |
+|---|---|---|
+| **Recognise application bundles** <!-- setting:app_recognise --> | On | Shows applications (`Safari.app` and the like) as applications rather than folders, and names frameworks, plug-ins and other bundles in the Kind column. Off shows them all as plain folders and greys out the settings below. |
+| **Show application icons** <!-- setting:app_icons --> | On | Draws applications with their own icons, as Finder does. Off draws a plain application icon. |
+| **Hide .app extensions** <!-- setting:app_hide_ext --> | On | Shows "Safari" rather than "Safari.app". Renaming still shows the whole name. |
+| **Double-click to launch applications** <!-- setting:app_double_click --> | On | Double-click or **Enter** launches an application. Off, they show its contents instead; **Open Application** on the right-click menu still launches it. Greyed out while the next setting is on. |
+| **Treat application bundles as folders** <!-- setting:app_as_folders --> | Off | For developers and administrators: double-click and **Enter** go inside applications like any folder, and the right-click menu has the folder commands too. Applications keep their icons and names. |
 
 ## Filtering
 

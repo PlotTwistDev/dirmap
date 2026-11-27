@@ -1037,7 +1037,7 @@ pub(super) fn order_entries(
         })
         .collect();
     let size_of = |e: &Entry| if e.is_dir { sizes.and_then(|s| s.get(&e.name)).map(|s| s.0).unwrap_or(0) } else { e.shown_size() };
-    let kinds: Vec<String> = if key == FSort::Type { entries.iter().map(|e| browser::kind_for(&e.name, e.is_dir)).collect() } else { Vec::new() };
+    let kinds: Vec<String> = if key == FSort::Type { entries.iter().map(browser::entry_kind).collect() } else { Vec::new() };
     o.sort_by(|&x, &y| {
         let (a, b) = (&entries[x as usize], &entries[y as usize]);
         let mut ord = match key {
@@ -1143,6 +1143,9 @@ pub(super) enum FAction {
     AskAi,
     /// Two splat scenes, in Compare Scenes.
     CompareScenes,
+    /// Applications: launch them, or go inside (Show Package Contents).
+    LaunchApp,
+    ShowContents,
 }
 
 impl App {
@@ -2634,7 +2637,7 @@ impl App {
                             Some(FSort::Name) => {
                                 let icon = Rect::from_min_size(pos2(cell.left() + 10.0, cy - 8.0), vec2(16.0, 16.0));
                                 let tint = if faint { Color32::from_gray(120) } else { color_for(e.ext()) };
-                                self.icons.paint(ui, icon, e.is_dir, e.ext(), tint);
+                                self.icons.paint_entry(ui, icon, dir, e, tint, false);
                                 let mark = if self.files.marks.is_empty() {
                                     None
                                 } else {
@@ -2651,7 +2654,7 @@ impl App {
                                 if e.is_link {
                                     p.text(icon.left_bottom() + vec2(-3.0, 2.0), Align2::LEFT_BOTTOM, "↪", FontId::proportional(10.0), vis.strong_text_color());
                                 }
-                                let mut end = if chevrons && e.is_dir {
+                                let mut end = if chevrons && e.is_dir && !crate::apps::is_app(e.bundle) {
                                     views::chevron(&p, pos2(cell.right() - 11.0, cy), if selected { sel_fg } else { pal.weak });
                                     cell.right() - 18.0
                                 } else {
@@ -2672,7 +2675,7 @@ impl App {
                                     end -= 20.0;
                                 }
                                 let clip = Rect::from_min_max(pos2(cell.left() + 33.0, rect.top()), pos2(end, rect.bottom()));
-                                let name = seq.map_or(&*e.name, |s| s.label.as_str());
+                                let name = seq.map_or(crate::apps::shown_name(&e.name, e.bundle), |s| s.label.as_str());
                                 let g = p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, name, font.clone(), tc);
                                 let mut after = g.right();
                                 if let Some(s) = seq {
@@ -2713,7 +2716,7 @@ impl App {
                                 }
                             }
                             Some(FSort::Type) => {
-                                let kind = if e.is_link { format!("Link to {}", browser::kind_for(&e.name, e.is_dir).to_lowercase()) } else { browser::kind_for(&e.name, e.is_dir) };
+                                let kind = if e.is_link { format!("Link to {}", browser::entry_kind(e).to_lowercase()) } else { browser::entry_kind(e) };
                                 p.with_clip_rect(cell.shrink2(vec2(6.0, 0.0)).intersect(p.clip_rect())).text(pos2(cell.left() + 8.0, cy), Align2::LEFT_CENTER, kind, font.clone(), weak);
                             }
                             Some(FSort::Modified) if e.modified > 0 => {
@@ -2803,7 +2806,7 @@ impl App {
             if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
                 picks.menu = Some((FAction::CopyPath, vec![here.clone()]));
             }
-            if let Some(a) = folder_menu(ui, pinned) {
+            if let Some(a) = folder_menu(ui, pinned, false) {
                 picks.menu = Some((a, vec![here.clone()]));
             }
         });
@@ -2911,7 +2914,7 @@ impl App {
                     } else {
                         let faint = e.hidden;
                         let tint = if faint { Color32::from_gray(120) } else { color_for(e.ext()) };
-                        icons.paint_big(ui, Rect::from_center_size(pic.center(), vec2(size * 0.8, size * 0.8)), e.is_dir, e.ext(), tint);
+                        icons.paint_entry(ui, Rect::from_center_size(pic.center(), vec2(size * 0.8, size * 0.8)), dir, e, tint, true);
                     }
                     if e.is_link {
                         p.text(pic.left_bottom() + vec2(size * 0.1, -2.0), Align2::LEFT_BOTTOM, "↪", FontId::proportional(14.0), pal.strong);
@@ -2935,7 +2938,7 @@ impl App {
                     }
                     // The name: up to two lines, centred, shortened with … when longer.
                     let tc = if selected { sel_fg } else if e.hidden { pal.weak } else { pal.text };
-                    let shown = t.seqs.get(&i).map_or_else(|| e.name.to_string(), |s| format!("{}\n{} frames", s.label, group(s.seq.frames)));
+                    let shown = t.seqs.get(&i).map_or_else(|| crate::apps::shown_name(&e.name, e.bundle).to_string(), |s| format!("{}\n{} frames", s.label, group(s.seq.frames)));
                     let mut job = egui::text::LayoutJob::simple(shown, FontId::proportional(12.5), tc, cell.width() - 10.0);
                     job.wrap.max_rows = 2;
                     job.wrap.break_anywhere = true;
@@ -3462,7 +3465,9 @@ impl App {
                 self.play_sequences(vec![c]);
             } else if let (Some(e), Some(dir)) = (t.entry(i), t.here().dir()) {
                 let path = dir.join(&*e.name);
-                if e.is_dir || (archive::is_archive(&e.name) && !archive::inside(&path)) {
+                if crate::apps::launches(e.bundle) && !archive::inside(&path) && !remote::is_remote(&path) {
+                    self.launch_apps(vec![path]);
+                } else if e.is_dir || (archive::is_archive(&e.name) && !archive::inside(&path)) {
                     // Archives open like folders (with a licence).
                     if e.is_dir || self.premium(crate::licence::Feature::Archives) {
                         self.files.go(Location::Dir(path));
@@ -3512,7 +3517,7 @@ impl App {
         let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
         let colour = self.files.marks.get(disk).and_then(|m| m.colour);
         let caps = crate::fsys::remote::is_remote(disk).then(|| crate::fsys::remote::caps(disk));
-        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some(), splats: false };
+        let m = RowMenu { is_dir, app: false, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some(), splats: false };
         let ext = disk
             .file_name()
             .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
@@ -3528,6 +3533,20 @@ impl App {
             a => self.files_action(a, vec![disk.to_path_buf()]),
         }
         ui.close();
+    }
+
+    /// Is this path an application that opening launches, as far as the list on screen knows?
+    fn listed_app(&self, p: &Path) -> bool {
+        let t = self.files.cur();
+        t.here().dir() == p.parent() && p.file_name().and_then(|n| t.entry_named(&n.to_string_lossy())).is_some_and(|e| crate::apps::launches(e.bundle))
+    }
+
+    /// Launch applications through the system, each on its own thread (the system can take a
+    /// moment to answer); a failure shows as a notice saying why.
+    pub(super) fn launch_apps(&mut self, apps: Vec<PathBuf>) {
+        for p in apps {
+            self.files.spawn(move || crate::apps::launch(&p));
+        }
     }
 
     /// Is this path a folder, as far as the list on screen knows?
@@ -3645,7 +3664,9 @@ impl App {
                 // Folders open here (the first one); files open in their apps.
                 let mut went = false;
                 for p in paths {
-                    if self.listed_dir(&p) {
+                    if self.listed_app(&p) {
+                        self.launch_apps(vec![p]);
+                    } else if self.listed_dir(&p) {
                         if !went {
                             self.files.go(Location::Dir(p));
                             went = true;
@@ -3653,6 +3674,12 @@ impl App {
                     } else {
                         self.open_file(p);
                     }
+                }
+            }
+            FAction::LaunchApp => self.launch_apps(paths),
+            FAction::ShowContents => {
+                if let Some(p) = paths.into_iter().next() {
+                    self.files.go(Location::Dir(p));
                 }
             }
             FAction::OpenInNewTab => {
@@ -3807,6 +3834,8 @@ impl App {
 /// What the item menu needs to know.
 pub(super) struct RowMenu {
     pub is_dir: bool,
+    /// The item is an application (Open Application, Show Package Contents).
+    pub app: bool,
     pub count: usize,
     /// The row is an image sequence.
     pub seq: bool,
@@ -3898,7 +3927,7 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     let colour = c.marks.get(&path).and_then(|m| m.colour);
     let caps = crate::fsys::remote::is_remote(dir).then(|| crate::fsys::remote::caps(dir));
     let server = caps.is_some();
-    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some(), splats: false };
+    let ctx_menu = RowMenu { is_dir, app: !server && !read_only && crate::apps::is_app(e.bundle), count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some(), splats: false };
     let ctx_menu = RowMenu {
         cloud: !server && !read_only && crate::cloudops::supported() && (e.flags & scan::store::ON_DEMAND != 0 || (e.is_dir && super::cloud::on_demand_dir(&path))),
         // By name only here (it's worked out every frame); Compare Scenes looks inside.
@@ -3931,12 +3960,20 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     };
     let many = m.count > 1;
     let open = if many { format!("Open {} Items", m.count) } else { "Open".to_string() };
+    // An application: launch it, or look inside. Enter does whichever opening does.
+    let as_app = m.app && !many;
+    let launches = as_app && crate::apps::launches(crate::apps::Bundle::App.code());
     if m.seq {
         item(ui, true, if m.count == 2 { "Play and Compare (A/B)" } else { "Play" }, k(M::NONE, Key::Enter), FAction::Play);
+    } else if as_app {
+        let (run_key, inside_key) = if launches { (k(M::NONE, Key::Enter), String::new()) } else { (String::new(), k(M::NONE, Key::Enter)) };
+        let label = if crate::apps::CAN_LAUNCH { "Open Application" } else { "Open Application (on a Mac)" };
+        item(ui, crate::apps::CAN_LAUNCH, label, run_key, FAction::LaunchApp);
+        item(ui, true, "Show Package Contents", inside_key, FAction::ShowContents);
     } else {
         item(ui, true, &open, k(M::NONE, Key::Enter), FAction::Open);
     }
-    if m.is_dir {
+    if m.is_dir && (!as_app || crate::apps::prefs().as_folders) {
         item(ui, true, if many { "Open in New Tabs" } else { "Open in New Tab" }, String::new(), FAction::OpenInNewTab);
         if !many {
             item(ui, true, "Open in Other Pane", String::new(), FAction::OpenInOtherPane);
@@ -4038,7 +4075,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     }
     if m.is_dir && !many {
         ui.separator();
-        if let Some(a) = folder_menu(ui, m.pinned) {
+        if let Some(a) = folder_menu(ui, m.pinned, m.app) {
             out = Some(a);
         }
     }
@@ -4046,7 +4083,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
 }
 
 /// Add to Favourites (or remove) and Analyse, for a folder.
-fn folder_menu(ui: &mut egui::Ui, pinned: bool) -> Option<FAction> {
+fn folder_menu(ui: &mut egui::Ui, pinned: bool, app: bool) -> Option<FAction> {
     let mut out = None;
     if pinned {
         if ui.add(egui::Button::new(style::mi("Remove from Favourites"))).clicked() {
@@ -4055,7 +4092,12 @@ fn folder_menu(ui: &mut egui::Ui, pinned: bool) -> Option<FAction> {
     } else if ui.add(egui::Button::new(style::mi("Add to Favourites"))).on_hover_text("A bookmark in the sidebar. You can also drag the folder there.").clicked() {
         out = Some(FAction::Pin);
     }
-    if ui.add(egui::Button::new(style::mi("Analyse This Folder"))).on_hover_text("Scan it and show its treemap in the analysis dock, while you keep browsing").clicked() {
+    let (label, tip) = if app {
+        ("Analyse Application Storage", "Scan the application and show what takes its space in the analysis dock, while you keep browsing")
+    } else {
+        ("Analyse This Folder", "Scan it and show its treemap in the analysis dock, while you keep browsing")
+    };
+    if ui.add(egui::Button::new(style::mi(label))).on_hover_text(tip).clicked() {
         out = Some(FAction::Analyse);
     }
     out
@@ -4228,7 +4270,7 @@ mod tests {
     use super::*;
 
     fn e(name: &str, is_dir: bool, size: u64, modified: i64, hidden: bool) -> Entry {
-        Entry { name: name.into(), is_dir, is_link: false, hidden, size, alloc: size, flags: 0, modified }
+        Entry { name: name.into(), is_dir, is_link: false, hidden, size, alloc: size, flags: 0, modified, bundle: 0 }
     }
 
     fn names(es: &[Entry], o: &[u32]) -> Vec<String> {
