@@ -39,7 +39,7 @@ click it for details.
 |---|---|
 | **Quick access** | Home, Desktop, Documents, Downloads, Pictures, Music and Videos (and Applications on a Mac). These are your real folders, including ones that have been moved, such as Documents on OneDrive. |
 | **Favourites** | Folders you've bookmarked, in as many groups as you like. See [Favourites](#favourites). |
-| **Drives** | **This PC** (Windows) or **Computer** (Linux and macOS), then each local drive or mounted volume. Each has a bar showing how full it is, red when over 90%. Hover for the free space. |
+| **Drives** | **This PC** (Windows) or **Computer** (Linux and macOS), then each local drive or mounted volume, and any phone or camera plugged in. Each drive has a bar showing how full it is, red when over 90%. Hover for its details. See [Drive details](#drive-details). |
 | **Linux** | Windows only, when WSL is installed: each Linux distribution, as in Explorer (`\\wsl.localhost\Ubuntu`). Opening one starts it if it isn't running. |
 | **Network & Remote** | Network drives and shares, saved servers, and **Connect to Server…**. See [Network & Remote](#network--remote). |
 | **Saved searches** | Searches you've kept with **☆**. Click one to run it again. See [Searching subfolders](#searching-subfolders). |
@@ -307,6 +307,7 @@ read shows its type's icon instead.
 | Command | What it does |
 |---|---|
 | **Open** / **Open in New Tab** / **Open in Other Pane** | Opens folders here, in a new tab or in the other pane, and files in their apps. |
+| **Open Application** / **Show Package Contents** | On an [application](#applications): launches it, or goes inside it. |
 | **Open With** | Opens the item in one of [your apps](#open-with), or lets you choose one. |
 | **Quick Look** (**Space**) | A [large preview](#quick-look-and-the-preview-pane) of the file. |
 | **Copy** / **Cut** / **Paste** (**Ctrl+C**, **Ctrl+X**, **Ctrl+V**) | See [Copying, moving and deleting](#copying-moving-and-deleting). |
@@ -319,7 +320,7 @@ read shows its type's icon instead.
 | **Show in Explorer** (Finder, or the system file manager) | Opens the system's file manager with the item selected. |
 | **Open in Terminal…** (Command Prompt or PowerShell on Windows) | Opens a terminal in the folder. |
 | **Properties** (**Alt+Enter**) | Size, number of files and dates. |
-| **Analyse This Folder** | Scans the folder and shows it in the [analysis dock](#the-analysis-dock). You stay in Files. |
+| **Analyse This Folder** (**Analyse Application Storage** on an app) | Scans the folder and shows it in the [analysis dock](#the-analysis-dock). You stay in Files. |
 | **Show More Options** (**Shift+F10**; Windows) | Opens Windows' own menu for the items, the one Explorer shows: everything other apps add to it (7-Zip, Notepad++, PowerToys, your antivirus…), **Send to**, **Give access to** and the rest. **Rename** there renames in Filescape's list. |
 
 On Windows, **Shift+right-click** an item to go straight to Windows' menu, with the extra commands
@@ -475,7 +476,7 @@ the next. The selection stays as it is.
 | Videos | A frame from the video, made by the system (see below), with a play button: it plays right there, with a bar to jump about; click the picture to pause. **Open** plays it in Quick Look on macOS or your usual player elsewhere. It stops when you move to another file. Under it, a filmstrip of frames from across the video: click one to play from there (where videos can play here). When a video's first frame is dull (black, or a fade or title card), the picture shown for it, in the pane and in Icons view, is the most interesting of a few frames from across it instead. |
 | Spreadsheets | Excel (.xlsx, .xlsm, .xlsb, .xls) and OpenDocument (.ods) workbooks: the cells of each sheet, with a switch between sheets, the first 500 rows and 40 columns. The values are those the file was last saved with: formulas aren't worked out and macros never run. |
 | CSV and TSV | The same table view: the first 500 rows and 40 columns, with the first row as column names when it looks like them. Commas, semicolons, tabs and bars are told apart by themselves. |
-| SQLite databases | .sqlite, .sqlite3, .db and similar: a tab for each table with its column names and first 500 rows, and in the details how many tables, views and indexes it has. The database is only read: it's opened so that nothing in it can change and no lock is taken, and anything that takes longer than a few seconds is stopped. If the database uses a write-ahead log, the latest changes may still be in the -wal file beside it and aren't shown. |
+| SQLite databases | .sqlite, .sqlite3, .db and similar: a tab for each table with its column names and first 500 rows, and in the details how many tables, views and indexes it has. Each tab shows how much of the file that table takes (its rows and its indexes together), the tabs run largest first, and the preview opens on the largest, so a big database whose first table happens to be empty doesn't look empty. A full-text search index's own tables (messages_fts_data and the like) are counted with the index rather than shown on their own. The details list the three largest tables and any unused space inside the file that a VACUUM would give back. Row counts that take more than a second are shown as "500+". The database is only read: it's opened so that nothing in it can change and no lock is taken, and anything that takes longer than a few seconds is stopped. If the database uses a write-ahead log, the latest changes may still be in the -wal file beside it and aren't shown. |
 | Word, PowerPoint and OpenDocument | Word (.docx) and OpenDocument (.odt) documents formatted: headings, bold and italic, lists and tables. PowerPoint (.pptx) and OpenDocument (.odp) presentations as each slide's title and points. Pictures and layout aren't shown, and macros never run. In Icons view, the picture of the first page or slide that Office or LibreOffice saved with the file, when there is one. Older .doc and .ppt files aren't read. |
 | EPUB books | The chapters in reading order, formatted, with the title, author and language in the details. In Icons view, the book's cover. Pictures inside the book aren't shown, and nothing in it is run. |
 | PDFs | Every page, to scroll through, with the title, author, page count and paper size in the details. Pages are drawn by Filescape as they come into view. A PDF it can't draw (password-protected or damaged) shows the system's picture of its first page instead, where there is one. |
@@ -704,6 +705,40 @@ right-click menu of empty space in the list has **Undo**.
 **Ctrl+Y** or **Ctrl+Shift+Z** (**⇧⌘Z** on a Mac) redoes what you just undid, and the right-click
 menu of empty space has **Redo** too. Making another change clears what can be redone.
 
+## Applications
+
+On a Mac an application such as `Safari.app` is really a folder of programs, libraries and
+pictures. Filescape shows it the way Finder does: with its own icon, its name without `.app`, and
+**Application** in the Kind column. It's recognised by what's inside (an `Info.plist` or a
+program folder), so an ordinary folder that happens to be called `Notes.app` stays a folder. Apps
+in /Applications, ~/Applications, on other drives or anywhere else are all recognised.
+
+- **Double-click** an application, or select it and press **Enter**, to launch it. macOS opens it
+  exactly as Finder would, so Gatekeeper and your security settings still apply: an app
+  downloaded from the internet asks first, and one macOS blocks stays blocked. Selecting an app,
+  previewing it or analysing it never launches it.
+- If an app can't open, Filescape says why: it's damaged or incomplete (its program is missing),
+  it needs a newer version of macOS, you don't have permission, and so on.
+- **Show Package Contents** on the right-click menu goes inside the application, to look at its
+  resources, programs, libraries and settings files. Everything works there as in any folder.
+- **Analyse Application Storage** shows what takes up the app's space in the
+  [analysis dock](#the-analysis-dock).
+
+Other kinds of bundle are named in the Kind column but open like folders: frameworks, plug-ins
+(`.plugin`, Audio Units, VST and VST3), app extensions, System Settings panes, kernel extensions,
+screen savers, Quick Look plug-ins and Spotlight importers.
+
+Icons are read from the system (or from the app's icon file) in the background and kept while
+Filescape is open, so a folder of hundreds of apps opens as fast as any other. Nothing inside an
+app is ever run to find its icon or name, and apps in cloud folders keep a plain icon so nothing
+is downloaded. Applications on a server or inside an archive can't be launched.
+
+On Windows and Linux, a Mac app (on an external drive, say) shows as an application too, but
+double-click goes inside, since it can't run there.
+
+How applications behave can be changed under **Settings › Files**: see
+[Applications & Executables](../settings/reference.md#files).
+
 ## Archives
 
 Filescape opens zip, 7z, tar, tar.gz (`.tgz`), tar.xz and tar.bz2 archives like folders. Double-click
@@ -776,6 +811,37 @@ The player reads every image type Filescape previews: OpenEXR, PNG, JPEG, TIFF, 
 rest. It also reads **DPX** at 8, 10, 12 and 16 bits, in either byte order, packed or filled. A
 sequence on a server plays too, as each frame is downloaded. Frames are shown without their alpha
 channel.
+
+## Drive details
+
+Hover a drive in the sidebar, or a card in **Computer**, to see what it is:
+
+| Detail | What it tells you |
+|---|---|
+| **Type** | Internal, external, removable media, network share, disk image, virtual (a RAM disk or FUSE), system volume, optical disc, or phone. The icon shows it too: ⏏ for drives you can eject, 💿 for disk images, 🖧 for network shares, 📱 for phones. |
+| **Filesystem** | APFS, NTFS, exFAT, ext4 and so on. |
+| **Capacity, Used, Free** | Free is what you can still write. |
+| **Connection, Model** | USB, Thunderbolt, SATA, NVMe; the make and model where the system says. |
+| **Device or Server** | The disk behind the volume (`/dev/disk5s1`), or the server and share of a network drive. |
+| **Shares space** | Other APFS volumes in the same container, which share its free space. |
+| **Access** | Read-only or writable, encrypted or not, and hidden in Finder (macOS). |
+
+### Disk images
+
+A disk image (a macOS `.dmg` or `.sparsebundle`, a Windows `.vhdx`, a Linux loop device) is a
+file on another drive that the system opens as if it were a disk. Filescape shows it nested
+under the drive its file is on, and its details name that file.
+
+A sparse image grows as you fill it, but only while its host drive has room. When the host is
+nearly full, the image can't use all of its stated size: its bar shows its files in blue and
+the part it can't use in faint red, and **Held back** says how much that is.
+
+### Phones and cameras
+
+Phones don't mount as drives on macOS or Windows, so they can't be browsed like a folder there.
+Filescape still lists one that's plugged in, with how it connects (Apple, MTP or PTP). Click it
+to open **Image Capture** on a Mac, or **This PC** in File Explorer on Windows. On Linux, phones
+the desktop has mounted (GVFS) open in Filescape like any folder.
 
 ## Slow and unreachable drives
 

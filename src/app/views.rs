@@ -64,7 +64,9 @@ fn group_of(e: &Entry, g: FGroup, today: chrono::NaiveDate) -> (i64, String) {
     match g {
         FGroup::None => (0, String::new()),
         FGroup::Type => {
-            if e.is_dir {
+            if crate::apps::is_app(e.bundle) {
+                (0, "Applications".into())
+            } else if e.is_dir {
                 (0, "Folders".into())
             } else {
                 (1, browser::kind_for(&e.name, false))
@@ -449,18 +451,21 @@ impl App {
                 }
                 let cy = row.center().y;
                 let icon = Rect::from_min_size(pos2(row.left() + 10.0, cy - 8.0), vec2(16.0, 16.0));
-                icons.paint(ui, icon, e.is_dir, e.ext(), if e.hidden { Color32::from_gray(120) } else { color_for(e.ext()) });
-                let right = if e.is_dir { row.right() - 18.0 } else { row.right() - 6.0 };
+                icons.paint_entry(ui, icon, dir, e, if e.hidden { Color32::from_gray(120) } else { color_for(e.ext()) }, false);
+                let app = crate::apps::is_app(e.bundle);
+                let right = if e.is_dir && !app { row.right() - 18.0 } else { row.right() - 6.0 };
                 let clip = Rect::from_min_max(pos2(row.left() + 32.0, row.top()), pos2(right, row.bottom()));
                 let tc = if marked { pal.strong } else if e.hidden { pal.weak } else { pal.text };
                 let p = ui.painter();
-                p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &*e.name, font.clone(), tc);
-                if e.is_dir {
+                p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, crate::apps::shown_name(&e.name, e.bundle), font.clone(), tc);
+                if e.is_dir && !app {
                     chevron(p, pos2(row.right() - 11.0, cy), if marked { pal.strong } else { pal.weak });
                 }
                 let path = dir.join(&*e.name);
                 if resp.double_clicked() {
-                    if e.is_dir || (crate::fsys::archive::is_archive(&e.name) && !crate::fsys::archive::inside(&path)) {
+                    if crate::apps::launches(e.bundle) {
+                        picks.menu = Some((FAction::LaunchApp, vec![path.clone()]));
+                    } else if e.is_dir || (crate::fsys::archive::is_archive(&e.name) && !crate::fsys::archive::inside(&path)) {
                         picks.go = Some(Location::Dir(path.clone()));
                     } else {
                         picks.menu = Some((FAction::Open, vec![path.clone()]));
@@ -554,10 +559,10 @@ impl App {
                     p.image(id, r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 } else {
                     let tint = if e.hidden { Color32::from_gray(120) } else { color_for(e.ext()) };
-                    icons.paint_big(ui, Rect::from_center_size(pic.center(), vec2(size * 0.8, size * 0.8)), e.is_dir, e.ext(), tint);
+                    icons.paint_entry(ui, Rect::from_center_size(pic.center(), vec2(size * 0.8, size * 0.8)), dir, e, tint, true);
                 }
                 let tc = if selected { sel_fg } else if e.hidden { pal.weak } else { pal.text };
-                let shown = t.seqs.get(&i).map_or_else(|| e.name.to_string(), |s| s.label.clone());
+                let shown = t.seqs.get(&i).map_or_else(|| crate::apps::shown_name(&e.name, e.bundle).to_string(), |s| s.label.clone());
                 let mut job = egui::text::LayoutJob::simple(shown, FontId::proportional(11.5), tc, cell.width() - 8.0);
                 job.wrap.max_rows = 1;
                 job.wrap.break_anywhere = true;
@@ -604,7 +609,7 @@ mod tests {
     use super::*;
 
     fn entry(name: &str, is_dir: bool, size: u64, modified: i64) -> Entry {
-        Entry { name: name.into(), is_dir, is_link: false, hidden: false, size, alloc: size, flags: 0, modified }
+        Entry { name: name.into(), is_dir, is_link: false, hidden: false, size, alloc: size, flags: 0, modified, bundle: 0 }
     }
 
     #[test]

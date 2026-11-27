@@ -25,6 +25,8 @@ pub struct Sheet {
     pub heads: Vec<String>,
     /// Whether `size` counts every row (a huge CSV is only read as far as shown).
     pub rows_known: bool,
+    /// The space it takes in the file, where that's known (a database's tables).
+    pub bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +79,7 @@ pub fn read(path: &Path, rows: usize, cols: usize) -> Result<Book, String> {
         let Ok(range) = wb.worksheet_range(name) else { continue };
         let (h, w) = range.get_size();
         let rows: Vec<Vec<String>> = range.rows().take(rows).map(|r| r.iter().take(cols).map(text).collect()).collect();
-        sheets.push(Sheet { name: name.clone(), rows, size: (h, w), heads: Vec::new(), rows_known: true });
+        sheets.push(Sheet { name: name.clone(), rows, size: (h, w), heads: Vec::new(), rows_known: true, bytes: None });
     }
     if sheets.is_empty() {
         return Err("This workbook has no sheets Filescape can read.".into());

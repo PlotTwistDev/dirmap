@@ -246,7 +246,14 @@ fn trash_inner(path: &Path) -> Result<Option<PathBuf>, String> {
             let at = String::from_utf8_lossy(&out.stdout).trim().trim_end_matches('/').to_string();
             Ok((!at.is_empty()).then(|| PathBuf::from(at)))
         } else {
-            Err(format!("Finder couldn't move it to the Trash: {}", String::from_utf8_lossy(&out.stderr).trim()))
+            let err = String::from_utf8_lossy(&out.stderr);
+            // -128: the user cancelled Finder's password prompt (an app in /Applications that
+            // belongs to the system or another user needs an administrator to remove it).
+            if err.contains("(-128)") {
+                Err("Moving to the Trash was cancelled.".into())
+            } else {
+                Err(format!("Finder couldn't move it to the Trash: {}", err.trim()))
+            }
         }
     }
     #[cfg(not(any(windows, target_os = "macos")))]

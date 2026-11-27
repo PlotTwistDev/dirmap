@@ -961,7 +961,7 @@ fn list_with(path: &Path, how: fn(&Site, &str) -> io::Result<Vec<(String, Meta)>
     let items = how(&site, &p).map_err(|e| describe(&e))?;
     Ok(items
         .into_iter()
-        .map(|(name, m)| Entry { hidden: name.starts_with('.'), name: name.into(), is_dir: m.is_dir, is_link: m.is_link, size: if m.is_dir { 0 } else { m.len }, alloc: if m.is_dir { 0 } else { m.len }, flags: crate::scan::store::NO_ALLOC, modified: m.modified })
+        .map(|(name, m)| Entry { hidden: name.starts_with('.'), name: name.into(), is_dir: m.is_dir, is_link: m.is_link, size: if m.is_dir { 0 } else { m.len }, alloc: if m.is_dir { 0 } else { m.len }, flags: crate::scan::store::NO_ALLOC, modified: m.modified, bundle: 0 })
         .collect())
 }
 

@@ -1037,7 +1037,7 @@ pub(super) fn order_entries(
         })
         .collect();
     let size_of = |e: &Entry| if e.is_dir { sizes.and_then(|s| s.get(&e.name)).map(|s| s.0).unwrap_or(0) } else { e.shown_size() };
-    let kinds: Vec<String> = if key == FSort::Type { entries.iter().map(|e| browser::kind_for(&e.name, e.is_dir)).collect() } else { Vec::new() };
+    let kinds: Vec<String> = if key == FSort::Type { entries.iter().map(browser::entry_kind).collect() } else { Vec::new() };
     o.sort_by(|&x, &y| {
         let (a, b) = (&entries[x as usize], &entries[y as usize]);
         let mut ord = match key {
@@ -1143,6 +1143,9 @@ pub(super) enum FAction {
     AskAi,
     /// Two splat scenes, in Compare Scenes.
     CompareScenes,
+    /// Applications: launch them, or go inside (Show Package Contents).
+    LaunchApp,
+    ShowContents,
 }
 
 impl App {
@@ -1955,15 +1958,40 @@ impl App {
             if self.drives.is_empty() && self.drives_rx.is_some() {
                 ui.weak("Looking for drives…");
             }
-            let drives: Vec<(PathBuf, String, u64, u64, bool)> = self.drives.iter().filter(|d| !d.network).map(|d| (d.root.clone(), d.label.clone(), d.total, d.free, d.network)).collect();
-            for (root, label, total, free, _) in drives {
-                let name = drive_label(&root, &label);
-                let used = total.saturating_sub(free);
-                let tip = format!("{}\n{} free of {}", root.display(), scan::human(free), scan::human(total));
-                let frac = (total > 0).then(|| used as f32 / total as f32);
-                let resp = side_row(ui, "🖴", &name, here == Location::Dir(root.clone()), 30.0).on_hover_text(tip);
-                capacity_bar(ui, resp.rect, frac);
+            let all = self.drives.clone();
+            for (d, nested) in drive_order(&all) {
+                let name = drive_label(&d.root, &d.label);
+                let root = d.root.clone();
+                let indent = if nested { 16.0 } else { 0.0 };
+                let resp = ui
+                    .horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.add_space(indent);
+                        side_row(ui, d.info.kind.icon(), &name, here == Location::Dir(root.clone()), 30.0)
+                    })
+                    .inner;
+                if nested {
+                    // A short elbow from the host drive down to its image.
+                    let x = resp.rect.left() - 4.0;
+                    let stroke = Stroke::new(1.0, style::pal(ui).hairline);
+                    ui.painter().vline(x, (resp.rect.top() - 6.0)..=resp.rect.center().y - 4.0, stroke);
+                    ui.painter().hline(x..=resp.rect.left() + 2.0, resp.rect.center().y - 4.0, stroke);
+                }
+                let resp = resp.on_hover_ui(|ui| drive_tip(ui, d, &all));
+                capacity_bar_held(ui, resp.rect, d);
                 self.place_row(ui, &resp, &root, &mut picks);
+            }
+            for ph in self.phones.clone() {
+                let resp = side_row(ui, drives::Kind::Phone.icon(), &ph.name, ph.path.as_ref().is_some_and(|p| here == Location::Dir(p.clone())), ROW_F)
+                    .on_hover_ui(|ui| phone_tip(ui, &ph));
+                match &ph.path {
+                    Some(p) => self.place_row(ui, &resp, p, &mut picks),
+                    None => {
+                        if resp.clicked() {
+                            drives::open_phone(&ph);
+                        }
+                    }
+                }
             }
             ui.add_space(2.0);
             if ui.add(egui::Button::new(egui::RichText::new("⟳ Refresh drives").small().color(style::pal(ui).weak)).frame_when_inactive(false)).clicked() {
@@ -2358,33 +2386,33 @@ impl App {
             ui.weak(if self.drives_rx.is_some() { "Looking for drives…" } else { "No drives found." });
             return;
         }
-        let drives: Vec<(PathBuf, String, u64, u64, bool)> = self.drives.iter().map(|d| (d.root.clone(), d.label.clone(), d.total, d.free, d.network)).collect();
+        let all = self.drives.clone();
+        // Network shares after the local drives, as in the sidebar; images after their host.
+        let mut order: Vec<(&drives::Drive, bool)> = drive_order(&all);
+        order.extend(all.iter().filter(|d| d.network).map(|d| (d, false)));
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
-                for (root, label, total, free, network) in drives {
-                    let (r, resp) = ui.allocate_exact_size(vec2(250.0, 58.0), Sense::click());
+                for (d, _) in order {
+                    let (root, label, total, free) = (d.root.clone(), d.label.clone(), d.total, d.free);
+                    let (r, resp) = ui.allocate_exact_size(vec2(270.0, 72.0), Sense::click());
                     let vis = ui.visuals();
                     let bg = if resp.hovered() { vis.widgets.hovered.weak_bg_fill } else { vis.faint_bg_color };
                     let p = ui.painter();
                     p.rect_filled(r, 6.0, bg);
-                    p.text(pos2(r.left() + 12.0, r.top() + 18.0), Align2::LEFT_CENTER, if network { "🖧" } else { "🖴" }, FontId::proportional(22.0), vis.text_color());
+                    p.text(pos2(r.left() + 12.0, r.top() + 20.0), Align2::LEFT_CENTER, d.info.kind.icon(), FontId::proportional(22.0), vis.text_color());
                     p.text(pos2(r.left() + 44.0, r.top() + 14.0), Align2::LEFT_CENTER, drive_label(&root, &label), FontId::proportional(14.0), vis.strong_text_color());
-                    let used = total.saturating_sub(free);
-                    let frac = if total > 0 { used as f32 / total as f32 } else { 0.0 };
-                    let bar = Rect::from_min_size(pos2(r.left() + 44.0, r.top() + 28.0), vec2(r.width() - 56.0, 7.0));
-                    p.rect_filled(bar, 2.0, vis.extreme_bg_color);
-                    let mut fill = bar;
-                    fill.set_width(bar.width() * frac.clamp(0.0, 1.0));
-                    p.rect_filled(fill, 2.0, if frac > 0.9 { Color32::from_rgb(210, 70, 60) } else { vis.selection.bg_fill });
+                    p.text(pos2(r.left() + 44.0, r.top() + 30.0), Align2::LEFT_CENTER, drive_kind_line(d, &all), FontId::proportional(11.0), vis.weak_text_color());
+                    let bar = Rect::from_min_size(pos2(r.left() + 44.0, r.top() + 42.0), vec2(r.width() - 56.0, 7.0));
+                    paint_capacity(p, vis, bar, d);
                     p.text(
-                        pos2(r.left() + 44.0, r.top() + 46.0),
+                        pos2(r.left() + 44.0, r.top() + 60.0),
                         Align2::LEFT_CENTER,
                         format!("{} free of {}", scan::human(free), scan::human(total)),
                         FontId::proportional(12.0),
                         vis.weak_text_color(),
                     );
-                    let resp = resp.on_hover_text(root.shown());
+                    let resp = resp.on_hover_ui(|ui| drive_tip(ui, d, &all));
                     if resp.double_clicked() || resp.clicked() {
                         picks.go = Some(Location::Dir(root.clone()));
                     }
@@ -2634,7 +2662,7 @@ impl App {
                             Some(FSort::Name) => {
                                 let icon = Rect::from_min_size(pos2(cell.left() + 10.0, cy - 8.0), vec2(16.0, 16.0));
                                 let tint = if faint { Color32::from_gray(120) } else { color_for(e.ext()) };
-                                self.icons.paint(ui, icon, e.is_dir, e.ext(), tint);
+                                self.icons.paint_entry(ui, icon, dir, e, tint, false);
                                 let mark = if self.files.marks.is_empty() {
                                     None
                                 } else {
@@ -2651,7 +2679,7 @@ impl App {
                                 if e.is_link {
                                     p.text(icon.left_bottom() + vec2(-3.0, 2.0), Align2::LEFT_BOTTOM, "↪", FontId::proportional(10.0), vis.strong_text_color());
                                 }
-                                let mut end = if chevrons && e.is_dir {
+                                let mut end = if chevrons && e.is_dir && !crate::apps::is_app(e.bundle) {
                                     views::chevron(&p, pos2(cell.right() - 11.0, cy), if selected { sel_fg } else { pal.weak });
                                     cell.right() - 18.0
                                 } else {
@@ -2672,7 +2700,7 @@ impl App {
                                     end -= 20.0;
                                 }
                                 let clip = Rect::from_min_max(pos2(cell.left() + 33.0, rect.top()), pos2(end, rect.bottom()));
-                                let name = seq.map_or(&*e.name, |s| s.label.as_str());
+                                let name = seq.map_or(crate::apps::shown_name(&e.name, e.bundle), |s| s.label.as_str());
                                 let g = p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, name, font.clone(), tc);
                                 let mut after = g.right();
                                 if let Some(s) = seq {
@@ -2713,7 +2741,7 @@ impl App {
                                 }
                             }
                             Some(FSort::Type) => {
-                                let kind = if e.is_link { format!("Link to {}", browser::kind_for(&e.name, e.is_dir).to_lowercase()) } else { browser::kind_for(&e.name, e.is_dir) };
+                                let kind = if e.is_link { format!("Link to {}", browser::entry_kind(e).to_lowercase()) } else { browser::entry_kind(e) };
                                 p.with_clip_rect(cell.shrink2(vec2(6.0, 0.0)).intersect(p.clip_rect())).text(pos2(cell.left() + 8.0, cy), Align2::LEFT_CENTER, kind, font.clone(), weak);
                             }
                             Some(FSort::Modified) if e.modified > 0 => {
@@ -2803,7 +2831,7 @@ impl App {
             if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
                 picks.menu = Some((FAction::CopyPath, vec![here.clone()]));
             }
-            if let Some(a) = folder_menu(ui, pinned) {
+            if let Some(a) = folder_menu(ui, pinned, false) {
                 picks.menu = Some((a, vec![here.clone()]));
             }
         });
@@ -2911,7 +2939,7 @@ impl App {
                     } else {
                         let faint = e.hidden;
                         let tint = if faint { Color32::from_gray(120) } else { color_for(e.ext()) };
-                        icons.paint_big(ui, Rect::from_center_size(pic.center(), vec2(size * 0.8, size * 0.8)), e.is_dir, e.ext(), tint);
+                        icons.paint_entry(ui, Rect::from_center_size(pic.center(), vec2(size * 0.8, size * 0.8)), dir, e, tint, true);
                     }
                     if e.is_link {
                         p.text(pic.left_bottom() + vec2(size * 0.1, -2.0), Align2::LEFT_BOTTOM, "↪", FontId::proportional(14.0), pal.strong);
@@ -2935,7 +2963,7 @@ impl App {
                     }
                     // The name: up to two lines, centred, shortened with … when longer.
                     let tc = if selected { sel_fg } else if e.hidden { pal.weak } else { pal.text };
-                    let shown = t.seqs.get(&i).map_or_else(|| e.name.to_string(), |s| format!("{}\n{} frames", s.label, group(s.seq.frames)));
+                    let shown = t.seqs.get(&i).map_or_else(|| crate::apps::shown_name(&e.name, e.bundle).to_string(), |s| format!("{}\n{} frames", s.label, group(s.seq.frames)));
                     let mut job = egui::text::LayoutJob::simple(shown, FontId::proportional(12.5), tc, cell.width() - 10.0);
                     job.wrap.max_rows = 2;
                     job.wrap.break_anywhere = true;
@@ -3462,7 +3490,9 @@ impl App {
                 self.play_sequences(vec![c]);
             } else if let (Some(e), Some(dir)) = (t.entry(i), t.here().dir()) {
                 let path = dir.join(&*e.name);
-                if e.is_dir || (archive::is_archive(&e.name) && !archive::inside(&path)) {
+                if crate::apps::launches(e.bundle) && !archive::inside(&path) && !remote::is_remote(&path) {
+                    self.launch_apps(vec![path]);
+                } else if e.is_dir || (archive::is_archive(&e.name) && !archive::inside(&path)) {
                     // Archives open like folders (with a licence).
                     if e.is_dir || self.premium(crate::licence::Feature::Archives) {
                         self.files.go(Location::Dir(path));
@@ -3512,7 +3542,7 @@ impl App {
         let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
         let colour = self.files.marks.get(disk).and_then(|m| m.colour);
         let caps = crate::fsys::remote::is_remote(disk).then(|| crate::fsys::remote::caps(disk));
-        let m = RowMenu { is_dir, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some(), splats: false };
+        let m = RowMenu { is_dir, app: false, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some(), splats: false };
         let ext = disk
             .file_name()
             .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
@@ -3528,6 +3558,20 @@ impl App {
             a => self.files_action(a, vec![disk.to_path_buf()]),
         }
         ui.close();
+    }
+
+    /// Is this path an application that opening launches, as far as the list on screen knows?
+    fn listed_app(&self, p: &Path) -> bool {
+        let t = self.files.cur();
+        t.here().dir() == p.parent() && p.file_name().and_then(|n| t.entry_named(&n.to_string_lossy())).is_some_and(|e| crate::apps::launches(e.bundle))
+    }
+
+    /// Launch applications through the system, each on its own thread (the system can take a
+    /// moment to answer); a failure shows as a notice saying why.
+    pub(super) fn launch_apps(&mut self, apps: Vec<PathBuf>) {
+        for p in apps {
+            self.files.spawn(move || crate::apps::launch(&p));
+        }
     }
 
     /// Is this path a folder, as far as the list on screen knows?
@@ -3645,7 +3689,9 @@ impl App {
                 // Folders open here (the first one); files open in their apps.
                 let mut went = false;
                 for p in paths {
-                    if self.listed_dir(&p) {
+                    if self.listed_app(&p) {
+                        self.launch_apps(vec![p]);
+                    } else if self.listed_dir(&p) {
                         if !went {
                             self.files.go(Location::Dir(p));
                             went = true;
@@ -3653,6 +3699,12 @@ impl App {
                     } else {
                         self.open_file(p);
                     }
+                }
+            }
+            FAction::LaunchApp => self.launch_apps(paths),
+            FAction::ShowContents => {
+                if let Some(p) = paths.into_iter().next() {
+                    self.files.go(Location::Dir(p));
                 }
             }
             FAction::OpenInNewTab => {
@@ -3807,6 +3859,8 @@ impl App {
 /// What the item menu needs to know.
 pub(super) struct RowMenu {
     pub is_dir: bool,
+    /// The item is an application (Open Application, Show Package Contents).
+    pub app: bool,
     pub count: usize,
     /// The row is an image sequence.
     pub seq: bool,
@@ -3898,7 +3952,7 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     let colour = c.marks.get(&path).and_then(|m| m.colour);
     let caps = crate::fsys::remote::is_remote(dir).then(|| crate::fsys::remote::caps(dir));
     let server = caps.is_some();
-    let ctx_menu = RowMenu { is_dir, count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some(), splats: false };
+    let ctx_menu = RowMenu { is_dir, app: !server && !read_only && crate::apps::is_app(e.bundle), count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some(), splats: false };
     let ctx_menu = RowMenu {
         cloud: !server && !read_only && crate::cloudops::supported() && (e.flags & scan::store::ON_DEMAND != 0 || (e.is_dir && super::cloud::on_demand_dir(&path))),
         // By name only here (it's worked out every frame); Compare Scenes looks inside.
@@ -3931,12 +3985,20 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     };
     let many = m.count > 1;
     let open = if many { format!("Open {} Items", m.count) } else { "Open".to_string() };
+    // An application: launch it, or look inside. Enter does whichever opening does.
+    let as_app = m.app && !many;
+    let launches = as_app && crate::apps::launches(crate::apps::Bundle::App.code());
     if m.seq {
         item(ui, true, if m.count == 2 { "Play and Compare (A/B)" } else { "Play" }, k(M::NONE, Key::Enter), FAction::Play);
+    } else if as_app {
+        let (run_key, inside_key) = if launches { (k(M::NONE, Key::Enter), String::new()) } else { (String::new(), k(M::NONE, Key::Enter)) };
+        let label = if crate::apps::CAN_LAUNCH { "Open Application" } else { "Open Application (on a Mac)" };
+        item(ui, crate::apps::CAN_LAUNCH, label, run_key, FAction::LaunchApp);
+        item(ui, true, "Show Package Contents", inside_key, FAction::ShowContents);
     } else {
         item(ui, true, &open, k(M::NONE, Key::Enter), FAction::Open);
     }
-    if m.is_dir {
+    if m.is_dir && (!as_app || crate::apps::prefs().as_folders) {
         item(ui, true, if many { "Open in New Tabs" } else { "Open in New Tab" }, String::new(), FAction::OpenInNewTab);
         if !many {
             item(ui, true, "Open in Other Pane", String::new(), FAction::OpenInOtherPane);
@@ -4038,7 +4100,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     }
     if m.is_dir && !many {
         ui.separator();
-        if let Some(a) = folder_menu(ui, m.pinned) {
+        if let Some(a) = folder_menu(ui, m.pinned, m.app) {
             out = Some(a);
         }
     }
@@ -4046,7 +4108,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
 }
 
 /// Add to Favourites (or remove) and Analyse, for a folder.
-fn folder_menu(ui: &mut egui::Ui, pinned: bool) -> Option<FAction> {
+fn folder_menu(ui: &mut egui::Ui, pinned: bool, app: bool) -> Option<FAction> {
     let mut out = None;
     if pinned {
         if ui.add(egui::Button::new(style::mi("Remove from Favourites"))).clicked() {
@@ -4055,7 +4117,12 @@ fn folder_menu(ui: &mut egui::Ui, pinned: bool) -> Option<FAction> {
     } else if ui.add(egui::Button::new(style::mi("Add to Favourites"))).on_hover_text("A bookmark in the sidebar. You can also drag the folder there.").clicked() {
         out = Some(FAction::Pin);
     }
-    if ui.add(egui::Button::new(style::mi("Analyse This Folder"))).on_hover_text("Scan it and show its treemap in the analysis dock, while you keep browsing").clicked() {
+    let (label, tip) = if app {
+        ("Analyse Application Storage", "Scan the application and show what takes its space in the analysis dock, while you keep browsing")
+    } else {
+        ("Analyse This Folder", "Scan it and show its treemap in the analysis dock, while you keep browsing")
+    };
+    if ui.add(egui::Button::new(style::mi(label))).on_hover_text(tip).clicked() {
         out = Some(FAction::Analyse);
     }
     out
@@ -4094,6 +4161,108 @@ pub(super) fn capacity_bar(ui: &egui::Ui, r: Rect, frac: Option<f32>) {
     fill.set_width(bar.width() * frac.clamp(0.0, 1.0));
     let c = if frac > 0.9 { Color32::from_rgb(210, 70, 60) } else { Color32::from_rgb(70, 130, 210) };
     p.rect_filled(fill, 1.5, c);
+}
+
+/// The sidebar's capacity bar for a drive: the used part, and for a disk image that can't
+/// grow, the part its host drive holds back in a faint red.
+fn capacity_bar_held(ui: &egui::Ui, r: Rect, d: &drives::Drive) {
+    if d.total == 0 {
+        return;
+    }
+    let bar = Rect::from_min_size(pos2(r.left() + 28.0, r.bottom() - 7.0), vec2((r.width() - 38.0).max(10.0), 3.0));
+    paint_capacity(ui.painter(), ui.visuals(), bar, d);
+}
+
+/// A capacity bar in `bar`: blue, red when nearly full; a sparse image's unusable room hatched
+/// in faint red after its data.
+fn paint_capacity(p: &egui::Painter, vis: &egui::Visuals, bar: Rect, d: &drives::Drive) {
+    let total = d.total.max(1) as f32;
+    let round = (bar.height() / 2.0).min(2.0);
+    p.rect_filled(bar, round, vis.extreme_bg_color);
+    let red = Color32::from_rgb(210, 70, 60);
+    let held = d.held_back();
+    let used = if held.is_some() { d.info.data.unwrap_or(0) } else { d.used() } as f32 / total;
+    let full = d.used() as f32 / total > 0.9;
+    let mut fill = bar;
+    fill.set_width(bar.width() * used.clamp(0.0, 1.0));
+    let blue = Color32::from_rgb(70, 130, 210);
+    p.rect_filled(fill, round, if full && held.is_none() { red } else { blue });
+    if let Some(h) = held {
+        let mut rest = bar;
+        rest.min.x = fill.max.x;
+        rest.set_width(bar.width() * (h as f32 / total).clamp(0.0, 1.0 - used));
+        p.rect_filled(rest, round, red.gamma_multiply(0.45));
+    }
+}
+
+/// "Disk image on DataHerdA · APFS" or "External drive · USB · ExFAT".
+fn drive_kind_line(d: &drives::Drive, all: &[drives::Drive]) -> String {
+    let i = &d.info;
+    let mut parts = vec![i.kind.name().to_string()];
+    if i.kind == drives::Kind::Image
+        && let Some(host) = i.image.as_deref().and_then(|p| drives::holding(p, all)).filter(|h| h.root != d.root)
+    {
+        parts[0] = format!("Disk image on {}", drive_label(&host.root, &host.label));
+    } else if !i.bus.is_empty() && matches!(i.kind, drives::Kind::External | drives::Kind::Removable) {
+        parts.push(i.bus.clone());
+    }
+    if !i.fs.is_empty() {
+        parts.push(i.fs.clone());
+    }
+    if i.read_only {
+        parts.push("read-only".into());
+    }
+    parts.join(" · ")
+}
+
+/// A drive's hover card: what it is, in a sentence, then its details.
+pub(super) fn drive_tip(ui: &mut egui::Ui, d: &drives::Drive, all: &[drives::Drive]) {
+    ui.set_max_width(380.0);
+    ui.strong(drive_label(&d.root, &d.label));
+    let about = d.info.kind.about();
+    if !about.is_empty() {
+        ui.weak(about);
+    }
+    ui.add_space(4.0);
+    egui::Grid::new("drive-tip").num_columns(2).spacing([12.0, 3.0]).show(ui, |ui| {
+        ui.weak("Path");
+        ui.label(d.root.shown());
+        ui.end_row();
+        for (k, v) in drives::describe(d, all) {
+            ui.weak(k);
+            ui.add(egui::Label::new(v).wrap());
+            ui.end_row();
+        }
+    });
+}
+
+fn phone_tip(ui: &mut egui::Ui, p: &drives::Phone) {
+    ui.set_max_width(360.0);
+    ui.strong(&p.name);
+    ui.weak(format!("{} · {}", drives::Kind::Phone.name(), p.protocol));
+    ui.add_space(4.0);
+    ui.add(egui::Label::new(p.hint()).wrap());
+}
+
+/// Local drives in sidebar order: each disk image right after the drive its file is on, marked
+/// nested; images whose host isn't listed stay where they are.
+fn drive_order(all: &[drives::Drive]) -> Vec<(&drives::Drive, bool)> {
+    let local: Vec<&drives::Drive> = all.iter().filter(|d| !d.network).collect();
+    let host_of = |d: &drives::Drive| -> Option<PathBuf> {
+        let img = d.info.image.as_deref()?;
+        drives::holding(img, all).filter(|h| h.root != d.root && !h.network).map(|h| h.root.clone())
+    };
+    let mut out = Vec::new();
+    for d in &local {
+        if host_of(d).is_some() {
+            continue;
+        }
+        out.push((*d, false));
+        for c in local.iter().filter(|c| host_of(c).as_ref() == Some(&d.root)) {
+            out.push((*c, true));
+        }
+    }
+    out
 }
 
 /// A sidebar line: icon and label, left-aligned. Where we are gets the selection tint and an
@@ -4228,7 +4397,7 @@ mod tests {
     use super::*;
 
     fn e(name: &str, is_dir: bool, size: u64, modified: i64, hidden: bool) -> Entry {
-        Entry { name: name.into(), is_dir, is_link: false, hidden, size, alloc: size, flags: 0, modified }
+        Entry { name: name.into(), is_dir, is_link: false, hidden, size, alloc: size, flags: 0, modified, bundle: 0 }
     }
 
     fn names(es: &[Entry], o: &[u32]) -> Vec<String> {

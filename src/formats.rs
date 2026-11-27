@@ -121,7 +121,7 @@ impl Format {
                 Category::Audio => ("Cover, waveform, tags and playback", "The system, with lofty for tags"),
                 Category::Pdf => ("Every page", "hayro (the system for protected PDFs)"),
                 Category::Midi => ("A piano roll, with tempo and instruments", "midly"),
-                Category::Database => ("Each table's columns and first rows, read-only", "SQLite (rusqlite)"),
+                Category::Database => ("Each table's columns, first rows, row count and size in the file, largest first; read-only", "SQLite (rusqlite)"),
                 Category::Model => ("A shaded model to turn about", "Filescape (gltf for glTF)"),
                 Category::Splat => ("The splats drawn on the graphics chip to turn, move and zoom about (points where it can't), with its splat count, colour detail, size and checks for stray or invisible splats", "Filescape"),
                 Category::Cad => ("What the file says: the program that made it, units, author and parts (not drawn)", "Filescape"),

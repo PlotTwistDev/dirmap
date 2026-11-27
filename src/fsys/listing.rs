@@ -28,6 +28,8 @@ pub struct Entry {
     pub flags: u8,
     /// Seconds since the Unix epoch, 0 when unknown.
     pub modified: i64,
+    /// A bundle (an application, a framework…): [`crate::apps::Bundle::code`], 0 for none.
+    pub bundle: u8,
 }
 
 impl Entry {
@@ -376,7 +378,9 @@ pub fn entry(e: &fs::DirEntry) -> Option<Entry> {
     if md.is_file() {
         flags |= cloud_for(e);
     }
+    let bundle = if is_dir { crate::apps::bundle_at(&e.path(), &name) } else { 0 };
     Some(Entry {
+        bundle,
         hidden: crate::scan::is_hidden(&name, &md),
         size: if md.is_file() { md.len() } else { 0 },
         alloc,

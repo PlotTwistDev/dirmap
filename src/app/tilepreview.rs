@@ -333,6 +333,7 @@ impl App {
             alloc: n.alloc,
             flags: n.flags,
             modified: n.modified,
+            bundle: 0,
         };
         Some((self.full_path(sel), e))
     }

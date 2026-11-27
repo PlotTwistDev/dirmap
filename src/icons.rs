@@ -3,12 +3,38 @@
 
 use eframe::egui::{self, Color32, Rect, TextureHandle};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 #[derive(Default)]
 pub struct Icons {
     /// Keyed by lowercase extension; "<dir>" for folders. `None` = the OS had no icon.
     cache: HashMap<String, Option<TextureHandle>>,
+    /// Applications' own icons, by path (see [`Icons::paint_app`]).
+    apps: HashMap<PathBuf, AppIcon>,
+    worker: Option<AppWorker>,
 }
+
+/// One application's icon: loading, loaded, or none to be had.
+struct AppIcon {
+    /// The bundle's modified time when it was asked for: a newer one (the app was updated)
+    /// loads the icon again.
+    stamp: i64,
+    tex: Option<TextureHandle>,
+}
+
+/// Loads application icons one at a time on its own thread, so opening /Applications never
+/// stalls the window.
+struct AppWorker {
+    ask: mpsc::Sender<(PathBuf, i64)>,
+    done: mpsc::Receiver<(PathBuf, i64, Option<(u32, u32, Vec<u8>)>)>,
+}
+
+/// Pixels across an application icon is loaded at: sharp in lists and the Icons view, small
+/// enough that a folder of hundreds of apps stays light.
+const APP_ICON_PX: u32 = 128;
+/// Forget every loaded icon past this many (they load again as needed).
+const APP_ICONS_MAX: usize = 600;
 
 const DIR_KEY: &str = "<dir>";
 
@@ -30,6 +56,78 @@ impl Icons {
 }
 
 impl Icons {
+    /// Draw an application's own icon (`path`: the bundle; `stamp`: its modified time). Until it
+    /// has loaded, or when it has none, or the setting is off, a drawn application glyph.
+    pub fn paint_app(&mut self, ui: &egui::Ui, rect: Rect, path: &Path, stamp: i64) {
+        let ctx = ui.ctx().clone();
+        self.take_loaded(&ctx);
+        if crate::apps::prefs().icons {
+            match self.apps.get(path) {
+                Some(a) if a.stamp == stamp => {
+                    if let Some(t) = &a.tex {
+                        let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                        ui.painter().image(t.id(), rect, uv, Color32::WHITE);
+                        return;
+                    }
+                }
+                _ => self.ask_app(&ctx, path, stamp),
+            }
+        }
+        paint_app_glyph(ui.painter(), rect);
+    }
+
+    fn ask_app(&mut self, ctx: &egui::Context, path: &Path, stamp: i64) {
+        if self.apps.len() >= APP_ICONS_MAX {
+            self.apps.clear();
+        }
+        // Marked as asked for, so it's asked once; filled in when it arrives.
+        self.apps.insert(path.to_path_buf(), AppIcon { stamp, tex: None });
+        let w = self.worker.get_or_insert_with(|| {
+            let (ask, rx) = mpsc::channel::<(PathBuf, i64)>();
+            let (tx, done) = mpsc::channel();
+            let ctx = ctx.clone();
+            let _ = std::thread::Builder::new().name("app-icons".into()).spawn(move || {
+                while let Ok((p, stamp)) = rx.recv() {
+                    let px = crate::apps::icon(&p, APP_ICON_PX);
+                    if tx.send((p, stamp, px)).is_err() {
+                        return;
+                    }
+                    ctx.request_repaint();
+                }
+            });
+            AppWorker { ask, done }
+        });
+        let _ = w.ask.send((path.to_path_buf(), stamp));
+    }
+
+    fn take_loaded(&mut self, ctx: &egui::Context) {
+        let Some(w) = &self.worker else { return };
+        while let Ok((p, stamp, px)) = w.done.try_recv() {
+            let tex = px.map(|(w, h, rgba)| {
+                let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+                let opts = egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR };
+                ctx.load_texture(format!("app-icon:{}", p.display()), img, opts)
+            });
+            if let Some(a) = self.apps.get_mut(&p)
+                && a.stamp == stamp
+            {
+                a.tex = tex;
+            }
+        }
+    }
+
+    /// Draw the icon for an item of a folder listing (`big`: the Icons view and galleries):
+    /// an application's own icon, otherwise its type's.
+    pub fn paint_entry(&mut self, ui: &egui::Ui, rect: Rect, dir: &Path, e: &crate::fsys::listing::Entry, tint: Color32, big: bool) {
+        if crate::apps::is_app(e.bundle) {
+            self.paint_app(ui, rect, &dir.join(&*e.name), e.modified);
+        } else if big {
+            self.paint_big(ui, rect, e.is_dir, e.ext(), tint);
+        } else {
+            self.paint(ui, rect, e.is_dir, e.ext(), tint);
+        }
+    }
+
     /// Draw a big icon (the Icons view). The system's icons are only 32 pixels, so above 48 the
     /// drawn icon is used instead, which stays sharp at any size.
     pub fn paint_big(&mut self, ui: &egui::Ui, rect: Rect, is_dir: bool, ext: &str, tint: Color32) {
@@ -79,6 +177,24 @@ fn paint_glyph(p: &egui::Painter, r: Rect, is_dir: bool, ext: &str, tint: Color3
             p.text(band.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(size), text);
         }
     }
+}
+
+/// An application with no icon of its own (or not loaded yet): a rounded tile with a simple
+/// mark, like the system's generic application icon.
+pub fn paint_app_glyph(p: &egui::Painter, r: Rect) {
+    let s = r.height() / 16.0;
+    let tile = r.shrink(1.5 * s);
+    let round = 3.5 * s;
+    p.rect_filled(tile, round, Color32::from_rgb(92, 116, 160));
+    let inner = tile.shrink(2.0 * s);
+    p.rect_filled(Rect::from_min_max(inner.min, egui::pos2(inner.max.x, inner.center().y)), round * 0.5, Color32::from_rgb(120, 146, 192));
+    // A pencil, ruler and brush crossed as an "A", like the generic app icon.
+    let c = inner.center();
+    let h = inner.height() * 0.42;
+    let stroke = egui::Stroke::new((1.4 * s).max(1.0), Color32::WHITE);
+    p.line_segment([egui::pos2(c.x - h * 0.6, c.y + h), egui::pos2(c.x, c.y - h)], stroke);
+    p.line_segment([egui::pos2(c.x + h * 0.6, c.y + h), egui::pos2(c.x, c.y - h)], stroke);
+    p.line_segment([egui::pos2(c.x - h * 0.75, c.y + h * 0.35), egui::pos2(c.x + h * 0.75, c.y + h * 0.35)], stroke);
 }
 
 fn luma(c: Color32) -> f32 {
