@@ -2114,7 +2114,8 @@ impl App {
                 .default_size(self.files.prefs.preview_width)
                 .frame(egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 8 }))
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical().id_salt("preview-scroll").auto_shrink(false).show(ui, |ui| self.preview_pane(ui));
+                    let tall = ui.available_height();
+                    egui::ScrollArea::vertical().id_salt("preview-scroll").auto_shrink(false).show(ui, |ui| self.preview_pane(ui, tall));
                 });
             self.files.prefs.preview_width = r.response.rect.width();
             ui.painter().vline(r.response.rect.left(), r.response.rect.y_range(), Stroke::new(1.0, pal.hairline));

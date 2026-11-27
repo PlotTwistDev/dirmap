@@ -456,9 +456,11 @@ app. **Full screen** (or **F**) fills the screen with it, and **Window** (or **F
 back. Quick Look works in Storage Analysis too: see
 [Quick Look on the map](treemap.md#quick-look-on-the-map).
 
-**👁** on the toolbar, or **Alt+P**, shows the preview pane at the right of the window. It shows
-the selected item with its details: kind, size, dates and, for images, the dimensions and pixel
-format. Drag its edge to make it wider.
+**👁** on the toolbar, or **Alt+P**, shows the preview pane at the right of the window, laid out as
+in Storage Analysis. The **Preview** tab gives the preview all the room in the pane, with the
+item's name, kind and size and **Open** / **Quick Look** under it; **Details** lists everything
+known about it: kind, size, dates and, for images, the dimensions and pixel format. Drag its edge
+to make it wider.
 
 With several items selected, the top of the pane counts them: how many files and folders, their
 total size, and a line for each kind (**JPG image**, **ZIP archive**, **SH source**…) with how
