@@ -44,7 +44,7 @@ pub(super) fn default_layer(layers: usize) -> usize {
 }
 
 /// A run's tokens, coloured by how sure the model was of each.
-fn run_text(ui: &mut egui::Ui, r: &Run) {
+pub(super) fn run_text(ui: &mut egui::Ui, r: &Run) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for s in &r.steps {

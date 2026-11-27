@@ -5,6 +5,7 @@
 
 use super::*;
 
+mod compare;
 mod inside;
 mod steer;
 use crate::kit::{self, Tone};
@@ -41,6 +42,8 @@ pub(super) struct LabState {
     /// A strength sweep under way or done, and the strength of the run being written.
     sweep: Option<steer::Sweep>,
     sweep_strength: f32,
+    /// Two sets of settings (or two models) side by side.
+    pub compare: compare::Compare,
     bench: BenchSettings,
     /// The speed test running: (run, of runs).
     pub bench_progress: Option<(u32, u32)>,
@@ -70,6 +73,7 @@ impl Default for LabState {
             steered: None,
             sweep: None,
             sweep_strength: 0.0,
+            compare: compare::Compare::default(),
             bench: BenchSettings::default(),
             bench_progress: None,
             bench_asked: BenchSettings::default(),
@@ -83,6 +87,7 @@ enum Page {
     Next,
     Inside,
     Steer,
+    Compare,
     Speed,
 }
 
@@ -175,7 +180,7 @@ impl App {
             ui.add_space(8.0);
             let busy = self.ask.phase != super::ask::Phase::Idle;
             ui.add_enabled_ui(!busy, |ui| {
-                kit::segmented(ui, &mut self.ask.lab_state.page, &[(Page::Next, "Next token"), (Page::Inside, "Inside"), (Page::Steer, "Steer"), (Page::Speed, "Speed")], false);
+                kit::segmented(ui, &mut self.ask.lab_state.page, &[(Page::Next, "Next token"), (Page::Inside, "Inside"), (Page::Steer, "Steer"), (Page::Compare, "Compare"), (Page::Speed, "Speed")], false);
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 kit::badge(ui, "Free", Tone::Success).on_hover_text("Everything in the Lab is free: it's for learning how models work.");
@@ -188,6 +193,7 @@ impl App {
             Page::Speed => return self.lab_speed(ui, name),
             Page::Inside => return self.lab_inside(ui, name),
             Page::Steer => return self.lab_steer(ui, name),
+            Page::Compare => return self.lab_compare(ui, name),
             Page::Next => {}
         }
         ui.weak("What the model would write next, and how sure it is.");
@@ -516,6 +522,13 @@ fn about_page(ui: &mut egui::Ui, page: Page) {
             &[
                 "Steering adds a direction to one layer's numbers while the model writes, worked out from the difference between how the model represents two words.",
                 "It changes nothing in the model file, and only lasts for that answer. The effect is experimental: some directions change the tone clearly, others do little or make the text worse.",
+            ],
+        ),
+        Page::Compare => (
+            "About Compare",
+            &[
+                "Both sides read the same text and use the same seed, so any difference comes from the settings, or from the model if you kept one side and loaded another.",
+                "One run shows what one seed happened to pick. With temperature above 0, try a few seeds before deciding which settings or model writes better.",
             ],
         ),
         Page::Speed => (
