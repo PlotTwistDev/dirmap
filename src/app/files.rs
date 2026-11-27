@@ -129,6 +129,8 @@ pub(super) struct FilesPrefs {
     /// rail, and its width.
     pub insights_open: bool,
     pub insights_width: f32,
+    /// How much the maps write on their tiles (both workspaces).
+    pub map_density: super::viz::MapDensity,
     /// The first pane's view (the second pane's is in `second`), and the Icons view's size.
     pub view: FView,
     pub icon_size: f32,
@@ -212,6 +214,7 @@ impl Default for FilesPrefs {
             map_preview_tab: super::rails::PreviewTab::Preview,
             insights_open: true,
             insights_width: 330.0,
+            map_density: super::viz::MapDensity::Balanced,
             view: FView::Details,
             icon_size: 96.0,
             remember_looks: true,

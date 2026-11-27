@@ -84,6 +84,22 @@ stay open or closed as you left them.
   rectangles big enough to hold them, in white on a dark backing so they read on any colour.
   They fade in as you zoom in, and get bigger on bigger tiles.
 
+## How much is written on the tiles
+
+**Display > Detail on the map** sets how much the treemap writes on its tiles, in Storage
+Analysis and the Files dock alike:
+
+| Detail | On the tiles |
+|---|---|
+| **Minimal** | Names on big tiles only, with no sizes: the shapes and colours do the talking. |
+| **Balanced** (the usual) | Names where they fit comfortably, and sizes under them on taller tiles. |
+| **Detailed** | Names on small tiles too, and each size with its share of what's on the map. |
+
+The clicked item has a bright ring with a dark edge either side, so it stands out on light and
+dark tiles; other items selected with it in the file manager get a plain outline. When you've
+zoomed in, the map's bottom left corner says how far (for example **×3.2**); press **Home** for
+the whole view again.
+
 ## Previews on tiles
 
 As you zoom in, a file's rectangle that grows big enough shows what's in the file instead of a

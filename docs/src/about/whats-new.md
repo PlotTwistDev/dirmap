@@ -2,6 +2,13 @@
 
 ## Next version
 
+### Easier to read maps
+
+- **Display > Detail on the map**: **Minimal**, **Balanced** or **Detailed** names and sizes on
+  the tiles, with shares at Detailed. Remembered, and shared by Storage Analysis and the dock.
+- The clicked item's ring now reads on any tile colour, and a zoomed-in map shows how far it's
+  zoomed. See [How much is written on the tiles](../views/treemap.md#how-much-is-written-on-the-tiles).
+
 ### One map, two places
 
 - The analysis dock in Files has the same toolbar as Storage Analysis, in a compact form:

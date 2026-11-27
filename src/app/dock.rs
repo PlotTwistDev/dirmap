@@ -572,6 +572,10 @@ impl App {
 
     /// What's drawn on the dock's map. These are shared with Storage Analysis.
     fn dock_display_choices(&mut self, ui: &mut egui::Ui) {
+        if viz::density_switch(ui, &mut self.files.prefs.map_density) {
+            self.paint_gen += 1;
+        }
+        ui.separator();
         let mut labels = self.settings.show_labels;
         if ui.checkbox(&mut labels, "File names on tiles").changed() {
             self.settings.show_labels = labels;
