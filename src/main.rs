@@ -32,6 +32,7 @@ mod craftfile;
 mod daw;
 mod drives;
 mod dupes;
+mod eject;
 mod epub;
 mod elevate;
 mod fontview;

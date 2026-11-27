@@ -2,6 +2,14 @@
 
 ## Next version
 
+### Eject drives
+
+- External drives, USB sticks, SD cards and disk images can be ejected from Filescape on macOS,
+  Windows and Linux: the **⏏** button by a drive in the sidebar and in **Computer**, or **Eject**
+  on its right-click menu. Disk images stored on a drive are ejected first, and when an app is
+  still using the drive Filescape names it, with **Try Again** and **Force Eject**. See
+  [Ejecting drives](../views/file-manager.md#ejecting-drives).
+
 ### Where a database's space goes
 
 - SQLite previews show how much of the file each table takes, run the tabs largest first and
