@@ -113,6 +113,23 @@ The push only exists while the text is written, in a copy of the model's working
 thrown away afterwards. The model's file, Ask AI and the other Lab pages aren't affected. The
 sampling settings are the ones on **Next token**.
 
+## Comparing settings or models
+
+Press **Compare** at the top of the Lab to write the same text twice, side by side, with two sets
+of sampling settings. Each side has its own Temperature, Top-k, Top-p and Min-p, with three
+starting points: **Likeliest** (temperature 0), **Ask AI's** and **Adventurous** (temperature 1.2,
+no limits). Press **Write 30 tokens both ways** (or 10 or 100); both sides use the seed set on **Next token**, so only the
+settings differ. Under each text are its average confidence, average uncertainty and speed, and
+the line under both says where the two texts part.
+
+To compare two models, write once, tick **Keep this result** on one side, load another model on
+the left and press **Write 30 tokens** again: only the other side is written, with the new model. Each side
+names the model that wrote it. If you change the text after keeping a side, that side says it was
+written from different text.
+
+One run shows what one seed happened to pick. Above temperature 0, try a few seeds before deciding
+which settings or model you prefer. For speeds, the **Speed** page measures more carefully.
+
 ## Testing a model's speed
 
 Press **Speed** at the top of the Lab to see how fast the loaded model runs on this computer.

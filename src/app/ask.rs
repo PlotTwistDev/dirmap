@@ -185,6 +185,7 @@ impl App {
         let mut got = false;
         let mut benched = None;
         let mut steered_ev = None;
+        let mut compared_ev = None;
         while let Ok(ev) = e.rx.try_recv() {
             got = true;
             match ev {
@@ -203,6 +204,10 @@ impl App {
                     self.ask.conversation.push(Message { role: Role::Assistant, text });
                     self.ask.last = Some(s);
                     self.ask.phase = Phase::Idle;
+                }
+                Event::Predicted(r) if self.ask.lab_state.compare.waiting.is_some() => {
+                    self.ask.phase = Phase::Idle;
+                    compared_ev = self.ask.lab_state.compare.waiting.take().map(|i| (i, r));
                 }
                 Event::Predicted(r) => {
                     self.ask.lab_state.shown = 0;
@@ -231,6 +236,8 @@ impl App {
                 }
                 Event::Error(err) => {
                     self.ask.lab_state.bench_progress = None;
+                    self.ask.lab_state.compare.waiting = None;
+                    self.ask.lab_state.compare.left.clear();
                     // A failed load leaves nothing loaded; a failed answer keeps what was written.
                     if self.ask.phase == Phase::Loading {
                         self.ask.loaded = None;
@@ -245,6 +252,9 @@ impl App {
         }
         if let Some((r, w, f, t)) = benched {
             self.lab_benched(r, w, f, t);
+        }
+        if let Some((side, run)) = compared_ev {
+            self.lab_compared(side, run);
         }
         if let Some((plain, steered, push)) = steered_ev
             && !self.lab_swept(plain.clone(), steered.clone())
