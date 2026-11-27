@@ -39,7 +39,7 @@ click it for details.
 |---|---|
 | **Quick access** | Home, Desktop, Documents, Downloads, Pictures, Music and Videos (and Applications on a Mac). These are your real folders, including ones that have been moved, such as Documents on OneDrive. |
 | **Favourites** | Folders you've bookmarked, in as many groups as you like. See [Favourites](#favourites). |
-| **Drives** | **This PC** (Windows) or **Computer** (Linux and macOS), then each local drive or mounted volume. Each has a bar showing how full it is, red when over 90%. Hover for the free space. |
+| **Drives** | **This PC** (Windows) or **Computer** (Linux and macOS), then each local drive or mounted volume, and any phone or camera plugged in. Each drive has a bar showing how full it is, red when over 90%. Hover for its details. See [Drive details](#drive-details). |
 | **Linux** | Windows only, when WSL is installed: each Linux distribution, as in Explorer (`\\wsl.localhost\Ubuntu`). Opening one starts it if it isn't running. |
 | **Network & Remote** | Network drives and shares, saved servers, and **Connect to Server…**. See [Network & Remote](#network--remote). |
 | **Saved searches** | Searches you've kept with **☆**. Click one to run it again. See [Searching subfolders](#searching-subfolders). |
@@ -307,6 +307,7 @@ read shows its type's icon instead.
 | Command | What it does |
 |---|---|
 | **Open** / **Open in New Tab** / **Open in Other Pane** | Opens folders here, in a new tab or in the other pane, and files in their apps. |
+| **Open Application** / **Show Package Contents** | On an [application](#applications): launches it, or goes inside it. |
 | **Open With** | Opens the item in one of [your apps](#open-with), or lets you choose one. |
 | **Quick Look** (**Space**) | A [large preview](#quick-look-and-the-preview-pane) of the file. |
 | **Copy** / **Cut** / **Paste** (**Ctrl+C**, **Ctrl+X**, **Ctrl+V**) | See [Copying, moving and deleting](#copying-moving-and-deleting). |
@@ -319,7 +320,7 @@ read shows its type's icon instead.
 | **Show in Explorer** (Finder, or the system file manager) | Opens the system's file manager with the item selected. |
 | **Open in Terminal…** (Command Prompt or PowerShell on Windows) | Opens a terminal in the folder. |
 | **Properties** (**Alt+Enter**) | Size, number of files and dates. |
-| **Analyse This Folder** | Scans the folder and shows it in the [analysis dock](#the-analysis-dock). You stay in Files. |
+| **Analyse This Folder** (**Analyse Application Storage** on an app) | Scans the folder and shows it in the [analysis dock](#the-analysis-dock). You stay in Files. |
 | **Show More Options** (**Shift+F10**; Windows) | Opens Windows' own menu for the items, the one Explorer shows: everything other apps add to it (7-Zip, Notepad++, PowerToys, your antivirus…), **Send to**, **Give access to** and the rest. **Rename** there renames in Filescape's list. |
 
 On Windows, **Shift+right-click** an item to go straight to Windows' menu, with the extra commands
@@ -486,7 +487,7 @@ the next. The selection stays as it is.
 | Sound | MP3, WAV, FLAC, M4A, AAC, OGG and others: the album cover if the file has one, the waveform, and **▶ Play** / **⏸ Pause**. The waveform fills in as it plays, and on Windows and macOS clicking it (or the bar under the button) jumps to that point. The details show the title, artist, album, year, genre, length and format (sample rate, bit depth, channels, bit rate). It stops when you move to another file. |
 | MIDI music | MIDI files (.mid, .midi, .kar) as a piano roll: every note against time and pitch, coloured by channel and shaded by how hard it's played. The details show the title, length, number of notes and channels, tracks, tempo and time signature, and the instruments (General MIDI families, and drums). The same picture shows in Icons view and on map tiles. The music isn't played. |
 | 3D models | STL, OBJ, PLY, glTF and GLB, 3MF, FBX, COLLADA (.dae) and Alembic (.abc): the model drawn as plain shaded clay. Drag to turn it; double-click to put it back. The details show how many triangles and points it has, its size in its own units, and (where the file says) its parts, materials, textures and animations. Textures and colours aren't shown, and a glTF file's data is read only from inside it or from files beside it. FBX and COLLADA models are turned so the file's up is up. Alembic files saved in the older HDF5 layout aren't read. Icons view and map tiles show the model too. A Windows .obj object file (from a compiler) is told apart and shown as an ordinary file. |
-| Gaussian splat scenes and point clouds | SPZ, SPLAT, KSPLAT and SOG files (a bundled `.sog`, or a loose scene's `meta.json` with its pictures beside it); PLY files that hold splats or points rather than a mesh, including PlayCanvas's compressed PLY; GLB files whose points are splats (Khronos's `KHR_gaussian_splatting`); and web pages exported from SuperSplat with the scene inside. Filescape looks inside PLY, GLB, web page and `meta.json` files to tell; ordinary ones preview as before. Nothing in a web page is run: only the scene inside is read. The preview pane draws the splats for real on your graphics chip, with their view-dependent colour: drag to turn the scene, right-drag (or Shift-drag) to move it, scroll or pinch to zoom, and double-click to put it back. The line under the picture names the graphics chip and how long a picture took. Until the first picture is ready, or on a computer whose graphics can't draw splats, the scene is drawn as points from the splats' centres instead, and the line says why. A scene too big for graphics memory is drawn from an even sample and says so; one too big to keep its view-dependent colour in memory shows base colour and says so. The details show how many splats there are, how much colour detail they keep (spherical harmonics), bytes per splat, roughly how much graphics memory viewing it would take, the size of its main body, and checks for splats that are nearly invisible, oversized, far from the rest (often sky), or floating on their own near the subject (floaters). Huge scenes are shown from an even sample and say so. Point clouds show their points in their own colours. While you turn or move it, pictures come at half size so it keeps up, and the full picture follows when you stop. **W**, **A**, **S** and **D** move in, left, out and right while the pointer is over the scene, and **Q** and **E** move down and up. Point at the scene for its tools along the top: **Splats** picks how the splats are drawn (as made; **Outlines** of each splat; **Centres** as dots; or in false colour by **Opacity**, **Size**, **Crowding** or **Distance** from the middle, with a key in the corner), **Problems** shows the splats the checks below found in colour and the rest in grey, **Bounds** draws the box round the scene's main body, and **FOV** sets the field of view (the camera moves to keep the scene the same size, so only the perspective changes). To save the view as a picture, point at the scene and click the camera button in its top corner: the view as it is, drawn again at up to twice the size (up to 4K), is saved as a PNG where you choose. Icons view and map tiles show the scene too, drawn as splats on the graphics chip (as points where it can't), and map tiles also show the format and splat count. Under the details of a splat scene on this computer, the **Storage optimiser** shows how big the scene is now; **Measure other formats** works out how big it would be as **SPZ** (Niantic's compressed format, the smallest), **compressed PLY** (PlayCanvas and SuperSplat) and the standard 3DGS **PLY** that every tool reads, by converting it in memory without writing anything. **Save as…** beside a format writes a converted copy where you choose (next to the original to start with). The original is never changed or replaced. The new file is read back and checked against the scene, and the card says how closely it matches; a copy that doesn't match is removed. SPZ and compressed PLY keep colours and shapes a little more coarsely than a trainer's PLY, which rarely shows. Converting one file at a time is free. To compare two scenes, such as a scene and a converted copy, select both and right-click **Compare Scenes** (Filescape Professional). They show **Side by side**, or **Split** into one picture with the first scene left of a line you drag and the second right of it, or as their **Difference** (black where the pictures match, bright where they don't). Turning, moving or zooming either one moves both (in side by side, untick **Turn together** to move them separately), and both are drawn at the same moment. The bar says how alike the two pictures are (PSNR: 40 dB and up looks the same), and below them are both scenes' details side by side, with the names of the ones that differ in orange. |
+| Gaussian splat scenes and point clouds | SPZ, SPLAT, KSPLAT and SOG files (a bundled `.sog`, or a loose scene's `meta.json` with its pictures beside it); PLY files that hold splats or points rather than a mesh, including PlayCanvas's compressed PLY; GLB files whose points are splats (Khronos's `KHR_gaussian_splatting`); and web pages exported from SuperSplat with the scene inside. Filescape looks inside PLY, GLB, web page and `meta.json` files to tell; ordinary ones preview as before. Nothing in a web page is run: only the scene inside is read. The preview pane draws the splats for real on your graphics chip, with their view-dependent colour: drag to turn the scene, right-drag (or Shift-drag) to move it, scroll or pinch to zoom, and double-click to put it back. The line under the picture names the graphics chip and how long a picture took. Until the first picture is ready, or on a computer whose graphics can't draw splats, the scene is drawn as points from the splats' centres instead, and the line says why. A scene too big for graphics memory is drawn from an even sample and says so; one too big to keep its view-dependent colour in memory shows base colour and says so. The details show how many splats there are, how much colour detail they keep (spherical harmonics), bytes per splat, roughly how much graphics memory viewing it would take, the size of its main body, and checks for splats that are nearly invisible, oversized, far from the rest (often sky), or floating on their own near the subject (floaters). Huge scenes are shown from an even sample and say so. Point clouds show their points in their own colours. While you turn or move it, pictures come at half size so it keeps up, and the full picture follows when you stop. **W**, **A**, **S** and **D** move in, left, out and right while the pointer is over the scene, and **Q** and **E** move down and up. Point at the scene for its tools along the top: **Splats** picks how the splats are drawn (as made; **Outlines** of each splat; **Centres** as dots; or in false colour by **Opacity**, **Size**, **Crowding** or **Distance** from the middle, with a key in the corner), **Problems** shows the splats the checks below found in colour and the rest in grey, **Bounds** draws the box round the scene's main body, and **FOV** sets the field of view (the camera moves to keep the scene the same size, so only the perspective changes). To save the view as a picture, point at the scene and click the camera button in its top corner: the view as it is, drawn again at up to twice the size (up to 4K), is saved as a PNG where you choose. Icons view and map tiles show the scene too, drawn as splats on the graphics chip (as points where it can't), and map tiles also show the format and splat count. Under the details of a splat scene on this computer, the **Storage optimiser** shows how big the scene is now; **Measure other formats** works out how big it would be as **SPZ** (Niantic's compressed format, the smallest), **compressed PLY** (PlayCanvas and SuperSplat) and the standard 3DGS **PLY** that every tool reads, by converting it in memory without writing anything. **Save as…** beside a format writes a converted copy where you choose (next to the original to start with). The original is never changed or replaced. The new file is read back and checked against the scene, and the card says how closely it matches; a copy that doesn't match is removed. SPZ and compressed PLY keep colours and shapes a little more coarsely than a trainer's PLY, which rarely shows. Converting one file at a time is free. To compare two scenes, such as a scene and a converted copy, select both and right-click **Compare Scenes** (Filescape Professional). They show **Side by side**, or **Split** into one picture with the first scene left of a line you drag and the second right of it, or as their **Difference** (black where the pictures match, bright where they don't). Turning, moving or zooming either one moves both (in side by side, untick **Turn together** to move them separately), and both are drawn at the same moment. The bar says how alike the two pictures are (PSNR: 40 dB and up looks the same), and below them are both scenes' details side by side, with the names of the ones that differ in orange. Folders where a splat scene was trained (a 3DGS run with `cfg_args` and `point_cloud`, a nerfstudio run, a PERF-GS `train` folder, or the photos and COLMAP or `transforms.json` camera solve it starts from) preview as a summary: what made them, how many photos and starting points, and how many scenes were saved along the way. With Filescape Professional the preview also breaks the folder down by what takes the space (training state, trained scenes, photos, camera solve, logs) and shows a timeline of each saved scene by training step, with its splat count and how it changed from the last one, read from the file headers only, plus the run's settings. Training checkpoints are listed by name and size and never opened. |
 | Archives | Zip, 7z and tar archives as a tree: click a folder to open it. Biggest first, with each item's size, a bar for its share of the whole, and for zip files how much compression saved on each. The details show how many files and folders there are, the unpacked size, how much the archive saves overall, its format and its largest file. They also warn about files that need a password, names that would land outside the folder it's extracted to (Filescape always leaves those out), and archives that unpack to over 1,000 times their size. |
 | Email, contacts and calendars | Emails (.eml, .emlx): the subject, sender, recipients and date, the text, and the attachments listed by name and size. HTML mail is turned into plain text, so pictures and links in it are never loaded and attachments are never opened. Mailboxes (.mbox): each message's date, sender and subject. Contact cards (.vcf): one contact's details, or a list of contacts. Calendars (.ics): one event's time, place and description, or a list of events and to-dos. |
 | Maps | GPX tracks, GeoJSON and KML/KMZ: the tracks, shapes and places drawn on a plain background with a faint latitude and longitude grid (no map is fetched to go behind them). A track shows its start (green) and end (red). The details show the name, how many features or placemarks there are, the area covered, and for a GPX track its distance, climb, height range, start time, time taken and average speed. Icons view and map tiles show the drawing too. |
@@ -708,6 +709,40 @@ right-click menu of empty space in the list has **Undo**.
 **Ctrl+Y** or **Ctrl+Shift+Z** (**⇧⌘Z** on a Mac) redoes what you just undid, and the right-click
 menu of empty space has **Redo** too. Making another change clears what can be redone.
 
+## Applications
+
+On a Mac an application such as `Safari.app` is really a folder of programs, libraries and
+pictures. Filescape shows it the way Finder does: with its own icon, its name without `.app`, and
+**Application** in the Kind column. It's recognised by what's inside (an `Info.plist` or a
+program folder), so an ordinary folder that happens to be called `Notes.app` stays a folder. Apps
+in /Applications, ~/Applications, on other drives or anywhere else are all recognised.
+
+- **Double-click** an application, or select it and press **Enter**, to launch it. macOS opens it
+  exactly as Finder would, so Gatekeeper and your security settings still apply: an app
+  downloaded from the internet asks first, and one macOS blocks stays blocked. Selecting an app,
+  previewing it or analysing it never launches it.
+- If an app can't open, Filescape says why: it's damaged or incomplete (its program is missing),
+  it needs a newer version of macOS, you don't have permission, and so on.
+- **Show Package Contents** on the right-click menu goes inside the application, to look at its
+  resources, programs, libraries and settings files. Everything works there as in any folder.
+- **Analyse Application Storage** shows what takes up the app's space in the
+  [analysis dock](#the-analysis-dock).
+
+Other kinds of bundle are named in the Kind column but open like folders: frameworks, plug-ins
+(`.plugin`, Audio Units, VST and VST3), app extensions, System Settings panes, kernel extensions,
+screen savers, Quick Look plug-ins and Spotlight importers.
+
+Icons are read from the system (or from the app's icon file) in the background and kept while
+Filescape is open, so a folder of hundreds of apps opens as fast as any other. Nothing inside an
+app is ever run to find its icon or name, and apps in cloud folders keep a plain icon so nothing
+is downloaded. Applications on a server or inside an archive can't be launched.
+
+On Windows and Linux, a Mac app (on an external drive, say) shows as an application too, but
+double-click goes inside, since it can't run there.
+
+How applications behave can be changed under **Settings › Files**: see
+[Applications & Executables](../settings/reference.md#files).
+
 ## Archives
 
 Filescape opens zip, 7z, tar, tar.gz (`.tgz`), tar.xz and tar.bz2 archives like folders. Double-click
@@ -780,6 +815,37 @@ The player reads every image type Filescape previews: OpenEXR, PNG, JPEG, TIFF, 
 rest. It also reads **DPX** at 8, 10, 12 and 16 bits, in either byte order, packed or filled. A
 sequence on a server plays too, as each frame is downloaded. Frames are shown without their alpha
 channel.
+
+## Drive details
+
+Hover a drive in the sidebar, or a card in **Computer**, to see what it is:
+
+| Detail | What it tells you |
+|---|---|
+| **Type** | Internal, external, removable media, network share, disk image, virtual (a RAM disk or FUSE), system volume, optical disc, or phone. The icon shows it too: ⏏ for drives you can eject, 💿 for disk images, 🖧 for network shares, 📱 for phones. |
+| **Filesystem** | APFS, NTFS, exFAT, ext4 and so on. |
+| **Capacity, Used, Free** | Free is what you can still write. |
+| **Connection, Model** | USB, Thunderbolt, SATA, NVMe; the make and model where the system says. |
+| **Device or Server** | The disk behind the volume (`/dev/disk5s1`), or the server and share of a network drive. |
+| **Shares space** | Other APFS volumes in the same container, which share its free space. |
+| **Access** | Read-only or writable, encrypted or not, and hidden in Finder (macOS). |
+
+### Disk images
+
+A disk image (a macOS `.dmg` or `.sparsebundle`, a Windows `.vhdx`, a Linux loop device) is a
+file on another drive that the system opens as if it were a disk. Filescape shows it nested
+under the drive its file is on, and its details name that file.
+
+A sparse image grows as you fill it, but only while its host drive has room. When the host is
+nearly full, the image can't use all of its stated size: its bar shows its files in blue and
+the part it can't use in faint red, and **Held back** says how much that is.
+
+### Phones and cameras
+
+Phones don't mount as drives on macOS or Windows, so they can't be browsed like a folder there.
+Filescape still lists one that's plugged in, with how it connects (Apple, MTP or PTP). Click it
+to open **Image Capture** on a Mac, or **This PC** in File Explorer on Windows. On Linux, phones
+the desktop has mounted (GVFS) open in Filescape like any folder.
 
 ## Slow and unreachable drives
 

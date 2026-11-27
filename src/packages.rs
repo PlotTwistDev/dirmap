@@ -20,5 +20,8 @@ pub fn kind(name: &str) -> Option<&'static str> {
 /// A folder that previews like a file: by its name, or a LightCraft library under another name
 /// (one look for its catalogue, not on a server).
 pub fn is_package(path: &Path, name: &str) -> bool {
-    kind(name).is_some() || (!crate::fsys::remote::is_remote(path) && crate::lightcraft::is_library(path))
+    kind(name).is_some()
+        || (!crate::fsys::remote::is_remote(path)
+            && (crate::lightcraft::is_library(path)
+                || crate::splat::project::layout(path).is_some()))
 }

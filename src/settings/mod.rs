@@ -57,6 +57,18 @@ impl LightLevel {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    // Files: Applications & Executables (see `crate::apps::Prefs`).
+    /// Show application bundles as applications rather than folders.
+    pub app_recognise: bool,
+    /// Draw applications with their own icons.
+    pub app_icons: bool,
+    /// "Safari" rather than "Safari.app".
+    pub app_hide_ext: bool,
+    /// Double-click and Enter launch an application.
+    pub app_double_click: bool,
+    /// Double-click and Enter go inside applications, as for any folder.
+    pub app_as_folders: bool,
+
     // General
     pub theme: Theme,
     pub units: SizeUnits,
@@ -192,6 +204,11 @@ impl Default for Settings {
             include_files: String::new(),
             min_file_size: 0,
             max_age_days: 0,
+            app_recognise: true,
+            app_icons: true,
+            app_hide_ext: true,
+            app_double_click: true,
+            app_as_folders: false,
             col_percent: true,
             col_files: true,
             col_modified: true,
@@ -274,6 +291,10 @@ impl Settings {
                 (self.theme, self.units, self.stripes, self.live_tree, self.watch_changes, self.check_updates, self.ui_scale, self.system_notes, self.backup_reminder) =
                     (def.theme, def.units, def.stripes, def.live_tree, def.watch_changes, def.check_updates, def.ui_scale, def.system_notes, def.backup_reminder);
             }
+            Tab::Files => {
+                (self.app_recognise, self.app_icons, self.app_hide_ext, self.app_double_click, self.app_as_folders) =
+                    (def.app_recognise, def.app_icons, def.app_hide_ext, def.app_double_click, def.app_as_folders);
+            }
             Tab::Filtering => {
                 self.exclude_folders = def.exclude_folders;
                 self.exclude_files = def.exclude_files;
@@ -332,6 +353,13 @@ impl Settings {
         crate::thumbcache::set_limit((self.thumb_cache_mb.max(16.0) as u64) << 20);
         crate::video::set_better_posters(self.video_better_poster);
         crate::thumbcache::set_rich(self.rich_thumbs);
+        crate::apps::set_prefs(crate::apps::Prefs {
+            recognise: self.app_recognise,
+            icons: self.app_icons,
+            hide_ext: self.app_hide_ext,
+            double_click: self.app_double_click,
+            as_folders: self.app_as_folders,
+        });
     }
 }
 
@@ -378,6 +406,7 @@ impl PreviewPreset {
 pub enum Tab {
     #[default]
     General,
+    Files,
     Filtering,
     FolderList,
     Treemap,
@@ -388,11 +417,12 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 8] = [Tab::General, Tab::Filtering, Tab::FolderList, Tab::Treemap, Tab::Cloud, Tab::Previews, Tab::Advanced, Tab::Licensing];
+    pub const ALL: [Tab; 9] = [Tab::General, Tab::Files, Tab::Filtering, Tab::FolderList, Tab::Treemap, Tab::Cloud, Tab::Previews, Tab::Advanced, Tab::Licensing];
 
     pub fn name(self) -> &'static str {
         match self {
             Tab::General => "General",
+            Tab::Files => "Files",
             Tab::Filtering => "Filtering",
             Tab::FolderList => "Folder list",
             Tab::Treemap => "Treemap",
@@ -406,6 +436,7 @@ impl Tab {
     pub fn icon(self) -> Icon {
         match self {
             Tab::General => Icon::Gear,
+            Tab::Files => Icon::Folder,
             Tab::Filtering => Icon::Filter,
             Tab::FolderList => Icon::List,
             Tab::Treemap => Icon::Grid,
@@ -419,6 +450,7 @@ impl Tab {
     pub fn description(self) -> &'static str {
         match self {
             Tab::General => "Appearance, how sizes are written, scanning and updates.",
+            Tab::Files => "How the Files workspace shows and opens applications.",
             Tab::Filtering => "Choose what scans skip and what they count. These rules apply from the next scan.",
             Tab::FolderList => "Choose the columns of the folder list in Storage Analysis.",
             Tab::Treemap => "How the treemap looks and moves. Every change previews live in the main window.",
@@ -562,6 +594,7 @@ impl Dialog {
         use crate::help::topics;
         match self.tab {
             Tab::General => topics::SETTINGS_GENERAL,
+            Tab::Files => topics::SETTINGS_FILES,
             Tab::Filtering => topics::SETTINGS_FILTERING,
             Tab::FolderList => topics::SETTINGS_FOLDER_LIST,
             Tab::Treemap => topics::SETTINGS_TREEMAP,
@@ -703,6 +736,7 @@ impl Dialog {
                             };
                             match self.tab {
                                 Tab::General => pages::general(ui, &mut cx, licence),
+                                Tab::Files => pages::files(ui, &mut cx),
                                 Tab::Filtering => pages::filtering(ui, &mut cx),
                                 Tab::FolderList => pages::folder_list(ui, &mut cx),
                                 Tab::Treemap => pages::treemap(ui, &mut cx),

@@ -90,6 +90,9 @@
 - **Compare Scenes** (Professional): select two splat scenes and right-click to see them side
   by side, split by a line you drag, or as their difference, turning together, with how alike
   the pictures are and both scenes' details side by side.
+- **Splat training folders** preview as a summary of what trained them, the photos and
+  starting points used, and the scenes saved along the way. Professional adds what takes the
+  space and a timeline of each saved scene by training step, with its splat count.
 
 ### The AI Models workspace
 

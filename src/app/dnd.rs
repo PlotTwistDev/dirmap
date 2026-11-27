@@ -120,7 +120,7 @@ mod tests {
     use super::*;
 
     fn drive(root: &str) -> Drive {
-        Drive { root: root.into(), label: String::new(), total: 1, free: 1, network: false }
+        Drive { root: root.into(), total: 1, free: 1, ..Default::default() }
     }
 
     #[test]

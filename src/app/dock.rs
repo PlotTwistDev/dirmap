@@ -946,7 +946,7 @@ mod tests {
     }
 
     fn entry(name: &str, size: u64, is_dir: bool, modified: i64) -> Entry {
-        Entry { name: name.into(), is_dir, is_link: false, hidden: false, size, alloc: size, flags: 0, modified }
+        Entry { name: name.into(), is_dir, is_link: false, hidden: false, size, alloc: size, flags: 0, modified, bundle: 0 }
     }
 
     #[test]

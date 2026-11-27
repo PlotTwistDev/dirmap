@@ -12,6 +12,7 @@ pub mod gpu;
 pub mod html;
 pub mod inspect;
 pub mod ply;
+pub mod project;
 #[allow(clippy::module_inception)]
 pub mod splat;
 pub mod sog;

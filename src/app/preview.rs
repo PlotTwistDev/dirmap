@@ -268,6 +268,13 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(e) => Content::Error(e),
         };
     }
+    // A Gaussian splat training project or capture: a folder, shown as one.
+    if !crate::fsys::remote::is_remote(path) && path.is_dir() {
+        if let Some(p) = crate::splat::project::read(path) {
+            let (blocks, facts) = crate::splat::project::describe(path, &p);
+            return Content::Doc { blocks: Arc::new(blocks), facts };
+        }
+    }
     // On a server: fetched to a temporary copy first (not huge ones).
     if crate::fsys::remote::is_remote(path) {
         let archive = path.file_name().is_some_and(|n| crate::fsys::archive::is_archive(&n.to_string_lossy()));
@@ -1085,7 +1092,7 @@ impl App {
             let (kind, size) = match t.seqs.get(&i) {
                 Some(s) => (format!("{} sequence", s.seq.extension().to_uppercase()), s.seq.bytes),
                 // A folder's size is known only from an analysis that covers it.
-                None if e.is_dir => (browser::kind_for(&e.name, true), t.sizes.as_ref().and_then(|s| s.1.get(&e.name)).map_or(0, |s| s.0)),
+                None if e.is_dir => (browser::entry_kind(e), t.sizes.as_ref().and_then(|s| s.1.get(&e.name)).map_or(0, |s| s.0)),
                 None => (browser::kind_for(&e.name, false), e.size),
             };
             let k = kinds.entry(kind).or_default();
@@ -1173,6 +1180,9 @@ impl App {
         // like a file.
         if details {
             // The Details tab: no big preview, everything known about it.
+        } else if crate::apps::is_app(e.bundle) {
+            let (r, _) = ui.allocate_exact_size(vec2(w, 112.0), Sense::hover());
+            self.icons.paint_app(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), &path, e.modified);
         } else if e.is_dir && !crate::packages::is_package(&path, &e.name) {
             let (r, _) = ui.allocate_exact_size(vec2(w, 96.0), Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(64.0, 64.0)), true, "", Color32::GRAY);
@@ -1185,7 +1195,7 @@ impl App {
         }
         let facts_top = ui.cursor().top();
         ui.add_space(8.0);
-        ui.add(egui::Label::new(egui::RichText::new(&*e.name).strong()).wrap());
+        ui.add(egui::Label::new(egui::RichText::new(crate::apps::shown_name(&e.name, e.bundle)).strong()).wrap());
         ui.add_space(4.0);
         let actions = |app: &mut Self, ui: &mut egui::Ui| {
             ui.horizontal_wrapped(|ui| {
@@ -1214,7 +1224,7 @@ impl App {
         };
         if !details {
             // The Preview tab: what it is and how big, in one line; the rest is under Details.
-            let what = browser::kind_for(&e.name, e.is_dir);
+            let what = browser::entry_kind(&e);
             let line = if !e.is_dir {
                 format!("{what} · {}", crate::scan::human(e.size))
             } else if let Some(&(b, f)) = self.files.cur().sizes.as_ref().and_then(|s| s.1.get(&e.name)) {
@@ -1231,7 +1241,7 @@ impl App {
         }
         egui::Grid::new("preview-facts").num_columns(2).spacing([10.0, 3.0]).show(ui, |ui| {
             ui.weak("Kind");
-            ui.label(browser::kind_for(&e.name, e.is_dir));
+            ui.label(browser::entry_kind(&e));
             ui.end_row();
             if !e.is_dir {
                 ui.weak("Size");
@@ -1472,6 +1482,12 @@ impl App {
 
     fn preview_main(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
         let pal = style::pal(ui);
+        if crate::apps::is_app(e.bundle) {
+            let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+            let side = (r.width().min(r.height()) * 0.6).clamp(64.0, 256.0);
+            self.icons.paint_app(ui, Rect::from_center_size(r.center(), vec2(side, side)), path, e.modified);
+            return;
+        }
         if e.is_dir && !crate::packages::is_package(path, &e.name) {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), true, "", Color32::GRAY);
@@ -1705,7 +1721,12 @@ impl App {
             Content::Model { mesh, tex, drawn } => model_view(ui, path, mesh, tex, drawn, size),
             Content::Splat { scene, tex, drawn } => splat_view(ui, path, scene, tex, drawn, size),
             Content::Doc { blocks, .. } => {
-                let blocks = blocks.clone();
+                let mut blocks = blocks.clone();
+                // A splat training project's breakdown and timeline are Pro.
+                let project = matches!(blocks.first(), Some(crate::help::doc::Block::Heading { id, .. }) if id == crate::splat::project::PREVIEW_ID);
+                if project && !self.licence.allows(crate::licence::Feature::SplatProjects) {
+                    blocks = Arc::new(crate::splat::project::free_blocks(&blocks));
+                }
                 let pal = style::pal(ui);
                 egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
                     ui.set_min_size(size - vec2(16.0, 16.0));
@@ -2841,7 +2862,7 @@ fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, 
 
 /// "12.4 MB · PNG image · 3 Nov 2026"
 pub(super) fn facts_line(e: &Entry) -> String {
-    let mut s = browser::kind_for(&e.name, e.is_dir);
+    let mut s = browser::entry_kind(e);
     if !e.is_dir {
         s = format!("{} · {s}", crate::scan::human(e.size));
         if e.flags & crate::scan::store::ONLINE_ONLY != 0 {

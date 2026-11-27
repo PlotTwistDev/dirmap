@@ -235,6 +235,8 @@ mod imp {
         let Ok(rd) = std::fs::read_dir(gvfs()) else { return Vec::new() };
         let mut out: Vec<NetPlace> = rd
             .flatten()
+            // Phones and cameras are listed with the drives.
+            .filter(|e| crate::drives::gvfs_phone(&e.file_name().to_string_lossy()).is_none())
             .map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
                 NetPlace { remote: gvfs_remote(&name).unwrap_or_else(|| name.clone()), path: e.path(), disconnected: false }

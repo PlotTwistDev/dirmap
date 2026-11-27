@@ -279,7 +279,9 @@ pub struct App {
     expanded: HashSet<Box<[u32]>>,
     rows: Option<Vec<Row>>,
     drives: Vec<Drive>,
-    drives_rx: Option<mpsc::Receiver<(Vec<Drive>, Vec<PathBuf>)>>,
+    drives_rx: Option<mpsc::Receiver<(Vec<Drive>, Vec<PathBuf>, Vec<drives::Phone>)>>,
+    /// Phones and cameras plugged in, listed with the drives.
+    phones: Vec<drives::Phone>,
     /// WSL distributions (Windows), shown under Linux in the File Manager's sidebar.
     wsl: Vec<PathBuf>,
     /// The window's handle on Windows (for the system's own right-click menu), else 0.
@@ -436,6 +438,7 @@ impl App {
             drives: Vec::new(),
             drives_rx: None,
             wsl: Vec::new(),
+            phones: Vec::new(),
             hwnd: window_handle(cc),
             show_drives: false,
             filter: ViewFilter::default(),
@@ -922,7 +925,7 @@ impl App {
     fn refresh_drives(&mut self) {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send((drives::list(), drives::wsl()));
+            let _ = tx.send((drives::list(), drives::wsl(), drives::phones()));
         });
         self.drives_rx = Some(rx);
     }
@@ -2813,8 +2816,9 @@ impl eframe::App for App {
 
         if let Some(rx) = &self.drives_rx {
             match rx.try_recv() {
-                Ok((d, wsl)) => {
+                Ok((d, wsl, phones)) => {
                     self.drives = d;
+                    self.phones = phones;
                     self.wsl = wsl;
                     self.drives_rx = None;
                 }
@@ -2824,7 +2828,7 @@ impl eframe::App for App {
         // Scanning a whole drive: its used space gives an estimate of how far along we are.
         // Checked every frame because the drive list may arrive after the scan starts.
         if let Some(job) = self.job.as_mut().filter(|j| j.expected.is_none()) {
-            job.expected = self.drives.iter().find(|d| same_path(&d.root, &job.root)).map(|d| d.used()).filter(|&u| u > 0);
+            job.expected = self.drives.iter().find(|d| same_path(&d.root, &job.root)).map(|d| d.content()).filter(|&u| u > 0);
         }
 
         // Collect a finished scan.
