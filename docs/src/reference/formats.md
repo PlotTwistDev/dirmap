@@ -42,7 +42,7 @@ for the settings.
 | Video | `.mp4` `.m4v` `.mov` `.mkv` `.avi` `.wmv` `.webm` `.mpg` `.mpeg` `.m2ts` `.mts` `.3gp` `.flv` `.mxf` | A frame, playback and a filmstrip | The system (AVFoundation, Media Foundation, or ffmpeg on Linux) |
 | Sound | `.mp3` `.wav` `.flac` `.m4a` `.aac` `.ogg` `.oga` `.opus` `.wma` `.aif` `.aiff` `.alac` | Cover, waveform, tags and playback | The system, with lofty for tags |
 | CSV or TSV table | `.csv` `.tsv` `.tab` | A table, with column names from the first row | Filescape (csv) |
-| SQLite database | `.sqlite` `.sqlite3` `.db` `.db3` `.s3db` `.sl3` | Each table's columns and first rows, read-only | SQLite (rusqlite) |
+| SQLite database | `.sqlite` `.sqlite3` `.db` `.db3` `.s3db` `.sl3` | Each table's columns, first rows, row count and size in the file, largest first; read-only | SQLite (rusqlite) |
 | 3D model | `.stl` `.obj` `.ply` `.gltf` `.glb` `.3mf` `.fbx` `.dae` `.abc` | A shaded model to turn about; PLY point clouds are drawn as points and Gaussian splat scenes as splats, with their details | Filescape (gltf for glTF, craft-mesh for FBX, COLLADA and Alembic) |
 | Gaussian splat scene (SPZ) | `.spz` | The splats drawn on the graphics chip to turn, move and zoom about (points where it can't), with its splat count, colour detail, size and checks for stray or invisible splats | Filescape |
 | Gaussian splat scene (SPLAT, KSPLAT, SOG) | `.splat` `.ksplat` `.sog` | The splats drawn on the graphics chip to turn, move and zoom about (points where it can't), with its splat count, colour detail, size and checks for stray or invisible splats | Filescape |

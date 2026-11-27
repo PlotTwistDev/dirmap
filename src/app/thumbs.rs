@@ -480,7 +480,7 @@ fn snippet(path: &Path, kind: TextKind) -> Option<String> {
             let k = crate::officedoc::kind_of(&path.file_name()?.to_string_lossy())?;
             crate::officedoc::plain_text(&crate::officedoc::read(path, k).ok()?)
         }
-        TextKind::Database => crate::sheets::snippet(&crate::tables::read_sqlite(path, 40, 12).ok()?),
+        TextKind::Database => crate::sheets::snippet(&crate::tables::read_sqlite(path, 40, 12, false).ok()?),
         TextKind::Book => crate::officedoc::plain_text(&crate::epub::open(path, 40).ok()?.blocks),
         TextKind::Mail => crate::mailview::snippet(path)?,
         TextKind::Project => crate::officedoc::plain_text(&crate::daw::read(path).ok()?.0),

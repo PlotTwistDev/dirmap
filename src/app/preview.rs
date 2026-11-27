@@ -331,7 +331,7 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(e) if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("obj")) && e.contains("object file") => Content::Binary,
             Err(e) => Content::Error(e),
         },
-        Kind::Database => match crate::tables::read_sqlite(path, crate::sheets::ROWS, crate::sheets::COLS) {
+        Kind::Database => match crate::tables::read_sqlite(path, crate::sheets::ROWS, crate::sheets::COLS, true) {
             Ok(b) => Content::Sheet(Arc::new(b)),
             Err(e) => Content::Error(e),
         },
@@ -1748,7 +1748,15 @@ fn sheet_view(ui: &mut egui::Ui, path: &Path, book: &crate::sheets::Book, size: 
             egui::ScrollArea::horizontal().id_salt(("sheet-tabs", path)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for (i, s) in book.sheets.iter().enumerate() {
-                        ui.selectable_value(&mut pick, i, &s.name);
+                        // A database's tables carry their size, quieter than the name.
+                        let mut job = egui::text::LayoutJob::default();
+                        let body = egui::TextStyle::Button.resolve(ui.style());
+                        let colour = if pick == i { ui.visuals().selection.stroke.color } else { ui.visuals().widgets.inactive.fg_stroke.color };
+                        job.append(&s.name, 0.0, egui::TextFormat::simple(body.clone(), colour));
+                        if let Some(b) = s.bytes {
+                            job.append(&crate::scan::human(b), 6.0, egui::TextFormat::simple(FontId::proportional(body.size * 0.85), colour.gamma_multiply(0.6)));
+                        }
+                        ui.selectable_value(&mut pick, i, job);
                     }
                 });
             });
@@ -1758,6 +1766,9 @@ fn sheet_view(ui: &mut egui::Ui, path: &Path, book: &crate::sheets::Book, size: 
         let (h, w) = sheet.size;
         let more = if sheet.rows_known { "" } else { "+" };
         let mut note = format!("{}{more} {} × {} columns", group(h as u64), if h == 1 && sheet.rows_known { "row" } else { "rows" }, group(w as u64));
+        if let Some(b) = sheet.bytes {
+            note.push_str(&format!(" · {} in the file", crate::scan::human(b)));
+        }
         if h > sheet.rows.len() || w > crate::sheets::COLS {
             note.push_str(&format!(" · the first {} rows and {} columns", sheet.rows.len(), w.min(crate::sheets::COLS)));
         }
