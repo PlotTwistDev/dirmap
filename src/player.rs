@@ -620,6 +620,11 @@ impl Shared {
 
     /// The next frame to decode, making room for it if a frame further ahead can go.
     fn pick(&self, st: &mut State) -> Option<usize> {
+        // Until one frame has been decoded its size isn't known, so decode just one: with many
+        // workers starting at once they would otherwise all start a frame and overrun the budget.
+        if st.est == 0 && !st.busy.is_empty() {
+            return None;
+        }
         let n = self.slots.len();
         let mut held = 0usize;
         for d in 0..n {
