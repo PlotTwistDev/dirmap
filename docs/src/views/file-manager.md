@@ -647,6 +647,12 @@ workspace opens with the item selected in its folder.
   Finder. Hold **Ctrl** or **Alt** while you let go to copy, or **Shift** to move (on a Mac,
   **⌥** copies and **⌘** moves). The label by the pointer always says which will happen, and a
   folder can't be dropped inside itself.
+- **Drag out of Filescape** (macOS and Windows). Drag items past the edge of the window and drop
+  them on Finder or Explorer, the Desktop, another app (Mail, a chat, an editor) or the Trash in
+  the Dock (the Recycle Bin on Windows). The other app treats them exactly as if they came from
+  Finder or Explorer: Finder moves them on the same drive and copies them to another, and the
+  Trash keeps **Put Back**. Items on servers or inside archives can't be dragged out. On Linux,
+  dragging stops at the window's edge for now.
 - **Rename** with **F2**, and **Delete** to send items to the Recycle Bin or Trash. Filescape asks
   first. **Ctrl+Z** undoes any of these.
 

@@ -2755,6 +2755,7 @@ impl eframe::App for App {
         self.settings.apply_previews();
         scan::set_shown_metric(self.metric);
 
+        self.drag_out(&ctx);
         self.help_keys(&ctx);
         let about = help::AboutInfo { renderer: self.renderer, elevated: elevate::is_elevated() };
         if let Some(help::Action::ApplyFilter(p)) = self.help.ui(&ctx, &about) {
@@ -3528,7 +3529,8 @@ mod filter_tests {
     }
 }
 
-/// The native window handle, for the Windows shell menu.
+/// The native window handle: the HWND on Windows (the shell menu, dragging out), the window's
+/// NSView on macOS (dragging out).
 fn window_handle(cc: &eframe::CreationContext) -> isize {
     #[cfg(windows)]
     {
@@ -3537,6 +3539,15 @@ fn window_handle(cc: &eframe::CreationContext) -> isize {
             && let RawWindowHandle::Win32(w) = h.as_raw()
         {
             return w.hwnd.get();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(h) = cc.window_handle()
+            && let RawWindowHandle::AppKit(w) = h.as_raw()
+        {
+            return w.ns_view.as_ptr() as isize;
         }
     }
     let _ = cc;

@@ -159,3 +159,42 @@ mod tests {
         assert!(!pointless(&[a], Path::new("/y"), DropOp::Move));
     }
 }
+
+impl App {
+    /// Hand a drag to the system once it leaves the window, so items can be dropped on Finder,
+    /// Explorer, the Desktop, other apps or the Trash (see `crate::dragout`); and tidy up after
+    /// one that has ended.
+    pub(super) fn drag_out(&mut self, ctx: &egui::Context) {
+        if let Some((paths, how)) = crate::dragout::take_ended() {
+            // Dropped on the Trash but still here: the Dock left the moving to us. Through
+            // Finder, so Put Back and Undo work.
+            let left: Vec<PathBuf> = paths.into_iter().filter(|p| p.symlink_metadata().is_ok()).collect();
+            if how == crate::dragout::Outcome::Trashed && !left.is_empty() {
+                let name = match &left[..] {
+                    [one] => one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                    many => format!("{} items", many.len()),
+                };
+                self.trash_paths(name, left);
+            }
+            self.files.refresh();
+            ctx.request_repaint();
+        }
+        if !crate::dragout::SUPPORTED || self.hwnd == 0 {
+            return;
+        }
+        let Some(items) = egui::DragAndDrop::payload::<DragItems>(ctx) else { return };
+        let outside = ctx.input(|i| i.pointer.primary_down() && i.pointer.latest_pos().is_none_or(|p| !i.content_rect().contains(p)));
+        if !outside {
+            return;
+        }
+        egui::DragAndDrop::clear_payload(ctx);
+        // Only items on this computer: server and archive items have no file for other apps.
+        let paths: Vec<PathBuf> = items.0.iter().filter(|p| !crate::fsys::remote::is_remote(p) && !crate::fsys::archive::inside(p)).cloned().collect();
+        if paths.is_empty() {
+            return;
+        }
+        if let Err(e) = crate::dragout::start(self.hwnd, paths) {
+            self.ops.notice = Some((e, true));
+        }
+    }
+}
