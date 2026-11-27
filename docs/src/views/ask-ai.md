@@ -82,6 +82,9 @@ About This…** (**Ask AI About These…** for several items in Files). Ask AI o
 attached to your next question, shown above the question box as **📎 About …**. Ask something like
 "What is this folder for?" or "What could I delete here?".
 
+From inside Ask AI, press **Attach…** under **Send** and choose **A file…** or **A folder…**, or
+drop files and folders from your file manager onto Ask AI.
+
 What the model is told:
 
 - The item's path, whether it's a file or folder, its size and when it was last changed.
@@ -96,6 +99,13 @@ What the model is told:
 Press **×** to ask without them. After you send the question, **📎 About …** stays above it; hover
 it to see exactly what the model was told. Follow-up questions in the same chat can refer back to
 it.
+
+Under the answer, **Based on** lists the files and folders it was given, and whether the model saw
+only their names, sizes and dates or the text of the files too. Click one to show it in Files.
+
+What comes from your files is marked off from your question, and the model is told it is material
+to answer about, not instructions. A document that says "ignore your instructions" is read as part
+of the document. Small models can still be misled by what they read, so check answers that matter.
 
 Nothing is sent anywhere: the model runs on this computer. Ask AI never deletes, moves or renames
 anything, whatever the answer says.
