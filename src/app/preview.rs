@@ -127,6 +127,11 @@ pub(super) struct Look {
     pub video: Option<VideoView>,
     /// Frames from across the video being previewed.
     strip: Option<StripView>,
+    /// Quick Look's own window: where it opened this time (kept while it's open, so the system
+    /// is free to move it), and where it was last (outer top left, inner size), to open there
+    /// next time.
+    win_home: Option<(egui::Pos2, Vec2)>,
+    win_last: Option<(egui::Pos2, Vec2)>,
 }
 
 /// A video's filmstrip: being read, then its frames.
@@ -886,6 +891,11 @@ impl Look {
     }
 }
 
+/// Quick Look's own window.
+fn look_viewport() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("quick-look")
+}
+
 impl App {
     /// The item a preview shows: the cursor's item in the focused pane.
     fn look_target(&self) -> Option<(PathBuf, Entry)> {
@@ -901,6 +911,7 @@ impl App {
     /// the window with it.
     pub(super) fn quick_look(&mut self, ctx: &egui::Context) {
         if !self.files.look.open {
+            self.files.look.win_home = None;
             return;
         }
         let Some((path, e)) = self.look_target() else {
@@ -916,6 +927,13 @@ impl App {
         }
         if !typing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
             self.files.look.full = !self.files.look.full;
+            if !ctx.embed_viewports() {
+                ctx.send_viewport_cmd_to(look_viewport(), egui::ViewportCommand::Fullscreen(self.files.look.full));
+            }
+        }
+        if !ctx.embed_viewports() {
+            self.quick_look_window(ctx, path, e);
+            return;
         }
         let screen = ctx.content_rect();
         let size = vec2((screen.width() * 0.72).max(420.0), (screen.height() * 0.78).max(320.0));
@@ -967,6 +985,88 @@ impl App {
             self.files.look.full = false;
         }
         if step != 0 {
+            self.files_move_cursor(|pos, _| pos.map(|p| p as i64 + step).unwrap_or(0), false);
+        }
+    }
+
+    /// Quick Look in a window of its own, which can be moved anywhere, outside the app too, and
+    /// made full screen (F). Keys pressed in it work as they do over the app.
+    fn quick_look_window(&mut self, ctx: &egui::Context, path: PathBuf, e: Entry) {
+        let id = look_viewport();
+        let home = *self.files.look.win_home.get_or_insert_with(|| {
+            self.files.look.win_last.unwrap_or_else(|| {
+                // First time: centred over the app, about three quarters of its size.
+                let app = ctx.input(|i| i.viewport().outer_rect).unwrap_or_else(|| ctx.content_rect());
+                let size = vec2((app.width() * 0.72).max(420.0), (app.height() * 0.78).max(320.0));
+                (app.center() - size / 2.0, size)
+            })
+        });
+        let builder = egui::ViewportBuilder::default()
+            .with_title(format!("{} – Quick Look", e.name))
+            .with_position(home.0)
+            .with_inner_size(home.1)
+            .with_min_inner_size([320.0, 240.0]);
+        let full = self.files.look.full;
+        let (mut close, mut step, mut toggle) = (false, 0i64, false);
+        ctx.show_viewport_immediate(id, builder, |ctx, _class| {
+            let (closing, outer, inner) = ctx.input(|i| (i.viewport().close_requested(), i.viewport().outer_rect, i.viewport().inner_rect));
+            close |= closing;
+            if let (Some(o), Some(r), false) = (outer, inner, full) {
+                self.files.look.win_last = Some((o.min, r.size()));
+            }
+            if !ctx.egui_wants_keyboard_input() {
+                use egui::{Key, Modifiers as M};
+                ctx.input_mut(|i| {
+                    close |= i.consume_key(M::NONE, Key::Escape) || i.consume_key(M::NONE, Key::Space);
+                    toggle |= i.consume_key(M::NONE, Key::F);
+                    if i.consume_key(M::NONE, Key::ArrowDown) {
+                        step = 1;
+                    }
+                    if i.consume_key(M::NONE, Key::ArrowUp) {
+                        step = -1;
+                    }
+                });
+            }
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&*e.name).strong());
+                    ui.weak(facts_line(&e));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Open").clicked() {
+                            let p = path.clone();
+                            self.files.spawn(move || crate::actions::open(&p));
+                        }
+                        let (label, tip) = if full { ("Window", "Back to a window (F)") } else { ("Full screen", "Fill the screen (F)") };
+                        if ui.button(label).on_hover_text(tip).clicked() {
+                            toggle = true;
+                        }
+                        if !self.files.look.from_map {
+                            if ui.button("▶").on_hover_text("Next file (↓)").clicked() {
+                                step = 1;
+                            }
+                            if ui.button("◀").on_hover_text("Previous file (↑)").clicked() {
+                                step = -1;
+                            }
+                        }
+                        let next = if self.files.look.from_map { "" } else { "⏶⏷ next · " };
+                        ui.weak(if cfg!(target_os = "macos") { format!("{next}Space closes") } else { format!("{next}Space or Esc closes") });
+                    });
+                });
+                ui.separator();
+                let avail = ui.available_size();
+                self.preview_body(ui, &path, &e, avail);
+            });
+        });
+        if toggle {
+            self.files.look.full = !full;
+            ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Fullscreen(!full));
+        }
+        if close {
+            self.files.look.open = false;
+            self.files.look.full = false;
+            self.files.look.win_home = None;
+        }
+        if step != 0 && !self.files.look.from_map {
             self.files_move_cursor(|pos, _| pos.map(|p| p as i64 + step).unwrap_or(0), false);
         }
     }
@@ -1042,40 +1142,103 @@ impl App {
         ui.separator();
     }
 
-    pub(super) fn preview_pane(&mut self, ui: &mut egui::Ui) {
+    /// The preview pane at the right of the list, laid out as Storage Analysis's: Preview and
+    /// Details tabs, the preview taking all the room the facts under it leave in the pane
+    /// (`tall` points high), so they sit at the bottom and pictures and videos get the space.
+    pub(super) fn preview_pane(&mut self, ui: &mut egui::Ui, tall: f32) {
+        use super::rails::PreviewTab;
+        use crate::kit::{self, Icon, Kind as K};
         let pal = style::pal(ui);
-        ui.add_space(6.0);
+        ui.add_space(4.0);
         ui.horizontal(|ui| {
-            style::section_title(ui, "Preview");
+            let mut tab = self.files.prefs.map_preview_tab;
+            kit::segmented(ui, &mut tab, &[(PreviewTab::Preview, "Preview"), (PreviewTab::Details, "Details")], false);
+            self.files.prefs.map_preview_tab = tab;
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if style::icon_button(ui, true, "✖", "Close the preview pane (Alt+P)").clicked() {
+                if kit::icon_button(ui, Icon::FoldRight, "Close the preview pane (Alt+P)").clicked() {
                     self.files.prefs.preview = false;
                 }
             });
         });
+        ui.add_space(4.0);
+        let details = self.files.prefs.map_preview_tab == PreviewTab::Details;
         self.selection_tally(ui);
         let Some((path, e)) = self.look_target() else {
-            ui.add_space(30.0);
-            ui.vertical_centered(|ui| ui.label(egui::RichText::new("Select a file to preview it").color(pal.weak)));
+            ui.add_space((tall * 0.28).max(30.0));
+            ui.vertical_centered(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+                crate::kit::icons::paint(ui.painter(), r, Icon::File, pal.weak.gamma_multiply(0.6));
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("Nothing selected").strong());
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new("Select a file to see its preview and details here. Space opens a large preview.").color(pal.weak));
+            });
             return;
         };
-        ui.add_space(4.0);
         let w = ui.available_width();
-        let h = (ui.available_height() * 0.55).clamp(120.0, w * 1.2);
         // Folders get an icon; a package (a Logic project, a LightCraft library…) gets a preview
         // like a file.
-        if crate::apps::is_app(e.bundle) {
+        if details {
+            // The Details tab: no big preview, everything known about it.
+        } else if crate::apps::is_app(e.bundle) {
             let (r, _) = ui.allocate_exact_size(vec2(w, 112.0), Sense::hover());
             self.icons.paint_app(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), &path, e.modified);
         } else if e.is_dir && !crate::packages::is_package(&path, &e.name) {
             let (r, _) = ui.allocate_exact_size(vec2(w, 96.0), Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(64.0, 64.0)), true, "", Color32::GRAY);
         } else {
+            // The facts' height as last drawn (they're drawn after the preview).
+            let facts = ui.data(|d| d.get_temp::<f32>(egui::Id::new("files-preview-facts"))).unwrap_or(150.0);
+            let above = ui.cursor().top() - ui.max_rect().top();
+            let h = (tall - above - facts - 10.0).max(tall * 0.45).max(120.0);
             self.preview_body(ui, &path, &e, vec2(w, h));
         }
+        let facts_top = ui.cursor().top();
         ui.add_space(8.0);
         ui.add(egui::Label::new(egui::RichText::new(crate::apps::shown_name(&e.name, e.bundle)).strong()).wrap());
         ui.add_space(4.0);
+        let actions = |app: &mut Self, ui: &mut egui::Ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+                if kit::button(ui, K::Secondary, Some(Icon::External), "Open").on_hover_text("Open it with its usual app").clicked() {
+                    let p = path.clone();
+                    app.files.spawn(move || crate::actions::open(&p));
+                }
+                if !e.is_dir && kit::button(ui, K::Secondary, Some(Icon::Eye), "Quick Look").on_hover_text("A large preview (Space)").clicked() {
+                    app.files.look.open = true;
+                    app.files.look.from_map = false;
+                }
+                let r = kit::icon_button(ui, Icon::More, "More");
+                egui::Popup::menu(&r).show(|ui| {
+                    if ui.button(if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in folder" }).clicked() {
+                        let p = path.clone();
+                        app.files.spawn(move || crate::actions::reveal(&p));
+                        ui.close();
+                    }
+                    if ui.button("Copy path").clicked() {
+                        ui.ctx().copy_text(path.display().to_string());
+                        ui.close();
+                    }
+                });
+            });
+        };
+        if !details {
+            // The Preview tab: what it is and how big, in one line; the rest is under Details.
+            let what = browser::entry_kind(&e);
+            let line = if !e.is_dir {
+                format!("{what} · {}", crate::scan::human(e.size))
+            } else if let Some(&(b, f)) = self.files.cur().sizes.as_ref().and_then(|s| s.1.get(&e.name)) {
+                format!("{what} · {} · {} files", crate::scan::human(b), group(f))
+            } else {
+                what
+            };
+            ui.add(egui::Label::new(egui::RichText::new(line).color(pal.weak)).wrap());
+            ui.add_space(4.0);
+            actions(self, ui);
+            let facts = ui.cursor().top() - facts_top;
+            ui.data_mut(|d| d.insert_temp(egui::Id::new("files-preview-facts"), facts));
+            return;
+        }
         egui::Grid::new("preview-facts").num_columns(2).spacing([10.0, 3.0]).show(ui, |ui| {
             ui.weak("Kind");
             ui.label(browser::entry_kind(&e));
@@ -1140,16 +1303,7 @@ impl App {
             super::explain::preview_section(ui, &path, &e.name);
         }
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if ui.button("Open").clicked() {
-                let p = path.clone();
-                self.files.spawn(move || crate::actions::open(&p));
-            }
-            if !e.is_dir && ui.button("Quick Look").on_hover_text("Space").clicked() {
-                self.files.look.open = true;
-                self.files.look.from_map = false;
-            }
-        });
+        actions(self, ui);
     }
 
     /// The preview itself: an image, text, or a large icon.
@@ -1372,8 +1526,11 @@ impl App {
             }
             return;
         }
-        if let Some(v) = self.files.look.video.as_mut() {
-            let open_outside = video_view(ui, v, size);
+        if self.files.look.video.is_some() {
+            // The filmstrip under the video seeks too, so it needs no bar of its own then.
+            let strip = self.files.look.strip.as_ref().is_some_and(|s| s.path == path && !s.frames.is_empty());
+            let v = self.files.look.video.as_mut().expect("just checked");
+            let open_outside = video_view(ui, v, size, !strip);
             if open_outside {
                 if let Some(v) = &self.files.look.video {
                     v.video.pause();
@@ -1435,6 +1592,10 @@ impl App {
                 // Scale against the full image, so 1:1 means actual pixels even when shown smaller.
                 // A drawing can be shown larger than its own size: it was drawn big enough.
                 let fit = (r.width() / full[0] as f32).min(r.height() / full[1] as f32).min(if source.is_some() { 8.0 } else { 1.0 });
+                // A video's frame (with its play button over the middle) is always shown whole:
+                // it's a stand-in for the video, not a picture to zoom into.
+                let video = crate::media::media_of(&e.name) == Some(crate::media::Media::Video) && !crate::fsys::remote::is_remote(path) && !crate::fsys::archive::inside(path);
+                let (zoom, pan) = if video { (None, Vec2::ZERO) } else { (zoom, pan) };
                 let scale = zoom.unwrap_or(fit);
                 let shown = vec2(full[0] as f32, full[1] as f32) * scale;
                 let img_rect = Rect::from_center_size(r.center() + pan, shown);
@@ -1445,7 +1606,7 @@ impl App {
                 // Wheel zooms about the pointer, drag pans, double-click toggles fit / 1:1.
                 let mut z = scale;
                 let mut pn = pan;
-                if resp.hovered() {
+                if resp.hovered() && !video {
                     let wheel = ui.input(|i| i.smooth_scroll_delta.y);
                     if wheel != 0.0 {
                         let f = (wheel / 200.0).exp();
@@ -1458,11 +1619,11 @@ impl App {
                         new_view = Some((Some(z), pn));
                     }
                 }
-                if resp.dragged() {
+                if resp.dragged() && !video {
                     pn += resp.drag_delta();
                     new_view = Some((Some(z), pn));
                 }
-                if resp.double_clicked() {
+                if resp.double_clicked() && !video {
                     new_view = Some(if zoom.is_some() { (None, Vec2::ZERO) } else { (Some(1.0), Vec2::ZERO) });
                 }
                 let mut label = format!("{} × {}  ·  {:.0}%", full[0], full[1], scale * 100.0);
@@ -1482,7 +1643,6 @@ impl App {
                 ui.painter().rect_filled(lr, 3.0, Color32::from_black_alpha(150));
                 ui.painter().galley(lr.min + vec2(5.0, 2.0), g, Color32::WHITE);
                 // A video's frame: a play button over it.
-                let video = crate::media::media_of(&e.name) == Some(crate::media::Media::Video) && !crate::fsys::remote::is_remote(path) && !crate::fsys::archive::inside(path);
                 if !video {
                     resp.on_hover_text("Scroll to zoom, drag to move, double-click for actual pixels or fit");
                 } else {
@@ -1610,8 +1770,9 @@ impl App {
 }
 
 /// A playing video: the picture (click to play or pause) and the controls under it. Returns
-/// whether it was asked to open in the system's player.
-fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
+/// whether it was asked to open in the system's player. `seek_bar`: a bar to seek with (left out
+/// when the filmstrip under it does that).
+fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2, seek_bar: bool) -> bool {
     let pal = style::pal(ui);
     if let Some(f) = v.video.take_frame(&mut v.serial) {
         let img = egui::ColorImage::from_rgba_unmultiplied(f.size, &f.rgba);
@@ -1655,7 +1816,7 @@ fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
         None => crate::media::clock(st.position),
     };
     let tw = 140.0;
-    if let Some(l) = st.info.and_then(|i| i.duration).filter(|l| *l > 0.0) {
+    if let Some(l) = st.info.and_then(|i| i.duration).filter(|l| *l > 0.0).filter(|_| seek_bar) {
         let mut at = v.scrub.map_or(st.position, |s| s.1).min(l);
         ui.spacing_mut().slider_width = (ui.available_width() - tw - 34.0).max(40.0);
         let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
@@ -1678,10 +1839,21 @@ fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
             }
         }
     }
-    ui.label(egui::RichText::new(time).monospace().size(12.0).color(pal.weak));
     let tip = if cfg!(target_os = "macos") { "Open in Quick Look" } else { "Open in your video app" };
-    if ui.small_button("Open").on_hover_text(tip).clicked() {
-        outside = true;
+    let time = egui::RichText::new(time).monospace().size(12.0).color(pal.weak);
+    if seek_bar {
+        ui.label(time);
+        if ui.small_button("Open").on_hover_text(tip).clicked() {
+            outside = true;
+        }
+    } else {
+        // No bar: the time and length sit at the right, where the bar ended.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("Open").on_hover_text(tip).clicked() {
+                outside = true;
+            }
+            ui.label(time);
+        });
     }
     if st.playing {
         ui.ctx().request_repaint_after(Duration::from_millis(250));

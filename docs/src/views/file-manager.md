@@ -449,15 +449,19 @@ from the app into the templates folder and New copies it.
 
 ## Quick Look and the preview pane
 
-Select a file and press **Space** for Quick Look: a large preview over the window. **↑**/**↓**
-(or the **◀** and **▶** buttons) move to the previous or next file while it stays open, and **Space** or **Escape** closes it. **Open** opens
-the file in its usual app. **Full screen** (or **F**) fills the window with it, and **Window** (or
-**F** again) puts it back. Quick Look works in Storage Analysis too: see
+Select a file and press **Space** for Quick Look: a large preview in a window of its own, which you
+can move anywhere, outside Filescape's window or onto another screen, and resize; it opens where
+you last left it. **↑**/**↓** (or the **◀** and **▶** buttons) move to the previous or next file
+while it stays open, and **Space** or **Escape** closes it. **Open** opens the file in its usual
+app. **Full screen** (or **F**) fills the screen with it, and **Window** (or **F** again) puts it
+back. Quick Look works in Storage Analysis too: see
 [Quick Look on the map](treemap.md#quick-look-on-the-map).
 
-**👁** on the toolbar, or **Alt+P**, shows the preview pane at the right of the window. It shows
-the selected item with its details: kind, size, dates and, for images, the dimensions and pixel
-format. Drag its edge to make it wider.
+**👁** on the toolbar, or **Alt+P**, shows the preview pane at the right of the window, laid out as
+in Storage Analysis. The **Preview** tab gives the preview all the room in the pane, with the
+item's name, kind and size and **Open** / **Quick Look** under it; **Details** lists everything
+known about it: kind, size, dates and, for images, the dimensions and pixel format. Drag its edge
+to make it wider.
 
 With several items selected, the top of the pane counts them: how many files and folders, their
 total size, and a line for each kind (**JPG image**, **ZIP archive**, **SH source**…) with how
@@ -473,7 +477,7 @@ the next. The selection stays as it is.
 | Drawings | SVG and SVGZ, drawn sharp at any zoom. **Source** shows the markup. Only what's in the file is drawn: pictures it links to elsewhere are left out. |
 | Text | Text and source files, the first 256 KB, in UTF-8 or UTF-16 (as PowerShell and many Windows tools write). Code is shown in syntax colours, for about 200 languages and file types (Rust, Python, JavaScript, C and C++, shell scripts, JSON, YAML, Dockerfiles…), and the details name the language. |
 | Fonts | TrueType and OpenType fonts (.ttf, .otf and collections): the alphabet, numbers and sample sentences drawn in the font, with its family, style and number of glyphs. A font without Latin letters shows the characters it has. |
-| Videos | A frame from the video, made by the system (see below), with a play button: it plays right there, with a bar to jump about; click the picture to pause. **Open** plays it in Quick Look on macOS or your usual player elsewhere. It stops when you move to another file. Under it, a filmstrip of frames from across the video: click one to play from there (where videos can play here). When a video's first frame is dull (black, or a fade or title card), the picture shown for it, in the pane and in Icons view, is the most interesting of a few frames from across it instead. |
+| Videos | A frame from the video, made by the system (see below), with a play button: it plays right there, with its time and length beside the pause button; click the picture to pause. The filmstrip under it is where you jump about (a video without one gets a bar to drag instead). **Open** plays it in Quick Look on macOS or your usual player elsewhere. It stops when you move to another file. Under it, a filmstrip of frames from across the video: click one to play from there (where videos can play here). When a video's first frame is dull (black, or a fade or title card), the picture shown for it, in the pane and in Icons view, is the most interesting of a few frames from across it instead. |
 | Spreadsheets | Excel (.xlsx, .xlsm, .xlsb, .xls) and OpenDocument (.ods) workbooks: the cells of each sheet, with a switch between sheets, the first 500 rows and 40 columns. The values are those the file was last saved with: formulas aren't worked out and macros never run. |
 | CSV and TSV | The same table view: the first 500 rows and 40 columns, with the first row as column names when it looks like them. Commas, semicolons, tabs and bars are told apart by themselves. |
 | SQLite databases | .sqlite, .sqlite3, .db and similar: a tab for each table with its column names and first 500 rows, and in the details how many tables, views and indexes it has. Each tab shows how much of the file that table takes (its rows and its indexes together), the tabs run largest first, and the preview opens on the largest, so a big database whose first table happens to be empty doesn't look empty. A full-text search index's own tables (messages_fts_data and the like) are counted with the index rather than shown on their own. The details list the three largest tables and any unused space inside the file that a VACUUM would give back. Row counts that take more than a second are shown as "500+". The database is only read: it's opened so that nothing in it can change and no lock is taken, and anything that takes longer than a few seconds is stopped. If the database uses a write-ahead log, the latest changes may still be in the -wal file beside it and aren't shown. |

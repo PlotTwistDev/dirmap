@@ -87,6 +87,15 @@ pub fn soft_shade(base: [f32; 3], pos: (f32, f32), size: (f32, f32), light: (f32
     })
 }
 
+/// Places the view holds, saved across a change to the tree (see `MapView::remember`).
+pub struct Held<P> {
+    root: Option<P>,
+    history: Vec<P>,
+    /// Names on the base and detail tile sets, in order.
+    labels: [Vec<P>; 2],
+    alpha: Vec<(P, f32)>,
+}
+
 /// A file tile big enough that it may get a label.
 pub struct Label {
     pub rect: DRect,
@@ -369,6 +378,70 @@ impl MapView {
         self.history.clear();
         self.cursor = 0;
         self.memo = Arc::new(Memo::default());
+        self.hover = None;
+        self.hover_prev = None;
+    }
+
+    /// Before the tree changes in place (a change on disk noticed after the scan, the size
+    /// shown switched): note, as `to_disk` makes them, the places the view holds by tree
+    /// position, which move when sizes do. Give the result to `refresh` with the new tree.
+    pub fn remember<P>(&mut self, to_disk: impl Fn(&[u32]) -> P) -> Held<P> {
+        self.finish_transition(&Feel::default());
+        let Some(s) = &self.scene else { return Held { root: None, history: Vec::new(), labels: Default::default(), alpha: Vec::new() } };
+        let abs = |rel: &[u32]| {
+            let mut p = s.root.clone();
+            p.extend_from_slice(rel);
+            p
+        };
+        let labels = |set: &Option<TileSet>| set.as_ref().map(|t| t.labels.iter().map(|l| to_disk(&abs(&l.path))).collect()).unwrap_or_default();
+        Held {
+            root: Some(to_disk(&s.root)),
+            history: self.history.iter().map(|e| to_disk(&e.root)).collect(),
+            labels: [labels(&s.base), labels(&s.detail)],
+            alpha: self.label_alpha.iter().map(|(k, a)| (to_disk(&abs(k)), *a)).collect(),
+        }
+    }
+
+    /// The tree changed in place: keep the folder, the camera, Back/Forward and the tiles on
+    /// screen (they stay up until fresh ones replace them, so the map doesn't go blank), with
+    /// what `remember` noted found again in `tree` by `to_tree`. Without a folder to keep, start
+    /// over as `clear` does.
+    pub fn refresh<P>(&mut self, tree: &Arc<Node>, held: Held<P>, mut to_tree: impl FnMut(&P) -> Option<Vec<u32>>) {
+        self.tree_key = Arc::as_ptr(tree) as usize;
+        // Layouts are remembered by node, and nodes changed size where they are.
+        self.memo = Arc::new(Memo::default());
+        self.root_request = None;
+        self.after = None;
+        let root = held.root.as_ref().and_then(&mut to_tree).filter(|r| tree.at(r).is_some_and(|n| n.is_dir));
+        let (Some(root), Some(scene)) = (root, self.scene.as_mut()) else {
+            self.clear();
+            return;
+        };
+        let mut rel = |p: &P| to_tree(p).and_then(|a| a.strip_prefix(&root[..]).map(<[u32]>::to_vec));
+        scene.root = root.clone();
+        scene.hits.clear();
+        scene.base_job = None;
+        scene.detail_job = None;
+        let [base, detail] = held.labels;
+        for (set, paths) in [(scene.base.as_mut(), base), (scene.detail.as_mut(), detail)] {
+            let Some(set) = set else { continue };
+            let old = std::mem::take(&mut set.labels);
+            set.labels = old.into_iter().zip(paths).filter_map(|(l, p)| Some(Label { rect: l.rect, path: rel(&p)? })).collect();
+        }
+        self.label_alpha = held.alpha.iter().filter_map(|(p, a)| Some((rel(p)?, *a))).collect();
+        // Back/Forward: places whose folder is gone drop out.
+        let mut cursor = 0;
+        let mut history = Vec::new();
+        for (i, (e, p)) in std::mem::take(&mut self.history).into_iter().zip(&held.history).enumerate() {
+            if let Some(r) = to_tree(p) {
+                if i <= self.cursor {
+                    cursor = history.len();
+                }
+                history.push(Entry { root: r, view: e.view });
+            }
+        }
+        self.history = history;
+        self.cursor = cursor;
         self.hover = None;
         self.hover_prev = None;
     }
@@ -1002,7 +1075,7 @@ impl MapView {
             return out;
         }
         let view = self.camera.view();
-        let key = self.paint.as_ref().map(|p| p.key).unwrap_or(0);
+        let key = self.paint_key().unwrap_or(0);
         let sets = scene.label_sets(&view, key);
         let fade = self.label_fade;
         let alphas = &mut self.label_alpha;

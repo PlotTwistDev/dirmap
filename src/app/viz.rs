@@ -167,6 +167,8 @@ pub(super) struct VizUi {
     pub filters_open: bool,
     /// Where the Filters button was last drawn, to hang the panel under it.
     filters_anchor: Option<Rect>,
+    /// The Filters panel was snapped off its button and floats here (its top left corner).
+    filters_float: Option<egui::Pos2>,
     /// The selection as the panes last saw it, to open the Preview pane on a new pick.
     pub seen_selection: Option<Vec<u32>>,
     /// The panes have had their first look at the selection.
@@ -838,8 +840,14 @@ impl App {
         }
         let screen = ctx.content_rect();
         let x = anchor.left().min(screen.right() - PANEL_W - 8.0).max(screen.left() + 8.0);
-        let pos = pos2(x, anchor.bottom() + 6.0);
+        let docked = pos2(x, anchor.bottom() + 6.0);
+        // Snapped off: wherever it was dragged, kept on screen when the window shrinks.
+        let keep_on_screen = |p: egui::Pos2| {
+            pos2(p.x.min(screen.right() - PANEL_W).max(screen.left()), p.y.min(screen.bottom() - 120.0).max(screen.top()))
+        };
+        let pos = self.viz.filters_float.map(keep_on_screen).unwrap_or(docked);
         let max_h = (screen.bottom() - pos.y - 12.0).max(200.0);
+        let floating = self.viz.filters_float.is_some();
         egui::Area::new(egui::Id::new("filters-panel"))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
@@ -847,17 +855,44 @@ impl App {
                 let t = kit::tokens(ui);
                 egui::Frame::popup(ui.style()).fill(t.card).corner_radius(kit::RADIUS).inner_margin(egui::Margin { left: 14, right: 14, top: 10, bottom: 12 }).show(ui, |ui| {
                     ui.set_width(PANEL_W - 28.0);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Filters").size(kit::HEADING).strong().color(t.strong));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if kit::icon_button(ui, Icon::Close, "Close (Esc)").clicked() {
-                                self.viz.filters_open = false;
-                            }
-                            if help::link_button(ui, "Help") {
-                                self.help.show_topic(topics::FILTERING);
-                            }
-                        });
-                    });
+                    // The title row is the handle: drag it to snap the panel off its button
+                    // and float it anywhere; drop it back under the button to dock it again.
+                    let grip = ui
+                        .horizontal(|ui| {
+                            let title = ui.add(egui::Label::new(RichText::new("Filters").size(kit::HEADING).strong().color(t.strong)).sense(egui::Sense::drag()));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if kit::icon_button(ui, Icon::Close, "Close (Esc)").clicked() {
+                                    self.viz.filters_open = false;
+                                }
+                                if help::link_button(ui, "Help") {
+                                    self.help.show_topic(topics::FILTERING);
+                                }
+                                let (icon, tip) = if floating {
+                                    (Icon::ArrowUp, "Snap back under the Filters button")
+                                } else {
+                                    (Icon::External, "Snap off to float anywhere (or drag the title)")
+                                };
+                                if kit::icon_button(ui, icon, tip).clicked() {
+                                    self.viz.filters_float = if floating { None } else { Some(pos + vec2(24.0, 24.0)) };
+                                }
+                                let rest = ui.available_size();
+                                title | ui.allocate_response(rest, egui::Sense::drag())
+                            })
+                            .inner
+                        })
+                        .inner;
+                    if grip.hovered() || grip.dragged() {
+                        ui.ctx().set_cursor_icon(if grip.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
+                    }
+                    if grip.dragged() {
+                        let d = grip.drag_delta();
+                        if d != egui::Vec2::ZERO {
+                            self.viz.filters_float = Some(pos + d);
+                        }
+                    }
+                    if grip.drag_stopped() && self.viz.filters_float.is_some_and(|p| p.distance(docked) < 28.0) {
+                        self.viz.filters_float = None;
+                    }
                     egui::ScrollArea::vertical().max_height(max_h - 90.0).auto_shrink([false, true]).show(ui, |ui| {
                         self.filters_body(ui);
                     });

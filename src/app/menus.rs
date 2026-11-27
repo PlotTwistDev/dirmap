@@ -1157,10 +1157,14 @@ impl App {
     /// Put fresh copies of changed items into the tree (or take them out), keeping the
     /// selection, the zoomed folder and the open folders where they were.
     pub(super) fn apply_updates(&mut self, updates: Vec<(PathBuf, Option<Node>)>) {
-        if updates.is_empty() || self.tree.is_none() {
+        let Some(tree) = &self.tree else { return };
+        let root = self.scanned_path.clone();
+        // Changes noticed on disk often leave an item as it was (a file touched, or written and
+        // put back): leave those out, and the tree and map alone when nothing is left.
+        let updates: Vec<_> = updates.into_iter().filter(|(disk, new)| !unchanged(tree, &root, disk, new.as_ref())).collect();
+        if updates.is_empty() {
             return;
         }
-        let root = self.scanned_path.clone();
         self.rework_tree(false, |tree| {
             for (disk, new) in updates {
                 let Ok(rel) = disk.strip_prefix(&root) else { continue };
@@ -1189,6 +1193,16 @@ impl App {
         if self.tree.is_none() {
             return;
         }
+        // The map keeps its place and its tiles across the change (fresh tiles replace them
+        // once built), instead of going blank and back to the whole folder each time. With
+        // "Show matches only" up its positions are in that view, so it starts over instead.
+        let held = match (&self.shown, &self.tree) {
+            (None, Some(tree)) => {
+                let (tree, base) = (tree.clone(), self.scanned_path.clone());
+                Some(self.map.remember(|p| disk_path(&base, &tree, p)))
+            }
+            _ => None,
+        };
         // Work in whole-scan positions; "Show matches only" is rebuilt from the new tree.
         self.drop_filtered_view();
         // Tree positions change when sizes do, so remember things by their paths on disk.
@@ -1196,11 +1210,15 @@ impl App {
         let zoom = self.full_path(&self.zoom);
         let expanded: Vec<PathBuf> = self.expanded.iter().map(|p| self.full_path(p)).collect();
 
-        self.map.clear();
         let old = self.tree.take().unwrap();
         let mut tree = Arc::try_unwrap(old).unwrap_or_else(|shared| (*shared).clone());
         f(&mut tree);
-        self.tree = Some(Arc::new(tree));
+        let tree = Arc::new(tree);
+        match held {
+            Some(held) => self.map.refresh(&tree, held, finder(&self.scanned_path, &tree)),
+            None => self.map.clear(),
+        }
+        self.tree = Some(tree);
 
         // Back to tree positions; anything gone falls back to its nearest surviving folder.
         let nearest = |app: &Self, p: &Path| p.ancestors().find_map(|a| app.tree_path_of(a)).unwrap_or_default();
@@ -1250,6 +1268,37 @@ impl App {
         }
         self.compare();
         self.paint_gen += 1;
+    }
+}
+
+/// Where tree position `path` is on disk, in `tree` scanned from `root` (as `App::full_path`).
+fn disk_path(root: &Path, tree: &Node, path: &[u32]) -> PathBuf {
+    let mut p = root.to_path_buf();
+    let mut n = tree;
+    for &i in path {
+        let Some(c) = n.children.get(i as usize) else { break };
+        n = c;
+        p.push(&*n.name);
+    }
+    p
+}
+
+/// Finds paths on disk in `tree` (scanned from `root`) as tree positions, many at a time: each
+/// folder's names are indexed the first time it's looked in, so finding every name on the map
+/// stays quick in folders with many thousands of entries.
+fn finder<'a>(root: &'a Path, tree: &'a Node) -> impl FnMut(&PathBuf) -> Option<Vec<u32>> + 'a {
+    let mut index: std::collections::HashMap<Vec<u32>, std::collections::HashMap<&'a str, u32>> = Default::default();
+    move |disk| {
+        let rel = disk.strip_prefix(root).ok()?;
+        let mut n = tree;
+        let mut out = Vec::new();
+        for c in rel.components() {
+            let names = index.entry(out.clone()).or_insert_with(|| n.children.iter().enumerate().map(|(i, k)| (&*k.name, i as u32)).collect());
+            let i = *names.get(&*c.as_os_str().to_string_lossy())?;
+            out.push(i);
+            n = &n.children[i as usize];
+        }
+        Some(out)
     }
 }
 
@@ -1317,6 +1366,24 @@ fn replace_at(n: &mut Node, names: &[String], new: Option<Node>) {
     resum(n);
 }
 
+/// Is the item at `disk` in `tree` (scanned from `root`) already as `new` has it? Compared by
+/// its totals, date and flags; a folder's date moves when anything in it is added, removed or
+/// renamed.
+fn unchanged(tree: &Node, root: &Path, disk: &Path, new: Option<&Node>) -> bool {
+    let Ok(rel) = disk.strip_prefix(root) else { return true };
+    let mut n = tree;
+    for c in rel.components() {
+        let name = c.as_os_str().to_string_lossy();
+        match n.children.iter().find(|k| *k.name == *name) {
+            Some(k) => n = k,
+            None => return new.is_none(),
+        }
+    }
+    let Some(new) = new else { return false };
+    (n.size, n.logical, n.alloc, n.files, n.modified, n.is_dir, n.flags, n.children.len())
+        == (new.size, new.logical, new.alloc, new.files, new.modified, new.is_dir, new.flags, new.children.len())
+}
+
 /// Recompute a folder's totals from its children and sort them as the scan does.
 fn resum(n: &mut Node) {
     scan::sort_children(&mut n.children);
@@ -1360,6 +1427,27 @@ mod tests {
         // A path that isn't there changes nothing.
         replace_at(&mut root, &["nope".into(), "q".into()], None);
         assert_eq!(root.size, 106);
+    }
+
+    /// Places on the map are found again by name after sizes reorder a folder, and changes
+    /// that leave an item as it was are noticed as such.
+    #[test]
+    fn paths_found_again_and_unchanged_items_left_out() {
+        let root = Path::new("/r");
+        let mut tree = dir("root", vec![dir("a", vec![file("x", 10), file("y", 5)]), file("b", 12)]);
+        let before = disk_path(root, &tree, &[0, 1]);
+        assert_eq!(before, Path::new("/r/a/y"));
+        assert!(unchanged(&tree, root, &before, Some(&file("y", 5))));
+        assert!(!unchanged(&tree, root, &before, Some(&file("y", 6))));
+        assert!(unchanged(&tree, root, Path::new("/r/gone"), None));
+        assert!(!unchanged(&tree, root, Path::new("/r/b"), None));
+
+        replace_at(&mut tree, &["a".into(), "x".into()], None);
+        assert_eq!(&*tree.children[0].name, "b");
+        let mut find = finder(root, &tree);
+        assert_eq!(find(&before), Some(vec![1, 0]));
+        assert_eq!(find(&PathBuf::from("/r/a/x")), None);
+        assert_eq!(find(&PathBuf::from("/r")), Some(vec![]));
     }
 
     #[test]
