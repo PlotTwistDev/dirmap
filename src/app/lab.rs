@@ -38,6 +38,9 @@ pub(super) struct LabState {
     layers: usize,
     steer: steer::Steering,
     pub steered: Option<(Run, Run, f32)>,
+    /// A strength sweep under way or done, and the strength of the run being written.
+    sweep: Option<steer::Sweep>,
+    sweep_strength: f32,
     bench: BenchSettings,
     /// The speed test running: (run, of runs).
     pub bench_progress: Option<(u32, u32)>,
@@ -65,6 +68,8 @@ impl Default for LabState {
             layers: 0,
             steer: steer::Steering::default(),
             steered: None,
+            sweep: None,
+            sweep_strength: 0.0,
             bench: BenchSettings::default(),
             bench_progress: None,
             bench_asked: BenchSettings::default(),
@@ -102,6 +107,7 @@ impl LabState {
         self.inside = None;
         self.lensed = None;
         self.steered = None;
+        self.sweep = None;
     }
 }
 
@@ -417,6 +423,11 @@ impl App {
         let current = self.ask.loaded.as_ref().map(|(p, _, _)| p.clone());
         if let Some(r) = results.iter().find(|r| Some(&r.path) == current.as_ref()) {
             speed_card(ui, r);
+            ui.add_space(6.0);
+            let mine: Vec<&BenchResult> = results.iter().filter(|r| Some(&r.path) == current.as_ref()).collect();
+            if mine.len() > 1 {
+                speed_history(ui, &mine);
+            }
             ui.add_space(10.0);
         }
         if results.is_empty() {
@@ -556,6 +567,31 @@ fn speed_card(ui: &mut egui::Ui, r: &BenchResult) {
         };
         ui.weak(format!("{pace} {} · {} tokens of context.", place(r), crate::fit::tokens(r.context as u64)));
     });
+}
+
+/// This model's tests over time, oldest on the left: writing speed as bars, each with its
+/// settings on hover, so a change of context, threads or hardware shows beside its effect.
+fn speed_history(ui: &mut egui::Ui, mine: &[&BenchResult]) {
+    let t = kit::tokens(ui);
+    let shown: Vec<&&BenchResult> = mine.iter().take(24).collect();
+    let fastest = shown.iter().map(|r| r.write_speed).fold(0.0f32, f32::max).max(1e-3);
+    ui.horizontal(|ui| {
+        ui.weak(format!("Its last {} tests, tokens a second written:", shown.len()));
+    });
+    let (rect, _) = ui.allocate_exact_size(vec2((shown.len() as f32 * 22.0).min(ui.available_width()), 56.0), Sense::hover());
+    let w = rect.width() / shown.len() as f32;
+    for (i, r) in shown.iter().rev().enumerate() {
+        let h = (rect.height() - 14.0) * r.write_speed / fastest;
+        let bar = egui::Rect::from_min_max(egui::pos2(rect.left() + i as f32 * w + 2.0, rect.bottom() - 14.0 - h), egui::pos2(rect.left() + (i + 1) as f32 * w - 2.0, rect.bottom() - 14.0));
+        let resp = ui.interact(bar.expand2(vec2(0.0, 14.0)), ui.id().with(("speed-bar", i)), Sense::hover());
+        ui.painter().rect_filled(bar, 2.0, if resp.hovered() { t.strong } else { t.accent });
+        ui.painter().text(egui::pos2(bar.center().x, rect.bottom() - 6.0), egui::Align2::CENTER_CENTER, format!("{:.0}", r.write_speed), egui::FontId::proportional(9.5), t.weak);
+        let when = chrono::DateTime::from_timestamp(r.when, 0).map(|d| d.with_timezone(&chrono::Local).format("%-d %b %H:%M").to_string()).unwrap_or_default();
+        resp.on_hover_text(format!(
+            "{when}\n{:.1} tokens a second written, {:.0} read, first token after {:.1} s\n{} · {} tokens of context · read {}, wrote {}, middle of {} runs",
+            r.write_speed, r.read_speed, r.first_token, place(r), r.context, r.read, r.write, r.runs
+        ));
+    }
 }
 
 fn place(r: &BenchResult) -> String {

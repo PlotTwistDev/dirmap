@@ -184,6 +184,7 @@ impl App {
         let Some(e) = &self.ask.engine else { return };
         let mut got = false;
         let mut benched = None;
+        let mut steered_ev = None;
         while let Ok(ev) = e.rx.try_recv() {
             got = true;
             match ev {
@@ -212,8 +213,8 @@ impl App {
                 // The layers' guesses follow a look straight away, so it stays busy until then.
                 Event::Looked(inside) => self.ask.lab_state.inside = Some(inside),
                 Event::Steered { plain, steered, push } => {
-                    self.ask.lab_state.steered = Some((plain, steered, push));
                     self.ask.phase = Phase::Idle;
+                    steered_ev = Some((plain, steered, push));
                 }
                 Event::Lensed { token, layers } => {
                     self.ask.lab_state.lensed = Some((token, layers));
@@ -244,6 +245,11 @@ impl App {
         }
         if let Some((r, w, f, t)) = benched {
             self.lab_benched(r, w, f, t);
+        }
+        if let Some((plain, steered, push)) = steered_ev
+            && !self.lab_swept(plain.clone(), steered.clone())
+        {
+            self.ask.lab_state.steered = Some((plain, steered, push));
         }
         if got || self.ask.phase != Phase::Idle {
             ctx.request_repaint_after(Duration::from_millis(30));
