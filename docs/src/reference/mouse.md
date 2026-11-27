@@ -48,13 +48,15 @@ A trackpad works too: two-finger scrolling acts as the wheel, and pinching zooms
 
 The treemap or sunburst under the list in the Files workspace. Wheel, drag and the + − Home keys work as in Storage Analysis.
 
-| Input | Action |
-|---|---|
-| **Click a tile** | Select it. The item in the list that holds it is selected too. |
-| **Double-click a tile** | Open its folder in the list; the map follows. |
-| **Right-click a tile** | The same menu as in the list, plus Open in List or Show in List. |
-| **Click a file type under the map** | Highlight those files on the map; click again to stop. |
-| **Drag the line above the dock** | Give the list or the map more room. |
+| Windows and Linux | macOS | Action |
+|---|---|---|
+| **Click a tile** | **Click a tile** | Select it. The item in the list that holds it is selected too. |
+| **Double-click a tile** | **Double-click a tile** | Open its folder in the list; the map follows. |
+| **Right-click a tile** | **Right-click a tile** | The same menu as in the list, plus Open in List or Show in List. |
+| **Point to a file type under the map** | **Point to a file type under the map** | Those files stand out on the map while the pointer is there. |
+| **Click a file type under the map** | **Click a file type under the map** | Highlight those files on the map; click again to stop. |
+| **Ctrl+click a file type under the map** | **⌘-click** | Add it to the highlight, or take it out. |
+| **Drag the line above the dock** | **Drag the line above the dock** | Give the list or the map more room. |
 
 ### Treemap
 
@@ -109,7 +111,19 @@ The file manager's Tree layout.
 | **Right-click** | Select the item and open the right-click menu. |
 | **Click a column heading** | Sort by that column; click again to reverse. |
 
-### Side panel and other lists
+### Under the map
+
+The totals, the file-type legend and the storage breakdown under the Storage Analysis map.
+
+| Windows and Linux | macOS | Action |
+|---|---|---|
+| **Click a size total (On disk, Logical size, Cloud only, Reclaimable)** | **Click a size total (On disk, Logical size, Cloud only, Reclaimable)** | Size the map by it. |
+| **Point to a file type** | **Point to a file type** | Those files stand out on the map while the pointer is there. |
+| **Click a file type** | **Click a file type** | Highlight those files on the map; click again to stop. |
+| **Ctrl+click a file type** | **⌘-click** | Add it to the highlight, or take it out. |
+| **Click a part of the storage breakdown** | **Click a part of the storage breakdown** | Show only those files on the map; click again to stop. |
+
+### Insights panel and other lists
 
 | Input | Action |
 |---|---|
@@ -118,7 +132,8 @@ The file manager's Tree layout.
 | **Click a size range (Sizes tab)** | Show only files in that range; click again to stop. |
 | **Click a change, duplicate or listed file** | Select it in the folder list and on the map. |
 | **Click a sequence** | Filter the map to that sequence and select its folder. |
-| **Drag the panel's left edge** | Make the side panel wider or narrower. |
+| **Drag the panel's left edge** | Make the Insights panel or the Preview pane wider or narrower; the width is remembered. |
+| **Click a button on the rail at the window's edge** | Bring back the folded Preview pane, or the Insights panel at that tab. |
 
 ### Size boxes
 

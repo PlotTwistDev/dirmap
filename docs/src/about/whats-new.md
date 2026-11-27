@@ -2,6 +2,46 @@
 
 ## Next version
 
+### Easier to read maps
+
+- **Display > Detail on the map**: **Minimal**, **Balanced** or **Detailed** names and sizes on
+  the tiles, with shares at Detailed. Remembered, and shared by Storage Analysis and the dock.
+- The clicked item's ring now reads on any tile colour, and a zoomed-in map shows how far it's
+  zoomed. See [How much is written on the tiles](../views/treemap.md#how-much-is-written-on-the-tiles).
+
+### One map, two places
+
+- The analysis dock in Files has the same toolbar as Storage Analysis, in a compact form:
+  **Treemap** / **Sunburst**, **Follow**, **Colour**, and display options under **⋯**. It keeps its
+  own colours.
+- **Follow** can now follow the **left** or **right** pane as well as the active one or the
+  selection, or be **Locked** on one folder.
+- **Open in Storage Analysis** takes the dock's folder, view, colours and selection with it, and
+  **Reveal in Files** (on Storage Analysis's right-click menu and Preview pane) goes the other way.
+- The dock's information line says how much of a folder is only in the cloud.
+
+### Panes that make room for the map
+
+- The Preview pane beside the Storage Analysis map has **Preview** and **Details** tabs, opens by
+  itself when you click a tile and folds away when nothing is selected. Pin it to keep it open.
+  It remembers its width and tab, and has **Reveal in Files** to jump to the item in the Files
+  workspace. See [The preview pane](../views/treemap.md#the-preview-pane).
+- The Insights panel (File types, Sizes, Changes, Duplicates, Sequences) folds away too, with
+  **Alt+I** (**⌥I**). Folded panes leave a narrow rail at the window's edge with a button for each.
+
+### Totals, legend and storage under the map
+
+- Under the Storage Analysis map, a strip of totals: **On disk**, **Logical size**, **Cloud only**,
+  **Reclaimable**, **Files**, **Folders** and, with a filter on, **Matching**. The total the map is
+  sized by is highlighted, and clicking another switches to it. Cloud-only data is never counted
+  as on this computer. See [The summary under the map](../views/treemap.md#the-summary-under-the-map).
+- A new legend shows each type's colour, size and share. Point to a type to see where those
+  files are on the map, click to highlight them, and Ctrl+click (⌘-click) to highlight several.
+  **All N types** lists every type, sortable by size, count or name. The Files dock uses the
+  same legend.
+- **Details** and **Storage** open the scan's details and the cloud storage breakdown, now a
+  full-width bar with Reclaimable beside it. The status bar keeps to what's happening.
+
 ### A calmer Storage Analysis toolbar
 
 - The controls above the map are one row now: **Treemap** / **Sunburst**, a **Size** menu, a

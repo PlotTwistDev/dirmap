@@ -42,7 +42,8 @@ Hovering a tile or selecting an item also gives both sizes and where its data is
 
 ### Storage breakdown
 
-When a scan has cloud files, a bar under the map splits its data, by logical size, into:
+When a scan has cloud files, **Storage** beside the totals under the map opens a bar that splits
+its data, by logical size, into:
 
 - **Not in the cloud**: files on this computer outside any cloud folder.
 - **Downloaded**: cloud files with their data here.
@@ -50,9 +51,12 @@ When a scan has cloud files, a bar under the map splits its data, by logical siz
   part of partly downloaded ones.
 - **Unknown**: files on mounted cloud drives.
 
-It names the services involved and says what share of the data is here; hover that figure for
-how many cloud files aren't downloaded. The breakdown always covers the whole scan, whatever the filters. Click a part
-to show only those files on the map (Professional); click it again to show everything.
+It names the services involved, what share of the data is on this computer and how many cloud
+files aren't fully downloaded; hover a part of the bar for its size and share. The breakdown always
+covers the whole scan, whatever the filters, and never downloads anything. Click a part to show
+only those files on the map (Professional); click it again to show everything. **Reclaimable**,
+beside the parts, says how much space freeing up could give back; click it for the Reclaimable
+view.
 
 ### Stored filter and columns
 

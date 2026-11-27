@@ -353,26 +353,27 @@ impl App {
     /// so the facts sit at the bottom and pictures and videos get the space.
     pub(super) fn map_preview_pane(&mut self, ui: &mut egui::Ui, tall: f32) {
         let pal = style::pal(ui);
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            style::section_title(ui, "Preview");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if style::icon_button(ui, true, "✖", "Close the preview pane (Alt+P)").clicked() {
-                    self.files.prefs.map_preview = false;
-                }
-            });
-        });
+        let details = self.files.prefs.map_preview_tab == super::rails::PreviewTab::Details;
         let Some(tree) = self.shown_tree() else { return };
         let Some(sel) = self.selected.clone() else {
-            ui.add_space(30.0);
-            ui.vertical_centered(|ui| ui.label(egui::RichText::new("Click a tile to preview it").color(pal.weak)));
+            // Nothing picked: say how to pick something.
+            ui.add_space((tall * 0.28).max(30.0));
+            ui.vertical_centered(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+                crate::kit::icons::paint(ui.painter(), r, crate::kit::Icon::Treemap, pal.weak.gamma_multiply(0.6));
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("Nothing selected").strong());
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new("Click a tile to see its preview and details here. Space opens a large preview.").color(pal.weak));
+            });
             return;
         };
         let Some(n) = tree.at(&sel) else { return };
         let Some((path, e)) = self.map_target() else { return };
-        ui.add_space(4.0);
         let w = ui.available_width();
-        if n.is_dir {
+        if details {
+            // The Details tab: no big preview, everything known about it.
+        } else if n.is_dir {
             let (r, _) = ui.allocate_exact_size(vec2(w, 96.0), Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(64.0, 64.0)), true, "", Color32::GRAY);
         } else if crate::fsys::remote::is_remote(&path) && !previewable(&n.name) {
@@ -389,6 +390,17 @@ impl App {
         ui.add(egui::Label::new(egui::RichText::new(&*n.name).strong()).wrap());
         ui.add_space(4.0);
         let total = tree.size.max(1);
+        if !details {
+            // The Preview tab: what it is and how big, in one line; the rest is under Details.
+            let what = browser::kind_for(&n.name, n.is_dir);
+            let line = if n.is_dir { format!("{what} · {} · {} files", scan::human(n.size), group(n.files)) } else { format!("{what} · {}", scan::human(n.size)) };
+            ui.add(egui::Label::new(egui::RichText::new(line).color(pal.weak)).wrap());
+            ui.add_space(4.0);
+            self.preview_actions(ui, &path, n.is_dir, &sel);
+            let facts = ui.cursor().top() - facts_top;
+            ui.data_mut(|d| d.insert_temp(egui::Id::new("map-preview-facts"), facts));
+            return;
+        }
         let folder = tree.at(&self.zoom).filter(|_| sel.starts_with(&self.zoom) && sel.len() > self.zoom.len());
         let mut go = None;
         egui::Grid::new("map-preview-facts").num_columns(2).spacing([10.0, 3.0]).show(ui, |ui| {
@@ -495,24 +507,55 @@ impl App {
             super::explain::preview_section(ui, &path, &n.name);
         }
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if ui.button("Open").clicked() {
-                let p = path.clone();
+        let is_dir = n.is_dir;
+        self.preview_actions(ui, &path, is_dir, &sel);
+        if let Some(p) = go {
+            self.select(p);
+        }
+    }
+
+    /// What can be done with the picked item: open it, look at it large, find it in Files or
+    /// in the system's file manager, copy its path.
+    fn preview_actions(&mut self, ui: &mut egui::Ui, path: &Path, is_dir: bool, sel: &[u32]) {
+        use crate::kit::{self, Icon, Kind};
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+            if kit::button(ui, Kind::Secondary, Some(Icon::External), "Open").on_hover_text("Open it with its usual app").clicked() {
+                let p = path.to_path_buf();
                 self.files.spawn(move || crate::actions::open(&p));
             }
-            if !n.is_dir && ui.button("Quick Look").on_hover_text("A large preview (Space)").clicked() {
+            if !is_dir && kit::button(ui, Kind::Secondary, Some(Icon::Eye), "Quick Look").on_hover_text("A large preview (Space)").clicked() {
                 self.files.look.open = true;
                 self.files.look.from_map = true;
             }
-            if ui.button(if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in folder" }).clicked() {
-                let p = path.clone();
-                self.files.spawn(move || crate::actions::reveal(&p));
+            if kit::button(ui, Kind::Secondary, Some(Icon::Folder), "Reveal in Files").on_hover_text("Show it in the Files workspace, selected in its folder").clicked() {
+                self.reveal_in_files(sel);
             }
+            let r = kit::icon_button(ui, Icon::More, "More");
+            egui::Popup::menu(&r).show(|ui| {
+                if ui.button(if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in folder" }).clicked() {
+                    let p = path.to_path_buf();
+                    self.files.spawn(move || crate::actions::reveal(&p));
+                    ui.close();
+                }
+                if ui.button("Copy path").clicked() {
+                    ui.ctx().copy_text(path.display().to_string());
+                    ui.close();
+                }
+            });
         });
-        let facts = ui.cursor().top() - facts_top;
-        ui.data_mut(|d| d.insert_temp(egui::Id::new("map-preview-facts"), facts));
-        if let Some(p) = go {
-            self.select(p);
+    }
+
+    /// Switch to the Files workspace with this item selected in its folder (a folder opens).
+    pub(super) fn reveal_in_files(&mut self, sel: &[u32]) {
+        let disk = self.full_path(sel);
+        let is_dir = self.shown_tree().and_then(|t| t.at(sel).map(|n| n.is_dir)).unwrap_or(false);
+        self.set_workspace(super::files::Workspace::Files);
+        if is_dir {
+            self.files.reveal(disk, Vec::new());
+        } else if let Some(dir) = disk.parent() {
+            let name: Box<str> = disk.file_name().map(|n| n.to_string_lossy().into()).unwrap_or_default();
+            self.files.reveal(dir.to_path_buf(), vec![name]);
         }
     }
 }

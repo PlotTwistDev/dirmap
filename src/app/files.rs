@@ -118,8 +118,19 @@ pub(super) struct FilesPrefs {
     /// The preview pane at the right.
     pub preview: bool,
     pub preview_width: f32,
-    /// The preview pane beside the map in Storage Analysis.
+    /// The preview pane beside the map in Storage Analysis: open, or folded to the rail.
     pub map_preview: bool,
+    /// Pinned: it stays open with nothing selected. Unpinned, it opens when a tile is picked and
+    /// folds away when nothing is.
+    pub map_preview_pin: bool,
+    pub map_preview_width: f32,
+    pub map_preview_tab: super::rails::PreviewTab,
+    /// Storage Analysis's Insights panel (File types, Sizes, Changes…): open, or folded to the
+    /// rail, and its width.
+    pub insights_open: bool,
+    pub insights_width: f32,
+    /// How much the maps write on their tiles (both workspaces).
+    pub map_density: super::viz::MapDensity,
     /// The first pane's view (the second pane's is in `second`), and the Icons view's size.
     pub view: FView,
     pub icon_size: f32,
@@ -198,6 +209,12 @@ impl Default for FilesPrefs {
             preview: false,
             preview_width: 300.0,
             map_preview: true,
+            map_preview_pin: false,
+            map_preview_width: 300.0,
+            map_preview_tab: super::rails::PreviewTab::Preview,
+            insights_open: true,
+            insights_width: 330.0,
+            map_density: super::viz::MapDensity::Balanced,
             view: FView::Details,
             icon_size: 96.0,
             remember_looks: true,
@@ -1220,7 +1237,7 @@ impl App {
 
     /// Ctrl/⌘+1 to 4 switch workspace from anywhere.
     pub(super) fn workspace_keys(&mut self, ctx: &egui::Context) {
-        if self.ops.modal() {
+        if self.blocked() {
             return;
         }
         let (files, remote, analysis, models) = ctx.input_mut(|i| {
@@ -1907,8 +1924,7 @@ impl App {
         });
         let here = self.files.here().clone();
         ui.spacing_mut().item_spacing.y = 1.0;
-        let pressed = ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| ui.max_rect().contains(p)));
-        if pressed {
+        if super::pressed_in(ui, ui.max_rect()) {
             self.files.focused = true;
         }
 
@@ -2151,8 +2167,7 @@ impl App {
     fn pane_ui(&mut self, ui: &mut egui::Ui, pane: usize) {
         let rect = ui.max_rect();
         let pal = style::pal(ui);
-        let pressed = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
-        if pressed.is_some_and(|p| rect.contains(p)) {
+        if super::pressed_in(ui, rect) {
             self.files.set_focus(pane);
             self.files.focused = true;
         }
@@ -3045,7 +3060,7 @@ impl App {
     fn files_keys(&mut self, ctx: &egui::Context, pointer_in: bool, picks: &mut FPicks) {
         use egui::{Key, Modifiers as M};
         // Not while a box is open over the list (Connect to Server, a server's question).
-        if self.ops.modal() || self.files.connect.is_some() || self.files.asking.is_some() || self.files.player.is_some() || self.files.compare.is_some() || self.files.mark_edit.is_some() || self.files.apps_box.is_some() {
+        if self.blocked() || self.files.connect.is_some() || self.files.asking.is_some() || self.files.player.is_some() || self.files.compare.is_some() || self.files.mark_edit.is_some() || self.files.apps_box.is_some() {
             return;
         }
         // The mouse's side buttons go to the file manager when the pointer is over it.

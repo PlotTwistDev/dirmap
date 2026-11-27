@@ -27,23 +27,50 @@ swatches in the **File types** list. Other colour modes show age or change since
 
 ## The summary under the map
 
-A line under the map sums up what it shows, like the map on filescape.app:
+Under the map, a strip of totals sums up the scan:
 
-![The summary under the map, with size filters on](../images/map-summary.png)
+![The summary under the map](../images/map-summary.png)
 
-- the scanned folder, its total size and its number of files;
-- a chip for each of the ten file types taking the most space, with its map colour and how much
-  space those files take.
+| Total | What it is |
+|---|---|
+| **On disk** | Space the files take on this computer's drive. Cloud files that are only online take none. |
+| **Logical size** | Each file's full size, wherever its data is. |
+| **Cloud only** | Data in the cloud that isn't on this computer (only with cloud files in the scan). |
+| **Reclaimable** | Space your cloud app could free up on this computer (Mac and Windows cloud folders only). |
+| **Files**, **Folders** | How many there are in the scan. |
+| **Matching** | With a filter on: the size and number of the files that match. |
 
-The summary **follows the filters.** Pick a category, set **Larger than** or **Smaller than**, or
-type a Custom filter, and the totals become those of the matching files only, written as
-"12.1 GB of 66.2 GB · 311 of 2,411 files", followed by the filters in words. The type chips are
-recounted from the matches too, so raising **Larger than** shows at a glance which types the big
-files are. While a new filter is being counted, a spinner shows beside the whole scan's totals.
+The totals are always the whole scan's, so data that's only in the cloud is never counted as on
+this computer. The total the map is sized by is highlighted; **click another size** to size the
+map by it (the same as the **Size** menu above the map; **Reclaimable** is part of Filescape
+Professional). Hover a total for what it counts. In a narrow window the less important totals
+are left out.
 
-**Click a chip** to highlight that type on the map, as clicking it in the **File types** list does;
-click it again, or **Clear**, to stop. Hover a chip to see its share of the total. With **Color
-by: Age** or **Change** only the totals line is shown, since the colours then mean something else.
+### The legend
+
+Under the totals, the legend lists the file types taking the most space, each with its map
+colour, size and share. It **follows the filters**: with a type, size or Custom filter on, it's
+recounted from the matching files, so raising **Larger than** shows at a glance which types the
+big files are.
+
+- **Point to a type** to see where those files are: the rest of the map dims while the pointer is
+  there.
+- **Click a type** to highlight it on the map, as clicking it in the **File types** list does;
+  click it again, or **Clear**, to stop. **Ctrl+click** (**⌘-click** on a Mac) adds a type to the
+  highlight or takes it out, so you can highlight several. Highlighting is part of Filescape
+  Professional; pointing is free.
+- **All N types** lists every type, in columns, sorted by size, number of files or name.
+  **Fewer** goes back to the short list.
+
+With **Colour: Age** or **Change** the legend is hidden, since the colours then mean something
+else.
+
+### Details and storage
+
+**Details** adds a line with the scanned folder, both sizes, how long the scan took, how many items
+couldn't be read and the active filters in words. With cloud files in the scan, **Storage** shows
+the storage breakdown; see [Cloud files](../disk-usage/cloud-files.md#storage-breakdown). Both
+stay open or closed as you left them.
 
 ## Finding out what something is
 
@@ -56,6 +83,22 @@ by: Age** or **Change** only the totals line is shown, since the colours then me
 - With **File names on tiles** turned on, names (and sizes, on taller tiles) are written on
   rectangles big enough to hold them, in white on a dark backing so they read on any colour.
   They fade in as you zoom in, and get bigger on bigger tiles.
+
+## How much is written on the tiles
+
+**Display > Detail on the map** sets how much the treemap writes on its tiles, in Storage
+Analysis and the Files dock alike:
+
+| Detail | On the tiles |
+|---|---|
+| **Minimal** | Names on big tiles only, with no sizes: the shapes and colours do the talking. |
+| **Balanced** (the usual) | Names where they fit comfortably, and sizes under them on taller tiles. |
+| **Detailed** | Names on small tiles too, and each size with its share of what's on the map. |
+
+The clicked item has a bright ring with a dark edge either side, so it stands out on light and
+dark tiles; other items selected with it in the file manager get a plain outline. When you've
+zoomed in, the map's bottom left corner says how far (for example **×3.2**); press **Home** for
+the whole view again.
 
 ## Previews on tiles
 
@@ -77,16 +120,28 @@ tiles** in Settings > Treemap.
 
 ## The preview pane
 
-The **Preview** pane at the right of the map shows the item you clicked: a large preview of the
-file (pictures can be zoomed and dragged, text scrolls, sound plays with the controls under it,
-and a video's frame has a play button that plays it right there, with its sound, a bar to jump
-about and **Open** to watch it in Quick Look on macOS or your video app elsewhere (on Linux,
-playing in the pane needs `ffmpeg`; on Windows the pane plays the picture only, so use **Open**
-for sound); a cloud file that isn't downloaded is only fetched if you ask), and its kind, size in bytes, size on disk, share of the analysis, date, where
-it is and, for a cloud file, how it's stored. For a folder it lists the largest items inside;
-click one to select it. **Open** opens the item and **Show in folder** (**Show in Finder** on macOS)
-shows it in your file manager. Hide or show the pane with **Preview pane** above the map or
-**Alt+P** (**⌥P** on macOS).
+The **Preview** pane beside the map shows the item you clicked. It has two tabs:
+
+- **Preview**: a large preview of the file, with its name, kind and size under it. Pictures can
+  be zoomed and dragged, text scrolls, sound plays with the controls under it, and a video's frame
+  has a play button that plays it right there, with its sound, a bar to jump about and **Open** to
+  watch it in Quick Look on macOS or your video app elsewhere (on Linux, playing in the pane
+  needs `ffmpeg`; on Windows the pane plays the picture only, so use **Open** for sound). A cloud
+  file that isn't downloaded is only fetched if you ask.
+- **Details**: everything known about it: kind, size in bytes, size on disk, share of the
+  analysis, date, where it is, how a cloud file is stored, and what the file says about itself
+  (picture dimensions, audio and video details, fonts). For a folder it lists the largest items
+  inside; click one to select it.
+
+Under both, **Open** opens the item, **Quick Look** shows a large preview, **Reveal in Files**
+switches to the Files workspace with the item selected in its folder, and **⋯** has **Show in
+folder** (**Show in Finder** on macOS) and **Copy path**. With nothing selected the pane says how
+to pick something.
+
+The pane **opens by itself** when you click a tile and **folds away** when nothing is selected.
+Click the **pin** at its top to keep it open all the time; **›|** (or **Alt+P**, **⌥P** on macOS)
+folds it away to a narrow rail at the window's edge, where the eye button brings it back. It
+remembers its width, its tab and whether it's pinned.
 
 ### Quick Look on the map
 

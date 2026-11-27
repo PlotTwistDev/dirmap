@@ -60,6 +60,7 @@ mod lab;
 mod storage;
 mod explain;
 mod livescan;
+mod rails;
 mod viz;
 pub(crate) mod style;
 use files::Workspace;
@@ -125,7 +126,7 @@ impl ViewFilter {
 }
 
 /// What the colors on the maps mean.
-#[derive(Clone, Copy, PartialEq, Hash)]
+#[derive(Clone, Copy, PartialEq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 enum ColorMode {
     Type,
     Age,
@@ -256,7 +257,7 @@ pub struct App {
     zoom: Vec<u32>,
     sort: SortBy,
     sort_desc: bool,
-    highlight_ext: Option<String>,
+    highlight_ext: viz::Highlight,
     /// The treemap: camera, tiles and navigation.
     map: MapView,
     /// The map is drawn in the File Manager's dock: right-click opens the item menu instead of
@@ -333,6 +334,8 @@ pub struct App {
     dup_skipped: (u64, u64),
     /// The storage breakdown of the current tree, worked out once per tree: (tree pointer, tally).
     cloud_sum: Option<(usize, scan::CloudTally)>,
+    /// Folders in the scan, counted once per tree (keyed by its address).
+    folder_sum: Option<(usize, u64)>,
     /// Show the "run as administrator?" question (first start without admin rights).
     admin_prompt: bool,
     /// Set when a restart as administrator didn't happen, to say so.
@@ -418,7 +421,7 @@ impl App {
             zoom: Vec::new(),
             sort: SortBy::Size,
             sort_desc: true,
-            highlight_ext: None,
+            highlight_ext: viz::Highlight::default(),
             map_in_dock: false,
             tile_prev: Default::default(),
             asking: Vec::new(),
@@ -470,6 +473,7 @@ impl App {
             dup_done: false,
             dup_skipped: (0, 0),
             cloud_sum: None,
+            folder_sum: None,
             admin_prompt,
             admin_declined: false,
             backup_reminder_closed: false,
@@ -625,7 +629,7 @@ impl App {
         self.scan_secs = secs;
         self.selected = None;
         self.zoom.clear();
-        self.highlight_ext = None;
+        self.highlight_ext.clear();
         self.map.clear();
         self.expanded.clear();
         self.expanded.insert(Box::new([]));
@@ -1512,8 +1516,8 @@ impl App {
         if self.shown.is_some() {
             ui.weak("Matching files only");
         }
-        if self.highlight_ext.is_some() && ui.small_button("Clear highlight").clicked() {
-            self.highlight_ext = None;
+        if self.highlight_ext.any_picked() && ui.small_button("Clear highlight").clicked() {
+            self.highlight_ext.clear();
         }
         let mut toggle = None;
         let mut menu_pick = None;
@@ -1538,7 +1542,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW_H, exts.len(), |ui, range| {
             for (k, e) in exts[range.clone()].iter().enumerate() {
                 let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-                let on = self.highlight_ext.as_deref() == Some(e.ext.as_str());
+                let on = self.highlight_ext.is_picked(&e.ext);
                 let vis = ui.visuals().clone();
                 if on {
                     ui.painter().rect_filled(rect, 2.0, vis.selection.bg_fill);
@@ -1582,9 +1586,14 @@ impl App {
             self.ext_action(a, ext);
         }
         if let Some(t) = toggle
-            && (self.highlight_ext.as_ref() == Some(&t) || self.premium(crate::licence::Feature::Filters))
+            && (self.highlight_ext.is_picked(&t) || self.premium(crate::licence::Feature::Filters))
         {
-            self.highlight_ext = if self.highlight_ext.as_ref() == Some(&t) { None } else { Some(t) };
+            // Ctrl/⌘-click adds to the types picked; a plain click picks just this one.
+            if ui.input(|i| i.modifiers.command) {
+                self.highlight_ext.toggle(&t);
+            } else {
+                self.highlight_ext.only(&t);
+            }
         }
     }
 
@@ -1592,23 +1601,7 @@ impl App {
     // ---------- right-hand panel ----------
 
     fn side_panel(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            for (tab, label) in
-                [(SideTab::Types, "File types"), (SideTab::Sizes, "Sizes"), (SideTab::Changes, "Changes"), (SideTab::Duplicates, "Duplicates"), (SideTab::Sequences, "Sequences")]
-            {
-                let tip = match tab {
-                    SideTab::Types => "Space used by each file type; click one to highlight it on the map",
-                    SideTab::Sizes => "How many files fall into each size range",
-                    SideTab::Changes => "Compare with a saved snapshot to see what grew or shrank",
-                    SideTab::Duplicates => "Find files with exactly the same contents",
-                    SideTab::Sequences => "Numbered file sequences (renders, scans) and their missing frames",
-                };
-                ui.selectable_value(&mut self.side_tab, tab, label).on_hover_text(tip);
-            }
-            if help::link_button(ui, "Help for this tab") {
-                self.help.show_topic(self.side_topic());
-            }
-        });
+        self.insights_header(ui);
         ui.separator();
         match self.side_tab {
             SideTab::Types => self.ext_panel(ui),
@@ -2066,10 +2059,8 @@ impl App {
             } else if self.filter.active() && !self.filter.matches(n) {
                 // Hidden, as on the treemap.
                 c = Color32::from_gray(45);
-            } else if let Some(h) = &self.highlight_ext {
-                if !n.ext().eq_ignore_ascii_case(h) {
-                    c = c.gamma_multiply(0.2);
-                }
+            } else if self.highlight_ext.active() && !self.highlight_ext.shows(n.ext()) {
+                c = c.gamma_multiply(0.2);
             }
             if Some(i) == hover {
                 c = lighten(c, 0.3);
@@ -2255,10 +2246,7 @@ impl App {
                 return None;
             }
             let c = if fade { cloud_fade(c, n.flags) } else { c };
-            let fill = match &highlight {
-                Some(h) if !n.ext().eq_ignore_ascii_case(h) => c.gamma_multiply(0.15),
-                _ => c,
-            };
+            let fill = if highlight.active() && !highlight.shows(n.ext()) { c.gamma_multiply(0.15) } else { c };
             Some((fill, c))
         });
         // Matches too small to draw would vanish into their folder's blended patch; light the
@@ -2364,10 +2352,10 @@ impl App {
         let help_hovered = self.help.hovered;
         // The keys go to the map unless the file manager was clicked last; the side buttons go to
         // whichever is under the pointer.
-        let keys = !typing && if self.map_in_dock { resp.hovered() } else { !self.browser_has_keys() };
+        let keys = !typing && !self.dialog.open && if self.map_in_dock { resp.hovered() } else { !self.browser_has_keys() };
         let fm = if self.map_in_dock { None } else { self.browser.rect };
         let (wheel, pinch, back, forward, home, plus, minus) = ui.input(|i| {
-            let side = !help_hovered && !i.pointer.hover_pos().is_some_and(|p| fm.is_some_and(|r| r.contains(p)));
+            let side = !help_hovered && !self.dialog.open && !i.pointer.hover_pos().is_some_and(|p| fm.is_some_and(|r| r.contains(p)));
             let mut wheel = 0.0f64;
             for e in &i.raw.events {
                 if let egui::Event::MouseWheel { delta, unit, modifiers, .. } = e {
@@ -2502,9 +2490,12 @@ impl App {
             Vec::new()
         };
         // Modern: name and size written straight on the tile, as on the website.
+        let density = self.files.prefs.map_density;
+        let view_size = zroot.size.max(1);
         if self.view().show_labels && modern {
+            let (min_w, min_h) = density.name_min();
             let labels: Vec<(Rect, Vec<u32>, f32)> =
-                all_labels.iter().filter(|(r, path, _)| r.width() >= 80.0 && r.height() >= 22.0 && !previewed.contains(path)).cloned().collect();
+                all_labels.iter().filter(|(r, path, _)| r.width() >= min_w && r.height() >= min_h && !previewed.contains(path)).cloned().collect();
             let name_font = FontId::monospace(12.0);
             let size_font = FontId::monospace(11.0);
             for (r, path, a) in labels {
@@ -2518,8 +2509,12 @@ impl App {
                 let p = painter.with_clip_rect(name_clip(r, n, 2.0).intersect(painter.clip_rect()));
                 let at = r.min + vec2(6.0, 6.0);
                 p.text(at, Align2::LEFT_TOP, &*n.name, name_font.clone(), ink.gamma_multiply(0.86 * a));
-                if r.height() >= 36.0 {
-                    p.text(at + vec2(0.0, 15.0), Align2::LEFT_TOP, scan::human(n.size), size_font.clone(), ink.gamma_multiply(0.64 * a));
+                if density.size_min().is_some_and(|h| r.height() >= h) {
+                    let mut size = scan::human(n.size);
+                    if density.shares() {
+                        size.push_str(&format!(" · {}", viz::share(n.size, view_size)));
+                    }
+                    p.text(at + vec2(0.0, 15.0), Align2::LEFT_TOP, size, size_font.clone(), ink.gamma_multiply(0.64 * a));
                 }
             }
         }
@@ -2537,12 +2532,15 @@ impl App {
                 }
                 let Some(n) = zroot.at(path) else { continue };
                 // Bigger tiles get bigger names, so zooming in helps.
-                let font = FontId::proportional((r.width().min(r.height() * 2.0) / 10.0).clamp(11.0, 17.0));
+                let font = FontId::proportional((r.width().min(r.height() * 2.0) / 10.0 / density.classic_scale()).clamp(11.0, 17.0));
+                if density == viz::MapDensity::Minimal && (r.width() < 110.0 || r.height() < 30.0) {
+                    continue;
+                }
                 let p = painter.with_clip_rect(name_clip(r, n, 1.0).intersect(painter.clip_rect()));
                 let at = r.min + vec2(3.0, 2.0);
                 // White text on a dark chip reads on any tile, however it's coloured or lit.
                 let name = p.layout_no_wrap(n.name.to_string(), font.clone(), Color32::WHITE);
-                let sa = a * mapview_smooth(font.size * 2.4, font.size * 2.9, r.height());
+                let sa = if density.size_min().is_none() { 0.0 } else { a * mapview_smooth(font.size * 2.4, font.size * 2.9, r.height()) };
                 let size = (sa > 0.02).then(|| p.layout_no_wrap(scan::human(n.size), font.clone(), Color32::WHITE));
                 let w = name.size().x.max(size.as_ref().map_or(0.0, |g| g.size().x));
                 let h = name.size().y + size.as_ref().map_or(0.0, |g| g.size().y * sa);
@@ -2576,15 +2574,26 @@ impl App {
         // the other items selected with it in the file manager.
         if !self.map.in_transition() {
             let picked = self.picked_paths();
+            let main = self.selected.clone();
             let all = self.selected.iter().chain(picked.iter().take(500));
+            let colour = self.view().selection_color;
             for sel in all.filter(|s| s.starts_with(&root)) {
                 let rel = &sel[root.len()..];
                 let rects = treemap::ancestors(zroot, self.map.camera.world(), rel);
                 // The nearest ancestor big enough to see; never the whole folder on show, which
                 // would just frame the map.
                 if let Some(r) = rects.iter().skip(1).rev().map(|r| self.map.to_screen(bounds, r)).find(|r| r.width() >= 3.0 && r.height() >= 3.0) {
-                    let stroke = Stroke::new(2.0, self.view().selection_color);
-                    painter.with_clip_rect(bounds).rect_stroke(r, 0.0, stroke, egui::StrokeKind::Inside);
+                    let p = painter.with_clip_rect(bounds);
+                    if main.as_ref() == Some(sel) && r.width() >= 8.0 && r.height() >= 8.0 {
+                        // The clicked item: a ring with a dark edge either side, so it stands out
+                        // on light and dark tiles alike, and a faint wash inside.
+                        p.rect_filled(r.shrink(2.0), 0.0, colour.gamma_multiply(0.10));
+                        p.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_black_alpha(150)), egui::StrokeKind::Inside);
+                        p.rect_stroke(r.shrink(1.0), 0.0, Stroke::new(2.5, colour), egui::StrokeKind::Inside);
+                        p.rect_stroke(r.shrink(3.5), 0.0, Stroke::new(1.0, Color32::from_black_alpha(110)), egui::StrokeKind::Inside);
+                    } else {
+                        p.rect_stroke(r, 0.0, Stroke::new(2.0, colour), egui::StrokeKind::Inside);
+                    }
                 }
             }
         }
@@ -2608,6 +2617,16 @@ impl App {
             let mut abs = root.clone();
             abs.extend_from_slice(rel);
             self.hover_status = Some(self.hover_text(&abs));
+        }
+        // Zoomed in: say how far, and how to get back, in the bottom left corner.
+        let zoom = self.map.camera.zoom();
+        if zoom > 1.05 && !self.map_in_dock {
+            let text = format!("×{:.1}  ·  Home for the whole view", zoom);
+            let font = FontId::proportional(11.5);
+            let g = painter.layout_no_wrap(text, font, Color32::WHITE);
+            let chip = Rect::from_min_size(bounds.left_bottom() + vec2(8.0, -8.0 - g.size().y - 6.0), g.size() + vec2(14.0, 6.0));
+            painter.rect_filled(chip, 4.0, Color32::from_black_alpha(150));
+            painter.galley_with_override_text_color(chip.min + vec2(7.0, 3.0), g, Color32::from_white_alpha(225));
         }
         if std::env::var_os("DIRMAP_PROFILE").is_some() {
             let text = format!(
@@ -2959,15 +2978,11 @@ impl eframe::App for App {
                 } else if let Some(job) = &self.job {
                     ui.spinner();
                     ui.label(format!("Scanning {}…", job.root.display()));
-                } else if let Some(t) = &self.tree {
-                    let how = "Click a tile to select, double-click to open a folder, right-click to zoom out.";
-                    ui.label(format!(
-                        "{}: {} in {} files, scanned in {:.1}s. {how}",
-                        self.scanned_path.display(),
-                        sizes_text(t, self.metric),
-                        group(t.files),
-                        self.scan_secs
-                    ));
+                } else if self.tree.is_some() {
+                    // The totals are in the strip under the map; here, only what's happening.
+                    if self.selected.is_none() {
+                        ui.weak("Click a tile to select it, double-click to open a folder, right-click to zoom out.");
+                    }
                     if self.scan_errors > 0 {
                         let text = if self.scan_errors == 1 {
                             "1 item couldn't be read.".to_string()
@@ -2989,10 +3004,6 @@ impl eframe::App for App {
                         {
                             crate::elevate::open_full_disk_access_settings();
                         }
-                    }
-                    if let Some(s) = &self.shown {
-                        ui.separator();
-                        ui.label(format!("Showing {} matching files ({})", group(s.tree.files), scan::human(s.tree.size)));
                     }
                     let stale = self.scanned_with.as_ref().is_some_and(|s| s.scan_key() != self.settings.scan_key());
                     if stale {
@@ -3044,11 +3055,9 @@ impl eframe::App for App {
         if self.files.look.from_map {
             self.quick_look(&ctx);
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::P)) {
-            self.files.prefs.map_preview = !self.files.prefs.map_preview;
-        }
-        let r = egui::Panel::right("exts").default_size(330.0).resizable(true).show(ui, |ui| self.side_panel(ui));
-        self.help_regions.push((r.response.rect, self.side_topic()));
+        self.rails_update(&ctx);
+        self.right_rail(ui);
+        self.insights_panel(ui);
         let r = egui::Panel::top("tree").default_size(340.0).resizable(true).show(ui, |ui| self.file_manager(ui));
         self.help_regions.push((r.response.rect, if self.browser.layout() == browser::Layout::Tree { topics::TREE } else { topics::BROWSER }));
         // Its own panel, so it gets the theme's background (readable in light and dark themes).
@@ -3073,19 +3082,7 @@ impl eframe::App for App {
         });
         self.help_regions.push((r.response.rect, topics::MAP_SUMMARY));
         // The clicked tile's preview and facts, beside the map.
-        if self.files.prefs.map_preview {
-            let pal = style::pal(ui);
-            let r = egui::Panel::right("map-preview")
-                .resizable(true)
-                .default_size(self.files.prefs.preview_width)
-                .size_range(200.0..=520.0)
-                .frame(egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 8 }))
-                .show(ui, |ui| {
-                    let tall = ui.available_height();
-                    egui::ScrollArea::vertical().id_salt("map-preview-scroll").auto_shrink(false).show(ui, |ui| self.map_preview_pane(ui, tall));
-                });
-            self.help_regions.push((r.response.rect, topics::TREEMAP_NAV));
-        }
+        self.preview_panel(ui);
         let map_topic = match self.map_kind {
             MapKind::Treemap => topics::TREEMAP_NAV,
             MapKind::Sunburst => topics::SUNBURST,
@@ -3111,6 +3108,19 @@ impl eframe::App for App {
 /// Live progress for a running scan: counts, an estimated percentage for whole drives, and
 /// the folder being read right now, so a long scan never looks frozen. Compact when the live
 /// tree is shown below it.
+/// A mouse button went down inside `rect` on this `ui`'s own layer this frame. A press on a
+/// window or popup drawn over `rect` (Settings, Help, a menu) doesn't count: it belongs to that.
+pub(crate) fn pressed_in(ui: &egui::Ui, rect: egui::Rect) -> bool {
+    let at = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
+    at.is_some_and(|p| rect.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id()))
+}
+
+/// A press anywhere on this `ui`'s own layer this frame, as [`pressed_in`]: where it was.
+pub(crate) fn pressed_at(ui: &egui::Ui) -> Option<egui::Pos2> {
+    let at = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
+    at.filter(|p| ui.ctx().layer_id_at(*p) == Some(ui.layer_id()))
+}
+
 fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
     let p = &job.progress;
     let files = p.files.load(Ordering::Relaxed);

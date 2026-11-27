@@ -587,7 +587,7 @@ impl Dialog {
             self.target = None;
         }
         // Esc cancels, unless it's leaving a text field or closing the confirmation.
-        if !self.confirm_reset_all && !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if !self.confirm_reset_all && !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             close = true;
         }
         if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F))) {

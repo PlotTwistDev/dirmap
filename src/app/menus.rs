@@ -16,6 +16,8 @@ pub(super) enum TreeAction {
     Open,
     CopyPath,
     Reveal,
+    /// Storage Analysis: show the item in the Files workspace.
+    RevealInFiles,
     Terminal(Terminal),
     Refresh,
     Properties,
@@ -260,6 +262,9 @@ impl App {
         set(item(ui, true, "Copy Path", &k(M::COMMAND | M::SHIFT, Key::C)), TreeAction::CopyPath);
         let reveal = if cfg!(windows) { format!("Select in {}…", actions::FILE_MANAGER) } else { format!("Show in {}…", actions::FILE_MANAGER) };
         set(item(ui, true, reveal, &k(M::COMMAND, Key::E)), TreeAction::Reveal);
+        if !info.in_browser {
+            set(item(ui, true, "Reveal in Files", ""), TreeAction::RevealInFiles);
+        }
         for (i, (label, t)) in actions::terminals().iter().enumerate() {
             let key = if i == 0 { Key::P } else { Key::S };
             set(item(ui, true, *label, &k(M::COMMAND, key)), TreeAction::Terminal(*t));
@@ -336,7 +341,7 @@ impl App {
     /// Tree shortcuts act on the selection, from anywhere except a text box.
     pub(super) fn tree_shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, Modifiers as M};
-        if self.tree.is_none() || self.job.is_some() || self.ops.modal() || ctx.text_edit_focused() {
+        if self.tree.is_none() || self.job.is_some() || self.blocked() || ctx.text_edit_focused() {
             return;
         }
         let Some(sel) = self.selected.clone() else { return };
@@ -414,6 +419,10 @@ impl App {
                 Ok(())
             }
             TreeAction::Reveal => actions::reveal(&disk),
+            TreeAction::RevealInFiles => {
+                self.reveal_in_files(&path);
+                Ok(())
+            }
             TreeAction::Terminal(t) => actions::terminal(&disk, t),
             TreeAction::Explain => {
                 self.explain_path(disk.clone());
@@ -490,10 +499,10 @@ impl App {
     pub(super) fn ext_action(&mut self, a: ExtAction, ext: String) {
         match a {
             ExtAction::Highlight => {
-                if self.highlight_ext.as_ref() != Some(&ext) && !self.premium(crate::licence::Feature::Filters) {
+                if !self.highlight_ext.is_picked(&ext) && !self.premium(crate::licence::Feature::Filters) {
                     return;
                 }
-                self.highlight_ext = if self.highlight_ext.as_ref() == Some(&ext) { None } else { Some(ext) };
+                self.highlight_ext.only(&ext);
             }
             ExtAction::Copy => {
                 self.ctx_copy = Some(format!(".{ext}"));

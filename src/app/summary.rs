@@ -1,16 +1,22 @@
-//! The summary under the Storage Analysis map: the scanned folder, how much it holds, and the
-//! file types taking the most space, each with its map colour and total (as on filescape.app).
+//! The summary under the Storage Analysis map: a strip of the scan's totals (on disk, logical,
+//! only in the cloud, reclaimable, files, folders), the file-type legend, and on request the
+//! scan's details and where its data is stored (the cloud breakdown).
 //!
-//! Everything here follows the filters: with a type, size or Custom filter on, the totals are
-//! those of the matching files only. Nothing is counted per frame: the totals come from what the
-//! filter work already produces in the background (`App::exts`, the filtered tree's list, or the
-//! Highlight match counts), so this stays instant on millions of files.
+//! The totals are the whole scan's, so cloud data is never counted as local whatever the view;
+//! with a filter on, a Matching total says how much of it matches. The legend follows the
+//! filters. Nothing is counted per frame: the totals come from the tree's own sums, the cached
+//! cloud tally and folder count, and what the filter work already produces in the background
+//! (`App::exts`, the filtered tree's list, or the Highlight match counts), so this stays instant
+//! on millions of files.
 
 use super::*;
+use super::viz::LegendItem;
 use crate::fsys::PathShow;
+use crate::kit;
+use eframe::egui::RichText;
 
-/// How many types the summary lists at most.
-const MAX_TYPES: usize = 10;
+/// How many types the legend can list at most.
+const MAX_TYPES: usize = 300;
 
 /// What the summary shows.
 #[derive(Debug, PartialEq)]
@@ -21,8 +27,8 @@ pub(super) struct Summary {
     /// The whole scan, to say "of" when filtering.
     pub all_files: u64,
     pub all_bytes: u64,
-    /// The biggest types, (lowercased extension, bytes), biggest first.
-    pub types: Vec<(String, u64)>,
+    /// The types, biggest first.
+    pub types: Vec<LegendItem>,
     /// A filter is on but its totals are still being worked out (the whole scan is shown).
     pub pending: bool,
 }
@@ -32,114 +38,269 @@ fn describe(f: &ViewFilter) -> String {
     super::viz::chips_of(f, false).into_iter().map(|(_, s)| s).collect::<Vec<_>>().join(" · ")
 }
 
+/// Folders at or below `n` (not counting `n`).
+fn count_folders(n: &Node) -> u64 {
+    let mut count = 0;
+    let mut stack = vec![n];
+    while let Some(x) = stack.pop() {
+        for c in x.children.iter().filter(|c| c.is_dir) {
+            count += 1;
+            stack.push(c);
+        }
+    }
+    count
+}
+
+/// One total in the strip.
+struct Card {
+    label: &'static str,
+    value: String,
+    tip: String,
+    /// The size measure clicking it switches to.
+    measure: Option<scan::Metric>,
+    /// Lower drops first when the window is narrow.
+    rank: u8,
+}
+
+/// Draws a total: a small label over a large value. Highlighted when it's the map's measure.
+fn card(ui: &mut egui::Ui, c: &Card, active: bool) -> egui::Response {
+    let t = kit::tokens(ui);
+    let label = ui.painter().layout_no_wrap(c.label.to_string(), FontId::proportional(10.0), t.weak);
+    let value = ui.painter().layout_no_wrap(c.value.clone(), FontId::proportional(15.5), t.strong);
+    let w = label.size().x.max(value.size().x) + 22.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 42.0), if c.measure.is_some() { Sense::click() } else { Sense::hover() });
+    if ui.is_rect_visible(rect) {
+        let hovered = resp.hovered() && c.measure.is_some();
+        let fill = if active { t.accent_soft } else if hovered { t.pal.hover } else { Color32::TRANSPARENT };
+        ui.painter().rect_filled(rect, 6.0, fill);
+        let x = rect.left() + 11.0;
+        ui.painter().galley_with_override_text_color(pos2(x, rect.top() + 6.0), label, if active { t.accent } else { t.weak });
+        ui.painter().galley_with_override_text_color(pos2(x, rect.top() + 19.0), value, t.strong);
+        kit::focus_ring(ui, rect, &resp, 6.0);
+    }
+    resp.widget_info(|| egui::WidgetInfo::labeled(if c.measure.is_some() { egui::WidgetType::Button } else { egui::WidgetType::Label }, true, format!("{} {}", c.label, c.value)));
+    let more = match c.measure {
+        Some(_) if active => "\n\nThe map is sized by this.",
+        Some(_) => "\n\nClick to size the map by this.",
+        None => "",
+    };
+    resp.on_hover_text(format!("{}{more}", c.tip))
+}
+
+/// A thin divider between groups of totals.
+fn divider(ui: &mut egui::Ui) {
+    let t = kit::tokens(ui);
+    let (r, _) = ui.allocate_exact_size(vec2(9.0, 28.0), Sense::hover());
+    ui.painter().vline(r.center().x, r.y_range(), egui::Stroke::new(1.0, t.divider));
+}
+
 impl App {
     /// The numbers for the summary, from results already worked out. None before a scan.
     pub(super) fn summary(&self) -> Option<Summary> {
         let tree = self.tree.as_ref()?;
-        let top = |v: &mut dyn Iterator<Item = (String, u64)>| v.filter(|e| e.1 > 0).take(MAX_TYPES).collect::<Vec<_>>();
-        let whole = || Summary {
-            files: tree.files,
-            bytes: tree.size,
-            all_files: tree.files,
-            all_bytes: tree.size,
-            types: top(&mut self.exts.iter().map(|e| (e.ext.clone(), e.bytes))),
-            pending: false,
-        };
+        let top = |v: &mut dyn Iterator<Item = LegendItem>| v.filter(|e| e.bytes > 0).take(MAX_TYPES).collect::<Vec<_>>();
+        let stats = |v: &[scan::ExtStat]| top(&mut v.iter().map(|e| LegendItem { ext: e.ext.clone(), bytes: e.bytes, files: Some(e.files) }));
+        let whole = || Summary { files: tree.files, bytes: tree.size, all_files: tree.files, all_bytes: tree.size, types: stats(&self.exts), pending: false };
         if !self.filter.active() {
             return Some(whole());
         }
-        // Show matches only: the filtered tree and its own type list.
+        // Only matches: the filtered tree and its own type list.
         if let Some(s) = self.shown.as_ref().filter(|s| s.filter == self.filter) {
-            return Some(Summary { files: s.tree.files, bytes: s.tree.size, types: top(&mut s.exts.iter().map(|e| (e.ext.clone(), e.bytes))), ..whole() });
+            return Some(Summary { files: s.tree.files, bytes: s.tree.size, types: stats(&s.exts), ..whole() });
         }
         // Highlight: the match counts, with bytes per type.
         if let Some(h) = self.current_hits() {
-            return Some(Summary { files: h.files, bytes: h.bytes, types: top(&mut h.exts.iter().cloned()), ..whole() });
+            return Some(Summary { files: h.files, bytes: h.bytes, types: top(&mut h.exts.iter().map(|(e, b)| LegendItem { ext: e.clone(), bytes: *b, files: None })), ..whole() });
         }
         Some(Summary { pending: true, ..whole() })
     }
 
-    /// The summary row: folder, size and file count, the active filters, then a chip per big
-    /// type in its map colour. Clicking a chip highlights that type on the map.
+    /// Folders in the scan, counted once per tree.
+    fn folder_total(&mut self) -> u64 {
+        let Some(tree) = self.tree.as_ref() else { return 0 };
+        let key = Arc::as_ptr(tree) as usize;
+        if self.folder_sum.is_none_or(|f| f.0 != key) {
+            self.folder_sum = Some((key, count_folders(tree)));
+        }
+        self.folder_sum.map(|f| f.1).unwrap_or(0)
+    }
+
+    /// The totals the strip shows, most important first.
+    fn cards(&mut self, sum: &Summary) -> Vec<Card> {
+        let Some(tree) = self.tree.clone() else { return Vec::new() };
+        let mut v = Vec::new();
+        let no_alloc = tree.flags & scan::store::NO_ALLOC != 0;
+        if !no_alloc {
+            v.push(Card {
+                label: "ON DISK",
+                value: scan::human(tree.alloc),
+                tip: "Space the scanned files take on this computer's drive, as `du` and Explorer's \"Size on disk\" count it. Cloud files that are only online take none, so this is what deleting or freeing up would recover.".into(),
+                measure: Some(scan::Metric::Disk),
+                rank: 9,
+            });
+        }
+        v.push(Card {
+            label: "LOGICAL SIZE",
+            value: scan::human(tree.logical),
+            tip: if no_alloc {
+                "Each file's full size. Space on disk isn't known for this analysis (a server, or a snapshot from an older version).".into()
+            } else {
+                "Each file's full size, wherever its data is: what Explorer calls \"Size\". Cloud files that are only online count in full, and compressed or sparse files count more than they take.".into()
+            },
+            measure: Some(scan::Metric::Logical),
+            rank: 7,
+        });
+        let cloud = self.cloud_summary().filter(|c| c.any());
+        if let Some(c) = cloud.filter(|_| tree.flags & scan::store::NOT_LOCAL != 0) {
+            v.push(Card {
+                label: "CLOUD ONLY",
+                value: scan::human(c.online_bytes),
+                tip: format!(
+                    "Data in the cloud that isn't on this computer: {} online-only and {} partly downloaded files. It isn't counted on disk, and opening those files downloads it.",
+                    group(c.online_only),
+                    group(c.partial)
+                ),
+                measure: Some(scan::Metric::CloudOnly),
+                rank: 5,
+            });
+        }
+        if let Some(c) = cloud.filter(|_| tree.flags & scan::store::ON_DEMAND != 0 && crate::cloudops::supported()) {
+            let pinned = if c.pinned_alloc > 0 { format!(" Files set to always stay on this device ({}) aren't counted.", scan::human(c.pinned_alloc)) } else { String::new() };
+            v.push(Card {
+                label: "RECLAIMABLE",
+                value: scan::human(c.reclaimable_bytes),
+                tip: format!(
+                    "Space your cloud app could free up on this computer while keeping {} downloaded files in the cloud.{pinned} Nothing is downloaded or freed up until you ask.",
+                    group(c.reclaimable)
+                ),
+                measure: Some(scan::Metric::Reclaimable),
+                rank: 4,
+            });
+        }
+        v.push(Card { label: "FILES", value: group(tree.files), tip: "Files in the scan, whatever the filters.".into(), measure: None, rank: 8 });
+        let folders = self.folder_total();
+        v.push(Card { label: "FOLDERS", value: group(folders), tip: "Folders in the scan, whatever the filters.".into(), measure: None, rank: 3 });
+        if self.filter.active() {
+            let (value, tip) = if sum.pending {
+                ("Counting…".to_string(), "The files matching the filters are still being counted.".to_string())
+            } else {
+                (
+                    format!("{} · {}", scan::human(sum.bytes), group(sum.files)),
+                    format!(
+                        "{} files ({}) match the filters: {}. Sized by the map's measure ({}).",
+                        group(sum.files),
+                        scan::human(sum.bytes),
+                        describe(&self.filter),
+                        self.metric.label().to_lowercase()
+                    ),
+                )
+            };
+            v.push(Card { label: "MATCHING", value, tip, measure: None, rank: 6 });
+        }
+        v
+    }
+
+    /// The summary under the map: the totals strip, the legend, and the details and cloud
+    /// breakdown when they're open.
     pub(super) fn summary_bar(&mut self, ui: &mut egui::Ui) {
         let Some(sum) = self.summary() else { return };
-        let pal = style::pal(ui);
-        let mono = FontId::monospace(11.5);
-        let filtering = self.filter.active() && !sum.pending;
-        ui.horizontal_wrapped(|ui| {
+        let t = kit::tokens(ui);
+        let mut cards = self.cards(&sum);
+        let has_cloud = self.cloud_summary().is_some_and(|c| c.any());
+        let details_id = egui::Id::new("summary-details");
+        let mut details = ui.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(details_id));
+        let mut breakdown = self.settings.cloud_breakdown;
+        // Drop the least important totals until the strip fits beside its toggles.
+        let toggles = if has_cloud { 210.0 } else { 110.0 };
+        let fits = |ui: &egui::Ui, cards: &[Card]| {
+            let w: f32 = cards
+                .iter()
+                .map(|c| {
+                    let lw = ui.fonts_mut(|f| f.layout_no_wrap(c.label.to_string(), FontId::proportional(10.0), t.weak).size().x);
+                    let vw = ui.fonts_mut(|f| f.layout_no_wrap(c.value.clone(), FontId::proportional(15.5), t.strong).size().x);
+                    lw.max(vw) + 24.0
+                })
+                .sum();
+            w + 20.0 <= ui.available_width() - toggles
+        };
+        while cards.len() > 1 && !fits(ui, &cards) {
+            let (i, _) = cards.iter().enumerate().min_by_key(|(_, c)| c.rank).unwrap();
+            cards.remove(i);
+        }
+        let mut measure = None;
+        ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            let mut size = if filtering {
-                format!("{} of {}", scan::human(sum.bytes), scan::human(sum.all_bytes))
-            } else {
-                scan::human(sum.bytes)
-            };
-            // Which size this is, and the other one when they differ (cloud files, compression).
-            if self.metric == scan::Metric::CloudOnly {
-                size.push_str(" only in the cloud");
-            } else if self.metric == scan::Metric::Reclaimable {
-                size.push_str(" reclaimable");
-            } else if let Some(t) = self.tree.as_ref().filter(|t| t.flags & scan::store::NO_ALLOC == 0) {
-                let other = if self.metric == scan::Metric::Disk { scan::Metric::Logical } else { scan::Metric::Disk };
-                let (a, b) = (scan::human(t.size), scan::human(t.size_by(other)));
-                size.push_str(if self.metric == scan::Metric::Disk { " on disk" } else { " logical" });
-                if !filtering && a != b {
-                    size.push_str(&format!(" ({b} {})", if other == scan::Metric::Disk { "on disk" } else { "logical" }));
+            let mut last_kind = None;
+            for c in &cards {
+                // A divider between sizes, counts and the match total.
+                let kind = if c.measure.is_some() { 0 } else if c.label == "MATCHING" { 2 } else { 1 };
+                if last_kind.is_some_and(|k| k != kind) {
+                    divider(ui);
+                }
+                last_kind = Some(kind);
+                if card(ui, c, c.measure == Some(self.metric)).clicked() {
+                    measure = c.measure;
                 }
             }
-            let files = if filtering {
-                format!("{} of {} files", group(sum.files), group(sum.all_files))
-            } else {
-                format!("{} files", group(sum.files))
-            };
-            ui.label(egui::RichText::new(format!("{} · {size} · {files}", self.scanned_path.shown())).font(mono.clone()).color(pal.strong));
-            if self.filter.active() {
-                ui.label(egui::RichText::new(format!(" · {}", describe(&self.filter))).font(mono.clone()).color(pal.weak));
-            }
-            if sum.pending {
-                ui.add_space(6.0);
-                ui.spinner();
-                ui.weak("Counting…");
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if viz::pill(ui, Some(kit::Icon::ChevronDown), "Details", details, false, false).on_hover_text("Where and when this was scanned, both sizes, and anything that couldn't be read").clicked() {
+                    details = !details;
+                }
+                if has_cloud
+                    && viz::pill(ui, Some(kit::Icon::Layers), "Storage", breakdown, false, false)
+                        .on_hover_text("Where the data in this scan is: on this computer, downloaded from the cloud, or only in the cloud")
+                        .clicked()
+                {
+                    breakdown = !breakdown;
+                }
+            });
         });
-        if self.color_mode != ColorMode::Type || sum.types.is_empty() {
-            return;
+        ui.data_mut(|d| d.insert_persisted(details_id, details));
+        if breakdown != self.settings.cloud_breakdown {
+            self.settings.cloud_breakdown = breakdown;
+            self.dialog.draft.cloud_breakdown = breakdown;
         }
-        let mut toggle = None;
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
-            for (ext, bytes) in &sum.types {
-                let on = self.highlight_ext.as_deref() == Some(ext.as_str());
-                let label = if ext.is_empty() { "(none)" } else { ext.as_str() };
-                let text = format!("{label} {}", scan::human(*bytes));
-                let w = ui.fonts_mut(|f| f.layout_no_wrap(text.clone(), mono.clone(), pal.text).size().x) + 26.0;
-                let (r, resp) = ui.allocate_exact_size(vec2(w, 20.0), Sense::click());
-                if on {
-                    ui.painter().rect_filled(r, 4.0, pal.sel);
-                } else if resp.hovered() {
-                    ui.painter().rect_filled(r, 4.0, pal.hover);
-                }
-                let swatch = Rect::from_center_size(pos2(r.left() + 10.0, r.center().y), vec2(9.0, 9.0));
-                ui.painter().rect_filled(swatch, 2.0, self.color_for_ext(ext));
-                ui.painter().text(pos2(r.left() + 20.0, r.center().y), Align2::LEFT_CENTER, text, mono.clone(), if on { pal.strong } else { pal.text });
-                let pct = *bytes as f64 * 100.0 / sum.bytes.max(1) as f64;
-                let tip = format!(
-                    "{pct:.1}% of {}. {}",
-                    if filtering { "the matching files" } else { "the scan" },
-                    if on { "Click to stop highlighting." } else { "Click to highlight these files on the map." }
-                );
-                if resp.on_hover_text(tip).clicked() {
-                    toggle = Some((ext.clone(), on));
-                }
-            }
-            if self.highlight_ext.is_some() && ui.add(egui::Button::new(egui::RichText::new("Clear").size(11.5)).frame_when_inactive(false)).clicked() {
-                self.highlight_ext = None;
-            }
-        });
-        if let Some((ext, on)) = toggle
-            && (on || self.premium(crate::licence::Feature::Filters))
+        if let Some(m) = measure
+            && m != self.metric
+            && (m != scan::Metric::Reclaimable || self.premium(crate::licence::Feature::CloudManagement))
         {
-            self.highlight_ext = if on { None } else { Some(ext) };
+            self.set_metric(m);
         }
+        if self.color_mode == ColorMode::Type && !sum.types.is_empty() {
+            ui.add_space(2.0);
+            let total = sum.types.iter().map(|i| i.bytes).sum::<u64>().max(sum.bytes);
+            self.type_legend(ui, &sum.types, total, false, "analysis");
+        } else {
+            self.highlight_ext.set_hover(None);
+        }
+        if details {
+            ui.add_space(2.0);
+            self.summary_details(ui);
+        }
+    }
+
+    /// The details row: the folder, when and how fast it was scanned, both sizes, and what
+    /// couldn't be read.
+    fn summary_details(&mut self, ui: &mut egui::Ui) {
+        let Some(tree) = self.tree.clone() else { return };
+        let t = kit::tokens(ui);
+        let small = |s: String| RichText::new(s).size(12.0).color(t.text);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.label(RichText::new(self.scanned_path.shown()).size(12.0).color(t.strong));
+            ui.label(small(format!("· {}", sizes_text(&tree, self.metric))));
+            if self.scan_secs > 0.0 {
+                ui.label(small(format!("· scanned in {:.1}s", self.scan_secs)));
+            }
+            if self.scan_errors > 0 {
+                let text = if self.scan_errors == 1 { "· 1 item couldn't be read".to_string() } else { format!("· {} items couldn't be read", group(self.scan_errors)) };
+                ui.label(RichText::new(text).size(12.0).color(t.warn)).on_hover_text("Their space isn't counted. Press F1 for why and what to do.");
+            }
+            if self.filter.active() {
+                ui.label(RichText::new(format!("· Filters: {}", describe(&self.filter))).size(12.0).color(t.weak));
+            }
+        });
     }
 }
 
