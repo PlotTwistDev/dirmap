@@ -1028,3 +1028,92 @@ fn measure_real_scenes() {
     }
 }
 
+
+
+// ---- S8: training projects.
+
+fn project_dir(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("filescape-splat-proj-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn put(dir: &std::path::Path, rel: &str, data: &[u8]) {
+    let p = dir.join(rel);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, data).unwrap();
+}
+
+#[test]
+fn inria_runs_show_their_timeline_from_headers_and_names() {
+    use project::{Layout, layout, read as read_project};
+    let d = project_dir("inria");
+    put(&d, "cfg_args", b"Namespace(sh_degree=3, source_path='/data/garden, take 2', model_path='./output/a1b2', images='images', resolution=-1, white_background=False, eval=False, test_iterations=[7000, 30000])");
+    put(&d, "cameras.json", br#"[{"id":0,"img_name":"a"},{"id":1,"img_name":"b"},{"id":2,"img_name":"c"}]"#);
+    put(&d, "input.ply", &splat_ply(5, 0, None, plain)[..]);
+    put(&d, "point_cloud/iteration_7000/point_cloud.ply", &splat_ply(40, 0, None, plain));
+    put(&d, "point_cloud/iteration_30000/point_cloud.ply", &splat_ply(90, 0, None, plain));
+    // Training state is a Python pickle: only its name and size may be used.
+    put(&d, "chkpnt30000.pth", b"\x80\x04not to be opened");
+    put(&d, "exposure.json", b"{}");
+    assert_eq!(layout(&d), Some(Layout::Inria));
+    let p = read_project(&d).unwrap();
+    let steps: Vec<(u64, Option<u64>)> = p.timeline.iter().map(|c| (c.step, c.splats)).collect();
+    assert_eq!(steps, [(7000, Some(40)), (30000, Some(90)), (30000, None)]);
+    assert_eq!(p.newest.as_deref(), Some(d.join("point_cloud/iteration_30000/point_cloud.ply").as_path()));
+    assert_eq!((p.cameras, p.points), (Some(3), Some(5)));
+    assert!(p.settings.contains(&("source_path".into(), "/data/garden, take 2".into())), "{:?}", p.settings);
+    assert!(!p.settings.iter().any(|(k, _)| k == "test_iterations"));
+    let parts: Vec<&str> = p.parts.iter().map(|x| x.0).collect();
+    assert!(parts.contains(&"Trained scenes") && parts.contains(&"Training state") && parts.contains(&"Camera solve"), "{parts:?}");
+    let (blocks, facts) = project::describe(&d, &p);
+    assert!(facts.iter().any(|(k, v)| *k == "Newest scene" && v.contains("90 splats")), "{facts:?}");
+    assert!(facts.iter().any(|(k, v)| *k == "Training state" && v.contains("never opened")));
+    // Without Professional: the heading and summary, then a note.
+    let free = project::free_blocks(&blocks);
+    assert_eq!(free.len(), 3);
+    assert!(blocks.len() > free.len());
+    assert!(packages_preview(&d));
+}
+
+fn packages_preview(d: &std::path::Path) -> bool {
+    crate::packages::is_package(d, &d.file_name().unwrap().to_string_lossy())
+}
+
+#[test]
+fn other_layouts_are_told_apart() {
+    use project::{Layout, layout, read as read_project};
+    let ns = project_dir("ns");
+    put(&ns, "config.yml", b"!!python/object:nerfstudio.engine.trainer.TrainerConfig\nmethod_name: splatfacto\nexperiment_name: garden\nmax_num_iterations: 30000\n");
+    put(&ns, "nerfstudio_models/step-000029999.ckpt", b"pickle");
+    assert_eq!(layout(&ns), Some(Layout::NerfstudioRun));
+    let p = read_project(&ns).unwrap();
+    assert_eq!(p.timeline.iter().map(|c| (c.step, c.splats)).collect::<Vec<_>>(), [(29999, None)]);
+    assert!(p.settings.contains(&("method_name".into(), "splatfacto".into())));
+
+    let perf = project_dir("outputs").join("train").join("20261127-101500");
+    put(&perf, "output.ply", &splat_ply(12, 0, None, plain));
+    assert_eq!(layout(&perf), Some(Layout::PerfGs));
+    assert_eq!(read_project(&perf).unwrap().newest, Some(perf.join("output.ply")));
+
+    let colmap = project_dir("colmap");
+    let mut cams = 7u64.to_le_bytes().to_vec();
+    cams.extend_from_slice(&[0; 16]);
+    put(&colmap, "sparse/0/cameras.bin", &1u64.to_le_bytes());
+    put(&colmap, "sparse/0/images.bin", &cams);
+    put(&colmap, "sparse/0/points3D.bin", &1234u64.to_le_bytes());
+    put(&colmap, "images/a.jpg", &[0; 100]);
+    assert_eq!(layout(&colmap), Some(Layout::Colmap));
+    let p = read_project(&colmap).unwrap();
+    assert_eq!((p.cameras, p.points), (Some(7), Some(1234)));
+    assert_eq!(p.parts.iter().find(|x| x.0 == "Photos").map(|x| (x.1, x.2)), Some((100, 1)));
+
+    let data = project_dir("nsdata");
+    put(&data, "transforms.json", br#"{"camera_model":"OPENCV","fl_x":800,"frames":[{"file_path":"images/a.png"},{"file_path":"images/b.png"}]}"#);
+    assert_eq!(layout(&data), Some(Layout::NerfstudioData));
+    assert_eq!(read_project(&data).unwrap().cameras, Some(2));
+
+    // An ordinary folder isn't one.
+    assert_eq!(layout(&project_dir("plain")), None);
+}
