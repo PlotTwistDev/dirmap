@@ -263,6 +263,13 @@ fn load(path: &Path, kind: Kind, size: u64) -> Content {
             Err(e) => Content::Error(e),
         };
     }
+    // A Gaussian splat training project or capture: a folder, shown as one.
+    if !crate::fsys::remote::is_remote(path) && path.is_dir() {
+        if let Some(p) = crate::splat::project::read(path) {
+            let (blocks, facts) = crate::splat::project::describe(path, &p);
+            return Content::Doc { blocks: Arc::new(blocks), facts };
+        }
+    }
     // On a server: fetched to a temporary copy first (not huge ones).
     if crate::fsys::remote::is_remote(path) {
         let archive = path.file_name().is_some_and(|n| crate::fsys::archive::is_archive(&n.to_string_lossy()));
@@ -1545,7 +1552,12 @@ impl App {
             Content::Model { mesh, tex, drawn } => model_view(ui, path, mesh, tex, drawn, size),
             Content::Splat { scene, tex, drawn } => splat_view(ui, path, scene, tex, drawn, size),
             Content::Doc { blocks, .. } => {
-                let blocks = blocks.clone();
+                let mut blocks = blocks.clone();
+                // A splat training project's breakdown and timeline are Pro.
+                let project = matches!(blocks.first(), Some(crate::help::doc::Block::Heading { id, .. }) if id == crate::splat::project::PREVIEW_ID);
+                if project && !self.licence.allows(crate::licence::Feature::SplatProjects) {
+                    blocks = Arc::new(crate::splat::project::free_blocks(&blocks));
+                }
                 let pal = style::pal(ui);
                 egui::Frame::new().fill(pal.well).corner_radius(style::RADIUS).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
                     ui.set_min_size(size - vec2(16.0, 16.0));
