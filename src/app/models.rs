@@ -303,7 +303,7 @@ impl App {
     }
 
     /// Opens the Files workspace at a model file, selected.
-    fn show_model_file(&mut self, path: &Path) {
+    pub(super) fn show_model_file(&mut self, path: &Path) {
         let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return };
         self.set_workspace(Workspace::Files);
         self.files.reveal(dir.to_path_buf(), vec![name.to_string_lossy().into()]);
