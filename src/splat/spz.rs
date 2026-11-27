@@ -215,7 +215,8 @@ pub(super) fn parse(data: &[u8], limits: Limits) -> Result<Scene, String> {
             const MASK: u32 = (1 << 9) - 1;
             let mut q = [0f32; 4];
             let mut sum = 0.0;
-            for (k, slot) in q.iter_mut().enumerate() {
+            // Packed first-to-last from the top bits down, so read from the last.
+            for (k, slot) in q.iter_mut().enumerate().rev() {
                 if k == largest {
                     continue;
                 }

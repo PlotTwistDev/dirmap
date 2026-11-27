@@ -44,6 +44,9 @@
   including a new check for floaters. There's also a box round the main body, a field of view
   control, and **W A S D** to move about. Turning a scene is smoother: pictures arrive while you
   drag, at half size, instead of only when you stop.
+- The **Storage optimiser** under a splat scene's details measures how big it would be as SPZ,
+  compressed PLY or standard PLY, and saves a converted copy, read back and checked, next to
+  the original, which is kept. As SPZ, a trainer's PLY is often about a tenth of the size.
 
 ### The AI Models workspace
 

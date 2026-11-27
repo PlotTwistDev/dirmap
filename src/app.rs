@@ -46,6 +46,7 @@ mod remoteui;
 mod transfers;
 mod siteimport;
 mod preview;
+mod splatopt;
 mod seqplayer;
 mod thumbs;
 mod tilepreview;

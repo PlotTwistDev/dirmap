@@ -1,6 +1,6 @@
 # Gaussian Splat viewing and inspection: research and plan
 
-Status: S1 (#96), S2 (#98) and S3 (#101) merged or in review, S4 (#104) merged, S5 in review, 26 Nov 2026. Rich's M4: 16 ms for 150k splats, 39 ms for 786k. Free/Pro split decided (section 10). S4 leaves out hover orbit on tiles; S5 leaves out orthographic view and free-look fly mode (W A S D moves the orbit instead).
+Status: S1 (#96), S2 (#98), S3 (#101), S4 (#104) and S5 (#106) merged; S6 in review, 26 Nov 2026. Rich's M4: 16 ms for 150k splats, 39 ms for 786k. Free/Pro split decided (section 10). S4 leaves out hover orbit on tiles; S5 leaves out orthographic view and free-look fly mode (W A S D moves the orbit instead). S6 writes SPZ v3 (gzip, the most widely read version) rather than v4.
 
 This answers section 28 of Rich's brief "Native Gaussian Splatting Viewer and Scene Inspection": items 1 to 6 and 9 are in this document; item 7 (prototype) is a headless spike described below; items 8, 10 and 11 belong to the build stages.
 
