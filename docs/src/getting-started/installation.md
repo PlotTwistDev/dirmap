@@ -1,13 +1,15 @@
 # Installation and first launch
 
-Filescape is a single program file and nothing runs in the background. On Linux you can also
-install it as a package, so it shows up in your application menu.
+Filescape needs no installer and nothing runs in the background. On Windows it is a folder with
+the program and the files its AI engine runs on; on Linux you can also install it as a package,
+so it shows up in your application menu.
 
 ## Windows
 
-1. Download `Filescape-windows.zip` and extract `Filescape.exe` anywhere, for example to your
-   Desktop or `C:\Tools`.
-2. Double-click `Filescape.exe`.
+1. Download `Filescape-windows.zip` and extract the `Filescape` folder in it anywhere, for example
+   to your Desktop or `C:\Tools`. Keep the files in it together: the `.dll` files beside
+   `Filescape.exe` are the AI engine for Ask AI and the Lab.
+2. Double-click `Filescape.exe` in that folder.
 3. If Windows SmartScreen warns about an unrecognised app, choose **More info**, then **Run anyway**.
 
 The first time it starts without administrator rights, Filescape asks whether to restart as
@@ -34,7 +36,7 @@ Pick whichever suits your system. All of them need a 64-bit x86 system with glib
 | `Filescape-linux.AppImage` | Any distribution | Make it executable (`chmod +x Filescape-linux.AppImage`, or tick **Allow executing file as program** in its properties) and double-click it. |
 | `Filescape-linux.deb` | Ubuntu, Debian, Linux Mint, Pop!_OS | Double-click it, or run `sudo apt install ./Filescape-linux.deb`. |
 | `Filescape-linux.rpm` | Fedora, RHEL, openSUSE | Double-click it, or run `sudo dnf install ./Filescape-linux.rpm` (`sudo zypper install` on openSUSE). |
-| `Filescape-linux.tar.gz` | Any distribution | Extract it (`tar xzf Filescape-linux.tar.gz`) and run `./filescape/filescape`. |
+| `Filescape-linux.tar.gz` | Any distribution | Extract it (`tar xzf Filescape-linux.tar.gz`) and run `./filescape/filescape`. Keep the `.so` files beside it: they are the AI engine. |
 
 The `.deb` and `.rpm` add Filescape to your application menu and put `filescape` on your path, so
 you can also start it from a terminal with a folder to scan: `filescape ~/Videos`. To remove it,

@@ -111,11 +111,13 @@ Every push to `main` builds Windows, Linux and macOS versions on GitHub Actions 
 workflow; open a run and download from *Artifacts*). Pushing a tag such as `v0.2.0` also attaches them
 to a GitHub release.
 
-- **Windows**: `Filescape-windows.zip` contains `Filescape.exe`. No install needed.
+- **Windows**: `Filescape-windows.zip` contains a `Filescape` folder: `Filescape.exe` and the AI
+  engine's DLLs (llama.cpp, a processor build per kind of x86 processor, and Vulkan). No install
+  needed.
 - **Linux** (glibc 2.35 or later: Ubuntu 22.04, Debian 12, Fedora 36 and newer):
   `Filescape-linux.AppImage` runs on any distribution, `Filescape-linux.deb` installs on Ubuntu and
   Debian, `Filescape-linux.rpm` on Fedora and openSUSE, and `Filescape-linux.tar.gz` has the bare
-  `filescape` binary with a `filescape.desktop` launcher. Needs X11 or Wayland plus `libxkbcommon`,
+  `filescape` binary with the AI engine's libraries and a `filescape.desktop` launcher. Needs X11 or Wayland plus `libxkbcommon`,
   which desktop installs already have. `packaging/linux/package.sh` makes all four from a release build.
 - **macOS** (11 Big Sur or later, Apple silicon and Intel): `Filescape-macos.dmg` contains
   `Filescape.app`. It isn't notarized, so the first time, right-click it and choose **Open**, or run
@@ -135,6 +137,11 @@ cargo run --release -- --cli --top 20 ~/    # text report, no window
 ```
 
 The binary ends up in `target/release/`. The same commands work on Windows, Linux and macOS.
+
+On Windows and Linux the AI engine is built with Vulkan, so the build also needs CMake and the
+Vulkan SDK (on Ubuntu 24.04: `sudo apt install cmake libvulkan-dev glslc spirv-headers`; on
+Windows, the LunarG installer, which sets `VULKAN_SDK`). Use `cargo run` there: it finds the
+engine's libraries in the build folder, which a bare `target/release/filescape` doesn't.
 
 Flags: `--all-fs` descends into other mounted filesystems, `--top N` sets the CLI row count,
 `--save-snapshot FILE` (with `--cli`) saves the scan for comparing later, `--compare FILE` opens the GUI

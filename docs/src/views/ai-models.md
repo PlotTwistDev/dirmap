@@ -166,16 +166,18 @@ run:
   graphics card with its memory. On a Mac with Apple silicon the memory is shared with the
   graphics chip. If Filescape can't find the graphics card's memory, type it in. **Filescape runs
   models on** says where Filescape's own Ask AI and Lab run models, as its runtime reports it: the
-  graphics chip on a Mac with Apple silicon, the processor on Windows, Linux and Intel Macs.
+  graphics chip on a Mac with Apple silicon, the graphics card on Windows and Linux when its
+  drivers support Vulkan, and otherwise the processor.
 - Move **Context** to choose how much text the model reads at once, in tokens (about ¾ of a word
   each). The memory a model needs grows with it, because it keeps a cache of everything it has
   read. **Compact (Q8)** stores that cache in about half the space.
 - **In Filescape** says whether Ask AI and the Lab can run it here, and where. If it needs more
   memory than is free right now, it says so: close other apps first.
-- On Windows, Linux and Intel Macs, **In apps that use the graphics card** says the same for
-  Ollama, LM Studio and other apps that put models on a graphics card: fully on the card (fast),
-  split between the card and main memory, on the processor, or not at all. On a Mac with Apple
-  silicon Filescape uses the graphics chip too, so there is one answer.
+- Where Filescape runs models on the processor (an Intel Mac, or a PC without Vulkan), **In apps
+  that use the graphics card** says the same for Ollama, LM Studio and other apps that put models
+  on a graphics card: fully on the card (fast), split between the card and main memory, on the
+  processor, or not at all. Where Filescape uses the graphics chip or card too, there is one
+  answer.
 - If the Lab's **Speed** tab has measured the model on this computer, its newest result is shown,
   with the context, the processor or graphics chip and the threads it ran with.
 - The bar shows the model itself, the cache and working space, against the memory available.

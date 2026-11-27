@@ -47,6 +47,8 @@ pub(super) struct AskState {
     temperature: f32,
     last: Option<llm::Stats>,
     load_seconds: f32,
+    /// The loaded model's layers on the graphics chip, of how many.
+    pub gpu_layers: (u32, u32),
     /// The context the loaded model has: the one asked for, or less when the model is shorter.
     pub(super) actual_context: u32,
     /// The last thing that went wrong.
@@ -118,7 +120,8 @@ fn runnable(list: &[Model]) -> Vec<(usize, &Model)> {
     v
 }
 
-/// Whether to put the model on the graphics chip: on Apple silicon, where llama.cpp uses Metal.
+/// Whether to put models on the graphics chip: on Apple silicon, where llama.cpp uses Metal,
+/// and where it found a graphics card through Vulkan (Windows, Linux).
 pub(super) fn use_gpu() -> bool {
     crate::fit::filescape_gpu()
 }
@@ -190,8 +193,9 @@ impl App {
             got = true;
             match ev {
                 Event::Loading => self.ask.phase = Phase::Loading,
-                Event::Loaded { context, seconds, layers } => {
+                Event::Loaded { context, seconds, layers, gpu_layers } => {
                     self.ask.lab_state.loaded_layers(layers as usize);
+                    self.ask.gpu_layers = (gpu_layers, layers);
                     self.ask.phase = Phase::Idle;
                     self.ask.load_seconds = seconds;
                     self.ask.actual_context = context;
@@ -618,10 +622,13 @@ impl App {
             }
         });
         ui.add_space(10.0);
-        ui.weak(if use_gpu() {
-            "Models run on this Mac's graphics chip."
-        } else {
-            "Models run on the processor. Small models (1 to 4B) answer quickest."
+        ui.weak(match (self.ask.loaded.is_some(), self.ask.gpu_layers, use_gpu()) {
+            (true, (0, _), _) => "This model runs on the processor. Small models (1 to 4B) answer quickest.".to_string(),
+            (true, (g, n), _) if g < n => format!("This model runs {g} of its {n} layers on the graphics card, the rest on the processor."),
+            (_, _, true) if cfg!(target_os = "macos") => "Models run on this Mac's graphics chip.".to_string(),
+            (true, _, _) => format!("This model runs on the graphics card ({}).", crate::fit::device_name(true)),
+            (_, _, true) => format!("Models run on the graphics card ({}) when they fit, otherwise partly or wholly on the processor.", crate::fit::device_name(true)),
+            _ => "Models run on the processor. Small models (1 to 4B) answer quickest.".to_string(),
         });
         self.models.list = Some(list);
         if let Some(m) = load {
@@ -1052,5 +1059,16 @@ fn check_fit(m: &Model, context: u32, gpu: bool) -> Result<llm::LoadRequest, Str
             crate::scan::human(hw.usable_ram().max(vram)),
         ));
     }
-    Ok(llm::LoadRequest { path: f.path.clone(), context, gpu })
+    // All of it on the graphics chip where memory is shared (Apple silicon); on a graphics card,
+    // as many layers as its free memory holds, the rest on the processor.
+    let mut gpu_layers = if gpu { u32::MAX } else { 0 };
+    if gpu && !hw.unified {
+        let layers = d.shape.layers.unwrap_or(0) as f32;
+        gpu_layers = match crate::fit::need(&d, weights, context as u64, 2.0).map(|n| crate::fit::verdict(&n, &hw, vram)) {
+            Some(crate::fit::Verdict::Gpu) => u32::MAX,
+            Some(crate::fit::Verdict::Split(share)) => (share * layers).floor() as u32,
+            _ => 0,
+        };
+    }
+    Ok(llm::LoadRequest { path: f.path.clone(), context, gpu_layers })
 }

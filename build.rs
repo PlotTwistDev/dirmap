@@ -1,10 +1,16 @@
 //! Bundles the help pages in `docs/src` (Markdown and images) into the program, so the Help
-//! Centre works offline and always matches the version it ships with.
+//! Centre works offline and always matches the version it ships with. Also tells the Linux
+//! program where to find the AI engine's libraries.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    // On Linux the AI engine's libraries sit beside the program (the .tar.gz) or in
+    // ../lib/filescape from it (the .deb, .rpm and AppImage): look for them there.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN:$ORIGIN/../lib/filescape");
+    }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs").join("src");
     // A directory here makes Cargo rerun this script when anything inside it changes.
     println!("cargo:rerun-if-changed=docs/src");
