@@ -2,6 +2,24 @@
 
 ## Next version
 
+### Easier to read maps
+
+- **Display > Detail on the map**: **Minimal**, **Balanced** or **Detailed** names and sizes on
+  the tiles, with shares at Detailed. Remembered, and shared by Storage Analysis and the dock.
+- The clicked item's ring now reads on any tile colour, and a zoomed-in map shows how far it's
+  zoomed. See [How much is written on the tiles](../views/treemap.md#how-much-is-written-on-the-tiles).
+
+### One map, two places
+
+- The analysis dock in Files has the same toolbar as Storage Analysis, in a compact form:
+  **Treemap** / **Sunburst**, **Follow**, **Colour**, and display options under **⋯**. It keeps its
+  own colours.
+- **Follow** can now follow the **left** or **right** pane as well as the active one or the
+  selection, or be **Locked** on one folder.
+- **Open in Storage Analysis** takes the dock's folder, view, colours and selection with it, and
+  **Reveal in Files** (on Storage Analysis's right-click menu and Preview pane) goes the other way.
+- The dock's information line says how much of a folder is only in the cloud.
+
 ### Panes that make room for the map
 
 - The Preview pane beside the Storage Analysis map has **Preview** and **Details** tabs, opens by

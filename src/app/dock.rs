@@ -17,21 +17,36 @@ use std::path::Path;
 /// What the dock's map shows as you browse.
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
 pub(super) enum Follow {
-    /// The folder open in the active tab.
+    /// The folder open in the active pane's tab.
     #[default]
     Folder,
-    /// One folder, whatever you open in the list.
+    /// One folder, whatever you open in the list ("Locked").
     Pinned,
     /// The selected folder, or the open folder with the selected file outlined.
     Selection,
+    /// The folder open in the left (first) pane, whichever pane is active.
+    LeftPane,
+    /// The folder open in the right pane (the left one when there's only one).
+    RightPane,
 }
 
 impl Follow {
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
-            Follow::Folder => "Follow folder",
-            Follow::Pinned => "Pinned",
+            Follow::Folder => "Follow active pane",
+            Follow::Pinned => "Locked",
             Follow::Selection => "Follow selection",
+            Follow::LeftPane => "Follow left pane",
+            Follow::RightPane => "Follow right pane",
+        }
+    }
+
+    /// Which pane this follows: Some(index) for one pane, None for the active one.
+    fn pane(self) -> Option<usize> {
+        match self {
+            Follow::LeftPane => Some(0),
+            Follow::RightPane => Some(1),
+            _ => None,
         }
     }
 }
@@ -47,11 +62,13 @@ pub(super) struct DockPrefs {
     /// The folder a Pinned dock shows.
     pub pinned: Option<PathBuf>,
     pub sunburst: bool,
+    /// The dock's own colours, apart from Storage Analysis's.
+    pub colour: ColorMode,
 }
 
 impl Default for DockPrefs {
     fn default() -> Self {
-        Self { open: false, height: 320.0, maximised: false, follow: Follow::Folder, pinned: None, sunburst: false }
+        Self { open: false, height: 320.0, maximised: false, follow: Follow::Folder, pinned: None, sunburst: false, colour: ColorMode::Type }
     }
 }
 
@@ -99,7 +116,7 @@ pub(super) enum Cover {
 
 /// What the dock's folder was worked out for: (tab, folder, cursor item, selected count, tree,
 /// mode, pinned folder).
-type FollowKey = (usize, Location, Option<Box<str>>, usize, usize, Follow, Option<PathBuf>);
+type FollowKey = (usize, Location, Option<Box<str>>, usize, usize, Follow, Option<PathBuf>, Option<PathBuf>);
 
 /// The dock while the program runs.
 #[derive(Default)]
@@ -107,6 +124,8 @@ pub(super) struct Dock {
     /// The folder the map should show, and how it resolved, for (selection key, tree, follow).
     target: Option<PathBuf>,
     cover: Option<Cover>,
+    /// Colours for Storage Analysis to take on (Open in Storage Analysis).
+    analysis_colour: Option<ColorMode>,
     key: Option<FollowKey>,
     /// The other selected items, as tree paths, outlined on the map.
     pub picked: Vec<Vec<u32>>,
@@ -162,6 +181,10 @@ impl App {
         let here = self.files.here().dir().map(Path::to_path_buf);
         match self.files.prefs.dock.follow {
             Follow::Folder => here,
+            f @ (Follow::LeftPane | Follow::RightPane) => {
+                let i = f.pane().unwrap_or(0).min(self.files.panes.len().saturating_sub(1));
+                self.files.panes.get(i).and_then(|p| p.tab().here().dir().map(Path::to_path_buf)).or(here)
+            }
             Follow::Pinned => self.files.prefs.dock.pinned.clone().or(here),
             Follow::Selection => {
                 let dir = here?;
@@ -193,7 +216,7 @@ impl App {
         let tree_id = self.shown_tree().map(|t| Arc::as_ptr(&t) as usize).unwrap_or(0);
         let (tab, here, cursor, count) = self.files.selection_key();
         let d = &self.files.prefs.dock;
-        let key = (tab, here, cursor, count, tree_id, d.follow, d.pinned.clone());
+        let key = (tab, here, cursor, count, tree_id, d.follow, d.pinned.clone(), self.dock_target());
         if self.dock.key.as_ref() == Some(&key) {
             return;
         }
@@ -339,8 +362,24 @@ impl App {
         }
     }
 
-    /// The dock: its toolbar, a line of facts, the map, and the file-type legend.
+    /// The dock: its toolbar, a line of facts, the map, and the file-type legend. It has its own
+    /// colours (Type, Age or Change), apart from Storage Analysis's.
     pub(super) fn dock_ui(&mut self, ui: &mut egui::Ui) {
+        let mut mine = self.files.prefs.dock.colour;
+        if mine == ColorMode::Change && self.diff.is_none() {
+            mine = ColorMode::Type;
+        }
+        let analysis = std::mem::replace(&mut self.color_mode, mine);
+        self.dock_body(ui);
+        self.files.prefs.dock.colour = std::mem::replace(&mut self.color_mode, analysis);
+        // Open in Storage Analysis: it takes on the dock's colours.
+        if let Some(c) = self.dock.analysis_colour.take() {
+            self.color_mode = c;
+            self.paint_gen += 1;
+        }
+    }
+
+    fn dock_body(&mut self, ui: &mut egui::Ui) {
         let pal = style::pal(ui);
         let rect = ui.max_rect();
         // A click in the dock takes the keys from the list (so Home, + and - reach the map).
@@ -403,96 +442,165 @@ impl App {
         ui.allocate_rect(body, Sense::hover());
     }
 
+    /// The dock's toolbar: the same controls as above the Storage Analysis map, fewer of them.
+    /// In a narrow dock, Follow and Colour move into the ⋯ menu.
     fn dock_bar(&mut self, ui: &mut egui::Ui) {
+        use crate::kit::{self, Icon};
         let ctx = ui.ctx().clone();
         let covered = matches!(self.dock.cover, Some(Cover::In(_)));
+        let narrow = ui.available_width() < 640.0;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            style::tool_group(ui, |ui| {
-                let sb = self.files.prefs.dock.sunburst;
-                if ui.add(egui::Button::selectable(!sb, "⊞ Treemap")).on_hover_text("Rectangles sized by bytes").clicked() {
-                    self.files.prefs.dock.sunburst = false;
-                }
-                if ui.add(egui::Button::selectable(sb, "◔ Sunburst")).on_hover_text("Rings: each folder around its parent").clicked() {
-                    self.files.prefs.dock.sunburst = true;
-                }
-            });
-            let follow = self.files.prefs.dock.follow;
-            let mut pick = None;
-            ui.menu_button(format!("{} ⏷", follow.label()), |ui| {
-                let items = [
-                    (Follow::Folder, "Show the folder open in the list (and in the active tab)"),
-                    (Follow::Pinned, "Keep showing one folder while you browse elsewhere"),
-                    (Follow::Selection, "Show the folder selected in the list; a selected file is outlined"),
-                ];
-                for (f, tip) in items {
-                    if ui.radio(follow == f, f.label()).on_hover_text(tip).clicked() {
-                        pick = Some(f);
-                    }
-                }
-            })
-            .response
-            .on_hover_text("What the map shows as you browse");
-            if let Some(f) = pick {
-                if f == Follow::Pinned {
-                    // Pin what's on the map now.
-                    self.files.prefs.dock.pinned = self.dock.target.clone().or_else(|| self.files.here().dir().map(Path::to_path_buf));
-                }
-                self.files.prefs.dock.follow = f;
-                self.dock.invalidate();
+            let mut sb = self.files.prefs.dock.sunburst;
+            let opts = [(false, Some(Icon::Treemap), "Treemap", "Rectangles sized by bytes"), (true, Some(Icon::Sunburst), "Sunburst", "Rings: each folder around its parent")];
+            let opts_short = [(false, Some(Icon::Treemap), "", "Treemap: rectangles sized by bytes"), (true, Some(Icon::Sunburst), "", "Sunburst: each folder around its parent")];
+            if viz::switch(ui, &mut sb, if narrow { &opts_short } else { &opts }) {
+                self.files.prefs.dock.sunburst = sb;
             }
-            if follow == Follow::Pinned
-                && let Some(p) = &self.files.prefs.dock.pinned
-            {
-                let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.shown());
-                ui.label(egui::RichText::new(format!("📌 {name}")).color(style::pal(ui).weak)).on_hover_text(p.shown());
+            if !narrow {
+                self.follow_menu(ui);
+                self.dock_colour_menu(ui);
             }
-            let has_diff = self.diff.is_some();
-            let mode = self.color_mode;
-            let label = match mode {
-                ColorMode::Type => "Colour: Type",
-                ColorMode::Age => "Colour: Age",
-                ColorMode::Change => "Colour: Change",
-            };
-            ui.menu_button(format!("{label} ⏷"), |ui| {
-                ui.radio_value(&mut self.color_mode, ColorMode::Type, "File type");
-                ui.radio_value(&mut self.color_mode, ColorMode::Age, "Age (last modified)");
-                ui.add_enabled_ui(has_diff, |ui| {
-                    ui.radio_value(&mut self.color_mode, ColorMode::Change, "Change since snapshot");
-                })
-                .response
-                .on_disabled_hover_text("Load a snapshot in Storage Analysis (Changes tab) to compare");
-            });
             let feel = self.feel();
             let treemap = !self.files.prefs.dock.sunburst;
             ui.add_enabled_ui(covered, |ui| {
-                style::tool_group(ui, |ui| {
-                    let sel = self.selected.clone();
-                    if style::icon_button(ui, sel.is_some() && treemap, "⌖", "Zoom to the selection").clicked()
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let sel = self.selected.clone();
+                ui.add_enabled_ui(sel.is_some() && treemap, |ui| {
+                    if kit::icon_button(ui, Icon::Target, "Zoom to the selection").clicked()
                         && let (Some(sel), Some(tree)) = (sel, self.shown_tree())
                     {
                         self.map.frame_path(&tree, &sel, &feel);
                     }
-                    if style::icon_button(ui, treemap, "⟲", "Whole folder: back to the full view (Home over the map)").clicked() {
+                });
+                ui.add_enabled_ui(treemap, |ui| {
+                    if kit::icon_button(ui, Icon::Home, "Whole folder: back to the full view (Home over the map)").clicked() {
                         self.map.reset(&feel);
                     }
                 });
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if style::icon_button(ui, true, "✖", format!("Hide the dock ({})", ctx.format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::J)))).clicked() {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let hide = format!("Hide the dock ({})", ctx.format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::J)));
+                if kit::icon_button(ui, Icon::Close, &hide).clicked() {
                     self.files.prefs.dock.open = false;
                 }
                 let max = self.files.prefs.dock.maximised;
-                if style::icon_button(ui, true, if max { "🗗" } else { "🗖" }, if max { "Restore the dock's size" } else { "Make the dock as tall as possible" }).clicked() {
+                if kit::icon_button(ui, if max { Icon::ChevronDown } else { Icon::ArrowUp }, if max { "Restore the dock's size" } else { "Make the dock as tall as possible" }).clicked() {
                     self.files.prefs.dock.maximised = !max;
                 }
-                if style::icon_button(ui, true, "⛶", "Open in Storage Analysis: the full workspace with the folder tree, types, duplicates… (Ctrl+3)").clicked() {
-                    self.set_workspace(Workspace::Analysis);
+                if kit::icon_button(ui, Icon::External, "Open in Storage Analysis, at this folder with the same view, colours and selection (Ctrl+3)").clicked() {
+                    self.open_dock_in_analysis();
                 }
+                let r = kit::icon_button(ui, Icon::More, "More: display options");
+                egui::Popup::menu(&r).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                    ui.set_min_width(220.0);
+                    if narrow {
+                        style::section_title(ui, "Follow");
+                        self.follow_choices(ui);
+                        ui.separator();
+                        style::section_title(ui, "Colour");
+                        self.colour_choices(ui);
+                        ui.separator();
+                    }
+                    self.dock_display_choices(ui);
+                });
                 ui.add_space(4.0);
                 self.analyse_button(ui, true);
             });
         });
+    }
+
+    /// Follow: what the dock's map shows as you browse.
+    fn follow_menu(&mut self, ui: &mut egui::Ui) {
+        let follow = self.files.prefs.dock.follow;
+        let mut label = follow.label().to_string();
+        if follow == Follow::Pinned
+            && let Some(p) = &self.files.prefs.dock.pinned
+        {
+            label = format!("Locked: {}", p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.shown()));
+        }
+        let icon = if follow == Follow::Pinned { crate::kit::Icon::Lock } else { crate::kit::Icon::Compass };
+        let r = viz::pill(ui, Some(icon), &label, false, false, true).on_hover_text("What the map shows as you browse");
+        egui::Popup::menu(&r).show(|ui| {
+            ui.set_min_width(240.0);
+            self.follow_choices(ui);
+        });
+    }
+
+    fn follow_choices(&mut self, ui: &mut egui::Ui) {
+        let follow = self.files.prefs.dock.follow;
+        let two = self.files.panes.len() > 1;
+        let items = [
+            (Follow::Folder, "The folder open in the active pane and tab", true),
+            (Follow::LeftPane, "The folder open in the left pane, whichever pane you're in", two),
+            (Follow::RightPane, "The folder open in the right pane, whichever pane you're in", two),
+            (Follow::Selection, "The folder selected in the list; a selected file is outlined", true),
+            (Follow::Pinned, "Keep showing the folder on the map now, wherever you browse", true),
+        ];
+        let mut pick = None;
+        for (f, tip, ok) in items {
+            let r = ui.add_enabled(ok, egui::Button::selectable(follow == f, f.label()));
+            let r = if ok { r.on_hover_text(tip) } else { r.on_disabled_hover_text("Split the File Manager into two panes first") };
+            if r.clicked() {
+                pick = Some(f);
+            }
+        }
+        if let Some(f) = pick {
+            if f == Follow::Pinned {
+                // Lock what's on the map now.
+                self.files.prefs.dock.pinned = self.dock.target.clone().or_else(|| self.files.here().dir().map(Path::to_path_buf));
+            }
+            self.files.prefs.dock.follow = f;
+            self.dock.invalidate();
+            ui.close();
+        }
+    }
+
+    fn dock_colour_menu(&mut self, ui: &mut egui::Ui) {
+        let label = match self.color_mode {
+            ColorMode::Type => "Colour: Type",
+            ColorMode::Age => "Colour: Age",
+            ColorMode::Change => "Colour: Change",
+        };
+        let r = viz::pill(ui, Some(crate::kit::Icon::Palette), label, false, false, true).on_hover_text("What the colours on the dock's map mean (Storage Analysis keeps its own)");
+        egui::Popup::menu(&r).show(|ui| {
+            ui.set_min_width(200.0);
+            self.colour_choices(ui);
+        });
+    }
+
+    /// What's drawn on the dock's map. These are shared with Storage Analysis.
+    fn dock_display_choices(&mut self, ui: &mut egui::Ui) {
+        if viz::density_switch(ui, &mut self.files.prefs.map_density) {
+            self.paint_gen += 1;
+        }
+        ui.separator();
+        let mut labels = self.settings.show_labels;
+        if ui.checkbox(&mut labels, "File names on tiles").changed() {
+            self.settings.show_labels = labels;
+            self.dialog.draft.show_labels = labels;
+        }
+        let mut previews = self.settings.tile_previews;
+        if ui.checkbox(&mut previews, "Previews on tiles").on_hover_text("Zoomed-in tiles show what's in the file").changed() {
+            self.settings.tile_previews = previews;
+            self.dialog.draft.tile_previews = previews;
+        }
+    }
+
+    /// Storage Analysis at the dock's folder, with the dock's view, colours and selection.
+    fn open_dock_in_analysis(&mut self) {
+        let zoom = self.zoom.clone();
+        let selected = self.selected.clone();
+        self.set_workspace(Workspace::Analysis);
+        self.map_kind = if self.files.prefs.dock.sunburst { MapKind::Sunburst } else { MapKind::Treemap };
+        // dock_ui puts its own colours back after this frame; Storage Analysis takes them on.
+        self.files.prefs.dock.colour = self.color_mode;
+        self.dock.analysis_colour = Some(self.color_mode);
+        if self.shown_tree().is_some_and(|t| t.at(&zoom).is_some()) {
+            self.zoom = zoom;
+            self.selected = selected.filter(|s| s.starts_with(&self.zoom));
+        }
     }
 
     /// One line: what state the analysis is in for this folder, and facts about it.
@@ -537,13 +645,28 @@ impl App {
                 ui.label(egui::RichText::new(scan::human(st.size)).size(12.0).color(pal.text));
                 sep(ui);
                 ui.label(small(format!("{} files · {} folders", group(st.files), group(st.folders))));
-                if let Some((name, size)) = &st.largest_dir {
+                // Cloud data only when there is some, never counted as here.
+                if let Some(n) = self.shown_tree().and_then(|t| t.at(at).map(|n| (n.flags, n.size_by(scan::Metric::CloudOnly))))
+                    && n.0 & scan::store::NOT_LOCAL != 0
+                    && n.1 > 0
+                {
+                    sep(ui);
+                    ui.label(small(format!("{} only in the cloud", scan::human(n.1))))
+                        .on_hover_text("Data in this folder that's in the cloud but not on this computer. It isn't counted on disk.");
+                }
+                // In a narrow dock the largest items give way to the analysis time.
+                let room = |ui: &egui::Ui| ui.available_width() - 150.0;
+                if let Some((name, size)) = st.largest_dir.as_ref().filter(|_| room(ui) > 260.0) {
                     sep(ui);
                     ui.label(small(format!("largest folder {name} ({})", scan::human(*size)))).on_hover_text("The biggest folder directly inside this one");
                 }
-                if let Some((name, size)) = &st.largest_file {
+                if let Some((name, size)) = st.largest_file.as_ref().filter(|_| room(ui) > 160.0) {
                     sep(ui);
-                    ui.add(egui::Label::new(small(format!("largest file {name} ({})", scan::human(*size)))).truncate()).on_hover_text("The biggest file anywhere inside this folder");
+                    let w = room(ui);
+                    ui.scope(|ui| {
+                        ui.set_max_width(w);
+                        ui.add(egui::Label::new(small(format!("largest file {name} ({})", scan::human(*size)))).truncate()).on_hover_text("The biggest file anywhere inside this folder");
+                    });
                 }
             } else {
                 sep(ui);
@@ -634,6 +757,15 @@ impl App {
             self.dock.set_zoom = Some(self.zoom.clone());
             match self.files.prefs.dock.follow {
                 Follow::Pinned => self.files.prefs.dock.pinned = Some(disk),
+                f @ (Follow::LeftPane | Follow::RightPane) => {
+                    // Move the pane the dock follows, whichever is active.
+                    let i = f.pane().unwrap_or(0).min(self.files.panes.len().saturating_sub(1));
+                    let focus = std::mem::replace(&mut self.files.focus, i);
+                    if self.files.here().dir() != Some(disk.as_path()) {
+                        self.files.go(Location::Dir(disk));
+                    }
+                    self.files.focus = focus;
+                }
                 _ => {
                     if self.files.here().dir() != Some(disk.as_path()) {
                         self.files.go(Location::Dir(disk));

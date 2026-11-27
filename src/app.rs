@@ -126,7 +126,7 @@ impl ViewFilter {
 }
 
 /// What the colors on the maps mean.
-#[derive(Clone, Copy, PartialEq, Hash)]
+#[derive(Clone, Copy, PartialEq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 enum ColorMode {
     Type,
     Age,
@@ -2490,9 +2490,12 @@ impl App {
             Vec::new()
         };
         // Modern: name and size written straight on the tile, as on the website.
+        let density = self.files.prefs.map_density;
+        let view_size = zroot.size.max(1);
         if self.view().show_labels && modern {
+            let (min_w, min_h) = density.name_min();
             let labels: Vec<(Rect, Vec<u32>, f32)> =
-                all_labels.iter().filter(|(r, path, _)| r.width() >= 80.0 && r.height() >= 22.0 && !previewed.contains(path)).cloned().collect();
+                all_labels.iter().filter(|(r, path, _)| r.width() >= min_w && r.height() >= min_h && !previewed.contains(path)).cloned().collect();
             let name_font = FontId::monospace(12.0);
             let size_font = FontId::monospace(11.0);
             for (r, path, a) in labels {
@@ -2506,8 +2509,12 @@ impl App {
                 let p = painter.with_clip_rect(name_clip(r, n, 2.0).intersect(painter.clip_rect()));
                 let at = r.min + vec2(6.0, 6.0);
                 p.text(at, Align2::LEFT_TOP, &*n.name, name_font.clone(), ink.gamma_multiply(0.86 * a));
-                if r.height() >= 36.0 {
-                    p.text(at + vec2(0.0, 15.0), Align2::LEFT_TOP, scan::human(n.size), size_font.clone(), ink.gamma_multiply(0.64 * a));
+                if density.size_min().is_some_and(|h| r.height() >= h) {
+                    let mut size = scan::human(n.size);
+                    if density.shares() {
+                        size.push_str(&format!(" · {}", viz::share(n.size, view_size)));
+                    }
+                    p.text(at + vec2(0.0, 15.0), Align2::LEFT_TOP, size, size_font.clone(), ink.gamma_multiply(0.64 * a));
                 }
             }
         }
@@ -2525,12 +2532,15 @@ impl App {
                 }
                 let Some(n) = zroot.at(path) else { continue };
                 // Bigger tiles get bigger names, so zooming in helps.
-                let font = FontId::proportional((r.width().min(r.height() * 2.0) / 10.0).clamp(11.0, 17.0));
+                let font = FontId::proportional((r.width().min(r.height() * 2.0) / 10.0 / density.classic_scale()).clamp(11.0, 17.0));
+                if density == viz::MapDensity::Minimal && (r.width() < 110.0 || r.height() < 30.0) {
+                    continue;
+                }
                 let p = painter.with_clip_rect(name_clip(r, n, 1.0).intersect(painter.clip_rect()));
                 let at = r.min + vec2(3.0, 2.0);
                 // White text on a dark chip reads on any tile, however it's coloured or lit.
                 let name = p.layout_no_wrap(n.name.to_string(), font.clone(), Color32::WHITE);
-                let sa = a * mapview_smooth(font.size * 2.4, font.size * 2.9, r.height());
+                let sa = if density.size_min().is_none() { 0.0 } else { a * mapview_smooth(font.size * 2.4, font.size * 2.9, r.height()) };
                 let size = (sa > 0.02).then(|| p.layout_no_wrap(scan::human(n.size), font.clone(), Color32::WHITE));
                 let w = name.size().x.max(size.as_ref().map_or(0.0, |g| g.size().x));
                 let h = name.size().y + size.as_ref().map_or(0.0, |g| g.size().y * sa);
@@ -2564,15 +2574,26 @@ impl App {
         // the other items selected with it in the file manager.
         if !self.map.in_transition() {
             let picked = self.picked_paths();
+            let main = self.selected.clone();
             let all = self.selected.iter().chain(picked.iter().take(500));
+            let colour = self.view().selection_color;
             for sel in all.filter(|s| s.starts_with(&root)) {
                 let rel = &sel[root.len()..];
                 let rects = treemap::ancestors(zroot, self.map.camera.world(), rel);
                 // The nearest ancestor big enough to see; never the whole folder on show, which
                 // would just frame the map.
                 if let Some(r) = rects.iter().skip(1).rev().map(|r| self.map.to_screen(bounds, r)).find(|r| r.width() >= 3.0 && r.height() >= 3.0) {
-                    let stroke = Stroke::new(2.0, self.view().selection_color);
-                    painter.with_clip_rect(bounds).rect_stroke(r, 0.0, stroke, egui::StrokeKind::Inside);
+                    let p = painter.with_clip_rect(bounds);
+                    if main.as_ref() == Some(sel) && r.width() >= 8.0 && r.height() >= 8.0 {
+                        // The clicked item: a ring with a dark edge either side, so it stands out
+                        // on light and dark tiles alike, and a faint wash inside.
+                        p.rect_filled(r.shrink(2.0), 0.0, colour.gamma_multiply(0.10));
+                        p.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_black_alpha(150)), egui::StrokeKind::Inside);
+                        p.rect_stroke(r.shrink(1.0), 0.0, Stroke::new(2.5, colour), egui::StrokeKind::Inside);
+                        p.rect_stroke(r.shrink(3.5), 0.0, Stroke::new(1.0, Color32::from_black_alpha(110)), egui::StrokeKind::Inside);
+                    } else {
+                        p.rect_stroke(r, 0.0, Stroke::new(2.0, colour), egui::StrokeKind::Inside);
+                    }
                 }
             }
         }
@@ -2596,6 +2617,16 @@ impl App {
             let mut abs = root.clone();
             abs.extend_from_slice(rel);
             self.hover_status = Some(self.hover_text(&abs));
+        }
+        // Zoomed in: say how far, and how to get back, in the bottom left corner.
+        let zoom = self.map.camera.zoom();
+        if zoom > 1.05 && !self.map_in_dock {
+            let text = format!("×{:.1}  ·  Home for the whole view", zoom);
+            let font = FontId::proportional(11.5);
+            let g = painter.layout_no_wrap(text, font, Color32::WHITE);
+            let chip = Rect::from_min_size(bounds.left_bottom() + vec2(8.0, -8.0 - g.size().y - 6.0), g.size() + vec2(14.0, 6.0));
+            painter.rect_filled(chip, 4.0, Color32::from_black_alpha(150));
+            painter.galley_with_override_text_color(chip.min + vec2(7.0, 3.0), g, Color32::from_white_alpha(225));
         }
         if std::env::var_os("DIRMAP_PROFILE").is_some() {
             let text = format!(

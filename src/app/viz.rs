@@ -43,6 +43,62 @@ const AGE_PRESETS: [(&str, i64, i64); 6] = [
     ("Over 5 years ago", 0, 5 * 365),
 ];
 
+/// How much the maps write on their tiles.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) enum MapDensity {
+    /// Names on big tiles only, no sizes: the shapes and colours do the talking.
+    Minimal,
+    /// Names where they fit comfortably, sizes under them on taller tiles.
+    #[default]
+    Balanced,
+    /// Names on small tiles too, with sizes and shares.
+    Detailed,
+}
+
+impl MapDensity {
+    /// The smallest tile (width, height) that gets a name.
+    pub fn name_min(self) -> (f32, f32) {
+        match self {
+            MapDensity::Minimal => (130.0, 34.0),
+            MapDensity::Balanced => (80.0, 22.0),
+            MapDensity::Detailed => (52.0, 18.0),
+        }
+    }
+
+    /// The smallest tile height that gets the size under the name (None: never).
+    pub fn size_min(self) -> Option<f32> {
+        match self {
+            MapDensity::Minimal => None,
+            MapDensity::Balanced => Some(36.0),
+            MapDensity::Detailed => Some(30.0),
+        }
+    }
+
+    /// Whether the size line also says the share of the view.
+    pub fn shares(self) -> bool {
+        self == MapDensity::Detailed
+    }
+
+    /// How far to scale the Classic style's name sizes.
+    pub fn classic_scale(self) -> f32 {
+        match self {
+            MapDensity::Minimal => 1.5,
+            MapDensity::Balanced => 1.0,
+            MapDensity::Detailed => 0.8,
+        }
+    }
+}
+
+/// The Minimal / Balanced / Detailed switch, for the Display menus. Returns true when changed.
+pub(super) fn density_switch(ui: &mut egui::Ui, d: &mut MapDensity) -> bool {
+    let t = kit::tokens(ui);
+    ui.label(RichText::new("Detail on the map").size(11.5).color(t.weak));
+    let before = *d;
+    kit::segmented(ui, d, &[(MapDensity::Minimal, "Minimal"), (MapDensity::Balanced, "Balanced"), (MapDensity::Detailed, "Detailed")], false)
+        .on_hover_text("How much is written on the tiles: names on big tiles only, where they fit, or on small tiles too with sizes and shares");
+    *d != before
+}
+
 /// File types picked in the legend (or the File types list) to stand out on the map, plus the
 /// one under the mouse in the legend, which stands out while hovered (free; picking is Pro).
 #[derive(Clone, Default, Hash, PartialEq)]
@@ -231,7 +287,7 @@ pub(super) fn pill(ui: &mut egui::Ui, icon: Option<Icon>, text: &str, on: bool, 
 }
 
 /// Two-way switch drawn as joined pills (Treemap | Sunburst, Highlight | Only).
-fn switch<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, Option<Icon>, &str, &str)]) -> bool {
+pub(super) fn switch<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, Option<Icon>, &str, &str)]) -> bool {
     let t = kit::tokens(ui);
     let mut changed = false;
     egui::Frame::new().fill(style::blend(t.pal.chrome, t.pal.hover, 0.55)).corner_radius(kit::CONTROL_RADIUS).inner_margin(2).show(ui, |ui| {
@@ -574,6 +630,10 @@ impl App {
 
     /// The Display menu: what's drawn on and beside the map.
     pub(super) fn display_choices(&mut self, ui: &mut egui::Ui) {
+        if density_switch(ui, &mut self.files.prefs.map_density) {
+            self.paint_gen += 1;
+        }
+        ui.separator();
         let mut labels = self.settings.show_labels;
         if ui.checkbox(&mut labels, "File names on tiles").changed() {
             self.settings.show_labels = labels;
