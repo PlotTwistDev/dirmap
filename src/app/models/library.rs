@@ -83,7 +83,7 @@ enum Row {
 
 /// What the user asked to do with a model, from its menu or the details panel.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Act {
+pub(super) enum Act {
     Inspect,
     Ask,
     Lab,
@@ -791,7 +791,7 @@ impl App {
     }
 
     /// Does what was asked with model `i` of `list`.
-    fn model_act(&mut self, list: &[Model], i: usize, a: Act) {
+    pub(super) fn model_act(&mut self, list: &[Model], i: usize, a: Act) {
         let Some(m) = list.get(i) else { return };
         match a {
             Act::Inspect => {
@@ -973,7 +973,7 @@ fn statuses(m: &Model) -> Vec<(Tone, String)> {
 }
 
 /// A fact as a small tile: label over value.
-fn fact_tile(ui: &mut egui::Ui, w: f32, label: &str, value: &str, tip: &str) {
+pub(super) fn fact_tile(ui: &mut egui::Ui, w: f32, label: &str, value: &str, tip: &str) {
     let t = kit::tokens(ui);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 46.0), Sense::hover());
     ui.painter().rect_filled(rect, 6.0, t.pal.well);

@@ -108,14 +108,23 @@ right-click menu. Only actions that apply to it are shown:
 
 ## Inspecting a model
 
-Double-click a model, or press **🔍 Inspect**, to see what's inside it. Filescape reads only the
+Double-click a model, or press **Inspect**, to see what's inside it. Filescape reads only the
 part of each file where the model describes itself and lists its pieces, never the weights, so
-this takes a moment even for a model of many gigabytes. **⏴ All models** or **Esc** goes back to the
+this takes a moment even for a model of many gigabytes. The **←** button or **Esc** goes back to the
 list.
 
-**Overview** lists what's known about the model, such as its architecture, layers, attention
-heads, context length, vocabulary, licence and number of parameters. A tag beside each fact says
-where it comes from:
+The top of the page shows the model's kind, name, format and app, with **Ask AI**, **Open in Lab**,
+**Show in Files** (the folder button) and **Compare…** beside it. Below, tiles give the facts most
+people want first: parameters, size, precision, context, layers and whether Filescape can run it.
+A fact the model's files don't give says **Unknown**. Hover over a fact's name for a short
+explanation of the term.
+
+The tabs on the left (**Overview**, **Health**, **Will it run?**, **Structure**) are for everyone.
+The ones under **Advanced** (**Tensors**, **Tokens**, **Metadata**) show the model's raw parts.
+
+**Overview** lists what's known about the model in groups (about it, its shape, how it handles
+text, and the file), such as its architecture, layers, attention heads, context length,
+vocabulary, licence and number of parameters. A tag beside each fact says where it comes from:
 
 | Tag | Meaning |
 |---|---|
@@ -212,7 +221,7 @@ and a model joins these pieces to spell anything its vocabulary lacks.
 **Metadata** lists every entry the model file carries, such as its training settings and
 tokenizer, with a box to find one.
 
-**Compare with…**, at the top right, puts this model beside another one from the list, in a
+**Compare…**, at the top right, puts this model beside another one from the list, in a
 **Compare** tab:
 
 - A sentence sums up what they share, for example "Same architecture and size, stored at
