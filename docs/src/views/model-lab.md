@@ -103,6 +103,11 @@ Researchers call this *activation steering*, and the difference a *steering vect
   have little room left to change anything; about a third of the way in usually works best and is
   where the Lab starts.
 - Leave one box empty to push towards (or away from) a single idea.
+- The pairs under the boxes, such as **Happy / Sad** or **Formal / Casual**, fill both boxes in one
+  click.
+- **Sweep strengths** writes the text without a push and then at strengths 2, 4, 6, 8 and 10, one
+  under another, so you can see where the push starts to show and where the text falls apart.
+  **■ Stop** stops it after the one it's writing.
 
 The push only exists while the text is written, in a copy of the model's working memory that's
 thrown away afterwards. The model's file, Ask AI and the other Lab pages aren't affected. The
@@ -122,6 +127,9 @@ The result shows:
 - **Tokens a second read**: how fast the model takes in a question or a document before it
   answers. This is usually much faster than writing.
 - **To the first word**: how long you'd wait for an answer to start after sending that much text.
+
+Once a model has been tested more than once, a chart under the result shows its last tests (up to
+24) as bars of tokens a second written; hover over a bar to see that test's settings.
 
 Every result is kept, with the model, where it ran (the graphics chip, or the processor and how
 many threads), the context length and the date, so you can compare models and settings in the

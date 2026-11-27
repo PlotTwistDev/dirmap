@@ -397,7 +397,7 @@ mod menu_tests {
     #[test]
     fn menu_icons_are_in_the_font() {
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(Default::default(), |_| {});
+        ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
         let font = egui::FontId::proportional(14.0);
         // `has_glyph` is wrong for glyphs in the font that also holds the replacement mark, so
         // compare with how a character no font has is drawn.
