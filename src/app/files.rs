@@ -1955,15 +1955,40 @@ impl App {
             if self.drives.is_empty() && self.drives_rx.is_some() {
                 ui.weak("Looking for drives…");
             }
-            let drives: Vec<(PathBuf, String, u64, u64, bool)> = self.drives.iter().filter(|d| !d.network).map(|d| (d.root.clone(), d.label.clone(), d.total, d.free, d.network)).collect();
-            for (root, label, total, free, _) in drives {
-                let name = drive_label(&root, &label);
-                let used = total.saturating_sub(free);
-                let tip = format!("{}\n{} free of {}", root.display(), scan::human(free), scan::human(total));
-                let frac = (total > 0).then(|| used as f32 / total as f32);
-                let resp = side_row(ui, "🖴", &name, here == Location::Dir(root.clone()), 30.0).on_hover_text(tip);
-                capacity_bar(ui, resp.rect, frac);
+            let all = self.drives.clone();
+            for (d, nested) in drive_order(&all) {
+                let name = drive_label(&d.root, &d.label);
+                let root = d.root.clone();
+                let indent = if nested { 16.0 } else { 0.0 };
+                let resp = ui
+                    .horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.add_space(indent);
+                        side_row(ui, d.info.kind.icon(), &name, here == Location::Dir(root.clone()), 30.0)
+                    })
+                    .inner;
+                if nested {
+                    // A short elbow from the host drive down to its image.
+                    let x = resp.rect.left() - 4.0;
+                    let stroke = Stroke::new(1.0, style::pal(ui).hairline);
+                    ui.painter().vline(x, (resp.rect.top() - 6.0)..=resp.rect.center().y - 4.0, stroke);
+                    ui.painter().hline(x..=resp.rect.left() + 2.0, resp.rect.center().y - 4.0, stroke);
+                }
+                let resp = resp.on_hover_ui(|ui| drive_tip(ui, d, &all));
+                capacity_bar_held(ui, resp.rect, d);
                 self.place_row(ui, &resp, &root, &mut picks);
+            }
+            for ph in self.phones.clone() {
+                let resp = side_row(ui, drives::Kind::Phone.icon(), &ph.name, ph.path.as_ref().is_some_and(|p| here == Location::Dir(p.clone())), ROW_F)
+                    .on_hover_ui(|ui| phone_tip(ui, &ph));
+                match &ph.path {
+                    Some(p) => self.place_row(ui, &resp, p, &mut picks),
+                    None => {
+                        if resp.clicked() {
+                            drives::open_phone(&ph);
+                        }
+                    }
+                }
             }
             ui.add_space(2.0);
             if ui.add(egui::Button::new(egui::RichText::new("⟳ Refresh drives").small().color(style::pal(ui).weak)).frame_when_inactive(false)).clicked() {
@@ -2358,33 +2383,33 @@ impl App {
             ui.weak(if self.drives_rx.is_some() { "Looking for drives…" } else { "No drives found." });
             return;
         }
-        let drives: Vec<(PathBuf, String, u64, u64, bool)> = self.drives.iter().map(|d| (d.root.clone(), d.label.clone(), d.total, d.free, d.network)).collect();
+        let all = self.drives.clone();
+        // Network shares after the local drives, as in the sidebar; images after their host.
+        let mut order: Vec<(&drives::Drive, bool)> = drive_order(&all);
+        order.extend(all.iter().filter(|d| d.network).map(|d| (d, false)));
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
-                for (root, label, total, free, network) in drives {
-                    let (r, resp) = ui.allocate_exact_size(vec2(250.0, 58.0), Sense::click());
+                for (d, _) in order {
+                    let (root, label, total, free) = (d.root.clone(), d.label.clone(), d.total, d.free);
+                    let (r, resp) = ui.allocate_exact_size(vec2(270.0, 72.0), Sense::click());
                     let vis = ui.visuals();
                     let bg = if resp.hovered() { vis.widgets.hovered.weak_bg_fill } else { vis.faint_bg_color };
                     let p = ui.painter();
                     p.rect_filled(r, 6.0, bg);
-                    p.text(pos2(r.left() + 12.0, r.top() + 18.0), Align2::LEFT_CENTER, if network { "🖧" } else { "🖴" }, FontId::proportional(22.0), vis.text_color());
+                    p.text(pos2(r.left() + 12.0, r.top() + 20.0), Align2::LEFT_CENTER, d.info.kind.icon(), FontId::proportional(22.0), vis.text_color());
                     p.text(pos2(r.left() + 44.0, r.top() + 14.0), Align2::LEFT_CENTER, drive_label(&root, &label), FontId::proportional(14.0), vis.strong_text_color());
-                    let used = total.saturating_sub(free);
-                    let frac = if total > 0 { used as f32 / total as f32 } else { 0.0 };
-                    let bar = Rect::from_min_size(pos2(r.left() + 44.0, r.top() + 28.0), vec2(r.width() - 56.0, 7.0));
-                    p.rect_filled(bar, 2.0, vis.extreme_bg_color);
-                    let mut fill = bar;
-                    fill.set_width(bar.width() * frac.clamp(0.0, 1.0));
-                    p.rect_filled(fill, 2.0, if frac > 0.9 { Color32::from_rgb(210, 70, 60) } else { vis.selection.bg_fill });
+                    p.text(pos2(r.left() + 44.0, r.top() + 30.0), Align2::LEFT_CENTER, drive_kind_line(d, &all), FontId::proportional(11.0), vis.weak_text_color());
+                    let bar = Rect::from_min_size(pos2(r.left() + 44.0, r.top() + 42.0), vec2(r.width() - 56.0, 7.0));
+                    paint_capacity(p, vis, bar, d);
                     p.text(
-                        pos2(r.left() + 44.0, r.top() + 46.0),
+                        pos2(r.left() + 44.0, r.top() + 60.0),
                         Align2::LEFT_CENTER,
                         format!("{} free of {}", scan::human(free), scan::human(total)),
                         FontId::proportional(12.0),
                         vis.weak_text_color(),
                     );
-                    let resp = resp.on_hover_text(root.shown());
+                    let resp = resp.on_hover_ui(|ui| drive_tip(ui, d, &all));
                     if resp.double_clicked() || resp.clicked() {
                         picks.go = Some(Location::Dir(root.clone()));
                     }
@@ -4094,6 +4119,108 @@ pub(super) fn capacity_bar(ui: &egui::Ui, r: Rect, frac: Option<f32>) {
     fill.set_width(bar.width() * frac.clamp(0.0, 1.0));
     let c = if frac > 0.9 { Color32::from_rgb(210, 70, 60) } else { Color32::from_rgb(70, 130, 210) };
     p.rect_filled(fill, 1.5, c);
+}
+
+/// The sidebar's capacity bar for a drive: the used part, and for a disk image that can't
+/// grow, the part its host drive holds back in a faint red.
+fn capacity_bar_held(ui: &egui::Ui, r: Rect, d: &drives::Drive) {
+    if d.total == 0 {
+        return;
+    }
+    let bar = Rect::from_min_size(pos2(r.left() + 28.0, r.bottom() - 7.0), vec2((r.width() - 38.0).max(10.0), 3.0));
+    paint_capacity(ui.painter(), ui.visuals(), bar, d);
+}
+
+/// A capacity bar in `bar`: blue, red when nearly full; a sparse image's unusable room hatched
+/// in faint red after its data.
+fn paint_capacity(p: &egui::Painter, vis: &egui::Visuals, bar: Rect, d: &drives::Drive) {
+    let total = d.total.max(1) as f32;
+    let round = (bar.height() / 2.0).min(2.0);
+    p.rect_filled(bar, round, vis.extreme_bg_color);
+    let red = Color32::from_rgb(210, 70, 60);
+    let held = d.held_back();
+    let used = if held.is_some() { d.info.data.unwrap_or(0) } else { d.used() } as f32 / total;
+    let full = d.used() as f32 / total > 0.9;
+    let mut fill = bar;
+    fill.set_width(bar.width() * used.clamp(0.0, 1.0));
+    let blue = Color32::from_rgb(70, 130, 210);
+    p.rect_filled(fill, round, if full && held.is_none() { red } else { blue });
+    if let Some(h) = held {
+        let mut rest = bar;
+        rest.min.x = fill.max.x;
+        rest.set_width(bar.width() * (h as f32 / total).clamp(0.0, 1.0 - used));
+        p.rect_filled(rest, round, red.gamma_multiply(0.45));
+    }
+}
+
+/// "Disk image on DataHerdA · APFS" or "External drive · USB · ExFAT".
+fn drive_kind_line(d: &drives::Drive, all: &[drives::Drive]) -> String {
+    let i = &d.info;
+    let mut parts = vec![i.kind.name().to_string()];
+    if i.kind == drives::Kind::Image
+        && let Some(host) = i.image.as_deref().and_then(|p| drives::holding(p, all)).filter(|h| h.root != d.root)
+    {
+        parts[0] = format!("Disk image on {}", drive_label(&host.root, &host.label));
+    } else if !i.bus.is_empty() && matches!(i.kind, drives::Kind::External | drives::Kind::Removable) {
+        parts.push(i.bus.clone());
+    }
+    if !i.fs.is_empty() {
+        parts.push(i.fs.clone());
+    }
+    if i.read_only {
+        parts.push("read-only".into());
+    }
+    parts.join(" · ")
+}
+
+/// A drive's hover card: what it is, in a sentence, then its details.
+pub(super) fn drive_tip(ui: &mut egui::Ui, d: &drives::Drive, all: &[drives::Drive]) {
+    ui.set_max_width(380.0);
+    ui.strong(drive_label(&d.root, &d.label));
+    let about = d.info.kind.about();
+    if !about.is_empty() {
+        ui.weak(about);
+    }
+    ui.add_space(4.0);
+    egui::Grid::new("drive-tip").num_columns(2).spacing([12.0, 3.0]).show(ui, |ui| {
+        ui.weak("Path");
+        ui.label(d.root.shown());
+        ui.end_row();
+        for (k, v) in drives::describe(d, all) {
+            ui.weak(k);
+            ui.add(egui::Label::new(v).wrap());
+            ui.end_row();
+        }
+    });
+}
+
+fn phone_tip(ui: &mut egui::Ui, p: &drives::Phone) {
+    ui.set_max_width(360.0);
+    ui.strong(&p.name);
+    ui.weak(format!("{} · {}", drives::Kind::Phone.name(), p.protocol));
+    ui.add_space(4.0);
+    ui.add(egui::Label::new(p.hint()).wrap());
+}
+
+/// Local drives in sidebar order: each disk image right after the drive its file is on, marked
+/// nested; images whose host isn't listed stay where they are.
+fn drive_order(all: &[drives::Drive]) -> Vec<(&drives::Drive, bool)> {
+    let local: Vec<&drives::Drive> = all.iter().filter(|d| !d.network).collect();
+    let host_of = |d: &drives::Drive| -> Option<PathBuf> {
+        let img = d.info.image.as_deref()?;
+        drives::holding(img, all).filter(|h| h.root != d.root && !h.network).map(|h| h.root.clone())
+    };
+    let mut out = Vec::new();
+    for d in &local {
+        if host_of(d).is_some() {
+            continue;
+        }
+        out.push((*d, false));
+        for c in local.iter().filter(|c| host_of(c).as_ref() == Some(&d.root)) {
+            out.push((*c, true));
+        }
+    }
+    out
 }
 
 /// A sidebar line: icon and label, left-aligned. Where we are gets the selection tint and an

@@ -39,7 +39,7 @@ click it for details.
 |---|---|
 | **Quick access** | Home, Desktop, Documents, Downloads, Pictures, Music and Videos (and Applications on a Mac). These are your real folders, including ones that have been moved, such as Documents on OneDrive. |
 | **Favourites** | Folders you've bookmarked, in as many groups as you like. See [Favourites](#favourites). |
-| **Drives** | **This PC** (Windows) or **Computer** (Linux and macOS), then each local drive or mounted volume. Each has a bar showing how full it is, red when over 90%. Hover for the free space. |
+| **Drives** | **This PC** (Windows) or **Computer** (Linux and macOS), then each local drive or mounted volume, and any phone or camera plugged in. Each drive has a bar showing how full it is, red when over 90%. Hover for its details. See [Drive details](#drive-details). |
 | **Linux** | Windows only, when WSL is installed: each Linux distribution, as in Explorer (`\\wsl.localhost\Ubuntu`). Opening one starts it if it isn't running. |
 | **Network & Remote** | Network drives and shares, saved servers, and **Connect to Server…**. See [Network & Remote](#network--remote). |
 | **Saved searches** | Searches you've kept with **☆**. Click one to run it again. See [Searching subfolders](#searching-subfolders). |
@@ -776,6 +776,37 @@ The player reads every image type Filescape previews: OpenEXR, PNG, JPEG, TIFF, 
 rest. It also reads **DPX** at 8, 10, 12 and 16 bits, in either byte order, packed or filled. A
 sequence on a server plays too, as each frame is downloaded. Frames are shown without their alpha
 channel.
+
+## Drive details
+
+Hover a drive in the sidebar, or a card in **Computer**, to see what it is:
+
+| Detail | What it tells you |
+|---|---|
+| **Type** | Internal, external, removable media, network share, disk image, virtual (a RAM disk or FUSE), system volume, optical disc, or phone. The icon shows it too: ⏏ for drives you can eject, 💿 for disk images, 🖧 for network shares, 📱 for phones. |
+| **Filesystem** | APFS, NTFS, exFAT, ext4 and so on. |
+| **Capacity, Used, Free** | Free is what you can still write. |
+| **Connection, Model** | USB, Thunderbolt, SATA, NVMe; the make and model where the system says. |
+| **Device or Server** | The disk behind the volume (`/dev/disk5s1`), or the server and share of a network drive. |
+| **Shares space** | Other APFS volumes in the same container, which share its free space. |
+| **Access** | Read-only or writable, encrypted or not, and hidden in Finder (macOS). |
+
+### Disk images
+
+A disk image (a macOS `.dmg` or `.sparsebundle`, a Windows `.vhdx`, a Linux loop device) is a
+file on another drive that the system opens as if it were a disk. Filescape shows it nested
+under the drive its file is on, and its details name that file.
+
+A sparse image grows as you fill it, but only while its host drive has room. When the host is
+nearly full, the image can't use all of its stated size: its bar shows its files in blue and
+the part it can't use in faint red, and **Held back** says how much that is.
+
+### Phones and cameras
+
+Phones don't mount as drives on macOS or Windows, so they can't be browsed like a folder there.
+Filescape still lists one that's plugged in, with how it connects (Apple, MTP or PTP). Click it
+to open **Image Capture** on a Mac, or **This PC** in File Explorer on Windows. On Linux, phones
+the desktop has mounted (GVFS) open in Filescape like any folder.
 
 ## Slow and unreachable drives
 
