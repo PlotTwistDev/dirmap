@@ -307,6 +307,7 @@ read shows its type's icon instead.
 | Command | What it does |
 |---|---|
 | **Open** / **Open in New Tab** / **Open in Other Pane** | Opens folders here, in a new tab or in the other pane, and files in their apps. |
+| **Open Application** / **Show Package Contents** | On an [application](#applications): launches it, or goes inside it. |
 | **Open With** | Opens the item in one of [your apps](#open-with), or lets you choose one. |
 | **Quick Look** (**Space**) | A [large preview](#quick-look-and-the-preview-pane) of the file. |
 | **Copy** / **Cut** / **Paste** (**Ctrl+C**, **Ctrl+X**, **Ctrl+V**) | See [Copying, moving and deleting](#copying-moving-and-deleting). |
@@ -319,7 +320,7 @@ read shows its type's icon instead.
 | **Show in Explorer** (Finder, or the system file manager) | Opens the system's file manager with the item selected. |
 | **Open in Terminal…** (Command Prompt or PowerShell on Windows) | Opens a terminal in the folder. |
 | **Properties** (**Alt+Enter**) | Size, number of files and dates. |
-| **Analyse This Folder** | Scans the folder and shows it in the [analysis dock](#the-analysis-dock). You stay in Files. |
+| **Analyse This Folder** (**Analyse Application Storage** on an app) | Scans the folder and shows it in the [analysis dock](#the-analysis-dock). You stay in Files. |
 | **Show More Options** (**Shift+F10**; Windows) | Opens Windows' own menu for the items, the one Explorer shows: everything other apps add to it (7-Zip, Notepad++, PowerToys, your antivirus…), **Send to**, **Give access to** and the rest. **Rename** there renames in Filescape's list. |
 
 On Windows, **Shift+right-click** an item to go straight to Windows' menu, with the extra commands
@@ -703,6 +704,40 @@ right-click menu of empty space in the list has **Undo**.
 
 **Ctrl+Y** or **Ctrl+Shift+Z** (**⇧⌘Z** on a Mac) redoes what you just undid, and the right-click
 menu of empty space has **Redo** too. Making another change clears what can be redone.
+
+## Applications
+
+On a Mac an application such as `Safari.app` is really a folder of programs, libraries and
+pictures. Filescape shows it the way Finder does: with its own icon, its name without `.app`, and
+**Application** in the Kind column. It's recognised by what's inside (an `Info.plist` or a
+program folder), so an ordinary folder that happens to be called `Notes.app` stays a folder. Apps
+in /Applications, ~/Applications, on other drives or anywhere else are all recognised.
+
+- **Double-click** an application, or select it and press **Enter**, to launch it. macOS opens it
+  exactly as Finder would, so Gatekeeper and your security settings still apply: an app
+  downloaded from the internet asks first, and one macOS blocks stays blocked. Selecting an app,
+  previewing it or analysing it never launches it.
+- If an app can't open, Filescape says why: it's damaged or incomplete (its program is missing),
+  it needs a newer version of macOS, you don't have permission, and so on.
+- **Show Package Contents** on the right-click menu goes inside the application, to look at its
+  resources, programs, libraries and settings files. Everything works there as in any folder.
+- **Analyse Application Storage** shows what takes up the app's space in the
+  [analysis dock](#the-analysis-dock).
+
+Other kinds of bundle are named in the Kind column but open like folders: frameworks, plug-ins
+(`.plugin`, Audio Units, VST and VST3), app extensions, System Settings panes, kernel extensions,
+screen savers, Quick Look plug-ins and Spotlight importers.
+
+Icons are read from the system (or from the app's icon file) in the background and kept while
+Filescape is open, so a folder of hundreds of apps opens as fast as any other. Nothing inside an
+app is ever run to find its icon or name, and apps in cloud folders keep a plain icon so nothing
+is downloaded. Applications on a server or inside an archive can't be launched.
+
+On Windows and Linux, a Mac app (on an external drive, say) shows as an application too, but
+double-click goes inside, since it can't run there.
+
+How applications behave can be changed under **Settings › Files**: see
+[Applications & Executables](../settings/reference.md#files).
 
 ## Archives
 

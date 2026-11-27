@@ -992,7 +992,7 @@ impl App {
             let (kind, size) = match t.seqs.get(&i) {
                 Some(s) => (format!("{} sequence", s.seq.extension().to_uppercase()), s.seq.bytes),
                 // A folder's size is known only from an analysis that covers it.
-                None if e.is_dir => (browser::kind_for(&e.name, true), t.sizes.as_ref().and_then(|s| s.1.get(&e.name)).map_or(0, |s| s.0)),
+                None if e.is_dir => (browser::entry_kind(e), t.sizes.as_ref().and_then(|s| s.1.get(&e.name)).map_or(0, |s| s.0)),
                 None => (browser::kind_for(&e.name, false), e.size),
             };
             let k = kinds.entry(kind).or_default();
@@ -1064,18 +1064,21 @@ impl App {
         let h = (ui.available_height() * 0.55).clamp(120.0, w * 1.2);
         // Folders get an icon; a package (a Logic project, a LightCraft library…) gets a preview
         // like a file.
-        if e.is_dir && !crate::packages::is_package(&path, &e.name) {
+        if crate::apps::is_app(e.bundle) {
+            let (r, _) = ui.allocate_exact_size(vec2(w, 112.0), Sense::hover());
+            self.icons.paint_app(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), &path, e.modified);
+        } else if e.is_dir && !crate::packages::is_package(&path, &e.name) {
             let (r, _) = ui.allocate_exact_size(vec2(w, 96.0), Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(64.0, 64.0)), true, "", Color32::GRAY);
         } else {
             self.preview_body(ui, &path, &e, vec2(w, h));
         }
         ui.add_space(8.0);
-        ui.add(egui::Label::new(egui::RichText::new(&*e.name).strong()).wrap());
+        ui.add(egui::Label::new(egui::RichText::new(crate::apps::shown_name(&e.name, e.bundle)).strong()).wrap());
         ui.add_space(4.0);
         egui::Grid::new("preview-facts").num_columns(2).spacing([10.0, 3.0]).show(ui, |ui| {
             ui.weak("Kind");
-            ui.label(browser::kind_for(&e.name, e.is_dir));
+            ui.label(browser::entry_kind(&e));
             ui.end_row();
             if !e.is_dir {
                 ui.weak("Size");
@@ -1325,6 +1328,12 @@ impl App {
 
     fn preview_main(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
         let pal = style::pal(ui);
+        if crate::apps::is_app(e.bundle) {
+            let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+            let side = (r.width().min(r.height()) * 0.6).clamp(64.0, 256.0);
+            self.icons.paint_app(ui, Rect::from_center_size(r.center(), vec2(side, side)), path, e.modified);
+            return;
+        }
         if e.is_dir && !crate::packages::is_package(path, &e.name) {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), true, "", Color32::GRAY);
@@ -2681,7 +2690,7 @@ fn sound_controls(ui: &mut egui::Ui, player: &mut Option<crate::media::Player>, 
 
 /// "12.4 MB · PNG image · 3 Nov 2026"
 pub(super) fn facts_line(e: &Entry) -> String {
-    let mut s = browser::kind_for(&e.name, e.is_dir);
+    let mut s = browser::entry_kind(e);
     if !e.is_dir {
         s = format!("{} · {s}", crate::scan::human(e.size));
         if e.flags & crate::scan::store::ONLINE_ONLY != 0 {

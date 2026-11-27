@@ -73,6 +73,31 @@ pub fn general(ui: &mut egui::Ui, cx: &mut PageCx, licence: &mut crate::licence:
     updates(ui, cx, licence);
 }
 
+/// Settings > Files.
+pub fn files(ui: &mut egui::Ui, cx: &mut PageCx) {
+    let f = cx.focuser();
+    let d = &mut *cx.d;
+    kit::section(ui, Icon::Folder, "Applications & Executables", f.of("apps"), |ui| {
+        kit::toggle_row(ui, "Recognise application bundles", Some("Show applications (Safari.app and the like) as applications rather than folders, and name plug-ins, frameworks and other bundles in the Kind column. Off shows them all as plain folders."), &mut d.app_recognise);
+        let on = d.app_recognise;
+        ui.add_enabled_ui(on, |ui| {
+            kit::divider(ui);
+            kit::toggle_row(ui, "Show application icons", Some("Draw applications with their own icons, as Finder does. Icons are read once and kept while Filescape is open; apps in cloud folders keep a plain icon so nothing is downloaded."), &mut d.app_icons);
+            kit::divider(ui);
+            kit::toggle_row(ui, "Hide .app extensions", Some("Show “Safari” rather than “Safari.app”. Renaming still shows the whole name."), &mut d.app_hide_ext);
+            kit::divider(ui);
+            ui.add_enabled_ui(!d.app_as_folders, |ui| {
+                let mut launch = d.app_double_click && !d.app_as_folders;
+                if kit::toggle_row(ui, "Double-click to launch applications", Some("Double-click or Enter opens an application. Off, they show its contents instead, and Open Application in the right-click menu still launches it."), &mut launch).changed() {
+                    d.app_double_click = launch;
+                }
+            });
+            kit::divider(ui);
+            kit::toggle_row(ui, "Treat application bundles as folders", Some("For developers and administrators: double-click and Enter go inside applications like any folder, and the right-click menu has the folder commands too. Applications keep their icons and names."), &mut d.app_as_folders);
+        });
+    });
+}
+
 fn updates(ui: &mut egui::Ui, cx: &mut PageCx, licence: &mut crate::licence::Licensing) {
     let f = cx.focuser();
     use crate::licence::update::{VERSION, platform};

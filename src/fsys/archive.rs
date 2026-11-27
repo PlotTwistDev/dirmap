@@ -267,6 +267,7 @@ pub fn list(archive: &Path, inner: &str) -> Result<Vec<Entry>, String> {
                 alloc: it.size,
                 flags: crate::scan::store::NO_ALLOC,
                 modified: it.modified,
+                bundle: 0,
             })
         })
         .collect())
