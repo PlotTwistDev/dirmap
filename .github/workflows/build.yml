@@ -117,7 +117,7 @@ jobs:
           # The packages must install and start their program.
           sudo apt-get install -y -qq ./dist/Filescape-linux.deb
           filescape --help
-          ldd /usr/bin/filescape | grep -q '/usr/lib/filescape/libllama'
+          ldd /usr/bin/filescape | tee /dev/stderr | grep -q 'lib/filescape/libllama.so'
           rpm -qpl dist/Filescape-linux.rpm | grep -qx /usr/bin/filescape
           ./dist/Filescape-linux.AppImage --appimage-extract-and-run --help
 
