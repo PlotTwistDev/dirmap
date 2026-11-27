@@ -35,10 +35,27 @@ Files that belong to one model are shown as one entry: numbered parts
 
 ## Reading the list
 
-Models are sorted by size, largest first. Each one shows its name, size and where it's from, then
-a line of details:
+A strip above the list adds things up:
 
-`GGUF · qwen3 · 8B · Q4_K_M · 40K context`
+| Total | Meaning |
+|---|---|
+| **Models** | Models found, not counting Ollama downloads no model uses. |
+| **On disk** | Space the model files take on the drive. A file shared under two names (a hard link, as sharing copies in [Freeing space](#freeing-space) makes) is counted once, so this can be less than the sizes in the list added up. |
+| **Recoverable** | Space in extra copies of a model kept elsewhere and in unused Ollama downloads. **Free up space** opens Storage, which also finds unfinished downloads and old versions. |
+| **Locations** | Folders models were found in. |
+| **Runs in Filescape** | Whole GGUF models on this computer, which Ask AI and the Lab can load. |
+
+Each model has a coloured tile for its kind: **Language**, **Image generation**, **Video
+generation**, **Audio and speech**, **Embedding**, **Vision**, **Multimodal**, **Adapter or LoRA**,
+or **Unidentified**. The kind comes from the model's own files when they say: the architecture in a
+GGUF file, or the class named in a Hugging Face `config.json` or `model_index.json`. Otherwise it's
+a guess from the folder it's in (ComfyUI's `loras` or `checkpoints`, say) or its name: a guess has
+a dashed tile and says **(probably)**. When nothing tells, the model is **Unidentified** rather than
+assumed to be anything.
+
+The second line gives the details:
+
+`Language  ·  GGUF · qwen3 · 1.7B · Q4_K_M · 40K context`
 
 | Detail | Meaning |
 |---|---|
@@ -49,10 +66,45 @@ a line of details:
 | Context | The longest text the model can read at once, in tokens (roughly ¾ of a word each). |
 | Add-on | A vision projector or adapter that works together with a model, not on its own. |
 
-Click a model to see what's known about it on the right, with the full path of each of its files.
-Right-click it and choose **Show in Files**, or press **Show in Files** on the right, to open the
-folder it's in with the file selected. **Copy path** copies the path of its first file. For a
-GGUF model, **💬 Ask AI** opens [Ask AI](ask-ai.md) with that model picked, to chat with it. **🔬 Lab** in the toolbar shows what it would write next and how sure it is: see [The Lab](model-lab.md).
+A green dot beside the app means Filescape can run the model; an orange dot on the tile means it's
+an extra copy or an unused download.
+
+### Finding a model
+
+- The chips above the list (**All**, **Language**, **Image** …) show one kind of model. Only kinds
+  that were found get a chip.
+- **Search models** matches names, details, apps and paths. Every word must match.
+- **Sort** orders by size, name, type or app.
+- **Filters** shows only models from one app, in one format, that run in Filescape, or that are
+  copies and unused downloads.
+- The two buttons beside Sort show every model file on its own line, or **versions of one model
+  together**: `qwen3:1.7b` from Ollama and `Qwen3-1.7B-Q8_0.gguf` from LM Studio sit under one
+  heading with their precisions and apps. Click a heading to open it. Versions are put together by
+  name, never treated as copies: copies are found only by comparing the files' contents.
+
+The **Locations** panel on the left lists where Filescape looked, with how many models and how much
+space it found in each. Click a folder to open it in Files. The ⟨ button folds the panel away, and
+the ⟩ button on the thin rail brings it back.
+
+### The model panel
+
+Click a model to see it on the right: its kind, its parameters, size, precision and context (or
+**Unknown** when the files don't say), whether Filescape can run it and why not, its files, and
+other places the same files are kept. Every action for the model is here, and in its **⋯** menu or
+right-click menu. Only actions that apply to it are shown:
+
+| Action | What it does |
+|---|---|
+| **Inspect** | Opens the model's page, below. Double-clicking a model does the same. |
+| **Ask AI** | Opens [Ask AI](ask-ai.md) with the model picked. |
+| **Open in Lab** | Opens [the Lab](model-lab.md) with the model picked. |
+| **Will it run?** | Opens the model's page at **Will it run?** |
+| **Compare…** | Opens the model's page compared with another model you choose. |
+| **Show in Files** | Opens the folder it's in, with the file selected. |
+| **Show in Storage Analysis** | Selects it on the map when the current scan includes it; otherwise scans the folder it was found in. |
+| **Copy path** | Copies the path of its first file (menu only). |
+| **Optimise size…** | Makes a smaller copy at a lower precision: see [Shrinking a model](#shrinking-a-model). Professional. |
+| **Move to Trash…** | Removes the model after showing everything it removes. **Move to Recycle Bin…** on Windows. |
 
 ## Inspecting a model
 

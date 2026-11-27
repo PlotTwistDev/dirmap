@@ -81,6 +81,11 @@ pub(super) enum Phase {
 }
 
 impl AskState {
+    /// Shows the "Get a small model" offer.
+    pub(super) fn offer_starter(&mut self) {
+        self.offer = true;
+    }
+
     fn context(&self) -> u32 {
         if self.context == 0 { 4096 } else { self.context }
     }

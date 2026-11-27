@@ -13,6 +13,8 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
+mod library;
+
 /// The model list, and the search that fills it.
 #[derive(Default)]
 pub(super) struct ModelsState {
@@ -26,6 +28,12 @@ pub(super) struct ModelsState {
     page: Option<ModelPage>,
     /// The Storage view: space by app, and what can be freed.
     pub storage: super::storage::StorageState,
+    /// The library's search, filters and layout.
+    lib: library::Library,
+    /// The space the models take, worked out with the list.
+    footprint: models::Footprint,
+    /// A file to show in Files once the details panel is drawn.
+    reveal_later: Option<PathBuf>,
 }
 
 /// A model's own page: what's inside it.
@@ -147,10 +155,8 @@ struct ModelsJob {
     scan: Arc<Mutex<Option<Arc<scan::Progress>>>>,
     /// What's happening, for the status line.
     status: Arc<Mutex<String>>,
-    rx: mpsc::Receiver<Option<Vec<Model>>>,
+    rx: mpsc::Receiver<Option<(Vec<Model>, models::Footprint)>>,
 }
-
-const ROW: f32 = 2.0 * ROW_H + 6.0;
 
 impl App {
     /// Looks for models again: the known places, the user's folders and the analysis scan.
@@ -172,18 +178,24 @@ impl App {
         };
         let (progress, slot, status) = (job.progress.clone(), job.scan.clone(), job.status.clone());
         std::thread::spawn(move || {
-            let _ = tx.send(search(roots, analysis, &progress, &slot, &status));
+            let _ = tx.send(search(roots, analysis, &progress, &slot, &status).map(|list| {
+                let fp = models::footprint(&list);
+                (list, fp)
+            }));
         });
         let mut storage = std::mem::take(&mut self.models.storage);
         storage.forget();
-        self.models = ModelsState { job: Some(job), list: None, chosen: None, places, page: None, storage };
+        let lib = std::mem::take(&mut self.models.lib);
+        self.models = ModelsState { job: Some(job), list: None, chosen: None, places, page: None, storage, lib, footprint: Default::default(), reveal_later: None };
     }
 
     pub(super) fn poll_models(&mut self, ctx: &egui::Context) {
         if let Some(j) = &self.models.job {
             match j.rx.try_recv() {
-                Ok(list) => {
+                Ok(found) => {
+                    let (list, fp) = found.unzip();
                     self.models.list = list;
+                    self.models.footprint = fp.unwrap_or_default();
                     self.models.job = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
@@ -220,13 +232,14 @@ impl App {
             if ui.add_enabled(!busy, egui::Button::new("⟳ Look again")).on_hover_text("Look for models again in every place on the left").clicked() {
                 self.start_models();
             }
-            if ui.button("✚ Add folder…").on_hover_text("Also look in a folder of your choice, such as a ComfyUI or Stable Diffusion folder").clicked()
-                && let Some(dir) = rfd::FileDialog::new().pick_folder()
-            {
-                if !self.files.prefs.model_folders.contains(&dir) {
-                    self.files.prefs.model_folders.push(dir);
-                }
-                self.start_models();
+            if ui.button("✚ Add folder…").on_hover_text("Also look in a folder of your choice, such as a ComfyUI or Stable Diffusion folder").clicked() {
+                // Not the blocking picker: on macOS it can abort the app (see asking.rs).
+                self.ask_path(super::dialogs::Dialog::new().set_title("Look for AI models in"), super::dialogs::Pick::Folder, |app, dir| {
+                    if !app.files.prefs.model_folders.contains(&dir) {
+                        app.files.prefs.model_folders.push(dir);
+                    }
+                    app.start_models();
+                });
             }
             if help::link_button(ui, "Help for the AI Models workspace") {
                 self.help.show_topic(topics::AI_MODELS);
@@ -254,14 +267,24 @@ impl App {
             return;
         }
         let side = egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 8, right: 6, top: 8, bottom: 6 });
-        let r = egui::Panel::left("model-places").default_size(230.0).min_size(160.0).resizable(true).frame(side).show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.models_places(ui));
-        });
-        self.help_regions.push((r.response.rect, topics::AI_MODELS));
+        if self.models.lib.side_hidden {
+            // Folded to a rail with one button to bring the locations back.
+            let rail = egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 4, right: 4, top: 8, bottom: 6 });
+            egui::Panel::left("model-places-rail").exact_size(34.0).resizable(false).frame(rail).show(ui, |ui| {
+                if kit::icon_button(ui, kit::Icon::FoldRight, "Show the locations models were looked for in").clicked() {
+                    self.models.lib.side_hidden = false;
+                }
+            });
+        } else {
+            let r = egui::Panel::left("model-places").default_size(230.0).min_size(170.0).resizable(true).frame(side).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.models_places(ui));
+            });
+            self.help_regions.push((r.response.rect, topics::AI_MODELS));
+        }
         let chosen = self.models.chosen.filter(|&i| self.models.list.as_ref().is_some_and(|l| i < l.len()));
         if chosen.is_some() && self.models.page.is_none() {
             let frame = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::same(10));
-            let r = egui::Panel::right("model-details").default_size(340.0).min_size(240.0).resizable(true).frame(frame).show(ui, |ui| {
+            let r = egui::Panel::right("model-details").default_size(350.0).min_size(260.0).resizable(true).frame(frame).show(ui, |ui| {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.model_details(ui));
             });
             self.help_regions.push((r.response.rect, topics::AI_MODELS));
@@ -277,301 +300,11 @@ impl App {
         self.help_regions.push((r.response.rect, topics::AI_MODELS));
     }
 
-    /// Left: where models were looked for.
-    fn models_places(&mut self, ui: &mut egui::Ui) {
-        ui.strong("Looked in");
-        ui.add_space(4.0);
-        let mut remove = None;
-        for (label, p) in &self.models.places {
-            ui.horizontal(|ui| {
-                ui.label(label.as_str());
-                if label == "Added"
-                    && let Some(i) = self.files.prefs.model_folders.iter().position(|f| f == p)
-                    && ui.small_button("✖").on_hover_text("Stop looking here").clicked()
-                {
-                    remove = Some(i);
-                }
-            });
-            ui.add(egui::Label::new(egui::RichText::new(p.shown()).small().weak()).wrap());
-            ui.add_space(4.0);
-        }
-        if self.tree.is_some() && self.job.is_none() {
-            ui.label("Storage Analysis scan");
-            ui.add(egui::Label::new(egui::RichText::new(self.scanned_path.shown()).small().weak()).wrap());
-        }
-        if self.models.places.is_empty() && self.tree.is_none() {
-            ui.weak("No Ollama, LM Studio or Hugging Face folders on this computer.");
-        }
-        ui.add_space(8.0);
-        ui.weak("Models elsewhere? Use Add folder, or scan a drive in Storage Analysis and look again.");
-        if let Some(i) = remove {
-            self.files.prefs.model_folders.remove(i);
-            self.start_models();
-        }
-    }
-
-    /// Middle: the summary and the list.
-    fn models_main(&mut self, ui: &mut egui::Ui) {
-        if let Some(j) = &self.models.job {
-            let (read, total) = (j.progress.read.load(Ordering::Relaxed), j.progress.to_read.load(Ordering::Relaxed));
-            let status = if total > 0 {
-                format!("Checking copies… {} of {}", scan::human(read), scan::human(total))
-            } else {
-                j.status.lock().unwrap().clone()
-            };
-            let mut cancel = false;
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(status);
-                cancel = ui.small_button("Cancel").clicked();
-            });
-            if cancel {
-                self.cancel_models();
-            }
-            return;
-        }
-        let Some(list) = self.models.list.take() else {
-            ui.label("The search was cancelled.");
-            if ui.button("Look again").clicked() {
-                self.start_models();
-            }
-            return;
-        };
-        self.models_list(ui, &list);
-        self.models.list = Some(list);
-    }
-
-    fn models_list(&mut self, ui: &mut egui::Ui, list: &[Model]) {
-        if list.is_empty() {
-            ui.add_space(6.0);
-            ui.heading("No AI models found");
-            ui.label(
-                "Filescape looks where Ollama, LM Studio and Hugging Face keep their models, in Downloads, \
-                 in folders you add and in the Storage Analysis scan, for model files (.gguf, .safetensors, \
-                 .ckpt, .pt, .onnx …) of 16 MB or more.",
-            );
-            return;
-        }
-        let total: u64 = list.iter().map(|m| m.size).sum();
-        let extra: u64 = list.iter().map(|m| m.extra).sum();
-        let unused: u64 = list.iter().filter(|m| m.orphan).map(|m| m.size).sum();
-        let count = list.iter().filter(|m| !m.orphan).count() as u64;
-        ui.horizontal_wrapped(|ui| {
-            ui.heading(format!("{} model{} · {}", group(count), if count == 1 { "" } else { "s" }, scan::human(total)));
-            if extra > 0 {
-                ui.colored_label(ui.visuals().warn_fg_color, format!("  {} in extra copies", scan::human(extra)))
-                    .on_hover_text("Models marked \"copy\" are byte-for-byte the same as another model higher in the list.");
-            }
-            if unused > 0 {
-                ui.colored_label(ui.visuals().warn_fg_color, format!("  {} in Ollama downloads no model uses", scan::human(unused)))
-                    .on_hover_text("Left behind by removed models or stopped downloads. Ollama doesn't need them.");
-            }
-        });
-        if let Some((tone, text)) = self.models.storage.outcome.clone() {
-            kit::callout(ui, tone, text);
-            if ui.small_button("Hide").clicked() {
-                self.models.storage.outcome = None;
-            }
-        }
-        ui.add_space(6.0);
-
-        let mut chosen = None;
-        let mut open = None;
-        let mut inspect = None;
-        let mut remove = None;
-        let mut shrink = None;
-        ui.spacing_mut().item_spacing.y = 0.0;
-        egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW, list.len(), |ui, range| {
-            for (k, m) in list[range.clone()].iter().enumerate() {
-                let i = range.start + k;
-                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
-                let vis = ui.visuals().clone();
-                let selected = self.models.chosen == Some(i);
-                if selected {
-                    ui.painter().rect_filled(rect, 4.0, vis.selection.bg_fill);
-                } else if resp.hovered() {
-                    ui.painter().rect_filled(rect, 4.0, vis.widgets.hovered.weak_bg_fill);
-                } else if i % 2 == 1 {
-                    ui.painter().rect_filled(rect, 0.0, vis.faint_bg_color);
-                }
-                let font = FontId::proportional(13.5);
-                let small = FontId::proportional(12.5);
-                let top = rect.top() + ROW_H / 2.0 + 3.0;
-                let bottom = top + ROW_H;
-                let clip = Rect::from_min_max(rect.left_top(), pos2(rect.right() - 90.0, rect.bottom()));
-                let p = ui.painter().with_clip_rect(clip.intersect(ui.clip_rect()));
-                let name_color = if selected { vis.selection.stroke.color } else { vis.strong_text_color() };
-                p.text(pos2(rect.left() + 8.0, top), Align2::LEFT_CENTER, &m.name, font.clone(), name_color);
-                ui.painter().text(pos2(rect.right() - 8.0, top), Align2::RIGHT_CENTER, scan::human(m.size), font.clone(), vis.text_color());
-                ui.painter().text(pos2(rect.right() - 8.0, bottom), Align2::RIGHT_CENTER, m.source.label(), small.clone(), vis.weak_text_color());
-                let mut job = egui::text::LayoutJob::default();
-                let weak = egui::TextFormat { font_id: small.clone(), color: vis.weak_text_color(), ..Default::default() };
-                let warn = egui::TextFormat { font_id: small.clone(), color: vis.warn_fg_color, ..Default::default() };
-                job.append(&m.details(), 0.0, weak);
-                if let Some(note) = note(m) {
-                    job.append(&format!("   {note}"), 0.0, warn);
-                }
-                let galley = ui.painter().layout_job(job);
-                p.galley(pos2(rect.left() + 8.0, bottom - galley.size().y / 2.0), galley, vis.text_color());
-                let resp = resp.on_hover_text(m.files.first().map(|f| f.path.shown()).unwrap_or_default());
-                if resp.clicked() {
-                    chosen = Some(i);
-                }
-                if resp.double_clicked() {
-                    inspect = Some(i);
-                }
-                resp.context_menu(|ui| {
-                    if ui.button("Inspect").clicked() {
-                        inspect = Some(i);
-                        ui.close();
-                    }
-                    if ui.button("Show in Files").clicked() {
-                        open = Some(i);
-                        ui.close();
-                    }
-                    if ui.button("Copy path").clicked() {
-                        if let Some(f) = m.files.first() {
-                            ui.ctx().copy_text(f.path.shown());
-                        }
-                        ui.close();
-                    }
-                    if m.runnable() && ui.button("Shrink (quantise)…").on_hover_text("Make a smaller copy of this model. The original is kept. Professional.").clicked() {
-                        shrink = Some(i);
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.button(if cfg!(windows) { "Move to Recycle Bin…" } else { "Move to Trash…" }).on_hover_text("Remove this model. You see everything it removes first.").clicked() {
-                        remove = Some(i);
-                        ui.close();
-                    }
-                });
-            }
-        });
-        if let Some(i) = chosen {
-            self.models.chosen = Some(i);
-        }
-        if let Some(m) = remove.and_then(|i| list.get(i)) {
-            self.ask_remove_model(m);
-        }
-        if let Some(m) = shrink.and_then(|i| list.get(i)) {
-            self.ask_shrink(m);
-        }
-        if let Some(i) = inspect
-            && let Some(m) = list.get(i)
-        {
-            self.models.chosen = Some(i);
-            self.inspect_model(i, m);
-        }
-        if let Some(i) = open
-            && let Some(f) = list.get(i).and_then(|m| m.files.first())
-        {
-            self.show_model_file(&f.path.clone());
-        }
-    }
-
     /// Opens the Files workspace at a model file, selected.
     fn show_model_file(&mut self, path: &Path) {
         let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return };
         self.set_workspace(Workspace::Files);
         self.files.reveal(dir.to_path_buf(), vec![name.to_string_lossy().into()]);
-    }
-
-    /// Right: everything known about the chosen model.
-    fn model_details(&mut self, ui: &mut egui::Ui) {
-        let Some(list) = self.models.list.take() else { return };
-        let Some(m) = self.models.chosen.and_then(|i| list.get(i)) else {
-            self.models.list = Some(list);
-            return;
-        };
-        let mut open = None;
-        let mut pick = None;
-        ui.horizontal(|ui| {
-            ui.add(egui::Label::new(egui::RichText::new(&m.name).heading()).wrap());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                if ui.small_button("✖").on_hover_text("Close").clicked() {
-                    self.models.chosen = None;
-                }
-            });
-        });
-        if let Some(n) = note(m) {
-            ui.colored_label(ui.visuals().warn_fg_color, n);
-        }
-        ui.add_space(6.0);
-        let i = &m.info;
-        let precision = i.quant.as_deref().map(|q| format!("{q} ({})", precision_words(q)));
-        let rows: Vec<(&str, Option<String>)> = vec![
-            ("Format", Some(m.format.label().to_string())),
-            ("Family", i.arch.clone()),
-            ("Parameters", i.params.clone()),
-            ("Precision", precision),
-            ("Context", i.context.map(|c| format!("{} tokens", group(c)))),
-            ("Kind", i.companion.then(|| "Add-on, used with a model".to_string())),
-            ("From", Some(m.source.label().to_string())),
-            ("Size", Some(scan::human(m.size))),
-        ];
-        egui::Grid::new("model-facts").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
-            for (k, v) in rows {
-                if let Some(v) = v {
-                    ui.weak(k);
-                    ui.label(v);
-                    ui.end_row();
-                }
-            }
-        });
-        ui.add_space(8.0);
-        ui.strong(if m.files.len() == 1 { "File" } else { "Files" });
-        for f in &m.files {
-            let r = ui.add(egui::Label::new(egui::RichText::new(f.path.shown())).wrap().sense(Sense::click())).on_hover_text("Click to show it in Files");
-            if r.clicked() {
-                open = Some(f.path.clone());
-            }
-            ui.weak(format!("{}{}", scan::human(f.size), if f.not_local { " · ☁ in the cloud, not read" } else { "" }));
-            ui.add_space(2.0);
-        }
-        if !m.copies.is_empty() {
-            ui.add_space(8.0);
-            ui.strong("The same files are also in");
-            for &c in &m.copies {
-                if let Some(o) = list.get(c) {
-                    let r = ui.add(egui::Label::new(format!("{} ({})", o.name, o.source.label())).sense(Sense::click()));
-                    if r.on_hover_text(o.files.first().map(|f| f.path.shown()).unwrap_or_default()).clicked() {
-                        pick = Some(c);
-                    }
-                }
-            }
-        }
-        if m.orphan {
-            ui.add_space(8.0);
-            ui.label(
-                "No installed Ollama model uses this file. It's usually left behind by a removed model or a \
-                 stopped download, and Ollama doesn't need it.",
-            );
-        }
-        ui.add_space(10.0);
-        let mut look = false;
-        let mut ask = false;
-        ui.horizontal(|ui| {
-            look = ui.button("🔍 Inspect").on_hover_text("See what's inside this model: its architecture, tensors and metadata").clicked();
-            if m.runnable() && ui.button("💬 Ask AI").on_hover_text("Chat with this model, run by Filescape on this computer").clicked() {
-                ask = true;
-            }
-            if ui.button("Show in Files").clicked() {
-                open = m.files.first().map(|f| f.path.clone());
-            }
-        });
-        if look && let Some(i) = self.models.chosen {
-            self.inspect_model(i, m);
-        }
-        if ask {
-            self.ask_about_model(m);
-        }
-        self.models.list = Some(list);
-        if pick.is_some() {
-            self.models.chosen = pick;
-        }
-        if let Some(p) = open {
-            self.show_model_file(&p);
-        }
     }
 }
 
@@ -729,6 +462,10 @@ impl App {
         }
         if page.compare_with.is_some() {
             tabs.push((PageTab::Compare, "Compare"));
+        }
+        // A tab asked for before the model was read (Will it run? from the library) may not apply.
+        if page.data.is_some() && !tabs.iter().any(|(t, _)| *t == page.tab) {
+            page.tab = PageTab::Overview;
         }
         if tabs.len() > 1 {
             kit::segmented(ui, &mut page.tab, &tabs, false);
@@ -1073,6 +810,13 @@ fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) 
         Verdict::TooBig => (Tone::Danger, format!("Too big for this computer: it needs about {}. Try a shorter context, a compact cache, or a smaller version of the model.", scan::human(n.total()))),
     };
     kit::callout(ui, tone, text);
+    if matches!(verdict, Verdict::Gpu | Verdict::Split(_)) && !super::ask::use_gpu() {
+        ui.add_space(4.0);
+        kit::note(
+            ui,
+            "That's for apps that use the graphics card, such as Ollama and LM Studio. Filescape's own Ask AI and Lab run models on the processor on this computer, so there they need main memory instead.",
+        );
+    }
     ui.add_space(8.0);
 
     // The need as a bar, with what fits marked.
