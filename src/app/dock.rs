@@ -220,6 +220,13 @@ impl App {
         if self.dock.key.as_ref() == Some(&key) {
             return;
         }
+        // Only the tree changed (a change on disk put in, which kept the selection in place):
+        // the tile picked on the map stays picked rather than going back to the list's.
+        let only_tree = self.dock.key.as_ref().is_some_and(|k| {
+            let mut k = k.clone();
+            k.4 = tree_id;
+            k == key
+        });
         self.dock.key = Some(key);
         let target = self.dock_target();
         let mut cover = self.cover_of(target.as_deref());
@@ -248,7 +255,9 @@ impl App {
         let chosen = self.files.chosen_paths();
         let following_selected_dir = self.files.prefs.dock.follow == Follow::Selection && self.files.cursor_entry().is_some_and(|e| e.is_dir);
         let cursor_path = self.files.cursor_entry().and_then(|e| self.files.here().dir().map(|d| d.join(&*e.name)));
-        self.selected = if following_selected_dir { None } else { cursor_path.and_then(|p| self.tree_path_of(&p)) };
+        if !only_tree {
+            self.selected = if following_selected_dir { None } else { cursor_path.and_then(|p| self.tree_path_of(&p)) };
+        }
         self.dock.set_selected = Some(self.selected.clone());
         self.dock.picked = if chosen.len() > 1 { chosen.iter().take(500).filter_map(|p| self.tree_path_of(p)).collect() } else { Vec::new() };
     }

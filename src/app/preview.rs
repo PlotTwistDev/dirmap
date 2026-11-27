@@ -127,6 +127,11 @@ pub(super) struct Look {
     pub video: Option<VideoView>,
     /// Frames from across the video being previewed.
     strip: Option<StripView>,
+    /// Quick Look's own window: where it opened this time (kept while it's open, so the system
+    /// is free to move it), and where it was last (outer top left, inner size), to open there
+    /// next time.
+    win_home: Option<(egui::Pos2, Vec2)>,
+    win_last: Option<(egui::Pos2, Vec2)>,
 }
 
 /// A video's filmstrip: being read, then its frames.
@@ -879,6 +884,11 @@ impl Look {
     }
 }
 
+/// Quick Look's own window.
+fn look_viewport() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("quick-look")
+}
+
 impl App {
     /// The item a preview shows: the cursor's item in the focused pane.
     fn look_target(&self) -> Option<(PathBuf, Entry)> {
@@ -894,6 +904,7 @@ impl App {
     /// the window with it.
     pub(super) fn quick_look(&mut self, ctx: &egui::Context) {
         if !self.files.look.open {
+            self.files.look.win_home = None;
             return;
         }
         let Some((path, e)) = self.look_target() else {
@@ -909,6 +920,13 @@ impl App {
         }
         if !typing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
             self.files.look.full = !self.files.look.full;
+            if !ctx.embed_viewports() {
+                ctx.send_viewport_cmd_to(look_viewport(), egui::ViewportCommand::Fullscreen(self.files.look.full));
+            }
+        }
+        if !ctx.embed_viewports() {
+            self.quick_look_window(ctx, path, e);
+            return;
         }
         let screen = ctx.content_rect();
         let size = vec2((screen.width() * 0.72).max(420.0), (screen.height() * 0.78).max(320.0));
@@ -960,6 +978,88 @@ impl App {
             self.files.look.full = false;
         }
         if step != 0 {
+            self.files_move_cursor(|pos, _| pos.map(|p| p as i64 + step).unwrap_or(0), false);
+        }
+    }
+
+    /// Quick Look in a window of its own, which can be moved anywhere, outside the app too, and
+    /// made full screen (F). Keys pressed in it work as they do over the app.
+    fn quick_look_window(&mut self, ctx: &egui::Context, path: PathBuf, e: Entry) {
+        let id = look_viewport();
+        let home = *self.files.look.win_home.get_or_insert_with(|| {
+            self.files.look.win_last.unwrap_or_else(|| {
+                // First time: centred over the app, about three quarters of its size.
+                let app = ctx.input(|i| i.viewport().outer_rect).unwrap_or_else(|| ctx.content_rect());
+                let size = vec2((app.width() * 0.72).max(420.0), (app.height() * 0.78).max(320.0));
+                (app.center() - size / 2.0, size)
+            })
+        });
+        let builder = egui::ViewportBuilder::default()
+            .with_title(format!("{} – Quick Look", e.name))
+            .with_position(home.0)
+            .with_inner_size(home.1)
+            .with_min_inner_size([320.0, 240.0]);
+        let full = self.files.look.full;
+        let (mut close, mut step, mut toggle) = (false, 0i64, false);
+        ctx.show_viewport_immediate(id, builder, |ctx, _class| {
+            let (closing, outer, inner) = ctx.input(|i| (i.viewport().close_requested(), i.viewport().outer_rect, i.viewport().inner_rect));
+            close |= closing;
+            if let (Some(o), Some(r), false) = (outer, inner, full) {
+                self.files.look.win_last = Some((o.min, r.size()));
+            }
+            if !ctx.egui_wants_keyboard_input() {
+                use egui::{Key, Modifiers as M};
+                ctx.input_mut(|i| {
+                    close |= i.consume_key(M::NONE, Key::Escape) || i.consume_key(M::NONE, Key::Space);
+                    toggle |= i.consume_key(M::NONE, Key::F);
+                    if i.consume_key(M::NONE, Key::ArrowDown) {
+                        step = 1;
+                    }
+                    if i.consume_key(M::NONE, Key::ArrowUp) {
+                        step = -1;
+                    }
+                });
+            }
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&*e.name).strong());
+                    ui.weak(facts_line(&e));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Open").clicked() {
+                            let p = path.clone();
+                            self.files.spawn(move || crate::actions::open(&p));
+                        }
+                        let (label, tip) = if full { ("Window", "Back to a window (F)") } else { ("Full screen", "Fill the screen (F)") };
+                        if ui.button(label).on_hover_text(tip).clicked() {
+                            toggle = true;
+                        }
+                        if !self.files.look.from_map {
+                            if ui.button("▶").on_hover_text("Next file (↓)").clicked() {
+                                step = 1;
+                            }
+                            if ui.button("◀").on_hover_text("Previous file (↑)").clicked() {
+                                step = -1;
+                            }
+                        }
+                        let next = if self.files.look.from_map { "" } else { "⏶⏷ next · " };
+                        ui.weak(if cfg!(target_os = "macos") { format!("{next}Space closes") } else { format!("{next}Space or Esc closes") });
+                    });
+                });
+                ui.separator();
+                let avail = ui.available_size();
+                self.preview_body(ui, &path, &e, avail);
+            });
+        });
+        if toggle {
+            self.files.look.full = !full;
+            ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Fullscreen(!full));
+        }
+        if close {
+            self.files.look.open = false;
+            self.files.look.full = false;
+            self.files.look.win_home = None;
+        }
+        if step != 0 && !self.files.look.from_map {
             self.files_move_cursor(|pos, _| pos.map(|p| p as i64 + step).unwrap_or(0), false);
         }
     }
@@ -1356,8 +1456,11 @@ impl App {
             }
             return;
         }
-        if let Some(v) = self.files.look.video.as_mut() {
-            let open_outside = video_view(ui, v, size);
+        if self.files.look.video.is_some() {
+            // The filmstrip under the video seeks too, so it needs no bar of its own then.
+            let strip = self.files.look.strip.as_ref().is_some_and(|s| s.path == path && !s.frames.is_empty());
+            let v = self.files.look.video.as_mut().expect("just checked");
+            let open_outside = video_view(ui, v, size, !strip);
             if open_outside {
                 if let Some(v) = &self.files.look.video {
                     v.video.pause();
@@ -1589,8 +1692,9 @@ impl App {
 }
 
 /// A playing video: the picture (click to play or pause) and the controls under it. Returns
-/// whether it was asked to open in the system's player.
-fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
+/// whether it was asked to open in the system's player. `seek_bar`: a bar to seek with (left out
+/// when the filmstrip under it does that).
+fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2, seek_bar: bool) -> bool {
     let pal = style::pal(ui);
     if let Some(f) = v.video.take_frame(&mut v.serial) {
         let img = egui::ColorImage::from_rgba_unmultiplied(f.size, &f.rgba);
@@ -1634,7 +1738,7 @@ fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
         None => crate::media::clock(st.position),
     };
     let tw = 140.0;
-    if let Some(l) = st.info.and_then(|i| i.duration).filter(|l| *l > 0.0) {
+    if let Some(l) = st.info.and_then(|i| i.duration).filter(|l| *l > 0.0).filter(|_| seek_bar) {
         let mut at = v.scrub.map_or(st.position, |s| s.1).min(l);
         ui.spacing_mut().slider_width = (ui.available_width() - tw - 34.0).max(40.0);
         let s = ui.add(egui::Slider::new(&mut at, 0.0..=l).show_value(false));
@@ -1657,10 +1761,21 @@ fn video_view(ui: &mut egui::Ui, v: &mut VideoView, size: Vec2) -> bool {
             }
         }
     }
-    ui.label(egui::RichText::new(time).monospace().size(12.0).color(pal.weak));
     let tip = if cfg!(target_os = "macos") { "Open in Quick Look" } else { "Open in your video app" };
-    if ui.small_button("Open").on_hover_text(tip).clicked() {
-        outside = true;
+    let time = egui::RichText::new(time).monospace().size(12.0).color(pal.weak);
+    if seek_bar {
+        ui.label(time);
+        if ui.small_button("Open").on_hover_text(tip).clicked() {
+            outside = true;
+        }
+    } else {
+        // No bar: the time and length sit at the right, where the bar ended.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("Open").on_hover_text(tip).clicked() {
+                outside = true;
+            }
+            ui.label(time);
+        });
     }
     if st.playing {
         ui.ctx().request_repaint_after(Duration::from_millis(250));
