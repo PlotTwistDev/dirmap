@@ -177,6 +177,11 @@ What the model is told:
   many more items there are and their total size. From Storage Analysis, sizes include
   everything inside folders, and there's also a breakdown by file type. A folder with more than
   5,000 items directly in it has only the first 5,000 looked at.
+- For an AI model file (GGUF or safetensors), what Filescape reads from the file itself, as the
+  [Model Inspector](ai-models.md#inspecting-a-model) does: its name, family, size in parameters, precision, layers
+  and context, each marked when it's worked out rather than read, and whether this computer has
+  the memory to run it. So **What is this model?** and **Could my computer run it?** are answered
+  from facts, not guessed from the file name. Nothing is run, and cloud-only files aren't read.
 - Nothing is opened to describe a folder, and Filescape looks no deeper than three levels, so a
   question about a large folder is answered quickly.
 - **Not** what's inside the files, unless you tick **Include the file's contents**. That box

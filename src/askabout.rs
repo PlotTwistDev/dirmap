@@ -77,7 +77,9 @@ pub fn from_disk(paths: &[PathBuf], budget: usize) -> Facts {
         let outline = if it.is_dir { outline_disk(p) } else { Vec::new() };
         parts.push(Part { path: p.clone(), item: it, inside, types: None, outline, unlisted });
     }
-    render(parts, readable, budget, false)
+    let mut f = render(parts, readable, budget, false);
+    add_models(&mut f, budget);
+    f
 }
 
 /// Facts about `paths` from a scan: sizes include everything inside folders, and folders get a
@@ -98,7 +100,9 @@ pub fn from_tree(nodes: &[(PathBuf, &Node)], budget: usize) -> Facts {
         let outline = if n.is_dir { outline_tree(n) } else { Vec::new() };
         parts.push(Part { path: p.clone(), item: it, inside, types, outline, unlisted: false });
     }
-    render(parts, readable, budget, true)
+    let mut f = render(parts, readable, budget, true);
+    add_models(&mut f, budget);
+    f
 }
 
 struct Part {
@@ -134,6 +138,79 @@ fn item_from(p: &Path, md: &std::fs::Metadata) -> Item {
         modified: md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64),
         online_only: flags & store::ONLINE_ONLY != 0,
     }
+}
+
+/// What Filescape reads from an AI model file asked about (GGUF or safetensors): its own
+/// description of itself, and whether this computer could run it. These are measured facts, so
+/// the model answering doesn't have to guess from the file name.
+fn add_models(f: &mut Facts, budget: usize) {
+    let models: Vec<PathBuf> = f.paths.iter().filter(|p| is_model_file(p)).take(4).cloned().collect();
+    let room = budget / 3 / models.len().max(1);
+    for p in models {
+        let Some(text) = model_facts(&p) else { continue };
+        let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let block = format!("\nWhat Filescape read from the model file {name}:\n{text}");
+        if block.len() <= room.max(600) {
+            f.text.push_str(&block);
+        } else {
+            f.text.push_str(&block.chars().take(room.max(600)).collect::<String>());
+            f.text.push_str("\n");
+            f.notes.push(format!("{name}: only some of what Filescape read from the model was included"));
+        }
+    }
+}
+
+fn is_model_file(p: &Path) -> bool {
+    let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().to_ascii_lowercase());
+    matches!(scan::ext_of(&name), "gguf" | "safetensors") && p.is_file()
+}
+
+/// The facts the model inspector reads from one model file, one per line, and the memory to
+/// run it here. Nothing is run; cloud-only files aren't read.
+pub fn model_facts(p: &Path) -> Option<String> {
+    use crate::models::{File, Format, Model, Source};
+    let md = std::fs::metadata(p).ok()?;
+    let not_local = scan::on_disk(&md, || p.to_path_buf(), 4096).1 & store::ONLINE_ONLY != 0;
+    if not_local {
+        return Some("It's in the cloud only, so it wasn't read (reading it would download it).\n".into());
+    }
+    let name = p.file_name()?.to_string_lossy().into_owned();
+    let format = if scan::ext_of(&name).eq_ignore_ascii_case("gguf") { Format::Gguf } else { Format::Safetensors };
+    let info = if format == Format::Gguf { crate::models::gguf_info(p).unwrap_or_default() } else { Default::default() };
+    let file = File { path: p.to_path_buf(), size: md.len(), not_local: false };
+    let m = Model { name, source: Source::Folder, format, info, files: vec![file], size: md.len(), copies: Vec::new(), extra: 0, same_as: Vec::new(), orphan: false };
+    let d = crate::inspect::inspect(&m);
+    if let Some(why) = &d.unread {
+        return Some(format!("{why}\n"));
+    }
+    let mut out = String::new();
+    for f in d.facts.iter().take(16) {
+        let how = match f.how {
+            crate::inspect::How::Verified => "",
+            crate::inspect::How::Calculated => " (worked out from the file)",
+            crate::inspect::How::Documented => " (stated in the publisher's files, not checked)",
+        };
+        out.push_str(&format!("- {}: {}{how}\n", f.label, f.value));
+    }
+    if m.info.companion {
+        out.push_str("- It's an add-on (a vision projector or adapter) that goes with another model; it doesn't run on its own.\n");
+        return Some(out);
+    }
+    let weights: u64 = d.tensors.iter().map(|t| t.bytes).sum::<u64>().max(md.len());
+    let ctx = 4096;
+    if let Some(n) = crate::fit::need(&d, weights, ctx, 2.0) {
+        let hw = crate::fit::detect();
+        let verdict = match crate::fit::verdict_here(&n, &hw) {
+            crate::fit::Verdict::Gpu => "fits on this computer's graphics chip, so it should run quickly".to_string(),
+            crate::fit::Verdict::Split(_) | crate::fit::Verdict::Cpu => "fits in this computer's memory and would run on the processor, more slowly".to_string(),
+            crate::fit::Verdict::TooBig => format!("is more than this computer can give it ({} usable)", scan::human(hw.usable_here().max(hw.usable_ram()))),
+        };
+        out.push_str(&format!("- Memory to run it with {} tokens of context: about {}; that {verdict}.\n", crate::fit::tokens(ctx), scan::human(n.total())));
+    }
+    if format == Format::Gguf {
+        out.push_str("- Filescape can run GGUF models itself, in AI Models.\n");
+    }
+    Some(out)
 }
 
 /// The least room worth giving one file's contents, in characters.
@@ -735,6 +812,21 @@ mod tests {
         let g = from_disk(&[d.join("docs")], 1500);
         assert!(!g.text.contains("Folders inside it"), "{}", g.text);
         assert!(g.notes.is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn model_files_are_described_from_their_headers() {
+        let d = tmp("model");
+        let p = d.join("tiny-chat.gguf");
+        crate::models::tests::write_gguf(&p, &[("general.architecture", "llama"), ("general.name", "Tiny Chat"), ("general.size_label", "1B")], &[("llama.context_length", 8192)], 4096);
+        let f = from_disk(&[p.clone()], 4000);
+        assert!(f.text.contains("What Filescape read from the model file tiny-chat.gguf:"), "{}", f.text);
+        assert!(f.text.contains("Tiny Chat") || f.text.contains("llama"), "{}", f.text);
+        assert!(f.text.contains("Filescape can run GGUF models itself"), "{}", f.text);
+        // Not a model file: nothing added.
+        std::fs::write(d.join("a.txt"), "x").unwrap();
+        assert!(!from_disk(&[d.join("a.txt")], 4000).text.contains("What Filescape read"));
         let _ = std::fs::remove_dir_all(&d);
     }
 

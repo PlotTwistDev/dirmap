@@ -124,8 +124,8 @@ pub fn for_sort(sort: Sort, readable: bool) -> Vec<Suggestion> {
         ],
         Sort::Image => &[s("What could this be?", "What is this file likely to be, judging by its name, type, size and dates?", false, M::Chat)],
         Sort::AiModel => &[
-            s("What is this model?", "What is this AI model likely to be, and what is it for, judging by its name, format and size?", false, M::Explain),
-            s("Could my computer run it?", "Roughly how much memory would this model need to run, judging by its size and format?", false, M::Check),
+            s("What is this model?", "What is this AI model, and what is it for? Use what Filescape read from the file.", false, M::Explain),
+            s("Could my computer run it?", "Could this computer run this model, and how much memory would it need? Use what Filescape read from the file.", false, M::Check),
         ],
         Sort::Folder => &[
             s("What is this folder?", "What is this folder, and what is it for?", false, M::Folder),

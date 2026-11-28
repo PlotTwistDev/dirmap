@@ -854,7 +854,7 @@ fn safetensors_params(path: &Path) -> Option<(u64, HashMap<String, u64>)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::Write;
 
