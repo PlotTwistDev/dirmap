@@ -190,6 +190,18 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 /* Sections */
 section { padding-block: 112px 0; }
 .section-head { display: grid; gap: 16px; max-width: 720px; }
+.caps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 48px; }
+.cap { display: grid; gap: 8px; align-content: start; padding: 22px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--ink); text-decoration: none; transition: border-color .15s ease, transform .15s ease; }
+.cap:hover { border-color: rgba(255,99,99,.35); transform: translateY(-2px); }
+.cap-k { font: 11px var(--mono); color: var(--coral); }
+.cap h3 { font-size: 17px; }
+.cap p { color: var(--text-2); font-size: 14px; }
+.flow { margin-top: 56px; padding: 28px; border-radius: 16px; border: 1px solid var(--line); background: linear-gradient(180deg, #0b0c0e, var(--ink)); }
+.flow h3 { font-size: 18px; max-width: 46ch; }
+.flow ol { list-style: none; counter-reset: step; padding: 0; margin: 22px 0 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+.flow li { counter-increment: step; display: grid; gap: 6px; align-content: start; position: relative; padding-top: 30px; }
+.flow li::before { content: counter(step); position: absolute; top: 0; left: 0; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font: 11px var(--mono); color: var(--key-text); background: var(--key); }
+.flow li span { color: var(--text-2); font-size: 14px; }
 .showcase { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: center; margin-top: 64px; }
 .showcase.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
 .showcase.flip .copy { order: 2; }
@@ -398,6 +410,8 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
   .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .foot-brand { grid-column: 1 / -1; }
   .principles { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .caps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flow ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .terms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .terms li + li { border-left: 0; }
   .terms li { border-top: 1px solid var(--line); }
@@ -425,7 +439,7 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
   .demo-badge { letter-spacing: .04em; padding-inline: 7px; }
   .demo-badge::before { display: none; }
   .demo-cap { font-size: 12px; padding-inline: 4px; }
-  .keys, .plans { grid-template-columns: minmax(0, 1fr); }
+  .keys, .plans, .caps, .flow ol { grid-template-columns: minmax(0, 1fr); }
   .fact b { font-size: 22px; }
   section { padding-block: 80px 0; }
   .foot .ver { margin-left: 0; }
@@ -594,6 +608,34 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
     </div>
   </div>
 
+  <section id="capabilities" aria-labelledby="cap-h">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Six jobs, one app</span>
+        <h2 id="cap-h">Everything you do with files, in one place.</h2>
+        <p class="lede">Most people keep a file manager, a disk analyser, a viewer for odd formats, a model runner and an FTP client. Filescape brings those jobs together, so finding, understanding and tidying your files happens in one place.</p>
+      </div>
+      <div class="caps">
+        <a class="cap" href="#cap-files"><span class="cap-k">01</span><h3>Manage files</h3><p>Two panes, tabs, previews, undo, batch rename and folder compare.</p></a>
+        <a class="cap" href="#cap-storage"><span class="cap-k">02</span><h3>See your storage</h3><p>Every file as a tile you can zoom through. Duplicates, snapshots, system files explained.</p></a>
+        <a class="cap" href="/formats"><span class="cap-k">03</span><h3>Preview anything</h3><p>Hundreds of formats, from camera RAW and PSD to spreadsheets, fonts and 3D. Free.</p></a>
+        <a class="cap" href="/ai-models"><span class="cap-k">04</span><h3>Understand local AI</h3><p>Find every model, see what's inside, check it will run, and chat with it offline.</p></a>
+        <a class="cap" href="#cap-remote"><span class="cap-k">05</span><h3>Servers and cloud</h3><p>SFTP, FTP(S) and WebDAV like a drive. Honest sizes for Google Drive, OneDrive, iCloud and Dropbox.</p></a>
+        <a class="cap" href="/vfx"><span class="cap-k">06</span><h3>Creative and VFX work</h3><p>Frame sequences as one row, missing frames marked, an EXR and DPX player, splats.</p></a>
+      </div>
+
+      <div class="flow" aria-labelledby="flow-h">
+        <h3 id="flow-h">A drive is nearly full. Here's the whole fix, without leaving Filescape.</h3>
+        <ol>
+          <li><b>Scan</b><span>Open the drive. As it scans, the biggest tiles on the map are the biggest files.</span></li>
+          <li><b>Look</b><span>Zoom into a big tile and it shows what it is: a film, a photo library, a model.</span></li>
+          <li><b>Check</b><span>Press Space to preview it, or ask "What is this?" for system files.</span></li>
+          <li><b>Act</b><span>Move it to another drive, free it up to the cloud, or Move to Trash. Undo if you change your mind.</span></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
   <section id="features">
     <div class="wrap">
       <div class="section-head">
@@ -601,7 +643,7 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
         <h2>The map shows you the problem. The file manager under it fixes it.</h2>
       </div>
 
-      <div class="showcase">
+      <div class="showcase" id="cap-storage">
         <div class="copy">
           <h3>A treemap you can fly through</h3>
           <p>Every file is a tile sized by how much space it takes, in soft colours by type (or the classic cushion shading, if you prefer). The map is drawn on your graphics card, so zooming and panning stay smooth even with millions of files.</p>
@@ -614,7 +656,7 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
         <div class="shot"><img src="/img/map-previews.webp" alt="Filescape's treemap zoomed in on a Photos folder, with each tile showing its picture and the selected photo in the preview pane" width="1440" height="922" loading="lazy"></div>
       </div>
 
-      <div class="showcase flip">
+      <div class="showcase flip" id="cap-files">
         <div class="copy">
           <h3>A real file manager, with the map docked underneath</h3>
           <p>Browse without scanning first. Two panes, tabs, previews and the usual copy, move and rename. The map follows the folder you're in, and selecting a file highlights its tile.</p>
@@ -627,7 +669,7 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
         <div class="shot"><img src="/img/files-dock.webp" alt="Filescape's Files workspace with a sidebar of drives, a file list and the analysis treemap docked below" width="1440" height="922" loading="lazy"></div>
       </div>
 
-      <div class="showcase">
+      <div class="showcase" id="cap-remote">
         <div class="copy">
           <h3>Servers open like drives</h3>
           <p>Connect to SFTP, FTP(S) and WebDAV, then browse, copy and analyse them like a local folder. Big copies go into a queue you can pause, stop and reorder.</p>
@@ -640,7 +682,7 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
         <div class="shot"><img src="/img/remote.webp" alt="The Remote workspace with a local folder and an SFTP server side by side and two transfers running in the queue" width="1440" height="922" loading="lazy"></div>
       </div>
 
-      <div class="showcase flip">
+      <div class="showcase flip" id="cap-previews">
         <div class="copy">
           <h3>Look inside without opening anything</h3>
           <p>Press Space on a camera RAW photo, a Photoshop document, a spreadsheet, a font, a song or a 3D model and see it at once, with the details that matter. Nothing in a file is ever run, and every preview is free.</p>
@@ -654,7 +696,7 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
         <div class="shot"><img src="/img/previews-pane.webp" alt="The Files workspace in Icons view with thumbnails of fonts, photos, a MIDI piano roll, a PDF and a 3D model, and a song's cover, waveform and tags in the preview pane" width="1440" height="922" loading="lazy"></div>
       </div>
 
-      <div class="showcase">
+      <div class="showcase" id="cap-cloud">
         <div class="copy">
           <h3>Cloud folders, measured honestly</h3>
           <p>Google Drive, OneDrive, iCloud Drive, Dropbox and others keep many files online only. Filescape shows what each file really takes on this computer, which ones are only in the cloud, and never downloads them behind your back.</p>
@@ -667,7 +709,7 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
         <div class="shot"><img src="/img/cloud.webp" alt="A scan with a Dropbox folder: online-only files marked, and a bar under the map splitting local files, downloaded files and data only in the cloud" width="1440" height="922" loading="lazy"></div>
       </div>
 
-      <div class="showcase flip">
+      <div class="showcase flip" id="cap-ai">
         <div class="copy">
           <h3>Your AI models, found and explained</h3>
           <p>Models from Ollama, LM Studio and Hugging Face are some of the biggest files on a drive. The AI Models workspace lists them all, shows what's inside each one and whether it will run here, lets you chat with it offline, and says what can be freed and why.</p>
@@ -699,7 +741,7 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
     <div class="wrap">
       <div class="showcase flip">
         <div class="copy">
-          <span class="eyebrow">For VFX and post</span>
+          <span class="eyebrow" id="cap-vfx">For VFX and post</span>
           <h2>Frame sequences are one row, not 240.</h2>
           <p>Filescape folds numbered frames into a single sequence with its range, size and any missing frames. Copy or move the whole shot at once, and play it straight from the list. 3D models, CAD drawings and Gaussian splat scenes preview too.</p>
           <ul class="ticks">
