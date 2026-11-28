@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 const T0: i64 = 1_795_392_000; // 23 Nov 2026
-const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql")];
+const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql"), include_str!("../migrations/0004_maintenance.sql")];
 
 /// Gives way once, so two requests run with `join` interleave like concurrent Workers.
 struct YieldOnce(bool);
@@ -887,4 +887,193 @@ fn contact_form_checks_turnstile_when_configured() {
     let r = w.contact(&format!("{MSG}&cf-turnstile-response=tok"), true, "203.0.113.9");
     assert_eq!(r.status, 500);
     assert!(w.message_ids().is_empty());
+}
+
+// ---- Maintenance ----
+
+fn bought(w: &World, txn: &str) -> (String, String) {
+    assert_eq!(w.webhook(&purchase(txn, 1)).status, 200);
+    let m: serde_json::Value = serde_json::from_str(w.net.emails().last().unwrap()).unwrap();
+    let text = m["text"].as_str().unwrap();
+    let i = text.find("FSP-").unwrap();
+    let serial = text[i..i + 27].to_string();
+    let id = pollster::block_on(w.cx().licence_by_order(txn)).unwrap().unwrap().lic.id;
+    (serial, id)
+}
+
+fn until_of(w: &World, id: &str) -> i64 {
+    let r = pollster::block_on(w.cx().licence(id)).unwrap().unwrap();
+    let u = r.lic.validity.updates_until().unwrap();
+    let col = w.db.0.query_row("SELECT maintenance_until FROM licences WHERE id = ?1", [id], |r| r.get::<_, i64>(0)).unwrap();
+    assert_eq!(u, col, "the cached column follows the certificate date");
+    u
+}
+
+fn renew(w: &World, id: &str, txn: &str) -> filescape_licence_server::maintenance::Outcome {
+    use filescape_licence::maintenance::Grant;
+    use filescape_licence_server::maintenance::NewGrant;
+    let g = NewGrant { grant: Grant::renewal(w.now.get(), 12), txn: Some(txn), amount: Some("2.99"), currency: Some("USD"), actor: "paddle", reason: "" };
+    pollster::block_on(w.cx().add_grant(id, &g, Some(730))).unwrap()
+}
+
+#[test]
+fn a_purchase_records_twelve_calendar_months_of_maintenance() {
+    let w = world();
+    let (_, id) = bought(&w, "txn_m1");
+    assert_eq!(until_of(&w, &id), filescape_licence::maintenance::add_months(T0, 12));
+    let g = pollster::block_on(w.cx().grants_of(&id)).unwrap();
+    assert_eq!(g.len(), 1);
+    assert_eq!(g[0].grant.kind, filescape_licence::maintenance::GrantKind::Purchase);
+    assert_eq!(g[0].after_until, Some(until_of(&w, &id)));
+}
+
+#[test]
+fn renewals_extend_the_same_licence_and_reach_installed_apps_at_the_weekly_check() {
+    use filescape_licence::maintenance::add_months;
+    use filescape_licence_server::maintenance::Outcome;
+    let w = world();
+    let (serial, id) = bought(&w, "txn_m2");
+    let first = ok(&w.activate(&serial, "m1", "act-m1-00001"));
+    let c: ActivationCert = w.verifier().verify(&first.activation, Purpose::Activation).unwrap();
+    let end = add_months(T0, 12);
+    assert_eq!(c.updates_until, Some(end));
+
+    // Renew before expiry: +12 months on the end date.
+    w.now.set(T0 + 100 * DAY);
+    assert_eq!(renew(&w, &id, "txn_r1"), Outcome::Applied { before: end, after: add_months(end, 12) });
+    // The same payment again (resent, or a second delivery) changes nothing.
+    assert_eq!(renew(&w, &id, "txn_r1"), Outcome::AlreadyDone);
+    // Stacked while active.
+    assert_eq!(renew(&w, &id, "txn_r2"), Outcome::Applied { before: add_months(end, 12), after: add_months(end, 24) });
+    // More than 2 years ahead: refused.
+    assert!(matches!(renew(&w, &id, "txn_r3"), Outcome::Refused(filescape_licence::maintenance::RenewRefusal::TooFarAhead)));
+
+    // Same serial, same activation: the weekly check returns the new date.
+    let v = ok(&w.api("/v1/validate", &serde_json::json!({ "activation_id": "act-m1-00001", "device_hash": device_hash("m1") })));
+    let c: ActivationCert = w.verifier().verify(&v.activation, Purpose::Activation).unwrap();
+    assert_eq!((c.updates_until, c.activation_id.as_str(), c.activations_used), (Some(add_months(end, 24)), "act-m1-00001", 1));
+    let lic = pollster::block_on(w.cx().licence(&id)).unwrap().unwrap();
+    assert_eq!(lic.lic.serial_hint, filescape_licence::serial::hint(&serial));
+    assert_eq!(pollster::block_on(w.cx().activations_of(&id)).unwrap().len(), 1, "devices untouched");
+}
+
+#[test]
+fn renewing_after_a_gap_starts_from_the_payment_and_on_the_last_day_still_extends() {
+    use filescape_licence::maintenance::add_months;
+    use filescape_licence_server::maintenance::Outcome;
+    let w = world();
+    let (_, id) = bought(&w, "txn_m3");
+    let end = add_months(T0, 12);
+    // On the expiry date, a few hours after the end time.
+    w.now.set(end + 3 * 3600);
+    assert_eq!(renew(&w, &id, "txn_g1"), Outcome::Applied { before: end, after: add_months(end, 12) });
+    // Two years after that ended: a new period from today, nothing owed for the gap.
+    let later = add_months(end, 12) + 2 * 365 * DAY;
+    w.now.set(later);
+    assert_eq!(renew(&w, &id, "txn_g2"), Outcome::Applied { before: add_months(end, 12), after: add_months(later, 12) });
+}
+
+#[test]
+fn temporary_and_revoked_licences_cannot_be_renewed() {
+    use filescape_licence::maintenance::RenewRefusal;
+    use filescape_licence_server::maintenance::Outcome;
+    let w = world();
+    let tmp = w.temp_serial(30, 3);
+    let tid = st_licence(&w, &tmp);
+    assert_eq!(renew(&w, &tid, "txn_t1"), Outcome::Refused(RenewRefusal::Temporary));
+    let (_, id) = bought(&w, "txn_m4");
+    w.admin(&format!("/licence/{id}/revoke"), "reason=refunded");
+    assert_eq!(renew(&w, &id, "txn_t2"), Outcome::Refused(RenewRefusal::Revoked));
+    assert!(pollster::block_on(w.cx().grant_by_txn("txn_t2")).unwrap().is_none());
+}
+
+#[test]
+fn a_refunded_renewal_comes_out_of_the_ledger_and_never_the_purchase() {
+    use filescape_licence::maintenance::add_months;
+    use filescape_licence_server::maintenance::Outcome;
+    let w = world();
+    let (_, id) = bought(&w, "txn_m5");
+    let end = add_months(T0, 12);
+    w.now.set(T0 + 10 * DAY);
+    renew(&w, &id, "txn_a");
+    renew(&w, &id, "txn_b");
+    assert_eq!(until_of(&w, &id), add_months(end, 24));
+    let (lid, o) = pollster::block_on(w.cx().reverse_txn("txn_a", "paddle", "refund")).unwrap().unwrap();
+    assert_eq!(lid, id);
+    assert_eq!(o, Outcome::Applied { before: add_months(end, 24), after: add_months(end, 12) });
+    assert_eq!(pollster::block_on(w.cx().reverse_txn("txn_a", "paddle", "refund")).unwrap().unwrap().1, Outcome::AlreadyDone);
+    // An admin can't reverse the purchase or a paid renewal.
+    let grants = pollster::block_on(w.cx().grants_of(&id)).unwrap();
+    for g in &grants {
+        if g.reversed_at.is_none() {
+            let r = w.admin(&format!("/licence/{id}/reverse-grant"), &format!("grant={}&reason=oops", g.id));
+            assert!(r.header("location").unwrap().contains("Only%20complimentary"), "{:?}", r.header("location"));
+        }
+    }
+    assert_eq!(until_of(&w, &id), add_months(end, 12));
+}
+
+#[test]
+fn admins_add_and_reverse_complimentary_maintenance_with_a_reason() {
+    use filescape_licence::maintenance::add_months;
+    let w = world();
+    let (_, id) = bought(&w, "txn_m6");
+    let (_, id2) = bought(&w, "txn_m7");
+    let end = add_months(T0, 12);
+    let r = w.admin(&format!("/licence/{id}/extend"), "months=0&days=30&reason=");
+    assert!(r.header("location").unwrap().contains("Give%20a%20reason"));
+    let r = w.admin(&format!("/licence/{id}/extend"), "months=0&days=30&reason=support+gesture");
+    assert!(r.header("location").unwrap().contains("Maintenance%20changed"), "{:?}", r.header("location"));
+    assert_eq!(until_of(&w, &id), end + 30 * DAY);
+    let page = w.call("GET", "localhost", &format!("/admin/licence/{id}"), &[], "");
+    assert!(page.body.contains("Complimentary extension +30 days") && page.body.contains("support gesture"), "{}", page.body);
+    let ev = pollster::block_on(w.cx().events_of(&id)).unwrap();
+    assert!(ev.iter().any(|e| e.what == "maintenance" && e.detail.contains("→") && e.actor.as_deref() == Some("dev")));
+    // Reverse it: back to the purchased date, not below.
+    let g = pollster::block_on(w.cx().grants_of(&id)).unwrap().into_iter().find(|g| g.grant.admin_reversible()).unwrap();
+    w.admin(&format!("/licence/{id}/reverse-grant"), &format!("grant={}&reason=wrong+licence", g.id));
+    assert_eq!(until_of(&w, &id), end);
+    // Bulk: each licence from its own date; temporary and unknown IDs are reported, not extended.
+    let tmp = st_licence(&w, &w.temp_serial(30, 3));
+    let r = w.admin("/maintenance", &format!("ids={id}%0A{id2}%0A{id2}%0A{tmp}%0Anope&months=1&days=0&reason=outage"));
+    let loc = r.header("location").unwrap().to_string();
+    assert!(loc.contains("Extended%202%20of%204"), "{loc}");
+    assert_eq!(until_of(&w, &id), add_months(end, 1));
+    assert_eq!(until_of(&w, &id2), add_months(end, 1));
+}
+
+#[test]
+fn the_migration_keeps_existing_licences_dates() {
+    // A database as it was before 0004, with one perpetual licence issued on the old 30.44-day rule.
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    for m in &SCHEMA[..3] {
+        conn.execute_batch(m).unwrap();
+    }
+    let old_until = T0 + 12 * 2_629_746;
+    conn.execute(
+        "INSERT INTO licences (id, serial_hash, serial_hint, kind, validity, issued_at, max_activations) VALUES ('L1', 'h1', 'AAAA', 'perpetual', ?1, ?2, 3), ('L2', 'h2', 'BBBB', 'temporary', '{\"mode\":\"first_activation\",\"days\":30}', ?2, 3)",
+        rusqlite::params![format!("{{\"mode\":\"perpetual\",\"updates_until\":{old_until}}}"), T0],
+    )
+    .unwrap();
+    conn.execute_batch(SCHEMA[3]).unwrap();
+    let (u, n): (i64, i64) = conn.query_row("SELECT maintenance_until, (SELECT count(*) FROM maintenance_grants) FROM licences WHERE id = 'L1'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((u, n), (old_until, 1));
+    let g: (String, i64, i64) = conn.query_row("SELECT kind, at, until FROM maintenance_grants WHERE licence_id = 'L1'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+    assert_eq!(g, ("purchase".to_string(), T0, old_until));
+    let t: Option<i64> = conn.query_row("SELECT maintenance_until FROM licences WHERE id = 'L2'", [], |r| r.get(0)).unwrap();
+    assert_eq!(t, None);
+}
+
+#[test]
+fn two_deliveries_of_one_renewal_at_once_extend_once() {
+    use filescape_licence::maintenance::{Grant, add_months};
+    use filescape_licence_server::maintenance::NewGrant;
+    let w = world();
+    let (_, id) = bought(&w, "txn_m8");
+    let cx = w.cx();
+    let g = NewGrant { grant: Grant::renewal(T0, 12), txn: Some("txn_dup"), amount: None, currency: None, actor: "paddle", reason: "" };
+    let (a, b) = pollster::block_on(futures::future::join(cx.add_grant(&id, &g, None), cx.add_grant(&id, &g, None)));
+    let applied = [a.unwrap(), b.unwrap()].iter().filter(|o| matches!(o, filescape_licence_server::maintenance::Outcome::Applied { .. })).count();
+    assert_eq!(applied, 1);
+    assert_eq!(until_of(&w, &id), add_months(add_months(T0, 12), 12));
 }

@@ -544,10 +544,10 @@ pub fn check_temporary(opts: &TemporaryOptions, now: Ts) -> Result<(), IssueErro
     Ok(())
 }
 
-/// The end of a perpetual licence's updates. Months count as 30.44 days: entitlement is a date,
-/// not a calendar computation.
+/// The end of a perpetual licence's updates: `months` calendar months after `now` (UTC), as
+/// [`crate::maintenance::add_months`] counts them.
 pub fn updates_until(now: Ts, months: u32) -> Ts {
-    now + i64::from(months) * 2_629_746
+    crate::maintenance::add_months(now, months)
 }
 
 /// The weekly check's rules for an existing activation. Never consumes a use.
