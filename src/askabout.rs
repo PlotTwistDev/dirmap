@@ -267,6 +267,36 @@ pub fn contents(files: &[PathBuf], budget: usize) -> String {
     out
 }
 
+/// Where `p` is in a scan of `root`, as child indexes, if the scan covers it.
+pub fn tree_index(tree: &Node, root: &Path, p: &Path) -> Option<Vec<u32>> {
+    let rest = p.strip_prefix(root).ok()?;
+    let mut at = Vec::new();
+    let mut n = tree;
+    for part in rest.components() {
+        let name = part.as_os_str().to_string_lossy();
+        let i = n.children.iter().position(|c| *c.name == *name)?;
+        at.push(i as u32);
+        n = &n.children[i];
+    }
+    Some(at)
+}
+
+/// The files directly in `dir` whose text Filescape can read, smallest first so more of them
+/// fit, at most 200. Only names are listed here: nothing is read until a question is sent.
+pub fn documents_in(dir: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut v: Vec<(u64, PathBuf)> = rd
+        .flatten()
+        .take(5000)
+        .filter_map(|e| {
+            let md = e.metadata().ok()?;
+            (md.is_file() && md.len() > 0).then(|| (md.len(), e.path()))
+        })
+        .collect();
+    v.sort();
+    v.into_iter().map(|(_, p)| p).filter(|p| can_read(p)).take(200).collect()
+}
+
 /// Whether Filescape can give the model the text of `p`: a text file, or a document or
 /// spreadsheet it reads itself. Online-only cloud files can't be read without downloading them.
 pub fn can_read(p: &Path) -> bool {

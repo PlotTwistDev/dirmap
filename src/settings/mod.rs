@@ -356,6 +356,7 @@ impl Settings {
         crate::thumbcache::set_limit((self.thumb_cache_mb.max(16.0) as u64) << 20);
         crate::video::set_better_posters(self.video_better_poster);
         crate::thumbcache::set_rich(self.rich_thumbs);
+        crate::asksuggest::set_shown(self.ask_in_files);
         crate::apps::set_prefs(crate::apps::Prefs {
             recognise: self.app_recognise,
             icons: self.app_icons,

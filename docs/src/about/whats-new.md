@@ -10,6 +10,10 @@
   It shares the loaded model with the AI Models workspace and has its own conversation, which
   **Open in AI Models** carries over. Picking something else mid-conversation asks before changing
   what the chat is about. See [Ask AI in Files](../views/ask-ai.md#ask-ai-in-files).
+- Right-click a file, folder or several items for an **Ask AI** submenu: summarise, explain, compare,
+  understand a folder's structure, what a project is for, storage use, possibly unnecessary files
+  and related files. Selecting several items asks about all of them, with no limit on how many.
+  See [From the right-click menu](../views/ask-ai.md#from-the-right-click-menu).
 - Ask AI can now read Word, PowerPoint, OpenDocument and Excel files, as well as plain text.
 - Every Ask AI conversation ends with the same note: **Private · Local processing · Read-only**,
   "Local AI models can make mistakes…", and an **ⓘ** that explains the limits.

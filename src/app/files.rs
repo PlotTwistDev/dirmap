@@ -1166,8 +1166,10 @@ pub(super) enum FAction {
     KeepHere,
     /// The "What Is This?" window for a system file or folder.
     Explain,
-    /// Ask AI about the items: their names, sizes and dates.
+    /// Ask AI about the items, in the AI Models workspace ("Open in Ask AI").
     AskAi,
+    /// Ask AI about the items in the Files preview pane's Ask AI tab, with a question or none.
+    AskAiWith(crate::asksuggest::Preset),
     /// Two splat scenes, in Compare Scenes.
     CompareScenes,
     /// Applications: launch them, or go inside (Show Package Contents).
@@ -2206,8 +2208,14 @@ impl App {
                     if self.files.prefs.ask_tab && self.ask_in_files() {
                         // Ask AI keeps its question box at the bottom, so it scrolls only the conversation.
                         self.preview_tabs(ui);
-                        let target = self.files.cursor_entry().and_then(|e| Some((self.files.here().dir()?.join(&*e.name), e))).filter(|(p, _)| super::preview::ask_ok(p));
-                        self.files_ask_pane(ui, target);
+                        let chosen = if self.files.cur().selected.len() > 1 { self.files.chosen_paths() } else { Vec::new() };
+                        let selection: Vec<PathBuf> = if chosen.is_empty() {
+                            self.files.cursor_entry().and_then(|e| Some(self.files.here().dir()?.join(&*e.name))).into_iter().collect()
+                        } else {
+                            chosen
+                        };
+                        let selection = selection.into_iter().filter(|p| super::preview::ask_ok(p)).collect();
+                        self.files_ask_pane(ui, selection);
                     } else {
                         egui::ScrollArea::vertical().id_salt("preview-scroll").auto_shrink(false).show(ui, |ui| self.preview_pane(ui, tall));
                     }
@@ -3842,6 +3850,7 @@ impl App {
                 }
             }
             FAction::AskAi => self.ask_about_paths(paths),
+            FAction::AskAiWith(p) => self.files_ask_preset(paths, p),
             FAction::CompareScenes => self.open_scene_compare(paths),
             FAction::Eject => {
                 if let Some(p) = paths.first() {
@@ -4210,7 +4219,23 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     if m.known && !many {
         item(ui, true, "What Is This?", String::new(), FAction::Explain);
     }
-    if !m.server {
+    if !m.server && !m.read_only && crate::asksuggest::shown() {
+        use crate::asksuggest::Preset;
+        ui.menu_button(style::mi("Ask AI"), |ui| {
+            let presets: &[Preset] = if many { &Preset::MANY } else if m.is_dir { &Preset::FOLDER } else { &Preset::FILE };
+            for &p in presets {
+                let label = match (p, many, m.is_dir) {
+                    (Preset::Ask, true, _) => "Ask About These…",
+                    (Preset::Ask, _, true) => "Ask About This Folder…",
+                    (Preset::Ask, _, false) => "Ask About This File…",
+                    _ => p.label(),
+                };
+                item(ui, true, label, String::new(), FAction::AskAiWith(p));
+            }
+            ui.separator();
+            item(ui, true, "Open in Ask AI", String::new(), FAction::AskAi);
+        });
+    } else if !m.server {
         item(ui, true, if many { "Ask AI About These…" } else { "Ask AI About This…" }, String::new(), FAction::AskAi);
     }
     if m.cloud {
