@@ -16,10 +16,14 @@
   See [From the right-click menu](../views/ask-ai.md#from-the-right-click-menu).
 - Ask AI can now read PDFs (page by page), EPUB books, Word, PowerPoint, OpenDocument and Excel
   files, as well as plain text.
-- When a file is only partly read, a **⚠ Partly read** line under the answer says how much, such
-  as "pages 1 to 6 of 40", and **Measured by Filescape** shows the sizes and dates Filescape
+- When the model wasn't given everything, a **⚠ Partly included** line under the answer says
+  what was left out, such as "pages 1 to 6 of 40" of a PDF, documents not read for lack of room,
+  or "listed 40 of 1,250 items" of a large folder, and **Measured by Filescape** shows the sizes and dates Filescape
   measured itself, apart from the model's answer. See
   [Asking about files and folders](../views/ask-ai.md#asking-about-files-and-folders).
+- Large folders: Ask AI describes a folder's shape first, the folders inside it up to three
+  levels down, then its largest items, and never reads more files than fit in the model's
+  context.
 - Every Ask AI conversation ends with the same note: **Private · Local processing · Read-only**,
   "Local AI models can make mistakes…", and an **ⓘ** that explains the limits.
 
