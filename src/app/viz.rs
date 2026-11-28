@@ -948,7 +948,8 @@ impl App {
             }
             for c in Category::ALL {
                 let on = self.filter.kinds & c.bit() != 0;
-                if choice(ui, on, plain(c.label()), c.tooltip()).clicked() && gate(self, on) {
+                // Applications are free, like everything else about them.
+                if choice(ui, on, plain(c.label()), c.tooltip()).clicked() && (c == Category::Applications || gate(self, on)) {
                     self.filter.kinds ^= c.bit();
                 }
             }

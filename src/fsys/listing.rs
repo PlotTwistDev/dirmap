@@ -250,10 +250,16 @@ pub fn unpack_filter(f: &str) -> (&str, u16) {
     (f, 0)
 }
 
-/// Whether an item passes a filter made by `pack_filter`. With kinds chosen, folders don't.
-pub fn entry_matches(filter: &str, name: &str, is_dir: bool) -> bool {
+/// Whether an item passes a filter made by `pack_filter`. With kinds chosen, folders don't,
+/// except applications when Applications is one of them.
+pub fn entry_matches(filter: &str, e: &Entry) -> bool {
     let (text, kinds) = unpack_filter(filter);
-    (kinds == 0 || (!is_dir && kinds & crate::categories::of(name).bit() != 0)) && name_matches(text, name)
+    let kind = if crate::apps::is_app(e.bundle) {
+        kinds & crate::categories::Category::Applications.bit() != 0
+    } else {
+        !e.is_dir && kinds & crate::categories::of(&e.name).bit() != 0
+    };
+    (kinds == 0 || kind) && name_matches(text, &e.name)
 }
 
 /// Whether a name matches what's typed in the filter box: wildcards (`*`, `?`) match the whole
@@ -330,7 +336,7 @@ fn search(
             }
             let hit = match tagged {
                 Some(set) => set.contains(&dir.join(&*e.name)),
-                None => entry_matches(query, &e.name, e.is_dir),
+                None => entry_matches(query, &e),
             };
             if hit {
                 found += 1;
