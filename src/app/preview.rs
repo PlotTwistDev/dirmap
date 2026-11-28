@@ -1206,7 +1206,7 @@ impl App {
         // like a file.
         if details {
             // The Details tab: no big preview, everything known about it.
-        } else if crate::apps::is_app(e.bundle) {
+        } else if crate::apps::own_icon(e.bundle) {
             let (r, _) = ui.allocate_exact_size(vec2(w, 112.0), Sense::hover());
             self.icons.paint_app(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), &path, e.modified);
         } else if e.is_dir && !crate::packages::is_package(&path, &e.name) {
@@ -1223,12 +1223,37 @@ impl App {
         ui.add_space(8.0);
         ui.add(egui::Label::new(egui::RichText::new(crate::apps::shown_name(&e.name, e.bundle)).strong()).wrap());
         ui.add_space(4.0);
-        let is_app = crate::apps::is_app(e.bundle) && !crate::fsys::remote::is_remote(&path) && !crate::fsys::archive::inside(&path);
+        let local = !crate::fsys::remote::is_remote(&path) && !crate::fsys::archive::inside(&path);
+        let is_app = crate::apps::own_icon(e.bundle) && local;
         let app_info = if is_app { self.files.app_info.get(ui.ctx(), &path, e.modified) } else { None };
+        let kind = crate::apps::of(e.bundle).filter(|_| local);
+        // Where a shortcut points, on this computer.
+        let original = app_info.as_ref().and_then(|d| d.shortcut.as_ref()?.target.clone()).map(|t| PathBuf::from(crate::apps::lnk::expand(&t))).filter(|t| cfg!(windows) && t.exists());
         let actions = |app: &mut Self, ui: &mut egui::Ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-                if is_app {
+                if kind == Some(crate::apps::Bundle::WinApp) {
+                    // A Windows program: Windows runs it, so SmartScreen and UAC still have their say.
+                    let r = ui.add_enabled_ui(cfg!(windows), |ui| kit::button(ui, K::Primary, Some(Icon::External), "Launch Application")).inner;
+                    if r.clicked() {
+                        let p = path.clone();
+                        app.files.spawn(move || crate::actions::open(&p));
+                    }
+                    r.on_hover_text("Run it, as Explorer would").on_disabled_hover_text("This is a Windows program: it can only be run on Windows.");
+                } else if kind == Some(crate::apps::Bundle::Shortcut) {
+                    let r = ui.add_enabled_ui(cfg!(windows), |ui| kit::button(ui, K::Primary, Some(Icon::External), "Open")).inner;
+                    if r.clicked() {
+                        let p = path.clone();
+                        app.files.spawn(move || crate::actions::open(&p));
+                    }
+                    r.on_hover_text("Open what it points to").on_disabled_hover_text("This is a Windows shortcut: it can only be followed on Windows.");
+                    if let Some(t) = original.clone()
+                        && kit::button(ui, K::Secondary, Some(Icon::Folder), "Show Original").on_hover_text("Show what it points to, selected in its folder").clicked()
+                        && let (Some(dir), Some(name)) = (t.parent(), t.file_name())
+                    {
+                        app.files.reveal(dir.to_path_buf(), vec![name.to_string_lossy().into()]);
+                    }
+                } else if kind == Some(crate::apps::Bundle::App) {
                     // An application: launch it (never just by selecting or previewing it).
                     let r = ui.add_enabled_ui(crate::apps::CAN_LAUNCH, |ui| kit::button(ui, K::Primary, Some(Icon::External), "Launch Application")).inner;
                     if r.clicked() {
@@ -1537,7 +1562,7 @@ impl App {
             self.files.look.video = None;
         }
         self.files.look.seen = self.files.look.tick;
-        if crate::apps::is_app(e.bundle) {
+        if crate::apps::own_icon(e.bundle) {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             let side = (r.width().min(r.height()) * 0.6).clamp(64.0, 256.0);
             self.icons.paint_app(ui, Rect::from_center_size(r.center(), vec2(side, side)), path, e.modified);
@@ -3142,9 +3167,24 @@ pub(super) fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
         row("Details", "Reading…".into());
         return;
     };
+    if let Some(sc) = &d.shortcut {
+        row("Points to", sc.target.clone().or_else(|| sc.relative.clone()).unwrap_or_else(|| "Not said".into()));
+        if let Some(a) = sc.arguments.clone() {
+            row("Arguments", a);
+        }
+        if let Some(w) = sc.working_dir.clone() {
+            row("Start in", w);
+        }
+        if let Some(c) = sc.comment.clone() {
+            row("Comment", c);
+        }
+    }
     let i = d.info.clone().unwrap_or_default();
     if let Some(n) = i.name.clone() {
         row("Name", n);
+    }
+    if let Some(n) = i.description.clone() {
+        row("Description", n);
     }
     if let Some(p) = d.publisher() {
         row("Publisher", p);
@@ -3159,13 +3199,17 @@ pub(super) fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
         row("Identifier", id);
     }
     if let Some(a) = d.arch.clone() {
-        row("Runs on", a);
+        row("Runs on", if d.console { format!("{a}, in a command window") } else { a });
     }
     if let Some(m) = i.min_os.clone() {
         row("Needs", format!("macOS {m} or later"));
     }
     let (bytes, alloc, files) = d.size;
-    row("Size", format!("{} on disk, {} of data, in {} files", crate::scan::human(alloc), crate::scan::human(bytes), group(files)));
+    if files == 1 {
+        row("Size", format!("{} on disk, {} of data", crate::scan::human(alloc), crate::scan::human(bytes)));
+    } else {
+        row("Size", format!("{} on disk, {} of data, in {} files", crate::scan::human(alloc), crate::scan::human(bytes), group(files)));
+    }
     if let Some(s) = d.signed.clone() {
         row("Signed", s);
     }
@@ -3173,7 +3217,10 @@ pub(super) fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
         row("Gatekeeper", g);
     }
     if d.quarantined {
-        row("Downloaded", "From the internet, not opened yet: macOS will ask before it first opens".into());
+        row(
+            "Downloaded",
+            if cfg!(windows) { "From the internet: Windows SmartScreen checks it when it's opened".into() } else { "From the internet, not opened yet: macOS will ask before it first opens".into() },
+        );
     }
     if let Some(p) = d.problem.clone() {
         row("Problem", p);

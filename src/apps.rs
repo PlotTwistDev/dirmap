@@ -12,6 +12,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 #[cfg(target_os = "macos")]
 mod mac;
+pub mod lnk;
+pub mod pe;
 
 /// What kind of bundle a folder is. Stored in [`crate::fsys::listing::Entry::bundle`] as
 /// [`Bundle::code`] (0 for none).
@@ -31,10 +33,15 @@ pub enum Bundle {
     QuickLook,
     Spotlight,
     Service,
+    /// A Windows program (`.exe`): a file, not a bundle, but shown with its own icon, name
+    /// and details the same way.
+    WinApp,
+    /// A Windows shortcut (`.lnk`).
+    Shortcut,
 }
 
 impl Bundle {
-    const ALL: [Bundle; 14] = [
+    const ALL: [Bundle; 16] = [
         Bundle::App,
         Bundle::Framework,
         Bundle::Plugin,
@@ -49,6 +56,8 @@ impl Bundle {
         Bundle::QuickLook,
         Bundle::Spotlight,
         Bundle::Service,
+        Bundle::WinApp,
+        Bundle::Shortcut,
     ];
 
     /// By the folder's extension alone (any case).
@@ -98,6 +107,8 @@ impl Bundle {
             Bundle::QuickLook => "Quick Look plug-in",
             Bundle::Spotlight => "Spotlight importer",
             Bundle::Service => "Service",
+            Bundle::WinApp => "Application",
+            Bundle::Shortcut => "Shortcut",
         }
     }
 
@@ -214,6 +225,26 @@ pub fn parts(app: &crate::scan::Node) -> Vec<(&'static str, &'static str, u64)> 
     out
 }
 
+/// What a file is by its name: a Windows program or shortcut (code as in [`Bundle::code`]), 0
+/// for anything else. Just the name, so listings stay as fast as before.
+pub fn file_code(name: &str) -> u8 {
+    let n = name.as_bytes();
+    let ends = |ext: &[u8]| n.len() > ext.len() && n[n.len() - ext.len()..].eq_ignore_ascii_case(ext);
+    if ends(b".exe") {
+        Bundle::WinApp.code()
+    } else if ends(b".lnk") {
+        Bundle::Shortcut.code()
+    } else {
+        0
+    }
+}
+
+/// Items drawn with their own icon and shown with application details: Mac applications,
+/// Windows programs and shortcuts.
+pub fn own_icon(code: u8) -> bool {
+    matches!(of(code), Some(Bundle::App | Bundle::WinApp | Bundle::Shortcut))
+}
+
 /// What the user chose under Settings > Files > Applications & Executables. Kept here (not
 /// passed around) because names and icons are drawn in many places.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -287,6 +318,10 @@ pub struct Info {
     pub executable: Option<String>,
     pub icon_file: Option<String>,
     pub copyright: Option<String>,
+    /// The publisher a Windows program names (CompanyName).
+    pub company: Option<String>,
+    /// What a Windows program says it is (FileDescription).
+    pub description: Option<String>,
 }
 
 /// Where a bundle keeps `Info.plist`.
@@ -308,6 +343,7 @@ pub fn info(app: &Path) -> Option<Info> {
         executable: s("CFBundleExecutable"),
         icon_file: s("CFBundleIconFile"),
         copyright: s("NSHumanReadableCopyright"),
+        ..Default::default()
     })
 }
 
@@ -364,6 +400,12 @@ pub fn icon(app: &Path, size: u32) -> Option<(u32, u32, Vec<u8>)> {
     if crate::cloud::root_of(&crate::cloud::roots(), app).is_some() {
         return None;
     }
+    let name = app.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let code = file_code(&name);
+    if code != 0 {
+        let img = if code == Bundle::WinApp.code() { pe::icon_file(app, size) } else { shortcut_icon(app, size) };
+        return img.map(|i| (i.width(), i.height(), i.into_raw()));
+    }
     #[cfg(target_os = "macos")]
     if let Some(i) = mac::icon(app, size) {
         return Some(i);
@@ -372,6 +414,21 @@ pub fn icon(app: &Path, size: u32) -> Option<(u32, u32, Vec<u8>)> {
     let data = std::fs::read(file).ok()?;
     let img = icns_image(&data, size)?;
     Some((img.width(), img.height(), img.into_raw()))
+}
+
+/// The icon a shortcut shows: from its icon location (a program or an .ico file), else its
+/// target's. Only files on this computer (a Windows path means nothing elsewhere).
+fn shortcut_icon(link: &Path, size: u32) -> Option<image::RgbaImage> {
+    let sc = lnk::shortcut(&std::fs::read(link).ok()?)?;
+    let from = |p: &str| -> Option<image::RgbaImage> {
+        let p = PathBuf::from(lnk::expand(p));
+        if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("ico")) {
+            let data = std::fs::read(&p).ok()?;
+            return image::load_from_memory_with_format(&data, image::ImageFormat::Ico).ok().map(|i| i.into_rgba8());
+        }
+        pe::icon_file(&p, size)
+    };
+    sc.icon.as_ref().and_then(|(p, _)| from(p)).or_else(|| from(sc.target.as_deref()?))
 }
 
 /// The bundle's icon file, from `CFBundleIconFile` (".icns" may be left off) or the usual names.
@@ -440,6 +497,10 @@ pub struct Details {
     pub quarantined: bool,
     /// What's wrong with it, if it can't be launched.
     pub problem: Option<String>,
+    /// A Windows program that runs in a console window (a command-line tool).
+    pub console: bool,
+    /// For a shortcut: what it says (the details above are its target's).
+    pub shortcut: Option<lnk::Shortcut>,
 }
 
 impl Details {
@@ -453,6 +514,7 @@ impl Details {
             Some("Apple") => Some("Apple".into()),
             _ => None,
         })
+        .or_else(|| self.info.as_ref()?.company.clone())
         .or_else(|| self.info.as_ref()?.copyright.clone())
     }
 }
@@ -460,12 +522,96 @@ impl Details {
 /// Work out an application's details (slow: call it off the UI thread). Nothing in the app is
 /// run: its program's header is read as data, and macOS's own tools check the signature.
 pub fn details(app: &Path) -> Details {
+    let name = app.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    match Bundle::from_code(file_code(&name)) {
+        Some(Bundle::WinApp) => return program_details(app),
+        Some(Bundle::Shortcut) => return shortcut_details(app),
+        _ => {}
+    }
     let info = info(app);
     let exe = info.as_ref().and_then(|i| i.executable.clone()).map(|e| app.join("Contents/MacOS").join(e));
     let arch = exe.as_deref().and_then(arch_of);
     let size = bundle_size(app);
     let (signed, gatekeeper) = signature(app);
-    Details { info, arch, size, signed, gatekeeper, quarantined: quarantined(app), problem: problem(app) }
+    Details { info, arch, size, signed, gatekeeper, quarantined: quarantined(app), problem: problem(app), ..Default::default() }
+}
+
+/// Space a file takes on the drive (its length where the system doesn't say).
+fn alloc_of(md: &std::fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        md.blocks() * 512
+    }
+    #[cfg(not(unix))]
+    {
+        md.len()
+    }
+}
+
+/// A Windows program's details, from its header and version information.
+fn program_details(exe: &Path) -> Details {
+    let meta = std::fs::metadata(exe).ok();
+    let size = meta.as_ref().map_or((0, 0, 1), |m| (m.len(), alloc_of(m), 1));
+    let Some(p) = pe::program_file(exe) else {
+        let name = exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        return Details { size, problem: Some(format!("“{name}” isn't a Windows program, or it's damaged.")), ..Default::default() };
+    };
+    let info = Info {
+        name: p.product.clone().or_else(|| p.description.clone()),
+        version: p.product_version.clone(),
+        build: p.file_version.clone().filter(|f| Some(f) != p.product_version.as_ref()),
+        copyright: p.copyright.clone(),
+        company: p.company.clone(),
+        description: p.description.clone().filter(|d| Some(d) != p.product.as_ref()),
+        executable: p.original_name.clone(),
+        ..Default::default()
+    };
+    Details {
+        info: Some(info),
+        arch: p.arch.clone().map(|a| format!("Windows, {a}")),
+        size,
+        signed: Some(if p.signed { "Signed (Windows checks the signature when it runs)".into() } else { "Not signed".into() }),
+        quarantined: marked_downloaded(exe),
+        console: p.console,
+        ..Default::default()
+    }
+}
+
+/// A shortcut's details: what it says, and its target's details when the target is a program
+/// on this computer.
+fn shortcut_details(link: &Path) -> Details {
+    let size = std::fs::metadata(link).map_or((0, 0, 1), |m| (m.len(), alloc_of(&m), 1));
+    let Some(sc) = std::fs::read(link).ok().and_then(|d| lnk::shortcut(&d)) else {
+        return Details { size, problem: Some("This shortcut is damaged: it doesn't say where it points.".into()), ..Default::default() };
+    };
+    let target = sc.target.as_deref().map(lnk::expand).map(PathBuf::from);
+    let mut d = match target.as_deref() {
+        Some(t) if cfg!(windows) && file_code(&t.to_string_lossy()) == Bundle::WinApp.code() && t.is_file() => program_details(t),
+        _ => Details::default(),
+    };
+    if cfg!(windows) && target.as_deref().is_some_and(|t| !t.exists()) {
+        d.problem = Some("What this shortcut points to isn't there any more: it was moved, renamed or uninstalled.".into());
+    }
+    d.size = size;
+    d.shortcut = Some(sc);
+    d
+}
+
+/// Windows marks files downloaded from the internet (the "mark of the web") so SmartScreen
+/// checks them when they're opened.
+fn marked_downloaded(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let mut ads = path.as_os_str().to_owned();
+        ads.push(":Zone.Identifier");
+        std::fs::read_to_string(ads).is_ok_and(|z| z.lines().any(|l| l.trim().strip_prefix("ZoneId=").is_some_and(|z| z.trim() == "3" || z.trim() == "4")))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        false
+    }
 }
 
 /// Which processors a Mach-O program runs on, from its header.
@@ -524,15 +670,7 @@ fn bundle_size(dir: &Path) -> (u64, u64, u64) {
             } else {
                 bytes += md.len();
                 files += 1;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::MetadataExt;
-                    alloc += md.blocks() * 512;
-                }
-                #[cfg(not(unix))]
-                {
-                    alloc += md.len();
-                }
+                alloc += alloc_of(&md);
             }
         }
     }
@@ -823,6 +961,44 @@ pub(crate) mod tests {
         assert_eq!(parts[0].0, "Frameworks", "{parts:?}");
         assert_eq!(parts.iter().map(|p| p.0).collect::<Vec<_>>(), ["Frameworks", "Program", "Resources", "Other"]);
         assert_eq!(parts.iter().map(|p| p.2).sum::<u64>(), t.at(slack).unwrap().size, "the parts add up to the app");
+    }
+
+    #[test]
+    fn windows_programs_and_shortcuts() {
+        let _g = PREFS_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(file_code("Paint.EXE"), Bundle::WinApp.code());
+        assert_eq!(file_code("Paint.lnk"), Bundle::Shortcut.code());
+        assert_eq!(file_code(".exe"), 0);
+        assert_eq!(file_code("notes.txt"), 0);
+        assert!(own_icon(Bundle::WinApp.code()) && own_icon(Bundle::Shortcut.code()) && own_icon(Bundle::App.code()));
+        assert!(!own_icon(Bundle::Framework.code()) && !is_app(Bundle::WinApp.code()), "only Mac apps open as bundles");
+        assert_eq!(Bundle::from_code(Bundle::WinApp.code()).unwrap().kind(), "Application");
+        let d = tmp("windows");
+        let exe = d.join("paint.exe");
+        std::fs::write(&exe, pe::tests::sample_exe()).unwrap();
+        let det = details(&exe);
+        let i = det.info.clone().unwrap();
+        assert_eq!(i.name.as_deref(), Some("Acme Paint Studio"));
+        assert_eq!(det.publisher().as_deref(), Some("Acme Ltd"));
+        assert_eq!((i.version.as_deref(), i.build.as_deref()), (Some("3.2.1"), Some("3.2.1.77")));
+        assert_eq!(det.arch.as_deref(), Some("Windows, 64-bit (x64)"));
+        assert_eq!(det.size.2, 1);
+        assert!(det.problem.is_none());
+        let (w, h, px) = icon(&exe, 32).unwrap();
+        assert_eq!((w, h, px.len()), (32, 32, 32 * 32 * 4));
+        // Not a program at all.
+        let fake = d.join("fake.exe");
+        std::fs::write(&fake, b"just text").unwrap();
+        assert!(details(&fake).problem.unwrap().contains("isn't a Windows program"));
+        // A shortcut: what it says, whatever the system.
+        let link = d.join("Paint.lnk");
+        std::fs::write(&link, lnk::tests::sample_lnk("C:\\Program Files\\Acme\\paint.exe")).unwrap();
+        let sd = details(&link);
+        let sc = sd.shortcut.clone().unwrap();
+        assert_eq!(sc.arguments.as_deref(), Some("--new-window"));
+        assert!(sc.target.unwrap().ends_with("paint.exe"));
+        std::fs::write(&link, b"broken").unwrap();
+        assert!(details(&link).problem.unwrap().contains("damaged"));
     }
 
     #[test]
