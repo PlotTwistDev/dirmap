@@ -47,8 +47,8 @@ PAGES = [
     ("/ai-models", "ai-models.html", "pages/ai-models.html",
      "Find, inspect and run local AI models · Filescape",
      "Find, inspect and run the AI models on your computer",
-     "Find every AI model on your computer, see what's inside it, check whether it will run, and "
-     "chat with it offline. Free, and nothing leaves your computer.", "ai-models", "0.8"),
+     "Find every AI model on your computer, see what's inside it, check whether it will run, chat "
+     "with it offline and get the space back. Free, and nothing leaves your computer.", "ai-models", "0.8"),
     ("/vfx", "vfx.html", "pages/vfx.html",
      "Filescape for VFX, 3D and creative projects",
      "Filescape for VFX, 3D and creative projects",
