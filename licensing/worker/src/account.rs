@@ -2,11 +2,15 @@
 //! release computers ([`crate::portal`]), offline activation, "email me my serial numbers", and
 //! the page Paddle's checkout returns to.
 
+use crate::maintenance::GrantRow;
 use crate::portal::{self, Owned};
+use crate::profile::{ChangeDone, Prefs, purchase_txn};
 use crate::store::Fail;
 use crate::web::{Form, date, esc, page};
 use crate::{Ctx, Db, Net, Req, Resp, mail};
+use filescape_licence::maintenance::MaintenanceStatus;
 use filescape_licence::model::{LicenceKind, Validity};
+use filescape_licence::release::{ReleaseManifest, default_download};
 
 fn nav(base: &str) -> String {
     format!("<b>Filescape</b><a href=\"{base}/\">Your licence</a><a href=\"{base}/activate\">Offline activation</a><a href=\"https://filescape.app/contact\">Contact</a><a href=\"https://filescape.app/\">filescape.app</a>")
@@ -30,7 +34,12 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
             Some(email) => signed_in(cx, base, &email, req.query_param("msg").as_deref()).await,
             None => Ok(home(base, req.query_param("msg").as_deref())),
         },
-        ("POST", "/login") => login(cx, base, &Form::parse(&req.text())).await,
+        ("POST", "/login") => {
+            if !cx.ip_allowed(req, "login", 10, 3600).await? {
+                return Ok(home(base, Some("Too many sign-in requests from your network. Please try again in an hour.")));
+            }
+            login(cx, base, &Form::parse(&req.text())).await
+        }
         ("GET", "/signin") => Ok(signin_page(base, &req.query_param("t").unwrap_or_default())),
         ("POST", "/signin") => signin(cx, base, &Form::parse(&req.text())).await,
         ("POST", "/signout") => {
@@ -46,7 +55,12 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
             let msg = if done { "Computer released. Filescape on that computer goes back to the free features at its next licence check." } else { "That computer was already released." };
             Ok(Resp::redirect(&format!("{base}/?msg={}", crate::web::encode(msg))))
         }
-        ("POST", "/find") => find(cx, base, &Form::parse(&req.text())).await,
+        ("POST", "/find") => {
+            if !cx.ip_allowed(req, "find", 10, 3600).await? {
+                return Ok(home(base, Some("Too many requests from your network. Please try again in an hour.")));
+            }
+            find(cx, base, &Form::parse(&req.text())).await
+        }
         // Extend maintenance: signed in (the licence must be registered to this email), then the
         // checkout page; the app's "Extend maintenance" goes straight to the checkout page.
         ("POST", "/renew") => {
@@ -68,6 +82,26 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
             "<h1>Thank you for renewing</h1><div class=\"card\"><p>Your maintenance is extended as soon as Paddle confirms the payment, usually within a minute, and a confirmation email is on its way. Your serial number and your computers stay as they are.</p>\
              <p>Filescape picks up the new date at its next weekly licence check. To see it now, choose <b>Help &gt; Licence</b> and press <b>Check now</b>.</p></div>",
         )),
+        ("POST", "/prefs") => {
+            let Some(email) = cx.session_email(req).await? else { return Ok(Resp::redirect(&format!("{base}/?msg=Sign%20in%20again"))) };
+            let form = Form::parse(&req.text());
+            cx.set_prefs(&email, Prefs { reminders: form.has("reminders") }).await?;
+            Ok(Resp::redirect(&format!("{base}/?msg=Preferences%20saved.")))
+        }
+        ("POST", "/email/change") => email_change(cx, base, req).await,
+        ("GET", "/email/confirm") => email_confirm_page(cx, base, &req.query_param("t").unwrap_or_default()).await,
+        ("POST", "/email/confirm") => email_confirm(cx, base, req).await,
+        ("GET", "/receipt") => {
+            let Some(email) = cx.session_email(req).await? else { return Ok(Resp::redirect(&format!("{base}/?msg=Sign%20in%20again"))) };
+            let (id, txn) = (req.query_param("licence").unwrap_or_default(), req.query_param("txn").unwrap_or_default());
+            if !cx.owns_txn(&email, &id, &txn).await? {
+                return Ok(Resp::redirect(&format!("{base}/?msg={}", crate::web::encode("That receipt isn't for a licence registered to you."))));
+            }
+            match cx.receipt_url(&txn).await? {
+                Some(url) => Ok(Resp::redirect(&url)),
+                None => Ok(Resp::redirect(&format!("{base}/?msg={}", crate::web::encode("That receipt isn't available right now. Paddle also emailed it to you when you paid.")))),
+            }
+        }
         ("GET", "/activate") => Ok(offline_page(base, None)),
         ("POST", "/activate") => offline(cx, base, req).await,
         ("GET", "/thanks") => Ok(show(
@@ -199,44 +233,128 @@ fn os_label(os: Option<&str>) -> &str {
     os.unwrap_or("Computer")
 }
 
-fn licence_card(base: &str, o: &Owned, now: filescape_licence::Ts, offer: Option<&str>) -> String {
+fn day(t: filescape_licence::Ts) -> String {
+    date(t).split(',').next().unwrap_or_default().to_string()
+}
+
+/// What the account page knows besides the licences themselves.
+struct View<'a> {
+    base: &'a str,
+    now: filescape_licence::Ts,
+    /// The renewal price label, when renewals can be bought.
+    offer: Option<&'a str>,
+    latest: Option<&'a ReleaseManifest>,
+    /// Receipts can be fetched from Paddle.
+    receipts: bool,
+}
+
+fn tile(label: &str, value: &str, sub: &str, extra: &str) -> String {
+    format!("<div><span>{label}</span><b>{value}</b><small>{sub}</small>{extra}</div>")
+}
+
+fn downloads(v: &View, updates_until: Option<filescape_licence::Ts>) -> String {
+    let Some(m) = v.latest else {
+        return "<p class=\"mute\">Download Filescape from <a href=\"https://filescape.app/#download\">filescape.app</a>.</p>".into();
+    };
+    let links = [("macOS", "macos", &m.downloads.macos), ("Windows", "windows", &m.downloads.windows), ("Linux", "linux", &m.downloads.linux)]
+        .iter()
+        .map(|(name, os, url)| format!("<a href=\"{}\">{name}</a>", esc(&url.as_ref().map_or_else(|| default_download(os), |u| u.to_string()))))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let notes = m.notes_url.as_deref().map(|u| format!(" · <a href=\"{}\">What's new</a>", esc(u))).unwrap_or_default();
+    let head = format!("<b>Filescape {}</b> <span class=\"mute\">released {}</span>", esc(&m.version), day(m.released_at));
+    match updates_until {
+        Some(u) if m.released_at > u => format!(
+            "<p>{head} <span class=\"pill\">Not included</span><br>It came out after your maintenance ended, so it runs with the free features until you extend maintenance. Versions released up to {} keep Pro for good.<br>Download: {links}{notes}</p>",
+            day(u)
+        ),
+        Some(_) => format!("<p>{head} <span class=\"pill good\">Included</span><br>Download: {links}{notes}</p>"),
+        None => format!("<p>{head}<br>Download: {links}{notes}</p>"),
+    }
+}
+
+fn history(v: &View, l: &filescape_licence::model::Licence, grants: &[GrantRow]) -> String {
+    use filescape_licence::maintenance::GrantKind;
+    let receipt = |txn: Option<&str>| match txn {
+        Some(t) if v.receipts => format!("<a href=\"{}/receipt?licence={}&amp;txn={}\">Receipt</a>", v.base, crate::web::encode(&l.id), crate::web::encode(t)),
+        Some(_) => "<span class=\"mute\">Emailed by Paddle</span>".into(),
+        None => String::new(),
+    };
+    let mut rows = String::new();
+    for g in grants {
+        let (what, txn) = match g.grant.kind {
+            GrantKind::Purchase => ("Purchase · perpetual licence with 12 months of maintenance".to_string(), purchase_txn(l.order_ref.as_deref())),
+            GrantKind::Renewal => (format!("Maintenance renewal · 12 months{}", match (&g.amount, &g.currency) {
+                (Some(a), Some(c)) => format!(" · {} {}", esc(a), esc(c)),
+                _ => String::new(),
+            }), g.txn.as_deref()),
+            GrantKind::Complimentary => (format!("Maintenance extended by us · {}", crate::maintenance::length(g.grant.months, g.grant.days)), None),
+        };
+        let state = if g.reversed_at.is_some() { " <span class=\"pill bad\">Reversed</span>" } else { "" };
+        let after = g.after_until.map(day).unwrap_or_default();
+        rows.push_str(&format!("<tr><td>{}</td><td>{what}{state}</td><td>{after}</td><td>{}</td></tr>", day(g.grant.at), receipt(txn)));
+    }
+    if rows.is_empty() {
+        rows = match purchase_txn(l.order_ref.as_deref()) {
+            Some(t) => format!("<tr><td>{}</td><td>Purchase</td><td></td><td>{}</td></tr>", day(l.issued_at), receipt(Some(t))),
+            None => format!("<tr><td>{}</td><td>Licence issued</td><td></td><td></td></tr>", day(l.issued_at)),
+        };
+    }
+    format!("<div class=\"scroll\"><table><tr><th>Date</th><th>What</th><th>Maintenance until</th><th></th></tr>{rows}</table></div>")
+}
+
+fn licence_card(v: &View, o: &Owned, grants: &[GrantRow]) -> String {
+    let (base, now) = (v.base, v.now);
     let l = &o.row.lic;
-    let what = match l.validity {
-        Validity::Perpetual { .. } => "Perpetual licence · never expires".to_string(),
+    let revoked = l.revoked_at.is_some();
+    let state = if revoked { " <span class=\"pill bad\">Revoked</span>" } else { "" };
+    let licence_tile = match l.validity {
+        _ if revoked => tile("Licence", "<span class=\"bad\">Revoked</span>", "Contact us if you think this is a mistake", ""),
+        Validity::Perpetual { .. } => tile("Licence", "<span class=\"good\">Perpetual</span>", "Never expires", ""),
         _ => match l.expires_at {
-            Some(e) if e <= now => format!("Temporary licence · ended {}", date(e)),
-            Some(e) => format!("Temporary licence · until {}", date(e)),
-            None => "Temporary licence · not activated yet".into(),
+            Some(e) if e <= now => tile("Licence", "Temporary", &format!("Ended {}", day(e)), ""),
+            Some(e) => tile("Licence", "Temporary", &format!("Until {}", day(e)), ""),
+            None => tile("Licence", "Temporary", "Starts when first activated", ""),
         },
     };
-    let state = if l.revoked_at.is_some() { " <span class=\"pill bad\">Revoked</span>" } else { "" };
-    let maint = match l.validity {
+    let mut maint_note = String::new();
+    let maint_tile = match l.validity {
         Validity::Perpetual { updates_until } => {
-            let day = date(updates_until).split(',').next().unwrap_or_default().to_string();
-            let status = match filescape_licence::maintenance::status(updates_until, now) {
-                filescape_licence::maintenance::MaintenanceStatus::Active { days_left, .. } => {
-                    format!("<b>Software maintenance:</b> <span class=\"good\">active</span>, {days_left} day{} left (until {day}). Every release published until then is included.", if days_left == 1 { "" } else { "s" })
-                }
-                filescape_licence::maintenance::MaintenanceStatus::Ended { .. } => format!(
-                    "<b>Software maintenance:</b> ended {day}. Your licence is still valid: every release published until then keeps its Pro features for good. Extend maintenance to get the latest version and another year of updates."
-                ),
-            };
-            let button = match (offer, l.revoked_at) {
-                (Some(label), None) => format!(
+            let button = match (v.offer, revoked) {
+                (Some(label), false) => format!(
                     "<form method=\"post\" action=\"{base}/renew\" style=\"margin-top:8px\"><input type=\"hidden\" name=\"licence\" value=\"{}\"><button class=\"primary\">Extend maintenance by 12 months · {}</button></form>",
                     esc(&l.id),
                     esc(label)
                 ),
                 _ => String::new(),
             };
-            format!("<div class=\"card\" style=\"background:var(--bg)\">{status}{button}</div>")
+            match filescape_licence::maintenance::status(updates_until, now) {
+                MaintenanceStatus::Active { days_left, .. } => {
+                    let pct = (days_left * 100 / 365).clamp(2, 100);
+                    maint_note = format!("<p>Every Filescape release published until {} is included. Renewing early loses nothing: it adds 12 months to that date.</p>{button}", day(updates_until));
+                    let tone = if days_left <= 30 { "warn" } else { "good" };
+                    tile(
+                        "Software maintenance",
+                        &format!("<span class=\"{tone}\">Active</span>"),
+                        &format!("Until {} · {days_left} day{} left", day(updates_until), if days_left == 1 { "" } else { "s" }),
+                        &format!("<div class=\"bar\"><i style=\"width:{pct}%\"></i></div>"),
+                    )
+                }
+                MaintenanceStatus::Ended { .. } => {
+                    maint_note = format!(
+                        "<p>Your licence is still valid: every release published until {} keeps its Pro features for good. Extend maintenance to get the latest version and another 12 months of updates, counted from the day you renew.</p>{button}",
+                        day(updates_until)
+                    );
+                    tile("Software maintenance", "Ended", &format!("On {}", day(updates_until)), "")
+                }
+            }
         }
-        _ => String::new(),
+        _ => tile("Software maintenance", "Included", "While the licence runs", ""),
     };
-    let count = if l.kind() == LicenceKind::Perpetual {
-        format!("{} of {} computers active", o.seats, l.max_activations)
+    let computers_tile = if l.kind() == LicenceKind::Perpetual {
+        tile("Computers", &format!("{} of {}", o.seats, l.max_activations), "Active now", "")
     } else {
-        format!("{} of {} activations used (temporary licences don't get activations back)", l.activations_used, l.max_activations)
+        tile("Activations", &format!("{} of {}", l.activations_used, l.max_activations), "Temporary licences don't get activations back", "")
     };
     let mut rows = String::new();
     for c in &o.computers {
@@ -265,7 +383,18 @@ fn licence_card(base: &str, o: &Owned, now: filescape_licence::Ts, offer: Option
     } else {
         format!("<div class=\"scroll\"><table><tr><th>Computer</th><th>Version</th><th>Activated</th><th>Last check</th><th></th></tr>{rows}</table></div>")
     };
-    format!("<div class=\"card\"><h2 style=\"margin-top:0\">Serial ending {}{state}</h2><p>{}<br>{}</p>{maint}{table}</div>", esc(&l.serial_hint), esc(&what), esc(&count))
+    let until = match l.validity {
+        Validity::Perpetual { updates_until } => Some(updates_until),
+        _ => None,
+    };
+    format!(
+        "<div class=\"card\"><h2 style=\"margin-top:0\">Filescape Pro · serial ending <span class=\"mono\">{}</span>{state}</h2>\
+         <div class=\"tiles\">{licence_tile}{maint_tile}{computers_tile}</div>{maint_note}\
+         <h3>Download</h3>{}<h3>Computers</h3>{table}<h3>Purchases and renewals</h3>{}</div>",
+        esc(&l.serial_hint),
+        downloads(v, until),
+        history(v, l, grants),
+    )
 }
 
 async fn signed_in<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, email: &str, msg: Option<&str>) -> Result<Resp, String> {
@@ -273,17 +402,104 @@ async fn signed_in<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, email: &str, m
     let owned = cx.owned(email).await?;
     let settings = cx.renewal_settings().await?;
     let offer = if cx.cfg.paddle.as_ref().is_some_and(|p| p.client_token.is_some()) { settings.offered().map(|p| p.label.clone()) } else { None };
-    let cards: String = owned.iter().map(|o| licence_card(base, o, cx.now, offer.as_deref())).collect();
+    let latest = cx.latest_release().await?;
+    let view = View { base, now: cx.now, offer: offer.as_deref(), latest: latest.as_ref(), receipts: cx.cfg.paddle.as_ref().is_some_and(|p| p.api_key.is_some()) };
+    let mut cards = String::new();
+    for o in &owned {
+        let grants = if o.row.lic.kind() == LicenceKind::Perpetual { cx.grants_of(&o.row.lic.id).await? } else { Vec::new() };
+        cards.push_str(&licence_card(&view, o, &grants));
+    }
     let cards = if cards.is_empty() { "<div class=\"card\">No licences are registered to this address.</div>".into() } else { cards };
+    let prefs = cx.prefs(email).await?;
     Ok(show(
         base,
         "Your licences",
         &format!(
             "<h1>Your Filescape licences</h1><div class=\"row mute\" style=\"align-items:center\">Signed in as {}. <form method=\"post\" action=\"{base}/signout\"><button>Sign out</button></form></div>{m}{cards}\
-             <p class=\"mute\">Releasing a computer frees its place for another one. The first computer you release in a week frees its place at once; after that, a released computer keeps its place for 7 days. Lost a serial number? Sign out and use <b>Email my serial numbers</b>.</p>",
-            esc(email)
+             <p class=\"mute\">Releasing a computer frees its place for another one. The first computer you release in a week frees its place at once; after that, a released computer keeps its place for 7 days. Lost a serial number? Sign out and use <b>Email my serial numbers</b>.</p>\
+             <div class=\"card\"><h2 style=\"margin-top:0\">Email preferences</h2><form method=\"post\" action=\"{base}/prefs\">\
+             <p><label style=\"flex-direction:row;align-items:center;gap:8px;font-size:15px;color:var(--fg)\"><input type=\"checkbox\" name=\"reminders\" value=\"1\"{}> Remind me before software maintenance ends (30 days and 7 days before, and on the day)</label></p>\
+             <p class=\"mute\">Emails about your purchases, renewals and sign-in links are always sent. We never send marketing email.</p><button>Save preferences</button></form></div>\
+             <div class=\"card\"><h2 style=\"margin-top:0\">Email address</h2><p>Your licences are registered to <b>{}</b>. To move them to another address, enter it below. We'll email that address a link to confirm, and this address gets a link to undo the change for 14 days.</p>\
+             <form method=\"post\" action=\"{base}/email/change\" class=\"row\"><label>New email<input name=\"email\" type=\"email\" required size=\"32\" autocomplete=\"email\"></label><button>Change email address</button></form></div>",
+            esc(email),
+            if prefs.reminders { " checked" } else { "" },
+            esc(email),
         ),
     ))
+}
+
+async fn email_change<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, req: &Req) -> Result<Resp, String> {
+    let back = |m: &str| Ok(Resp::redirect(&format!("{base}/?msg={}", crate::web::encode(m))));
+    let Some(email) = cx.session_email(req).await? else { return back("Sign in again.") };
+    let new = Form::parse(&req.text()).get("email").to_lowercase();
+    if !crate::profile::valid_email(&new) {
+        return back(&crate::profile::ChangeRefusal::Invalid.message());
+    }
+    if !cx.ip_allowed(req, "email-change", 5, 3600).await? || !cx.mail_allowed(&email, "email-change", 120).await? {
+        return back("Please wait a few minutes before asking again.");
+    }
+    match cx.request_email_change(&email, &new).await? {
+        Err(why) => back(&why.message()),
+        Ok(t) => {
+            let link = account_link(cx, base, &format!("/email/confirm?t={t}"));
+            if let Err(e) = mail::send(cx, &mail::email_confirm_message(&link, &email, &new)).await {
+                eprintln!("email change: {e}");
+                return back("The confirmation email couldn't be sent. Please try again later.");
+            }
+            back(&format!("Almost done: open the link we sent to {new} to confirm the change. It works for 24 hours. Until then, your licences stay on {email}."))
+        }
+    }
+}
+
+fn account_link<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, path: &str) -> String {
+    if cx.cfg.dev { format!("http://localhost:8787{base}{path}") } else { format!("https://{}{path}", cx.cfg.hosts.account) }
+}
+
+/// The confirm or undo link lands here; the change happens on a button press (a POST), so mail
+/// scanners that fetch links don't spend it.
+async fn email_confirm_page<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, t: &str) -> Result<Resp, String> {
+    let Some((kind, old, new)) = cx.email_change(t).await? else {
+        return Ok(show(base, "Email address", "<h1>Email address</h1><div class=\"card\">This link has expired or was already used.</div>"));
+    };
+    let (text, button) = if kind == "undo" {
+        (format!("Move your Filescape licences back from <b>{}</b> to <b>{}</b>? Anyone signed in as {} is signed out.", esc(&new), esc(&old), esc(&new)), "Undo the change")
+    } else {
+        (format!("Register the Filescape licences of <b>{}</b> to <b>{}</b>? Serial numbers and activated computers stay as they are.", esc(&old), esc(&new)), "Confirm")
+    };
+    Ok(show(
+        base,
+        "Email address",
+        &format!(
+            "<h1>Email address</h1><div class=\"card\"><p>{text}</p><form method=\"post\" action=\"{base}/email/confirm\"><input type=\"hidden\" name=\"t\" value=\"{}\"><button class=\"primary\">{button}</button></form></div>",
+            esc(t)
+        ),
+    ))
+}
+
+async fn email_confirm<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, req: &Req) -> Result<Resp, String> {
+    let t = Form::parse(&req.text()).get("t");
+    let done = |body: String| Ok(show(base, "Email address", &format!("<h1>Email address</h1><div class=\"card\">{body}</div>")));
+    match cx.use_email_change(&t).await? {
+        ChangeDone::Expired => done("This link has expired or was already used.".into()),
+        ChangeDone::Refused(why) => done(esc(&why.message())),
+        ChangeDone::Undone { old, count, .. } => done(format!(
+            "<p>Done: {} registered to <b>{}</b> again.</p><p>If you didn't make the original change, someone may have had access to your email. Change your email password, then <a href=\"{base}/\">sign in</a> to check your computers and release any you don't recognise.</p>",
+            if count == 1 { "your licence is".to_string() } else { format!("your {count} licences are") },
+            esc(&old)
+        )),
+        ChangeDone::Moved { old, new, count, undo } => {
+            let link = account_link(cx, base, &format!("/email/confirm?t={undo}"));
+            if let Err(e) = mail::send(cx, &mail::email_changed_message(&link, &new, count, &old)).await {
+                eprintln!("email changed: {e}");
+            }
+            // Proving the new address is as good as a sign-in link.
+            let session = cx.new_session(&new).await?;
+            let mut r = Resp::redirect(&format!("{base}/?msg={}", crate::web::encode(&format!("Your licences are now registered to {new}. We've emailed {old} a link to undo this for 14 days."))));
+            r.headers.push(("set-cookie".into(), portal::set_cookie(&session, portal::SESSION_LIFE, !cx.cfg.dev)));
+            Ok(r)
+        }
+    }
 }
 
 /// The renewal checkout: what the renewal gives, then Paddle's overlay checkout with the renewal

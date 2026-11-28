@@ -318,6 +318,20 @@ Paid renewals that couldn't be applied (a revoked licence, a checkout without a 
 link) are listed under **Payments that need attention** on the Renewals page; refund those in
 Paddle.
 
+## Updating a server for the account dashboard
+
+Stage 3 (28 Nov 2026) turns account.filescape.app into a dashboard: licence and maintenance
+status, downloads, purchase and renewal history with Paddle receipts, reminder preferences, and
+changing the email address (confirmed from the new address, with a 14-day undo link sent to the
+old one). Sign-in and "email my serial numbers" are limited to 10 an hour per network.
+
+1. `npx wrangler@4 d1 migrations apply filescape-licences --remote` (applies
+   `0006_account_dashboard.sql`).
+2. Deploy the Worker (step 6).
+
+Receipt links need `PADDLE_API_KEY` with permission to read transactions; without it the
+history says Paddle emailed the receipt.
+
 ## Local development
 
 ```
