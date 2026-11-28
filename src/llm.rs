@@ -446,6 +446,10 @@ fn answer(
         }
         let first = usize::from(conv.first().is_some_and(|m| m.role == Role::System));
         if conv.len() <= first + 1 {
+            // Only the question is left: it may still go, with less room for the answer.
+            if toks.len() + 256 <= n_ctx {
+                break toks;
+            }
             return Err(format!("The question is too long for this model's context ({n_ctx} tokens). Shorten it, or choose a longer context."));
         }
         conv.remove(first);
@@ -839,13 +843,26 @@ impl Utf8Stream {
 /// An answer split into the model's thinking (between `<think>` and `</think>`, as Qwen 3 and
 /// DeepSeek write) and the reply itself.
 pub fn split_thinking(text: &str) -> (Option<&str>, &str) {
+    // How models mark their thinking: Qwen, DeepSeek and most others; Gemma 4; gpt-oss.
+    const MARKS: &[(&str, &str)] = &[
+        ("<think>", "</think>"),
+        ("<|channel>thought", "<channel|>"),
+        ("<|channel|>analysis<|message|>", "<|channel|>final<|message|>"),
+    ];
     let t = text.trim_start();
-    let Some(rest) = t.strip_prefix("<think>") else { return (None, text) };
-    match rest.find("</think>") {
-        Some(i) => (Some(rest[..i].trim()), rest[i + "</think>".len()..].trim_start()),
-        // Still thinking.
-        None => (Some(rest.trim()), ""),
+    for (open, close) in MARKS {
+        // While the opening mark is still arriving, nothing is shown yet.
+        if t.len() < open.len() && open.starts_with(t) && !t.is_empty() {
+            return (Some(""), "");
+        }
+        let Some(rest) = t.strip_prefix(open) else { continue };
+        return match rest.find(close) {
+            Some(i) => (Some(rest[..i].trim().trim_end_matches("<|end|><|start|>assistant").trim()), rest[i + close.len()..].trim_start()),
+            // Still thinking.
+            None => (Some(rest.trim()), ""),
+        };
     }
+    (None, text)
 }
 
 #[cfg(test)]
@@ -887,6 +904,12 @@ mod tests {
         assert_eq!(split_thinking("<think>\nhmm\n</think>\n\nHello"), (Some("hmm"), "Hello"));
         assert_eq!(split_thinking("<think>still going"), (Some("still going"), ""));
         assert_eq!(split_thinking("Plain answer"), (None, "Plain answer"));
+        // Gemma 4, with and without thoughts, and while its mark is still arriving.
+        assert_eq!(split_thinking("<|channel>thought <channel|>This is CC0."), (Some(""), "This is CC0."));
+        assert_eq!(split_thinking("<|channel>thought\nLet me see.<channel|>Answer"), (Some("Let me see."), "Answer"));
+        assert_eq!(split_thinking("<|chan"), (Some(""), ""));
+        // gpt-oss.
+        assert_eq!(split_thinking("<|channel|>analysis<|message|>Hmm.<|end|><|start|>assistant<|channel|>final<|message|>Yes."), (Some("Hmm."), "Yes."));
     }
 
     #[test]
