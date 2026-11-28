@@ -388,20 +388,18 @@ impl App {
             }
             let model = loaded.clone().unwrap_or_else(|| "Model".into());
             for (i, m) in c.conversation.iter().enumerate() {
-                if let Some(a) = c.attached.get(&i) {
-                    ui.label(egui::RichText::new(format!("About {}", a.label)).size(11.5).color(t.weak));
-                }
-                ask::message(ui, i, m.role, &m.text, &model, false);
+                let about = c.attached.get(&i).map(|a| (a.label.as_str(), a.text.as_str()));
+                ask::message(ui, i, m.role, &m.text, &model, false, about);
                 if m.role == Role::Assistant
                     && let Some(a) = (0..i).rev().find_map(|q| c.attached.get(&q))
                     && !a.paths.is_empty()
                 {
                     ask::sources(ui, i, a, &m.text, &mut reveal);
                 }
-                ui.add_space(8.0);
+                ui.add_space(18.0);
             }
             if here && let Some(a) = &c.answering {
-                ask::message(ui, c.conversation.len(), Role::Assistant, a, &model, true);
+                ask::message(ui, c.conversation.len(), Role::Assistant, a, &model, true, None);
             }
             if here && c.reading.is_some() {
                 ui.horizontal(|ui| {

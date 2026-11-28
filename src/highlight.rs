@@ -67,7 +67,44 @@ fn syntax_for(name: &str, first_line: &str) -> Option<&'static SyntaxReference> 
 
 /// The colours of `text` from the file `name`, or None for text that isn't code.
 pub fn colour(name: &str, text: &str) -> Option<Colours> {
-    let syntax = syntax_for(name, text.lines().next().unwrap_or(""))?;
+    colour_with(syntax_for(name, text.lines().next().unwrap_or(""))?, text)
+}
+
+/// The colours of `text` as code in `lang`, a fenced code block's language: a name ("rust",
+/// "python") or an extension ("rs", "py").
+pub fn colour_lang(lang: &str, text: &str) -> Option<Colours> {
+    let s = syntaxes().find_syntax_by_token(lang.trim())?;
+    if s.name == "Plain Text" {
+        return None;
+    }
+    colour_with(s, text)
+}
+
+/// Text laid out in its colours in `font`; what the spans don't cover is in `plain`.
+pub fn job(text: &str, spans: &[Span], font: eframe::egui::FontId, plain: eframe::egui::Color32) -> eframe::egui::text::LayoutJob {
+    use eframe::egui::{Color32, TextFormat};
+    let mut job = eframe::egui::text::LayoutJob::default();
+    let fmt = |color: Color32, italics: bool| TextFormat { font_id: font.clone(), color, italics, ..Default::default() };
+    let mut at = 0;
+    for s in spans {
+        if s.start >= text.len() || s.start < at || !text.is_char_boundary(s.start) || !text.is_char_boundary(s.end.min(text.len())) {
+            break;
+        }
+        if s.start > at {
+            job.append(&text[at..s.start], 0.0, fmt(plain, false));
+        }
+        let end = s.end.min(text.len());
+        job.append(&text[s.start..end], 0.0, fmt(Color32::from_rgb(s.rgb[0], s.rgb[1], s.rgb[2]), s.italic));
+        at = end;
+    }
+    if at < text.len() {
+        job.append(&text[at..], 0.0, fmt(plain, false));
+    }
+    job.wrap.max_width = f32::INFINITY;
+    job
+}
+
+fn colour_with(syntax: &SyntaxReference, text: &str) -> Option<Colours> {
     let (dark, light) = themes();
     let run = |theme: &Theme| -> Vec<Span> {
         let mut h = HighlightLines::new(syntax, theme);
@@ -99,6 +136,21 @@ pub fn colour(name: &str, text: &str) -> Option<Colours> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Code blocks in answers name their language, not a file: "rust", "python", "sh".
+    #[test]
+    fn colours_by_language_name() {
+        for lang in ["rust", "python", "sh", "js"] {
+            assert!(colour_lang(lang, "let x = 1; // hi\n").is_some(), "{lang}");
+        }
+        assert!(colour_lang("text", "plain").is_none());
+        assert!(colour_lang("no-such-language", "x").is_none());
+        let text = "fn main() {}";
+        let c = colour_lang("rust", text).unwrap();
+        let j = job(text, &c.dark, eframe::egui::FontId::monospace(12.0), eframe::egui::Color32::GRAY);
+        assert_eq!(j.text, text);
+        assert!(j.sections.len() > 1);
+    }
 
     #[test]
     fn colours_code_not_prose() {

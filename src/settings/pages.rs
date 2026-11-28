@@ -103,6 +103,10 @@ pub fn files(ui: &mut egui::Ui, cx: &mut PageCx) {
             Some("The Ask AI tab beside Preview and Details, and the Ask AI buttons in the preview pane and Quick Look. Off hides them; Ask AI is still in the AI Models workspace. It runs on this computer and never changes your files."),
             &mut d.ask_in_files,
         );
+        kit::divider(ui);
+        kit::row(ui, "Conversation text size", Some("The size of questions and answers in Ask AI, apart from the rest of Filescape's text (Settings › General › Interface size)."), |ui| {
+            kit::segmented(ui, &mut d.ask_text, &[(0, "Small"), (1, "Medium"), (2, "Large")], false);
+        });
     });
 }
 

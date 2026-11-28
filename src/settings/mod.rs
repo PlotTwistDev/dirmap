@@ -70,6 +70,8 @@ pub struct Settings {
     pub app_as_folders: bool,
     /// Ask AI in the Files workspace: the preview pane's tab, its buttons and the menu items.
     pub ask_in_files: bool,
+    /// Ask AI's conversation text: 0 small, 1 medium, 2 large.
+    pub ask_text: u8,
 
     // General
     pub theme: Theme,
@@ -212,6 +214,7 @@ impl Default for Settings {
             app_double_click: true,
             app_as_folders: false,
             ask_in_files: true,
+            ask_text: 1,
             col_percent: true,
             col_files: true,
             col_modified: true,
@@ -295,8 +298,8 @@ impl Settings {
                     (def.theme, def.units, def.stripes, def.live_tree, def.watch_changes, def.check_updates, def.ui_scale, def.system_notes, def.backup_reminder);
             }
             Tab::Files => {
-                (self.app_recognise, self.app_icons, self.app_hide_ext, self.app_double_click, self.app_as_folders, self.ask_in_files) =
-                    (def.app_recognise, def.app_icons, def.app_hide_ext, def.app_double_click, def.app_as_folders, def.ask_in_files);
+                (self.app_recognise, self.app_icons, self.app_hide_ext, self.app_double_click, self.app_as_folders, self.ask_in_files, self.ask_text) =
+                    (def.app_recognise, def.app_icons, def.app_hide_ext, def.app_double_click, def.app_as_folders, def.ask_in_files, def.ask_text);
             }
             Tab::Filtering => {
                 self.exclude_folders = def.exclude_folders;
@@ -357,6 +360,7 @@ impl Settings {
         crate::video::set_better_posters(self.video_better_poster);
         crate::thumbcache::set_rich(self.rich_thumbs);
         crate::asksuggest::set_shown(self.ask_in_files);
+        crate::asksuggest::set_text_size(self.ask_text);
         crate::apps::set_prefs(crate::apps::Prefs {
             recognise: self.app_recognise,
             icons: self.app_icons,

@@ -31,6 +31,11 @@
   [Asking about pictures](../views/ask-ai.md#asking-about-pictures).
 - Asking about an AI model file gives the model what Filescape reads from it (family, size,
   precision, context) and whether this computer could run it, instead of a guess from its name.
+- Ask AI's conversations are easier to read, the same in AI Models, the Files tab and Quick
+  Look: your questions in a tinted bubble, answers under the model's name with roomier lines
+  and paragraphs, Markdown headings, lists, tables that scroll sideways and code blocks coloured
+  by language with their own **Copy**. **Conversation text size** in Settings › Files › Ask AI
+  sets their size apart from the rest of Filescape.
 - A document too long for the model's context is no longer cut to its start: Ask AI includes the
   passages that match the question (for a licence, the clauses about commercial use or
   warranties), or passages from all through it for a general question, and says which lines

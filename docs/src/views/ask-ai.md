@@ -73,7 +73,16 @@ Type a question and press **Enter**, or **Send**. **Shift+Enter** starts a new l
 appears as it's written; **■ Stop** ends it early. **New chat** starts a new conversation with
 the same model, and **Copy** under an answer copies it.
 
-Some models, such as Qwen 3 and DeepSeek R1, think before they answer. Their thinking is folded
+Your questions sit on the right in a tinted bubble, with what they were about beside **You**;
+hover that to see exactly what the model was told. Answers start under the model's name and are
+set out from their Markdown: headings, lists, bold and italics, quotes, tables (a wide one
+scrolls sideways in a narrow panel) and code, coloured by its language once the answer is
+complete, with **Copy** above each block. Nothing in an answer is run or loaded: a web link
+opens in your browser only when you click it. Text is held to a comfortable line length when the
+panel is wide. To make the conversation's text bigger or smaller without changing the rest of
+Filescape, use **Conversation text size** in Settings › Files › Ask AI.
+
+Some models, such as Qwen 3, DeepSeek R1, Gemma 4 and gpt-oss, think before they answer. Their thinking is folded
 away under **Thought about it**; click it to read it.
 
 Under the last answer, Filescape shows how many tokens it took and how fast they were written.

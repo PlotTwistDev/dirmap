@@ -68,6 +68,7 @@ How the Files workspace shows and opens applications. See [Applications](../view
 | Setting | Default | Effect |
 |---|---|---|
 | **Show Ask AI in Files** <!-- setting:ask_in_files --> | On | Shows the **Ask AI** tab beside **Preview** and **Details** in the Files preview pane, and the **Ask AI** buttons in the preview pane and Quick Look. Off hides them; Ask AI is still in the [AI Models workspace](../views/ask-ai.md). |
+| **Conversation text size** <!-- setting:ask_text --> | Medium | The size of questions and answers in Ask AI (Small, Medium or Large), apart from the rest of Filescape's text. |
 
 ## Filtering
 

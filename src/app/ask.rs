@@ -861,15 +861,8 @@ impl App {
             }
             let model = name.clone().unwrap_or_else(|| "Model".into());
             for (i, m) in self.ask.main.conversation.iter().enumerate() {
-                if let Some(a) = self.ask.main.attached.get(&i) {
-                    ui.weak(format!("📎 About {}", a.label)).on_hover_ui(|ui| {
-                        ui.set_max_width(520.0);
-                        ui.label("What the model was told with this question:");
-                        let text = &a.text;
-                        ui.weak(text.chars().take(1500).collect::<String>() + if text.chars().count() > 1500 { "…" } else { "" });
-                    });
-                }
-                message(ui, i, m.role, &m.text, &model, false);
+                let about = self.ask.main.attached.get(&i).map(|a| (a.label.as_str(), a.text.as_str()));
+                message(ui, i, m.role, &m.text, &model, false, about);
                 // Under an answer: what it was based on.
                 if m.role == Role::Assistant
                     && let Some(a) = i.checked_sub(1).and_then(|q| self.ask.main.attached.get(&q))
@@ -877,10 +870,10 @@ impl App {
                 {
                     sources(ui, i, a, &m.text, &mut reveal);
                 }
-                ui.add_space(10.0);
+                ui.add_space(18.0);
             }
             if let Some(t) = &self.ask.main.answering {
-                message(ui, self.ask.main.conversation.len(), Role::Assistant, t, &model, true);
+                message(ui, self.ask.main.conversation.len(), Role::Assistant, t, &model, true, None);
             }
             if let (Some(s), None) = (&self.ask.main.last, &self.ask.main.answering) {
                 let speed = if s.seconds > 0.0 { format!(" · {:.1} tokens a second", s.tokens as f32 / s.seconds) } else { String::new() };
@@ -1183,44 +1176,90 @@ impl App {
     }
 }
 
-/// One message of the conversation. The model's thinking, if it shows any, is folded away.
-pub(super) fn message(ui: &mut egui::Ui, i: usize, role: Role, text: &str, model: &str, writing: bool) {
+/// The width text reads best at: about 85 characters of the conversation's text.
+fn reading_width(ui: &egui::Ui, body: f32) -> f32 {
+    // Clear of the scroll bar on the right.
+    (ui.available_width() - 10.0).min(body * 48.0)
+}
+
+/// One message of the conversation, the same in AI Models, the Files tab and Quick Look's: the
+/// user's in a tinted bubble on the right, the model's under its name, its Markdown set out with
+/// room to breathe. The model's thinking, if it shows any, is folded away. `about` is what the
+/// question was asked about: a short label and what the model was told, shown on hover.
+pub(super) fn message(ui: &mut egui::Ui, i: usize, role: Role, text: &str, model: &str, writing: bool, about: Option<(&str, &str)>) {
     let t = kit::tokens(ui);
+    let body = crate::asksuggest::text_size();
+    let line = (body * 1.5).round();
     match role {
         Role::User => {
-            ui.label(egui::RichText::new("You").strong().color(t.accent));
-            ui.add(egui::Label::new(text).wrap().selectable(true));
+            let avail = ui.available_width() - 10.0;
+            let max = (avail * 0.85).min(body * 40.0);
+            ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+                ui.set_max_width(avail);
+                egui::Frame::new().fill(t.wash(Tone::Accent)).corner_radius(10.0).inner_margin(egui::Margin { left: 12, right: 12, top: 6, bottom: 8 }).show(ui, |ui| {
+                    ui.set_max_width(max);
+                    // Inside the bubble, text runs left to right as usual.
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("You").size(11.5).strong().color(t.accent));
+                        if let Some((label, told)) = about {
+                            ui.label(egui::RichText::new(format!("· about {label}")).size(11.5).color(t.weak)).on_hover_ui(|ui| {
+                                ui.set_max_width(520.0);
+                                ui.label("What the model was told with this question:");
+                                ui.weak(told.chars().take(1500).collect::<String>() + if told.chars().count() > 1500 { "…" } else { "" });
+                            });
+                        }
+                    });
+                    ui.add(egui::Label::new(egui::RichText::new(text).size(body).line_height(Some(line)).color(t.text)).wrap().selectable(true));
+                    });
+                });
+            });
         }
         _ => {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(model).strong());
+                let (r, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+                ui.painter().rect_filled(r, 6.0, t.wash(Tone::Accent));
+                kit::icons::paint(ui.painter(), r.shrink(5.0), kit::Icon::Ai, t.accent);
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new(model).strong().size(13.0));
+                ui.label(egui::RichText::new("· generated on this computer").size(11.5).color(t.weak));
                 if writing {
                     ui.spinner();
                 }
             });
-            let (thinking, reply) = llm::split_thinking(text);
-            if let Some(th) = thinking.filter(|t| !t.is_empty()) {
-                let title = if writing && reply.is_empty() { "Thinking…" } else { "Thought about it" };
-                egui::CollapsingHeader::new(egui::RichText::new(title).weak()).id_salt(("ask-think", i)).show(ui, |ui| {
-                    ui.add(egui::Label::new(egui::RichText::new(th).weak()).wrap().selectable(true));
-                });
-            }
-            if !reply.is_empty() {
-                formatted(ui, i, reply);
-                if !writing {
-                    ui.horizontal(|ui| {
-                        if ui.small_button("Copy").on_hover_text("Copy this answer").clicked() {
-                            ui.ctx().copy_text(reply.to_string());
-                        }
+            ui.add_space(4.0);
+            let width = reading_width(ui, body);
+            ui.scope(|ui| {
+                ui.set_max_width(width);
+                let (thinking, reply) = llm::split_thinking(text);
+                if let Some(th) = thinking.filter(|t| !t.is_empty()) {
+                    let title = if writing && reply.is_empty() { "Thinking…" } else { "Thought about it" };
+                    egui::CollapsingHeader::new(egui::RichText::new(title).weak()).id_salt(("ask-think", i)).show(ui, |ui| {
+                        ui.add(egui::Label::new(egui::RichText::new(th).weak().line_height(Some(line))).wrap().selectable(true));
                     });
                 }
-            }
+                if !reply.is_empty() {
+                    formatted(ui, i, reply, writing);
+                    if !writing {
+                        ui.add_space(2.0);
+                        ui.horizontal(|ui| {
+                            if ui.small_button("Copy").on_hover_text("Copy this answer").clicked() {
+                                ui.ctx().copy_text(reply.to_string());
+                            }
+                        });
+                    }
+                } else if writing && thinking.is_none() {
+                    ui.weak("Writing…");
+                }
+            });
         }
     }
 }
 
-/// An answer, with its Markdown (lists, bold, code) formatted. Links are shown but not opened.
-fn formatted(ui: &mut egui::Ui, i: usize, text: &str) {
+/// An answer, with its Markdown set out: headings, lists, tables, quotes, and code with a copy
+/// button. Nothing in it is run or fetched; a link opens a web page only when clicked. While the
+/// answer is still arriving, what's there is set out as it comes, and code isn't coloured yet.
+fn formatted(ui: &mut egui::Ui, i: usize, text: &str, writing: bool) {
     use crate::help::{doc, render};
     let key = egui::Id::new(("ask-md", i, text.len()));
     let blocks = ui.data(|d| d.get_temp::<Arc<Vec<doc::Block>>>(key)).unwrap_or_else(|| {
@@ -1230,7 +1269,9 @@ fn formatted(ui: &mut egui::Ui, i: usize, text: &str) {
     });
     static NO_DOCS: std::sync::OnceLock<doc::Docs> = std::sync::OnceLock::new();
     let mut images = std::collections::HashMap::new();
+    let body = crate::asksuggest::text_size();
     let mut out = render::Out {
+        look: render::Look { body, line: 1.5, gap: 12.0, chat: true, colour_code: !writing },
         page: "",
         docs: NO_DOCS.get_or_init(|| doc::Docs::from_sources(&[])),
         images: &mut images,
@@ -1239,6 +1280,9 @@ fn formatted(ui: &mut egui::Ui, i: usize, text: &str) {
         anchors: Vec::new(),
     };
     render::blocks(ui, &mut out, &blocks);
+    if let Some(render::Nav::Url(u)) = out.nav {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(u));
+    }
 }
 
 /// The model library as facts for a question: each model's kind, size, app, and whether it's an
