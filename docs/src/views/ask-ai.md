@@ -201,6 +201,20 @@ only partly listed ("Samples: listed 40 of 1,250 items by name, the rest only co
 answer covers only what the model was given. Hover the line to see everything; ask about fewer
 items, or one on its own, to give it more room.
 
+Ask AI asks the model to cite the files it relies on, like `[config.yaml:12]`, and sends text
+files with their lines numbered so it can. Under the answer, **Cited** lists those references,
+each checked by Filescape against what the model was actually given:
+
+- A tick: the file is among the items asked about (or inside a folder asked about), and the line
+  was sent to the model. Hover it to see that line as it is in the file; click it to show the file
+  in Files.
+- A warning: the file is real and among the items, but the line can't be checked, because the
+  model wasn't sent that file's lines or the line is past what was sent.
+- Crossed out: no such file was given to the model, so the reference may be made up.
+
+Words in brackets that aren't file names are left alone, and nothing outside the items you asked
+about is ever linked.
+
 **Measured by Filescape** under an answer opens the names, sizes, dates and counts Filescape read
 from the disk itself. Those are facts; the answer above them is the model's interpretation of
 them.
