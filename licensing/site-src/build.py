@@ -178,6 +178,62 @@ def formats_filters():
     return groups, levels, legend
 
 
+# The Free and Pro table on the homepage. Which tier and area each feature is in comes from the
+# app's entitlement matrix (licensing/core/src/features.rs), so the site can't say something is
+# free that the app charges for, or the reverse. The matrix's own descriptions also cover planned
+# work, so the site's wording is kept here, describing only what the released app does. A new
+# matrix row stops the build until it has wording here (or is listed in NOT_BUILT).
+FEATURE_TEXT = {
+    "FileBrowser": "Browse, two panes, tabs, previews, open, copy, move, rename, delete and undo",
+    "DiskMap": "Scan drives; treemap, sunburst, folder tree, file types and sizes; cloud sizes and status",
+    "Filters": "Show only some types of file, or files larger or smaller than a size",
+    "CustomFilter": "Your own name patterns (Ctrl+F), presets and recent filters",
+    "SequenceFilter": "Find numbered frame sequences and missing frames",
+    "Remote": "SFTP, FTP(S) and WebDAV, saved sites and an SSH terminal",
+    "RemoteTransfers": "The transfer queue for copies to and from servers",
+    "SequencePlayer": "Play EXR, DPX, PNG and TIFF sequences, with LUTs and A/B wipe",
+    "BatchRename": "Rename many files at once by rules, with a preview",
+    "FolderCompare": "Compare Folders and sync",
+    "SplatCompare": "Compare two Gaussian splat scenes side by side",
+    "SplatProjects": "Breakdowns of splat training projects and their saved scenes",
+    "Duplicates": "Find duplicate files across a scan",
+    "Archives": "Browse into ZIP, 7z and tar archives and extract them",
+    "SavedSearches": "Save a search to run again",
+    "Snapshots": "Save a scan and compare later scans with it",
+    "CloudManagement": "Free up or keep whole cloud folders at once, and the Reclaimable view",
+    "AiModels": "Find every model, look inside it, health checks, will-it-run, copies and unused downloads, delete or move one at a time",
+    "AskAi": "Chat with a model offline, ask about a file, with any graphics card",
+    "ModelLab": "Tokens, probabilities, sampling, speed and what happens inside a model",
+    "ModelAutomation": "Move or clean up many models at once",
+    "Quantize": "Make a smaller copy of a model; the original is kept",
+    "ResearchAutomation": "Speed tests across several models at once",
+}
+NOT_BUILT = {"AiBatch"}  # in the matrix for planning, not in the app yet: never listed
+AREA_LABEL = {"Files": "Files", "Storage": "Storage", "Cloud": "Cloud", "Remote": "Servers", "AiModels": "AI models"}
+
+
+def feature_table():
+    """Rows for the Free and Pro table, in the matrix's order, grouped by area."""
+    src = (REPO / "licensing/core/src/features.rs").read_text()
+    body = src[src.index("pub const MATRIX"):]
+    rows = re.findall(r'row\(F::(\w+),\s*(Free|Pro),\s*A::(\w+),\s*"((?:[^"\\]|\\.)*)"', body)
+    assert rows, "couldn't read MATRIX in features.rs"
+    by_area = {}
+    for feat, tier, area, name in rows:
+        if feat in NOT_BUILT:
+            continue
+        assert feat in FEATURE_TEXT, f"features.rs has {feat}: add its wording to FEATURE_TEXT in build.py"
+        by_area.setdefault(area, []).append((name, FEATURE_TEXT[feat], tier))
+    out = []
+    for area in ("Files", "Storage", "Cloud", "Remote", "AiModels"):
+        out.append(f'<tr class="area"><th colspan="3" scope="colgroup">{AREA_LABEL[area]}</th></tr>')
+        for name, text, tier in by_area.get(area, []):
+            free = '<td class="yes">Free</td>' if tier == "Free" else '<td class="no"><span class="sr">Not in Free</span>—</td>'
+            out.append(f'<tr><th scope="row">{html.escape(name)}<span>{html.escape(text)}</span></th>{free}<td class="yes">Included</td></tr>')
+    out.append('<tr><th scope="row">Every file preview<span>All supported formats, in Quick Look, the preview pane, Icons view and on the map</span></th><td class="yes">Free</td><td class="yes">Included</td></tr>')
+    return "\n".join(out)
+
+
 def md_inline(text):
     """Bold, code and links from the manual's Markdown. Links into the manual become plain text,
     since the Help Centre lives in the app; web links stay links."""
@@ -270,6 +326,7 @@ for f in (SRC / "fonts").glob("*.woff2"):
 table, n_formats, n_exts = formats_table()
 F_GROUPS, F_LEVELS, F_LEGEND = formats_filters()
 NEWS, NEWS_JUMP = whats_new()
+FEATURES = feature_table()
 urls = []
 # Download checksums: published only when ../site/SHA256SUMS.txt exists (licensing/SETUP.md step 9
 # says how to make it), so the site never shows sums for files it can't vouch for.
@@ -283,6 +340,7 @@ def render(path, out, src, title, og_title, desc, key, extra_head=""):
     body = (SRC / src).read_text()
     body = (body.replace("{{formats_table}}", table)
                 .replace("{{formats_count}}", str(n_formats))
+                .replace("{{feature_table}}", FEATURES)
                 .replace("{{formats_groups}}", F_GROUPS)
                 .replace("{{formats_levels}}", F_LEVELS)
                 .replace("{{formats_legend}}", F_LEGEND)
@@ -321,6 +379,8 @@ KNOWN = {out for _, out, *_ in PAGES} | {p.name for p in DIST.glob("*.html")}
 for path, out, src, title, og_title, desc, key, priority in PAGES:
     render(path, out, src, title, og_title, desc, key)
     sources = [SRC / "head.html", SRC / "nav.html", SRC / "foot.html", SRC / src]
+    if out == "index.html":
+        sources.append(REPO / "licensing/core/src/features.rs")
     if out == "formats.html":
         sources += [REPO / "docs/src/reference/formats.md", REPO / "src/formats.rs"]
     if out == "whats-new.html":
