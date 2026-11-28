@@ -115,3 +115,10 @@ debug = "line-tables-only"
 # Puts the app icon (packaging/filescape.ico) into filescape.exe.
 [target."cfg(windows)".build-dependencies]
 winresource = "0.1"
+
+# On Windows and Linux the engine ships as files beside the app, loaded when it starts: a build of
+# the processor engine for each kind of processor, and Vulkan for graphics cards. A computer
+# without Vulkan drivers (or without AVX2) still runs models, on the processor. On a Mac the
+# engine is built in, with Metal.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+llama-cpp-2 = { version = "=0.1.161", default-features = false, features = ["dynamic-backends", "vulkan"] }

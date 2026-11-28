@@ -52,7 +52,11 @@ impl Hardware {
             // macOS lets the GPU use about three quarters of memory by default.
             self.ram / 4 * 3
         } else {
-            self.gpus.iter().map(|g| g.vram).max().map_or(0, |v| v.saturating_sub(v / 10).saturating_sub(300 << 20))
+            // The card's memory as its driver tool reports it, or else as Vulkan does (Intel and
+            // AMD cards on Windows, which have no such tool).
+            let found = self.gpus.iter().map(|g| g.vram).max().unwrap_or(0);
+            let v = if found > 0 { found } else { self.runtime.iter().filter(|d| d.gpu).map(|d| d.total).max().unwrap_or(0) };
+            v.saturating_sub(v / 10).saturating_sub(300 << 20)
         }
     }
 
@@ -69,9 +73,17 @@ impl Hardware {
 }
 
 /// Whether Filescape's own runtime puts models on the graphics chip: on Apple silicon, where
-/// llama.cpp uses Metal. Elsewhere it is built for the processor only.
+/// llama.cpp uses Metal, and on Windows and Linux where it found a graphics card through Vulkan.
+/// An Intel Mac, or a PC without Vulkan drivers, runs models on the processor.
 pub fn filescape_gpu() -> bool {
-    cfg!(all(target_os = "macos", target_arch = "aarch64"))
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return true;
+    }
+    if cfg!(target_os = "macos") {
+        return false;
+    }
+    static GPU: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *GPU.get_or_init(|| runtime_devices().iter().any(|d| d.gpu))
 }
 
 pub fn detect() -> Hardware {
@@ -109,6 +121,7 @@ fn runtime_devices() -> Vec<Device> {
     if crate::llm::processor_problem().is_some() {
         return Vec::new();
     }
+    crate::llm::load_engine();
     llama_cpp_2::list_llama_ggml_backend_devices()
         .into_iter()
         .map(|d| Device {

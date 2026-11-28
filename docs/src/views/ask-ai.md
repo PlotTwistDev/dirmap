@@ -35,9 +35,12 @@ depending on the model's size and the disk. **Unload** frees the memory again.
   question gets the same answer; high is more varied, and more likely to wander.
 
 On a Mac with Apple silicon, models run on the graphics chip. On Windows and Linux they run on the
-processor, which needs one with AVX2 (nearly every PC made since 2015). A small model of 1 to 4
-billion parameters answers at a comfortable reading speed on most computers; larger ones are
-slower.
+graphics card if its drivers support Vulkan (most cards from NVIDIA, AMD and Intel made since
+2016 do): as much of the model as fits on the card, the rest on the processor. Without Vulkan
+they run on the processor, using the fastest instructions it has. The line under the model list
+says where the loaded model runs. On an Intel Mac models run on the processor, which needs AVX2. A
+small model of 1 to 4 billion parameters answers at a comfortable reading speed on most
+computers; larger ones are slower.
 
 ## Getting a small model
 

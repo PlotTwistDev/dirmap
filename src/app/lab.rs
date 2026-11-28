@@ -350,7 +350,7 @@ impl App {
             path,
             when: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64),
             context: self.ask.actual_context,
-            gpu: super::ask::use_gpu(),
+            gpu: self.ask.gpu_layers.0 > 0,
             threads,
             read: b.read,
             write: b.write,
@@ -358,7 +358,7 @@ impl App {
             read_speed,
             write_speed,
             first_token,
-            device: crate::fit::device_name(super::ask::use_gpu()),
+            device: crate::fit::device_name(self.ask.gpu_layers.0 > 0),
         };
         match crate::lab::results_file().map(|f| crate::lab::save_result(&f, r.clone())) {
             Some(Ok(all)) => l.results = Some(all),

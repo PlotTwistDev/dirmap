@@ -914,8 +914,9 @@ fn this_computer(ui: &mut egui::Ui, hw: &crate::fit::Hardware, detected: u64, vr
             match (crate::fit::filescape_gpu(), gpu) {
                 (true, Some(g)) => ui.label(format!("The graphics chip ({}, {})", g.backend, g.description)),
                 (true, None) => ui.label("The graphics chip (Metal)"),
-                _ if crate::llm::processor_problem().is_some() => ui.label("Nothing: this processor lacks AVX2, which Filescape's AI runtime needs"),
-                _ => ui.label("The processor. Filescape's AI runtime doesn't use graphics cards on this computer yet; Ollama and LM Studio can."),
+                _ if crate::llm::processor_problem().is_some() => ui.label("Nothing: this processor lacks AVX2, which Filescape's AI runtime needs on an Intel Mac"),
+                _ if cfg!(target_os = "macos") => ui.label("The processor. On an Intel Mac, Filescape's AI runtime doesn't use the graphics chip; Ollama and LM Studio may."),
+                _ => ui.label("The processor: no graphics card was found through Vulkan. Updating the graphics drivers can add it."),
             };
             ui.end_row();
         });

@@ -60,8 +60,9 @@ pub struct LoadRequest {
     pub path: PathBuf,
     /// Context length in tokens.
     pub context: u32,
-    /// Put the model's layers on the graphics chip (Apple silicon).
-    pub gpu: bool,
+    /// How many of the model's layers to put on the graphics chip: all of them (`u32::MAX`) on
+    /// Apple silicon, as many as fit on a graphics card, 0 for the processor only.
+    pub gpu_layers: u32,
 }
 
 pub enum Request {
@@ -100,7 +101,9 @@ pub struct Steer {
 pub enum Event {
     Loading,
     /// Loaded, with its context length and number of layers.
-    Loaded { context: u32, seconds: f32, layers: u32 },
+    /// The model is ready: its context length, how long loading took, its layers and how many of
+    /// them are on the graphics chip (0 when it runs on the processor).
+    Loaded { context: u32, seconds: f32, layers: u32, gpu_layers: u32 },
     /// More of the answer.
     Text(String),
     Done(Stats),
@@ -165,7 +168,9 @@ impl Engine {
 
 /// Why a model can't run on this processor, if it can't. llama.cpp is built for AVX2 on x86-64.
 pub fn processor_problem() -> Option<&'static str> {
-    #[cfg(target_arch = "x86_64")]
+    // On Windows and Linux the engine has a build for every kind of x86 processor and picks the
+    // best one when it starts; the Mac build for Intel is a single build that needs AVX2.
+    #[cfg(all(target_arch = "x86_64", target_os = "macos"))]
     {
         if !(std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma")) {
             return Some("This processor lacks AVX2, which Ask AI needs (most PCs made since 2015 have it).");
@@ -174,10 +179,44 @@ pub fn processor_problem() -> Option<&'static str> {
     None
 }
 
+/// Where the engine's files are: beside the app (Windows, the Linux .tar.gz), in
+/// `../lib/filescape` from it (the .deb, .rpm and AppImage), or where the build put them (when
+/// run with `cargo run`).
+#[cfg(not(target_os = "macos"))]
+fn engine_dirs() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(std::path::Path::to_path_buf)) {
+        v.push(dir.join("../lib/filescape"));
+        v.push(dir);
+    }
+    if let Some(d) = llama_cpp_sys_2::BACKENDS_DIR {
+        v.push(PathBuf::from(d));
+    }
+    v
+}
+
+/// Loads the engine's parts once, before anything asks llama.cpp about devices or models. On
+/// Windows and Linux they are files beside the app: the processor engine built for each kind of
+/// processor (the best this one can run is used) and Vulkan for graphics cards, which loads only
+/// where Vulkan drivers are installed. On a Mac it is built into the app.
+pub(crate) fn load_engine() {
+    #[cfg(not(target_os = "macos"))]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let has_cpu = |d: &std::path::Path| std::fs::read_dir(d).into_iter().flatten().flatten().any(|e| e.file_name().to_string_lossy().contains("ggml-cpu"));
+            if let Some(d) = engine_dirs().into_iter().find(|d| has_cpu(d)) {
+                llama_cpp_2::llama_backend::load_backends_from_path(&d);
+            }
+        });
+    }
+}
+
 /// The engine, set up once per run of the app.
 pub(crate) fn backend() -> Result<&'static LlamaBackend, String> {
     static B: std::sync::OnceLock<Result<LlamaBackend, String>> = std::sync::OnceLock::new();
     B.get_or_init(|| {
+        load_engine();
         let mut b = LlamaBackend::init().map_err(|e| e.to_string())?;
         b.void_logs();
         Ok(b)
@@ -214,22 +253,33 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
             }
         };
         let t = Instant::now();
-        let params = LlamaModelParams::default().with_n_gpu_layers(if req.gpu { 999 } else { 0 });
-        let model = match LlamaModel::load_from_file(backend, &req.path, &params) {
+        let threads = threads();
+        let cparams = |m: &LlamaModel| {
+            let context = req.context.min(m.n_ctx_train().max(512)).max(512);
+            LlamaContextParams::default().with_n_ctx(NonZeroU32::new(context)).with_n_batch(512).with_n_threads(threads).with_n_threads_batch(threads)
+        };
+        // On the graphics chip if asked. If the graphics card hasn't the room after all (its
+        // memory is shared with other apps), load it again on the processor rather than fail.
+        let mut gpu_layers = req.gpu_layers;
+        let model = loop {
+            let params = LlamaModelParams::default().with_n_gpu_layers(gpu_layers.min(999));
+            match LlamaModel::load_from_file(backend, &req.path, &params) {
+                Ok(m) if gpu_layers > 0 && !cfg!(target_os = "macos") && m.new_context(backend, cparams(&m)).is_err() => gpu_layers = 0,
+                Ok(m) => break Ok(m),
+                Err(_) if gpu_layers > 0 && !cfg!(target_os = "macos") => gpu_layers = 0,
+                Err(e) => break Err(e),
+            }
+        };
+        let model = match model {
             Ok(m) => m,
             Err(e) => {
                 let _ = tx.send(Event::Error(format!("The model couldn't be loaded: {e}")));
                 continue;
             }
         };
+        let gpu_layers = gpu_layers.min(model.n_layer());
         let context = req.context.min(model.n_ctx_train().max(512)).max(512);
-        let threads = threads();
-        let cparams = LlamaContextParams::default()
-            .with_n_ctx(NonZeroU32::new(context))
-            .with_n_batch(512)
-            .with_n_threads(threads)
-            .with_n_threads_batch(threads);
-        let mut ctx = match model.new_context(backend, cparams) {
+        let mut ctx = match model.new_context(backend, cparams(&model)) {
             Ok(c) => c,
             Err(e) => {
                 let _ = tx.send(Event::Error(format!("There isn't enough memory for this model at {context} tokens of context: {e}")));
@@ -237,7 +287,7 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
             }
         };
         let template = model.chat_template(None).ok();
-        let _ = tx.send(Event::Loaded { context, seconds: t.elapsed().as_secs_f32(), layers: model.n_layer() });
+        let _ = tx.send(Event::Loaded { context, seconds: t.elapsed().as_secs_f32(), layers: model.n_layer(), gpu_layers });
         // Tokens already in the context, from the previous turn.
         let mut cached: Vec<LlamaToken> = Vec::new();
         // The Lab's last look inside, and the model's last steps (read when first needed).
@@ -711,7 +761,7 @@ mod tests {
     fn predicts_with_probabilities() {
         let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
         let e = Engine::start();
-        e.send(Request::Load(LoadRequest { path: path.into(), context: 512, gpu: false }));
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 512, gpu_layers: 0 }));
         let settings = crate::lab::Settings { temperature: 0.0, ..Default::default() };
         let run = |e: &Engine, continuation: &str, steps| {
             e.send(Request::Predict { text: "Hello there".into(), chat: false, continuation: continuation.into(), steps, settings });
@@ -743,7 +793,7 @@ mod tests {
     fn looks_inside() {
         let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
         let e = Engine::start();
-        e.send(Request::Load(LoadRequest { path: path.into(), context: 512, gpu: false }));
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 512, gpu_layers: 0 }));
         let next = |e: &Engine| loop {
             match e.rx.recv_timeout(std::time::Duration::from_secs(120)).unwrap() {
                 Event::Error(err) => panic!("{err}"),
@@ -778,7 +828,7 @@ mod tests {
     fn speed_test_runs() {
         let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
         let e = Engine::start();
-        e.send(Request::Load(LoadRequest { path: path.into(), context: 1024, gpu: false }));
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 1024, gpu_layers: 0 }));
         e.send(Request::Bench(crate::lab::BenchSettings { read: 128, write: 16, runs: 3 }));
         let mut runs = 0;
         loop {
@@ -816,7 +866,7 @@ mod tests {
     fn runs_a_model() {
         let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
         let e = Engine::start();
-        e.send(Request::Load(LoadRequest { path: path.into(), context: 1024, gpu: false }));
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 1024, gpu_layers: 0 }));
         e.send(Request::Ask { conversation: vec![Message { role: Role::User, text: "Say hello.".into() }], sampling: Sampling { temperature: 0.0, max_tokens: 16 } });
         let mut text = String::new();
         loop {
