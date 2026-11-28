@@ -160,3 +160,21 @@ mod tests {
         assert_eq!(super::esc("<a href=\"x\">"), "&lt;a href=&quot;x&quot;&gt;");
     }
 }
+
+/// Whether a form POST came from `host` itself (cross-site request protection), from the browser's
+/// own `Sec-Fetch-Site` and `Origin` headers, which pages can't set.
+///
+/// Browsers send `Origin: null` for a form posted from a page whose Referrer-Policy is
+/// `no-referrer`, even to the same site, so `null` is accepted when `Sec-Fetch-Site` says
+/// same-origin (a browser that sends one sends both).
+pub fn same_origin_post(req: &crate::Req, host: &str, dev: bool) -> bool {
+    let sec = req.header("sec-fetch-site");
+    if sec.is_some_and(|s| s != "same-origin" && s != "none") {
+        return false;
+    }
+    match req.header("origin").map(|o| o.trim_end_matches('/')) {
+        None => true,
+        Some("null") => sec.is_some(),
+        Some(o) => o == format!("https://{host}") || (dev && (o.starts_with("http://localhost") || o.starts_with("http://127.0.0.1"))),
+    }
+}

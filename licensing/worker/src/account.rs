@@ -14,11 +14,7 @@ fn nav(base: &str) -> String {
 
 /// A form posted from this site (not another one). Session cookies are SameSite=Lax as well.
 fn same_site<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req) -> bool {
-    let origin_ok = req.header("origin").is_none_or(|o| {
-        let o = o.trim_end_matches('/');
-        o == format!("https://{}", cx.cfg.hosts.account) || (cx.cfg.dev && (o.starts_with("http://localhost") || o.starts_with("http://127.0.0.1")))
-    });
-    origin_ok && req.header("sec-fetch-site").is_none_or(|s| s == "same-origin" || s == "none")
+    crate::web::same_origin_post(req, &cx.cfg.hosts.account, cx.cfg.dev)
 }
 
 fn show(base: &str, title: &str, body: &str) -> Resp {

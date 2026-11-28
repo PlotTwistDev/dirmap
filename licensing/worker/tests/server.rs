@@ -496,6 +496,12 @@ fn admin_needs_cloudflare_access_and_same_site_posts() {
     // Posts from elsewhere are refused even in development.
     let r = w.call("POST", "localhost", "/admin/settings", &[("origin", "https://evil.example")], "perpetual_limit=1");
     assert_eq!(r.status, 403);
+    let r = w.call("POST", "localhost", "/admin/settings", &[("origin", "http://localhost:8787"), ("sec-fetch-site", "cross-site")], "perpetual_limit=1");
+    assert_eq!(r.status, 403);
+    let r = w.call("POST", "localhost", "/admin/settings", &[("origin", "null")], "perpetual_limit=1");
+    assert_eq!(r.status, 403);
+    let r = w.call("POST", "localhost", "/admin/settings", &[("origin", "null"), ("sec-fetch-site", "same-origin")], "perpetual_limit=1");
+    assert_ne!(r.status, 403, "{}", r.body);
     // Production: no token, no entry.
     w.cfg.dev = false;
     assert_eq!(w.call("GET", "admin.filescape.app", "/", &[], "").status, 403);
@@ -705,6 +711,13 @@ fn customers_sign_in_with_an_emailed_link_and_release_computers() {
     // Another site can't post the form.
     let evil = w.call("POST", "account.filescape.app", "/release", &[("cookie", &cookie), ("origin", "https://evil.example")], "activation=act-mac-0001");
     assert_eq!(evil.status, 403);
+    // Browsers that hide the origin send "null": allowed only when Sec-Fetch-Site vouches for it.
+    let hidden = w.call("POST", "account.filescape.app", "/release", &[("cookie", &cookie), ("origin", "null")], "activation=act-none");
+    assert_eq!(hidden.status, 403);
+    let cross = w.call("POST", "account.filescape.app", "/release", &[("cookie", &cookie), ("origin", "null"), ("sec-fetch-site", "cross-site")], "activation=act-none");
+    assert_eq!(cross.status, 403);
+    let same = w.call("POST", "account.filescape.app", "/release", &[("cookie", &cookie), ("origin", "null"), ("sec-fetch-site", "same-origin")], "activation=act-none");
+    assert_ne!(same.status, 403, "{}", same.body);
     // Release the Mac: the seat frees and the Mac's next check finds it ended.
     let r = acc("POST", "/release", &cookie, "activation=act-mac-0001");
     assert_eq!(r.status, 303);
@@ -1115,11 +1128,12 @@ fn token_from(location: &str) -> String {
 fn renewals_are_admin_priced_and_never_use_a_purchase_price() {
     let w = world();
     let r = w.admin("/renewals", "enabled=1&standard_id=pri_filescape&standard_label=%242.99");
-    assert!(r.header("location").unwrap().contains("purchase%20price"), "{:?}", r.header("location"));
+    assert!(r.body.contains("Not saved") && r.body.contains("purchase price"), "{}", r.body);
+    // A failed save shows the form again with what was typed.
     let r = w.admin("/renewals", "enabled=1&standard_id=pri_renew&standard_label=");
-    assert!(r.header("location").unwrap().contains("label"));
+    assert!(r.body.contains("short label") && r.body.contains("value=\"pri_renew\"") && r.body.contains("Not offered"), "{}", r.body);
     let r = w.admin("/renewals", "enabled=1");
-    assert!(r.header("location").unwrap().contains("set%20the%20standard%20price"));
+    assert!(r.body.contains("set the standard price"));
     offer_renewals(&w);
     // Switching to a promotional price keeps the old one accepted for open checkouts.
     w.admin("/renewals", "enabled=1&standard_id=pri_renew2&standard_label=%242.99&promo_id=pri_promo&promo_label=%241.99&use_promo=1");
