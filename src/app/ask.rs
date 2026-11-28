@@ -26,12 +26,12 @@ pub(super) struct AskState {
     pub lab_state: super::lab::LabState,
     pub(super) engine: Option<llm::Engine>,
     /// The model picked on the left: (file, name).
-    picked: Option<(PathBuf, String)>,
+    pub(super) picked: Option<(PathBuf, String)>,
     /// The model the engine has loaded, and its context length.
     pub(super) loaded: Option<(PathBuf, String, u32)>,
     pub(super) phase: Phase,
     /// Checking a model fits in memory before loading it.
-    check: Option<mpsc::Receiver<Result<llm::LoadRequest, String>>>,
+    pub(super) check: Option<mpsc::Receiver<Result<llm::LoadRequest, String>>>,
     conversation: Vec<Message>,
     /// What was attached to a question, by its index in `conversation`. Sent ahead of the
     /// question, shown only as a line above it, with its sources under the answer.
@@ -112,7 +112,7 @@ impl AskState {
 }
 
 /// Models that Filescape can run, with the list's index.
-fn runnable(list: &[Model]) -> Vec<(usize, &Model)> {
+pub(super) fn runnable(list: &[Model]) -> Vec<(usize, &Model)> {
     // Models that write text: not embedding, speech or vision-only ones, which can't chat.
     let mut v: Vec<(usize, &Model)> = list.iter().enumerate().filter(|(_, m)| m.runnable() && m.extra == 0 && crate::modelkind::chats(m)).collect();
     // Smallest first: they load and answer quickest.
@@ -256,6 +256,9 @@ impl App {
         }
         if let Some((r, w, f, t)) = benched {
             self.lab_benched(r, w, f, t);
+        }
+        if self.ask.lab_state.suites.suite.as_ref().is_some_and(|s| s.running()) {
+            self.lab_suite_tick();
         }
         if let Some((side, run)) = compared_ev {
             self.lab_compared(side, run);
@@ -427,7 +430,7 @@ impl App {
     }
 
     /// Checks the picked model fits in memory, then loads it.
-    fn load_model(&mut self, m: &Model) {
+    pub(super) fn load_model(&mut self, m: &Model) {
         let Some(f) = m.files.first() else { return };
         self.ask.picked = Some((f.path.clone(), m.name.clone()));
         self.ask.problem = None;

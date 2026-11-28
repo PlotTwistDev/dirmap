@@ -156,6 +156,19 @@ CSV file for a spreadsheet, with every setting and the hardware each test ran wi
 
 Other busy apps slow the test down, and the test slows them down while it runs.
 
+### Testing several models (Professional)
+
+**Test several models**, under the speed controls, tests a list of models one after another with
+the same Read, Write and Runs settings, so you don't have to load each one yourself. Tick the
+models (or **Tick all**) and press **Test N models**. Each model is loaded in turn and tested;
+**■ Stop** stops after the current step. A model that can't be loaded, or doesn't fit in memory,
+is listed with the reason and the rest carry on.
+
+The table under the list puts the fastest writer first, with how fast each read, how long it took
+to the first word and where it ran. Two copies of one model at different precisions are told
+apart by their precision (for example *Q4_K_M* and *F32*). Every result is also kept in
+**All results**, so it can be exported with the others.
+
 ## What to expect
 
 A model's probabilities say how sure it is of the next token, not whether it's right: a model can

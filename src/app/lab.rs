@@ -8,6 +8,7 @@ use super::*;
 mod compare;
 mod inside;
 mod steer;
+mod suite;
 use crate::kit::{self, Tone};
 use crate::lab::{BenchResult, BenchSettings, Run, Settings, Step};
 use crate::llm::Request;
@@ -51,6 +52,8 @@ pub(super) struct LabState {
     bench_asked: BenchSettings,
     /// Speed test results kept so far, read on first use.
     results: Option<Vec<BenchResult>>,
+    /// Testing several models in one go.
+    pub suites: suite::Suites,
 }
 
 impl Default for LabState {
@@ -78,6 +81,7 @@ impl Default for LabState {
             bench_progress: None,
             bench_asked: BenchSettings::default(),
             results: None,
+            suites: suite::Suites::default(),
         }
     }
 }
@@ -385,7 +389,8 @@ impl App {
         let busy = self.ask.phase != super::ask::Phase::Idle;
         let mut start = false;
         let mut stop = false;
-        if name.is_some() {
+        {
+            let loaded = name.is_some();
             let l = &mut self.ask.lab_state;
             ui.horizontal(|ui| {
                 let b = &mut l.bench;
@@ -415,15 +420,19 @@ impl App {
                     if let Some((r, of)) = l.bench_progress {
                         ui.weak(format!("Run {r} of {of}…"));
                     }
-                } else if kit::button(ui, kit::Kind::Primary, None, "Run speed test").clicked() {
+                } else if loaded && kit::button(ui, kit::Kind::Primary, None, "Run speed test").clicked() {
                     start = true;
                 }
             });
-            ui.weak("The model is busy while it runs: other apps may be slower, and so is the test if they're busy too.");
-        } else {
-            ui.add_space(8.0);
-            ui.label("Load a model on the left to test its speed.");
+            if loaded {
+                ui.weak("The model is busy while it runs: other apps may be slower, and so is the test if they're busy too.");
+            } else {
+                ui.add_space(4.0);
+                ui.label("Load a model on the left to test its speed, or test several below.");
+            }
         }
+        ui.add_space(6.0);
+        self.lab_suite(ui);
         ui.add_space(8.0);
         let results = self.ask.lab_state.results.clone().unwrap_or_default();
         let current = self.ask.loaded.as_ref().map(|(p, _, _)| p.clone());
@@ -607,7 +616,7 @@ fn speed_history(ui: &mut egui::Ui, mine: &[&BenchResult]) {
     }
 }
 
-fn place(r: &BenchResult) -> String {
+pub(super) fn place(r: &BenchResult) -> String {
     if r.gpu { "On the graphics chip".to_string() } else { format!("On the processor, {} threads", r.threads) }
 }
 
