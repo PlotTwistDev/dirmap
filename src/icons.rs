@@ -124,8 +124,11 @@ impl Icons {
     /// Draw the icon for an item of a folder listing (`big`: the Icons view and galleries):
     /// an application's own icon, otherwise its type's.
     pub fn paint_entry(&mut self, ui: &egui::Ui, rect: Rect, dir: &Path, e: &crate::fsys::listing::Entry, tint: Color32, big: bool) {
-        if crate::apps::is_app(e.bundle) {
+        if crate::apps::own_icon(e.bundle) {
             self.paint_app(ui, rect, &dir.join(&*e.name), e.modified);
+            if crate::apps::of(e.bundle) == Some(crate::apps::Bundle::Shortcut) {
+                paint_shortcut_arrow(ui.painter(), rect);
+            }
         } else if big {
             self.paint_big(ui, rect, e.is_dir, e.ext(), tint);
         } else {
@@ -186,6 +189,21 @@ fn paint_glyph(p: &egui::Painter, r: Rect, is_dir: bool, ext: &str, tint: Color3
 
 /// An application with no icon of its own (or not loaded yet): a rounded tile with a simple
 /// mark, like the system's generic application icon.
+/// The little curved arrow Windows puts on a shortcut's icon, bottom left.
+pub fn paint_shortcut_arrow(p: &egui::Painter, r: Rect) {
+    let s = (r.width() * 0.38).max(7.0);
+    let b = Rect::from_min_size(egui::pos2(r.left(), r.bottom() - s), egui::vec2(s, s));
+    p.rect_filled(b, s * 0.15, Color32::WHITE);
+    p.rect_stroke(b, s * 0.15, egui::Stroke::new(1.0, Color32::from_gray(90)), egui::StrokeKind::Inside);
+    let k = s / 10.0;
+    let ink = egui::Stroke::new((1.4 * k).max(1.0), Color32::from_rgb(30, 90, 200));
+    let at = |x: f32, y: f32| egui::pos2(b.left() + x * k, b.top() + y * k);
+    p.line_segment([at(2.5, 8.0), at(2.5, 5.0)], ink);
+    p.line_segment([at(2.5, 5.0), at(7.0, 3.0)], ink);
+    p.line_segment([at(7.0, 3.0), at(5.0, 2.0)], ink);
+    p.line_segment([at(7.0, 3.0), at(5.8, 5.0)], ink);
+}
+
 pub fn paint_app_glyph(p: &egui::Painter, r: Rect) {
     let s = r.height() / 16.0;
     let tile = r.shrink(1.5 * s);

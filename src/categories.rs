@@ -72,6 +72,12 @@ impl Category {
     }
 }
 
+/// Whether going from one set of kinds (bits) to another turns on a Professional filter:
+/// adding any kind but Applications. Taking kinds away, and Applications, are free.
+pub fn adds_pro_kind(before: u16, after: u16) -> bool {
+    after & !before & !Category::Applications.bit() != 0
+}
+
 /// Which kind of file this is, given whether it is inside an application: everything in an
 /// app counts as the app's, so its pictures and libraries aren't counted twice.
 pub fn of_in(name: &str, in_app: bool) -> Category {
@@ -138,6 +144,11 @@ mod tests {
         assert_eq!(of("HIBERFIL.SYS"), Category::Other);
         assert_eq!(of("nvlddmkm.sys"), Category::Programs);
         assert_eq!(of_in("icon.png", true), Category::Applications);
+        let (apps, images) = (Category::Applications.bit(), Category::Images.bit());
+        assert!(!adds_pro_kind(0, apps), "Applications is free");
+        assert!(adds_pro_kind(apps, apps | images), "it doesn't unlock the others");
+        assert!(adds_pro_kind(0, apps | images));
+        assert!(!adds_pro_kind(apps | images, apps), "clearing is free");
         assert_eq!(of_in("icon.png", false), Category::Images);
         assert!(Category::ALL.iter().all(|c| c.bit() != 0) && Category::Applications.bit() == 1 << 10);
     }
