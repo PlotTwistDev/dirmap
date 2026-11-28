@@ -45,17 +45,15 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
         ("GET", ["issue"]) => Ok(issue_form(&a, None)),
         ("POST", ["issue"]) => issue(cx, &a, &form).await,
         ("GET", ["activations"]) => activations(cx, &a).await,
-        ("GET", ["renewals"]) => renewals(cx, &a, req.query_param("msg").as_deref()).await,
-        ("POST", ["renewals"]) => {
-            let msg = match renewal_from_form(cx, &form) {
-                Ok(s) => {
-                    cx.set_renewal_settings(s, actor).await?;
-                    "Renewal settings saved.".to_string()
-                }
-                Err(e) => e,
-            };
-            Ok(Resp::redirect(&format!("{base}/renewals?msg={}", encode(&msg))))
-        }
+        ("GET", ["renewals"]) => renewals(cx, &a, req.query_param("msg").as_deref(), None).await,
+        ("POST", ["renewals"]) => match renewal_from_form(cx, &form) {
+            Ok(s) => {
+                cx.set_renewal_settings(s, actor).await?;
+                Ok(Resp::redirect(&format!("{base}/renewals?msg={}", encode("Renewal settings saved."))))
+            }
+            // Shown again with what was typed, so nothing has to be entered twice.
+            Err(e) => renewals(cx, &a, Some(&format!("Not saved: {e}")), Some(&form)).await,
+        },
         ("GET", ["maintenance"]) => Ok(bulk_form(&a, req.query_param("msg").as_deref())),
         ("POST", ["maintenance"]) => bulk_extend(cx, &a, &form).await,
         ("GET", ["messages"]) => messages(cx, &a, req.query_param("f").as_deref() == Some("all")).await,
@@ -867,19 +865,30 @@ fn renewal_from_form<D: Db, N: Net>(cx: &Ctx<'_, D, N>, form: &Form) -> Result<R
     Ok(s)
 }
 
-async fn renewals<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, msg: Option<&str>) -> Result<Resp, String> {
-    let s = cx.renewal_settings().await?;
+async fn renewals<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, msg: Option<&str>, draft: Option<&Form>) -> Result<Resp, String> {
+    let saved = cx.renewal_settings().await?;
+    // A form that didn't validate: show its values (unchecked) instead of the saved ones.
+    let s = match draft {
+        None => saved.clone(),
+        Some(f) => {
+            let raw = |k: &str| {
+                let (id, label) = (f.get(&format!("{k}_id")), f.get(&format!("{k}_label")));
+                (!id.is_empty() || !label.is_empty()).then_some(PriceChoice { price_id: id, label })
+            };
+            RenewalSettings { enabled: f.has("enabled"), standard: raw("standard"), promo: raw("promo"), use_promo: f.has("use_promo"), enterprise: raw("enterprise"), ..saved.clone() }
+        }
+    };
     let client = cx.cfg.paddle.as_ref().is_some_and(|p| p.client_token.is_some());
     let m = msg.map(|m| format!("<div class=\"card\">{}</div>", esc(m))).unwrap_or_default();
     let field = |key: &str, title: &str, c: &Option<PriceChoice>| {
         let (id, label) = c.as_ref().map_or((String::new(), String::new()), |c| (c.price_id.clone(), c.label.clone()));
         format!(
-            "<div class=\"row\" style=\"margin:8px 0\"><label>{title} price ID<input name=\"{key}_id\" value=\"{}\" size=\"34\" placeholder=\"pri_…\"></label><label>Shown as<input name=\"{key}_label\" value=\"{}\" size=\"8\" placeholder=\"$2.99\"></label></div>",
+            "<div class=\"row\" style=\"margin:8px 0\"><label>{title} price ID<input name=\"{key}_id\" value=\"{}\" size=\"34\" placeholder=\"pri_…\"></label><label>Shown as<input name=\"{key}_label\" value=\"{}\" size=\"10\" placeholder=\"e.g. $2.99\"></label></div>",
             esc(&id),
             esc(&label)
         )
     };
-    let offered = match s.offered() {
+    let offered = match saved.offered() {
         Some(p) => format!("<span class=\"pill good\">Offered</span> at {} ({})", esc(&p.label), esc(&p.price_id)),
         None => "<span class=\"pill\">Not offered</span>".into(),
     };

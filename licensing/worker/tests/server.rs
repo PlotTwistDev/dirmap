@@ -1128,11 +1128,12 @@ fn token_from(location: &str) -> String {
 fn renewals_are_admin_priced_and_never_use_a_purchase_price() {
     let w = world();
     let r = w.admin("/renewals", "enabled=1&standard_id=pri_filescape&standard_label=%242.99");
-    assert!(r.header("location").unwrap().contains("purchase%20price"), "{:?}", r.header("location"));
+    assert!(r.body.contains("Not saved") && r.body.contains("purchase price"), "{}", r.body);
+    // A failed save shows the form again with what was typed.
     let r = w.admin("/renewals", "enabled=1&standard_id=pri_renew&standard_label=");
-    assert!(r.header("location").unwrap().contains("label"));
+    assert!(r.body.contains("short label") && r.body.contains("value=\"pri_renew\"") && r.body.contains("Not offered"), "{}", r.body);
     let r = w.admin("/renewals", "enabled=1");
-    assert!(r.header("location").unwrap().contains("set%20the%20standard%20price"));
+    assert!(r.body.contains("set the standard price"));
     offer_renewals(&w);
     // Switching to a promotional price keeps the old one accepted for open checkouts.
     w.admin("/renewals", "enabled=1&standard_id=pri_renew2&standard_label=%242.99&promo_id=pri_promo&promo_label=%241.99&use_promo=1");
