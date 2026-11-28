@@ -7,6 +7,7 @@
 //! a stopped or failed run never leaves a half-written model that looks finished. The original
 //! is only ever read.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -107,12 +108,12 @@ pub struct Run {
     pub total: Arc<AtomicU32>,
     pub stop: Arc<AtomicBool>,
     /// What came of it: `None` while running.
-    pub result: Arc<Mutex<Option<Result<(), String>>>>,
+    pub result: Arc<Mutex<Option<Result<Checked, String>>>>,
 }
 
 /// Starts shrinking `input` (a GGUF file; the first part of a split one) into `out`, which mustn't
 /// exist. Returns at once.
-pub fn start(input: &Path, out: &Path, t: Target, threads: u32) -> Result<Run, String> {
+pub fn start(input: &Path, input_bytes: u64, out: &Path, t: Target, threads: u32) -> Result<Run, String> {
     if std::fs::symlink_metadata(out).is_ok() {
         return Err(format!("{} already exists.", out.display()));
     }
@@ -139,6 +140,8 @@ pub fn start(input: &Path, out: &Path, t: Target, threads: u32) -> Result<Run, S
     };
     let (done, total, stop, result) = (run.done.clone(), run.total.clone(), run.stop.clone(), run.result.clone());
     let out = out.to_path_buf();
+    let input = input.to_path_buf();
+    let ftype = t.ftype;
     let stderr = child.stderr.take();
     std::thread::spawn(move || {
         let last = Arc::new(Mutex::new(String::new()));
@@ -159,7 +162,9 @@ pub fn start(input: &Path, out: &Path, t: Target, threads: u32) -> Result<Run, S
         if let Some(h) = reader {
             let _ = h.join();
         }
-        let r = r.and_then(|()| std::fs::rename(&partial, &out).map_err(|e| format!("The new file couldn't be named: {e}")));
+        // Checked before it gets its name, so a damaged result is never listed as a model.
+        let input = input.clone();
+        let r = r.and_then(|()| verify(&input, input_bytes, &partial, ftype)).and_then(|c| std::fs::rename(&partial, &out).map(|()| c).map_err(|e| format!("The new file couldn't be named: {e}")));
         if r.is_err() {
             let _ = std::fs::remove_file(&partial);
         }
@@ -170,6 +175,99 @@ pub fn start(input: &Path, out: &Path, t: Target, threads: u32) -> Result<Run, S
         *result.lock().unwrap() = Some(r);
     });
     Ok(run)
+}
+
+/// One side of a before-and-after comparison, read from the file's header.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Side {
+    pub bytes: u64,
+    /// The precision the file says it has ("F16", "Q4_K_M"), if it says.
+    pub precision: Option<String>,
+    pub tensors: usize,
+    /// Numbers in the model (parameters), counted from the tensors.
+    pub params: u64,
+}
+
+impl Side {
+    /// Bits a parameter takes on disk, measured: the file's size over its parameters.
+    pub fn bits(&self) -> Option<f64> {
+        (self.params > 0).then(|| self.bytes as f64 * 8.0 / self.params as f64)
+    }
+}
+
+/// What checking the new file found: the original and the new file side by side.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Checked {
+    pub before: Side,
+    pub after: Side,
+    /// Tensors whose number type changed (the rest, such as norms, stay precise on purpose).
+    pub changed: usize,
+    /// What was checked, in plain sentences, for the window to list.
+    pub checks: Vec<String>,
+}
+
+fn side(path: &Path, h: &crate::gguf::Header) -> Side {
+    Side {
+        bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+        precision: h.u64("general.file_type").and_then(crate::models::ftype_name).map(str::to_string),
+        tensors: h.tensors.len(),
+        params: h.tensors.iter().map(|t| t.elements()).sum(),
+    }
+}
+
+/// Reopens a new file and checks it against the original: it must read as a model, say the
+/// precision asked for, hold every tensor of the original with the same shape, and be long
+/// enough for all of them. Any failure means the file isn't kept.
+pub fn verify(input: &Path, input_bytes: u64, out: &Path, ftype: u32) -> Result<Checked, String> {
+    use crate::gguf;
+    let bad = |why: String| Err(format!("The new file failed its check, so it wasn't kept: {why}. The original is unchanged."));
+    let new = match gguf::read(out, true) {
+        Ok(h) => h,
+        Err(e) => return bad(format!("it can't be read as a model ({e})")),
+    };
+    let len = std::fs::metadata(out).map(|m| m.len()).unwrap_or(0);
+    let mut checks = vec!["Reads as a GGUF model".to_string()];
+    if new.u64("general.file_type") != Some(ftype as u64) {
+        let says = new.u64("general.file_type").and_then(crate::models::ftype_name).unwrap_or("nothing");
+        return bad(format!("it says its precision is {says}"));
+    }
+    checks.push(format!("Says its precision is {}", crate::models::ftype_name(ftype as u64).unwrap_or("the one asked for")));
+    if let Some(t) = new.tensors.iter().find(|t| t.offset.checked_add(t.bytes).is_none_or(|end| end > len)) {
+        return bad(format!("the file ends before the end of {}", t.name));
+    }
+    checks.push(format!("All {} tensors are inside the file", new.tensors.len()));
+    let after = side(out, &new);
+    // The original was read moments ago by the worker; if it can't be now, the new file still
+    // passed its own checks.
+    let Ok(old) = gguf::read(input, true) else { return Ok(Checked { before: Side { bytes: input_bytes, precision: None, tensors: 0, params: 0 }, after, changed: 0, checks }) };
+    // A model split across files: the first file holds only its share of the tensors.
+    let split = old.u64("split.count").is_some_and(|n| n > 1);
+    let mut changed = 0;
+    if !split {
+        let mine: HashMap<&str, &gguf::Tensor> = new.tensors.iter().map(|t| (t.name.as_str(), t)).collect();
+        for t in &old.tensors {
+            match mine.get(t.name.as_str()) {
+                None => return bad(format!("{} is missing", t.name)),
+                Some(n) if n.dims != t.dims => {
+                    return bad(format!("{} has a different shape", t.name));
+                }
+                Some(n) if n.kind != t.kind => changed += 1,
+                Some(_) => {}
+            }
+        }
+        if new.tensors.len() != old.tensors.len() {
+            return bad(format!("it has {} tensors, the original {}", new.tensors.len(), old.tensors.len()));
+        }
+        checks.push("Every tensor of the original is there, with the same shape".into());
+    }
+    let mut before = side(input, &old);
+    before.bytes = input_bytes.max(before.bytes);
+    if split {
+        // Only the first file's tensors were read: the count would be a share, not the model.
+        before.params = 0;
+        before.tensors = 0;
+    }
+    Ok(Checked { before, after, changed, checks })
 }
 
 const STOPPED: &str = "Stopped. The original is unchanged and no new file was kept.";
@@ -251,6 +349,36 @@ mod tests {
         assert!(already_shrunk(Some("Q8_0")) && already_shrunk(Some("IQ4_XS")) && !already_shrunk(Some("BF16")) && !already_shrunk(None));
         assert_eq!(progress("[  12/ 291]  blk.0.attn_q.weight - [ 2048,  2048], type = f16"), Some((12, 291)));
         assert_eq!(progress("llama_model_loader: loaded meta data"), None);
+    }
+
+    #[test]
+    fn the_new_file_is_checked_against_the_original() {
+        use crate::gguf::write_test;
+        let d = std::env::temp_dir().join(format!("filescape-qv-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let input = d.join("in.gguf");
+        let out = d.join("out.gguf");
+        write_test(&input, &[], &[("general.file_type", 1)], &[("blk.0.w", &[256, 4], 1), ("norm", &[256], 0)], 0);
+        let q8 = target("Q8_0").unwrap().ftype;
+        write_test(&out, &[], &[("general.file_type", q8)], &[("blk.0.w", &[256, 4], 8), ("norm", &[256], 0)], 0);
+        let c = verify(&input, 0, &out, q8).unwrap();
+        assert_eq!((c.before.precision.as_deref(), c.after.precision.as_deref()), (Some("F16"), Some("Q8_0")));
+        assert_eq!((c.before.params, c.after.params, c.changed), (1280, 1280, 1));
+        assert!(c.after.bytes < c.before.bytes && c.after.bits().unwrap() < c.before.bits().unwrap());
+        assert_eq!(c.checks.len(), 4);
+        // The wrong precision, a missing tensor, a changed shape, a cut-short file: not kept.
+        assert!(verify(&input, 0, &out, target("Q4_K_M").unwrap().ftype).unwrap_err().contains("says its precision is Q8_0"));
+        write_test(&out, &[], &[("general.file_type", q8)], &[("blk.0.w", &[256, 4], 8)], 0);
+        assert!(verify(&input, 0, &out, q8).unwrap_err().contains("norm is missing"));
+        write_test(&out, &[], &[("general.file_type", q8)], &[("blk.0.w", &[256, 2], 8), ("norm", &[256], 0)], 0);
+        assert!(verify(&input, 0, &out, q8).unwrap_err().contains("different shape"));
+        write_test(&out, &[], &[("general.file_type", q8)], &[("blk.0.w", &[256, 4], 8), ("norm", &[256], 0)], 0);
+        let f = std::fs::OpenOptions::new().write(true).open(&out).unwrap();
+        f.set_len(f.metadata().unwrap().len() - 600).unwrap();
+        assert!(verify(&input, 0, &out, q8).unwrap_err().contains("ends before the end of"));
+        std::fs::write(&out, b"nope").unwrap();
+        assert!(verify(&input, 0, &out, q8).unwrap_err().contains("can't be read as a model"));
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     /// Shrinks a real model through the worker. Needs FILESCAPE_TEST_GGUF (a small GGUF).

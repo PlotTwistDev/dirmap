@@ -294,7 +294,21 @@ can be freed:
 - **Extra copies**: model files that are byte-for-byte the same as files another model keeps, such
   as the same GGUF file in LM Studio and in Downloads.
 
-Each item says why it can go. **Move to Trash…** shows every file, folder and link it removes, and
+Each item is marked **Safe to remove** or **Probably unused**, and **Why** lists what that rests
+on (hover over the mark to see the same list):
+
+- **Safe to remove**: the app's own records say nothing uses it, such as a file none of the models
+  in Ollama's list names, or a download that stopped more than a day ago.
+- **Probably unused**: nothing Filescape can see uses it, but something it can't see might. An
+  older Hugging Face version is one: programs normally ask for the current version, but one that
+  asks for an exact older version by its code still uses it. A download that stopped less than a
+  day ago is another, since a paused download could carry on from it.
+
+Filescape also looks at what the models it found link to. If a model elsewhere is a link to a file
+here (some tools link Ollama's downloads into LM Studio's folder, for example), that file is kept
+and the item says which model links to it; if nothing else is left, the item isn't offered.
+
+**Move to Trash…** shows every file, folder and link it removes, and
 asks once. Choose **Move to Trash** to be able to put it back (the space comes back when the Trash
 is emptied), or **Delete for good** to get the space back straight away. Removing one item at a
 time is free; ticking several and pressing **Remove N items…** is part of managing models in bulk,
@@ -321,7 +335,9 @@ goes before anything happens:
 - **Hugging Face**: its files in the cache, and the links to them in each version.
 - **LM Studio and other folders**: its files.
 
-If Ollama is downloading a model, let it finish first.
+If Ollama is downloading a model, let it finish first. If another model links to the files (a
+tool can link an Ollama download into LM Studio's folder, for example), Filescape doesn't remove
+it and says which link would stop working.
 
 ## Moving models to another drive
 
@@ -357,6 +373,18 @@ it's finished, so stopping or a failure leaves nothing half-written behind. Shri
 already-shrunk model is allowed with a warning: it loses more than shrinking the original would.
 llama.cpp does the work in a separate copy of Filescape, so a model it can't handle can't take the
 app down with it.
+
+Before the new file is named, Filescape reopens it and checks it: it must read as a model, say the
+precision you chose, hold every part (tensor) of the original with the same shape, and be long
+enough for all of them. If any check fails, the new file isn't kept and the window says which.
+
+When it passes, the window shows the original and the new file side by side: size on disk,
+precision, bits per weight (the file's size in bits over its weights, measured from the files),
+the number of weights and of tensors, and how many tensors now use fewer bits (some, such as
+normalisation weights, stay precise on purpose). **Compare with the original** opens both in the
+model's page to compare every tensor; **Show in Files** shows the new file. The checks say the file
+is complete and well formed, not how well it writes: try it in Ask AI or on the Lab's **Compare**
+page for that.
 
 ## On the command line
 

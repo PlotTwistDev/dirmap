@@ -34,6 +34,8 @@ pub(super) struct ModelsState {
     pub footprint: models::Footprint,
     /// A file to show in Files once the details panel is drawn.
     reveal_later: Option<PathBuf>,
+    /// Two model files to open side by side once the list has been read again: (original, new).
+    pub compare_later: Option<(PathBuf, PathBuf)>,
 }
 
 /// A model's own page: what's inside it.
@@ -188,7 +190,8 @@ impl App {
         let mut storage = std::mem::take(&mut self.models.storage);
         storage.forget();
         let lib = std::mem::take(&mut self.models.lib);
-        self.models = ModelsState { job: Some(job), list: None, chosen: None, places, page: None, storage, lib, footprint: Default::default(), reveal_later: None };
+        let compare_later = self.models.compare_later.take();
+        self.models = ModelsState { job: Some(job), list: None, chosen: None, places, page: None, storage, lib, footprint: Default::default(), reveal_later: None, compare_later };
     }
 
     pub(super) fn poll_models(&mut self, ctx: &egui::Context) {
@@ -199,6 +202,9 @@ impl App {
                     self.models.list = list;
                     self.models.footprint = fp.unwrap_or_default();
                     self.models.job = None;
+                    if let Some((a, b)) = self.models.compare_later.take() {
+                        self.compare_files(&a, &b);
+                    }
                 }
                 Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
                 Err(mpsc::TryRecvError::Disconnected) => self.models.job = None,
@@ -310,7 +316,38 @@ impl App {
     }
 }
 
+/// Starts reading another model to compare the page's model with.
+fn start_compare(page: &mut ModelPage, i: usize, other: &Model) {
+    let (tx, rx) = mpsc::channel();
+    let o = other.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(inspect::inspect(&o));
+    });
+    page.compare_with = Some(i);
+    page.compare_rx = Some(rx);
+    page.comparison = None;
+    page.tab = PageTab::Compare;
+}
+
 impl App {
+    /// Opens the model holding file `a` and compares it with the one holding `b`, if both are in
+    /// the list.
+    pub(super) fn compare_files(&mut self, a: &Path, b: &Path) {
+        let Some(list) = &self.models.list else { return };
+        let find = |p: &Path| list.iter().position(|m| m.files.iter().any(|f| f.path == p));
+        let (Some(i), Some(j)) = (find(a), find(b)) else {
+            self.models.storage.outcome = Some((Tone::Neutral, "The new file isn't in the list (it may be too small to count as a model), so it can't be compared here.".into()));
+            return;
+        };
+        let (ma, mb) = (list[i].clone(), list[j].clone());
+        self.models.storage.open = false;
+        self.ask.open = false;
+        self.inspect_model(i, &ma);
+        if let Some(page) = &mut self.models.page {
+            start_compare(page, j, &mb);
+        }
+    }
+
     /// Opens a model's page and starts reading what's inside it.
     fn inspect_model(&mut self, i: usize, m: &Model) {
         let (tx, rx) = mpsc::channel();
@@ -447,15 +484,7 @@ impl App {
                         });
                     });
                     if let Some(i) = pick {
-                        let (tx, rx) = mpsc::channel();
-                        let o = list[i].clone();
-                        std::thread::spawn(move || {
-                            let _ = tx.send(inspect::inspect(&o));
-                        });
-                        page.compare_with = Some(i);
-                        page.compare_rx = Some(rx);
-                        page.comparison = None;
-                        page.tab = PageTab::Compare;
+                        start_compare(&mut page, i, &list[i]);
                     }
                 }
                 if kit::icon_button(ui, kit::Icon::Folder, "Show in Files").clicked() {

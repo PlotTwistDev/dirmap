@@ -99,7 +99,13 @@ impl App {
 
     /// Asks to remove one model from the library: what that means is worked out first.
     pub(super) fn ask_remove_model(&mut self, m: &Model) {
-        match cleanup::plan(m) {
+        let places: Vec<PathBuf> = self.models.places.iter().map(|(_, p)| p.clone()).collect();
+        let list = self.models.list.clone().unwrap_or_default();
+        let plan = cleanup::plan(m).and_then(|item| {
+            let who = cleanup::linked_from(&item, &places, &list);
+            if who.is_empty() { Ok(item) } else { Err(format!("{} links to its files and would stop working. Remove that first.", who.join(", "))) }
+        });
+        match plan {
             Ok(item) => self.models.storage.confirm = Some(Confirm { items: vec![item], trash: true, share: false }),
             Err(e) => self.models.storage.outcome = Some((Tone::Warn, format!("{} can't be removed: {e}", m.name))),
         }
@@ -160,7 +166,7 @@ impl App {
                 ui.label("Removing…");
             }
         });
-        ui.weak("Nothing here is used by a model. Each item lists what it removes before anything happens.");
+        ui.weak("Nothing here is used by a model Filescape can see. Each item says how sure that is and why, and lists what it removes before anything happens.");
         ui.add_space(4.0);
         let mut remove_one = None;
         let mut share_one = None;
@@ -192,8 +198,12 @@ impl App {
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new(&it.title).strong());
                             ui.weak(format!("· {} · {}", it.app, scan::human(it.bytes)));
+                            sure_badge(ui, it);
                         });
                         ui.add(egui::Label::new(egui::RichText::new(&it.detail).small().weak()).wrap());
+                        if !it.reasons.is_empty() {
+                            egui::CollapsingHeader::new(egui::RichText::new("Why").small()).id_salt(("why", i)).show(ui, |ui| reasons(ui, it));
+                        }
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if it.can_trash && ui.add_enabled(!busy, egui::Button::new(format!("{}…", bin_verb()))).on_hover_text("See what this removes, then confirm").clicked() {
@@ -271,8 +281,14 @@ impl App {
             ui.add_space(4.0);
             egui::ScrollArea::vertical().max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
                 for it in &c.items {
-                    ui.label(egui::RichText::new(format!("{} · {}", it.title, scan::human(it.bytes))).strong());
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("{} · {}", it.title, scan::human(it.bytes))).strong());
+                        sure_badge(ui, it);
+                    });
                     ui.add(egui::Label::new(egui::RichText::new(&it.detail).small().weak()).wrap());
+                    if it.sure == cleanup::Sure::Likely {
+                        reasons(ui, it);
+                    }
                     for (k, p) in it.paths.iter().enumerate() {
                         let line = match it.keep.get(k).filter(|_| c.share) {
                             Some(keep) => format!("{}\n    becomes the same file as {}", p.shown(), keep.shown()),
@@ -321,6 +337,26 @@ impl App {
             self.models.storage.removing = Some(rx);
             self.models.storage.picked.clear();
         }
+    }
+}
+
+/// "Safe to remove" or "Probably unused", with what it rests on when hovered.
+fn sure_badge(ui: &mut egui::Ui, it: &Item) {
+    let tone = match it.sure {
+        cleanup::Sure::Certain => Tone::Success,
+        cleanup::Sure::Likely => Tone::Warn,
+    };
+    // A copy an app keeps can't be removed, only shared: say that, not "remove".
+    let text = if it.kind == Kind::Copy && !it.can_trash { "Safe to share" } else { it.sure.label() };
+    let r = kit::badge(ui, text, tone);
+    if !it.reasons.is_empty() {
+        r.on_hover_text(it.reasons.iter().map(|r| format!("• {r}")).collect::<Vec<_>>().join("\n"));
+    }
+}
+
+fn reasons(ui: &mut egui::Ui, it: &Item) {
+    for r in &it.reasons {
+        ui.add(egui::Label::new(egui::RichText::new(format!("• {r}")).small()).wrap());
     }
 }
 
