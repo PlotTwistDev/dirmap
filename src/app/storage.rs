@@ -10,7 +10,7 @@ use crate::cleanup::{self, Item, Kind, Removed};
 use crate::fsys::PathShow;
 use crate::kit::{self, Tone};
 use crate::models::{Model, Source};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 mod moving;
 mod shrink;
@@ -31,6 +31,11 @@ pub(super) struct StorageState {
     moving: Option<moving::Moving>,
     /// Shrinking one model into a new file.
     shrink: Option<shrink::Shrink>,
+    /// What was on screen when a removal finished, shown while Filescape looks again, so the page
+    /// stays put instead of emptying and refilling.
+    shown: Option<(Vec<Model>, Vec<Item>)>,
+    /// Sections the last removal emptied: each keeps a line saying so, in its place.
+    cleared: Vec<Kind>,
 }
 
 struct Confirm {
@@ -78,6 +83,7 @@ impl App {
                 Ok(items) => {
                     s.items = Some(items);
                     s.rx = None;
+                    s.shown = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
                 Err(mpsc::TryRecvError::Disconnected) => s.rx = None,
@@ -87,7 +93,26 @@ impl App {
             match rx.try_recv() {
                 Ok(done) => {
                     s.removing = None;
-                    s.outcome = Some(outcome(&done));
+                    // Until the new list arrives, show the old one without what went.
+                    let gone: HashSet<&PathBuf> = done.iter().filter(|(_, r)| r.iter().all(|r| r.result.is_ok())).flat_map(|(i, _)| i.paths.iter()).collect();
+                    let before = s.items.clone().unwrap_or_default();
+                    let after: Vec<Item> = before.iter().filter(|i| !i.paths.iter().any(|p| gone.contains(p))).cloned().collect();
+                    s.cleared = [Kind::Unused, Kind::Partial, Kind::OldVersion]
+                        .into_iter()
+                        .filter(|k| before.iter().any(|i| i.kind == *k) && !after.iter().any(|i| i.kind == *k))
+                        .collect();
+                    let (tone, mut text) = outcome(&done);
+                    let left: Vec<&Item> = after.iter().filter(|i| i.kind != Kind::Copy).collect();
+                    if tone == Tone::Success {
+                        text.push_str(&match left.len() {
+                            0 => " Nothing else can be freed.".to_string(),
+                            n => format!(" {n} more item{} below can be freed ({}).", if n == 1 { "" } else { "s" }, scan::human(left.iter().map(|i| i.bytes).sum())),
+                        });
+                    }
+                    s.outcome = Some((tone, text));
+                    if let Some(list) = self.models.list.clone() {
+                        self.models.storage.shown = Some((list, after));
+                    }
                     // Look again: the list and what can be freed have changed.
                     self.start_models();
                 }
@@ -101,6 +126,11 @@ impl App {
     pub(super) fn ask_remove_model(&mut self, m: &Model) {
         let places: Vec<PathBuf> = self.models.places.iter().map(|(_, p)| p.clone()).collect();
         let list = self.models.list.clone().unwrap_or_default();
+        // A model inside an app or extension is that app's: removing it could break the app.
+        if let Some(who) = m.files.iter().find_map(|f| cleanup::app_owner(&f.path)) {
+            self.models.storage.outcome = Some((Tone::Warn, format!("{} is inside {who}'s own files, which may load it from there, so Filescape doesn't remove it.", m.name)));
+            return;
+        }
         let plan = cleanup::plan(m).and_then(|item| {
             let who = cleanup::linked_from(&item, &places, &list);
             if who.is_empty() { Ok(item) } else { Err(format!("{} links to its files and would stop working. Remove that first.", who.join(", "))) }
@@ -123,14 +153,15 @@ impl App {
 
     /// The Storage view.
     pub(super) fn storage_view(&mut self, ui: &mut egui::Ui) {
-        let Some(list) = self.models.list.clone() else {
+        let shown = self.models.storage.shown.clone();
+        let Some(list) = self.models.list.clone().or_else(|| shown.as_ref().map(|(l, _)| l.clone())) else {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label("Looking for AI models…");
             });
             return;
         };
-        if self.models.storage.items.is_none() && self.models.storage.rx.is_none() {
+        if self.models.list.is_some() && self.models.storage.items.is_none() && self.models.storage.rx.is_none() {
             self.storage_look();
         }
         self.storage_header(ui, &list);
@@ -145,25 +176,34 @@ impl App {
         by_app(ui, &list);
         self.storage_places(ui, &list);
         ui.add_space(12.0);
-        let busy = self.models.storage.removing.is_some();
-        let Some(items) = self.models.storage.items.clone() else {
+        // While looking again after a removal, the old list stays, minus what went.
+        let updating = self.models.storage.items.is_none() && shown.is_some();
+        let busy = self.models.storage.removing.is_some() || updating;
+        let Some(all) = self.models.storage.items.clone().or_else(|| shown.map(|(_, i)| i)) else {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label("Looking for space to free…");
             });
             return;
         };
+        // Copies are listed for information only, after what can be freed.
+        let (items, copies): (Vec<Item>, Vec<Item>) = all.into_iter().partition(|i| i.kind != Kind::Copy);
+        let cleared = self.models.storage.cleared.clone();
         let total: u64 = items.iter().map(|i| i.bytes).sum();
         if items.is_empty() {
             ui.strong("Nothing to free");
-            ui.weak("No unused or unfinished downloads, older versions or loose copies were found where the library looked.");
+            ui.weak("No unused or unfinished downloads or older versions were found where the library looked.");
+            for k in &cleared {
+                cleared_line(ui, *k);
+            }
+            copies_info(ui, &copies);
             return;
         }
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(format!("{} CAN BE FREED", scan::human(total))).size(11.0).strong().color(kit::tokens(ui).weak));
             if busy {
                 ui.spinner();
-                ui.label("Removing…");
+                ui.label(if updating { "Updating…" } else { "Removing…" });
             }
         });
         ui.weak("Nothing here is used by a model Filescape can see. Each item says how sure that is and why, and lists what it removes before anything happens.");
@@ -172,6 +212,9 @@ impl App {
         let mut share_one = None;
         let mut share_all: Option<Vec<usize>> = None;
         egui::ScrollArea::vertical().id_salt("storage-items").max_height((ui.available_height() - 40.0).max(120.0)).auto_shrink([false, true]).show(ui, |ui| {
+            for k in &cleared {
+                cleared_line(ui, *k);
+            }
             let mut last = None;
             for (i, it) in items.iter().enumerate() {
                 if last != Some(it.kind) {
@@ -235,6 +278,7 @@ impl App {
                 .on_hover_text(it.paths.first().map(|p| p.shown()).unwrap_or_default());
                 ui.add_space(3.0);
             }
+            copies_info(ui, &copies);
         });
         ui.separator();
         let picked: Vec<usize> = self.models.storage.picked.iter().copied().filter(|&i| i < items.len()).collect();
@@ -360,9 +404,7 @@ fn sure_badge(ui: &mut egui::Ui, it: &Item) {
         cleanup::Sure::Certain => Tone::Success,
         cleanup::Sure::Likely => Tone::Warn,
     };
-    // A copy an app keeps can't be removed, only shared: say that, not "remove".
-    let text = if it.kind == Kind::Copy && !it.can_trash { "Safe to share" } else { it.sure.label() };
-    let r = kit::badge(ui, text, tone);
+    let r = kit::badge(ui, it.sure.label(), tone);
     if !it.reasons.is_empty() {
         r.on_hover_text(it.reasons.iter().map(|r| format!("• {r}")).collect::<Vec<_>>().join("\n"));
     }
@@ -404,7 +446,7 @@ fn kind_words(k: Kind) -> &'static str {
         Kind::Unused => "Left behind by removed models or stopped downloads. No model needs them.",
         Kind::Partial => "Downloads that stopped part way. Starting the download again starts afresh.",
         Kind::OldVersion => "Hugging Face keeps each version a program downloaded. Programs use the current one.",
-        Kind::Copy => "Files that are byte-for-byte the same as a model kept elsewhere. Share them as one file so every app keeps working, or remove a loose copy.",
+        Kind::Copy => "Files that are byte-for-byte the same as a model elsewhere. Listed for information only: an app or extension may load either copy from where it is, so Filescape doesn't remove or share them.",
         Kind::Model => "",
     }
 }
@@ -428,7 +470,7 @@ impl App {
             a.dedup();
             a.len()
         };
-        let freeable = self.models.storage.items.as_ref().map(|i| i.iter().map(|x| x.bytes).sum::<u64>());
+        let freeable = self.models.storage.items.as_ref().map(|i| i.iter().filter(|x| x.kind != Kind::Copy).map(|x| x.bytes).sum::<u64>());
         kit::card_frame(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -480,4 +522,46 @@ fn by_app(ui: &mut egui::Ui, list: &[Model]) {
             ui.end_row();
         }
     });
+}
+
+/// A section the last removal emptied, kept as one line so the page doesn't jump.
+fn cleared_line(ui: &mut egui::Ui, k: Kind) {
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+        crate::kit::icons::paint(ui.painter(), r, crate::kit::icons::Icon::Check, kit::tokens(ui).success);
+        ui.strong(k.heading());
+        ui.weak("· cleared");
+    });
+}
+
+/// Extra copies, for information: what they are, where, and inside which app, with nothing to
+/// press. Folded away, so a long list doesn't push the rest off screen.
+fn copies_info(ui: &mut egui::Ui, copies: &[Item]) {
+    if copies.is_empty() {
+        return;
+    }
+    ui.add_space(10.0);
+    let bytes: u64 = copies.iter().map(|c| c.bytes).sum();
+    egui::CollapsingHeader::new(egui::RichText::new(format!("Extra copies, for information · {} · {}", copies.len(), scan::human(bytes))).strong())
+        .id_salt("storage-copies")
+        .default_open(false)
+        .show(ui, |ui| {
+            ui.weak(kind_words(Kind::Copy));
+            ui.add_space(4.0);
+            for (i, it) in copies.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&it.title).strong());
+                    ui.weak(format!("· {} · {}", it.app, scan::human(it.bytes)));
+                    if let Some(who) = &it.used_by {
+                        kit::badge(ui, &format!("Inside {who}"), Tone::Neutral);
+                    }
+                });
+                ui.add(egui::Label::new(egui::RichText::new(&it.detail).small().weak()).wrap());
+                if !it.reasons.is_empty() {
+                    egui::CollapsingHeader::new(egui::RichText::new("Details").small()).id_salt(("copy-why", i)).show(ui, |ui| reasons(ui, it));
+                }
+                ui.add_space(3.0);
+            }
+        });
 }
