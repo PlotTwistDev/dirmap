@@ -166,6 +166,71 @@ pub fn run(plan: &Plan, ctl: &Ctl) -> Result<Moved, String> {
     Ok(Moved { left })
 }
 
+/// Checks moving `app`'s models back from where an earlier move put them to `at`, where the link
+/// is now. The plan's `from` is the folder the link leads to and `to` is `at`.
+pub fn check_back(app: &'static str, at: &Path) -> Result<Plan, String> {
+    if !is_link(at) {
+        return Err(format!("{} isn't a link, so there's nothing to move back.", at.display()));
+    }
+    // Where the link says, as written: links inside were made with that path (canonicalising
+    // could spell it differently, such as /private/tmp for /tmp on a Mac).
+    let to = fs::read_link(at).map_err(|e| format!("The link at {} can't be read: {e}", at.display()))?;
+    let from = if to.is_absolute() { to } else { at.parent().map(|p| p.join(&to)).unwrap_or(to) };
+    if !from.exists() {
+        return Err(format!("The link at {} leads to {}, which isn't there. Is the other drive connected?", at.display(), from.display()));
+    }
+    if !from.is_dir() {
+        return Err(format!("{} isn't a folder.", from.display()));
+    }
+    if app == "Ollama" && ollama_running() {
+        return Err("Ollama is running. Quit it first (from its menu-bar or tray icon, or stop the service), so no model is in use while it moves.".into());
+    }
+    let bytes = size(&from);
+    let here = at.parent().ok_or("That link has no folder around it.")?;
+    if let Some(free) = crate::drives::free_at(here)
+        && free < bytes + SPARE
+    {
+        return Err(format!("This drive has {} free; the models need {}.", crate::scan::human(free), crate::scan::human(bytes + SPARE)));
+    }
+    Ok(Plan { app, from, to: at.to_path_buf(), bytes })
+}
+
+/// Moves the models back: copies them beside the link, compares the copy, swaps the link for the
+/// copy and then deletes the folder on the other drive. On an error nothing has changed: the
+/// link still leads to the models.
+pub fn run_back(plan: &Plan, ctl: &Ctl) -> Result<Moved, String> {
+    let Plan { from, to, .. } = plan;
+    let n = to.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let partial = to.with_file_name(format!(".{n}.filescape-partial"));
+    if fs::symlink_metadata(&partial).is_ok() {
+        return Err(format!("{} is in the way (left from an earlier move?). Remove it first.", partial.display()));
+    }
+    ctl.bytes_total.store(plan.bytes, Ordering::Relaxed);
+    ctl.bytes_done.store(0, Ordering::Relaxed);
+    let undo_copy = |why: String| {
+        let _ = fs::remove_dir_all(&partial);
+        why
+    };
+    // 1. Copy beside the link; links into the other drive's folder are pointed here instead.
+    copy(from, &partial, from, to, ctl).map_err(|e| undo_copy(if e.kind() == io::ErrorKind::Interrupted { "Stopped. Nothing was moved.".into() } else { format!("Copying failed, so nothing was moved: {e}") }))?;
+    // 2. Compare.
+    same(from, &partial, from, to).map_err(|e| undo_copy(format!("The copy didn't match the original, so nothing was moved: {e}")))?;
+    if !ctl.go_on() {
+        return Err(undo_copy("Stopped. Nothing was moved.".into()));
+    }
+    // 3. The link goes, and 4. the copy takes its name.
+    remove_link(to).map_err(|e| undo_copy(format!("The link couldn't be removed (is an app using it?), so nothing was moved: {e}")))?;
+    if let Err(e) = fs::rename(&partial, to) {
+        return Err(match link(from, to) {
+            Ok(()) => undo_copy(format!("The copy couldn't be named, so nothing was moved: {e}")),
+            Err(l) => format!("The copy couldn't be named ({e}) and the link couldn't be made again ({l}). The models are safe in {} and in {}.", from.display(), partial.display()),
+        });
+    }
+    // 5. The folder on the other drive goes.
+    let left = fs::remove_dir_all(from).err().map(|e| (from.clone(), e.to_string()));
+    Ok(Moved { left })
+}
+
 /// Copies the tree `src` to `dest`. Links are made again: one pointing inside the folder being
 /// moved (`root`) by its full path is pointed at the same place in the new folder (`new_root`).
 fn copy(src: &Path, dest: &Path, root: &Path, new_root: &Path, ctl: &Ctl) -> io::Result<()> {
@@ -315,6 +380,35 @@ mod tests {
         assert!(!d.join(".hub.filescape-old").exists());
         // Moving again is refused: it's a link now.
         assert!(check("Hugging Face", &from, &d).unwrap_err().contains("already a link"));
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn moves_back_where_it_was() {
+        let d = tempdir("back");
+        let from = d.join("hub");
+        store(&from);
+        fs::create_dir(d.join("other")).unwrap();
+        let plan = Plan { app: "Hugging Face", from: from.clone(), to: d.join("other").join(folder_name("Hugging Face")), bytes: size(&from) };
+        run(&plan, &Ctl::default()).unwrap();
+        assert!(check_back("Hugging Face", &plan.to).unwrap_err().contains("isn't a link"));
+        let back = check_back("Hugging Face", &from).unwrap();
+        assert_eq!((back.from.clone(), back.bytes), (plan.to.clone(), 5000));
+        let r = run_back(&back, &Ctl::default()).unwrap();
+        assert_eq!(r.left, None);
+        assert!(!is_link(&from) && from.is_dir() && !plan.to.exists());
+        assert_eq!(fs::read(from.join("models--org--m/snapshots/abc/model.gguf")).unwrap().len(), 5000);
+        // The absolute link points into the folder here again, not the deleted one.
+        assert_eq!(fs::read_link(from.join("models--org--m/snapshots/abc/abs.gguf")).unwrap(), from.join("models--org--m/blobs/123"));
+        assert!(from.join("empty").is_dir());
+        // Stopped part way: the link stays and still leads to the models.
+        run(&plan, &Ctl::default()).unwrap();
+        let back = check_back("Hugging Face", &from).unwrap();
+        let ctl = Ctl::default();
+        ctl.stop.store(true, Ordering::Relaxed);
+        assert!(run_back(&back, &ctl).unwrap_err().starts_with("Stopped"));
+        assert!(is_link(&from) && !d.join(".hub.filescape-partial").exists());
+        assert_eq!(fs::read(from.join("models--org--m/blobs/123")).unwrap().len(), 5000);
         fs::remove_dir_all(&d).unwrap();
     }
 

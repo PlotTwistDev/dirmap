@@ -170,6 +170,7 @@ impl App {
         ui.add_space(4.0);
         let mut remove_one = None;
         let mut share_one = None;
+        let mut share_all: Option<Vec<usize>> = None;
         egui::ScrollArea::vertical().id_salt("storage-items").max_height((ui.available_height() - 40.0).max(120.0)).auto_shrink([false, true]).show(ui, |ui| {
             let mut last = None;
             for (i, it) in items.iter().enumerate() {
@@ -180,6 +181,17 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.strong(it.kind.heading());
                         ui.weak(format!("· {n} · {}", scan::human(bytes)));
+                        // Every copy at once: each becomes one file with what it's a copy of.
+                        let shareable: Vec<usize> = (0..items.len()).filter(|&j| items[j].kind == Kind::Copy && items[j].can_share).collect();
+                        if it.kind == Kind::Copy && shareable.len() > 1 {
+                            let freed: u64 = shareable.iter().map(|&j| items[j].bytes).sum();
+                            let r = ui
+                                .add_enabled(!busy, egui::Button::new(format!("Share all {} as one file each ({})…", shareable.len(), scan::human(freed))).small())
+                                .on_hover_text("Every copy on the same drive as what it's a copy of becomes a second name of that file, freeing the space and keeping every app working. Part of managing models in bulk (Professional).");
+                            if r.clicked() {
+                                share_all = Some(shareable);
+                            }
+                        }
                     });
                     ui.weak(kind_words(it.kind));
                     ui.add_space(2.0);
@@ -249,7 +261,9 @@ impl App {
                 self.models.storage.picked.clear();
             }
         });
-        if let Some(i) = remove_one {
+        if let Some(all) = share_all {
+            self.ask_remove(all.iter().map(|&i| items[i].clone()).collect(), true);
+        } else if let Some(i) = remove_one {
             self.ask_remove(vec![items[i].clone()], false);
         } else if let Some(i) = share_one {
             self.ask_remove(vec![items[i].clone()], true);

@@ -320,7 +320,8 @@ two files once more first, then makes the copy a second name of the file it's th
 *hard link*). Removing either name later keeps the other. A loose copy can also be moved to the
 Trash; a copy an app keeps can only be shared, since removing it would take the model from that
 app. Copies on different drives can't be shared. Sharing several at once is Professional, like
-removing several.
+removing several; **Share all N as one file each…** beside **Extra copies** does every copy that
+can be shared in one go, after the same confirmation listing each pair.
 
 Filescape only calls something unused when the app's own records say so. If Ollama's list of
 models or Hugging Face's version records can't be read, nothing in that folder is offered.
@@ -353,7 +354,12 @@ place. The original is deleted only after the link has been checked; if anything
 press **Stop**, everything is put back as it was. On Windows the link is a directory junction,
 which needs no special rights.
 
-A folder that has already been moved shows where its link leads.
+A folder that has already been moved shows where its link leads, and **Move back…** undoes the
+move: Filescape checks that this drive has room (and that Ollama isn't running), copies the models
+back beside the link, compares the copy, and puts it in place of the link. The folder on the other
+drive is deleted only after that; if anything fails or you press **Stop**, the link stays as it
+was and the app keeps finding its models on the other drive. Moving back is Professional, like
+moving.
 
 ## Shrinking a model
 
