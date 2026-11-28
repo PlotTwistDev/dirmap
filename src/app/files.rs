@@ -1050,7 +1050,7 @@ pub(super) fn order_entries(
     let mut o: Vec<u32> = (0..entries.len() as u32)
         .filter(|&i| {
             let e = &entries[i as usize];
-            (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, &e.name, e.is_dir)
+            (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, e)
         })
         .collect();
     let size_of = |e: &Entry| if e.is_dir { sizes.and_then(|s| s.get(&e.name)).map(|s| s.0).unwrap_or(0) } else { e.shown_size() };
@@ -1078,7 +1078,7 @@ pub(super) fn order_entries(
 /// Add the entries from `from` on that pass the filter to the end of `order`.
 fn append_new(order: &mut Vec<u32>, entries: &[Entry], from: usize, show_hidden: bool, filter: &str) {
     for (i, e) in entries.iter().enumerate().skip(from) {
-        if (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, &e.name, e.is_dir) {
+        if (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, e) {
             order.push(i as u32);
         }
     }

@@ -59,21 +59,26 @@ impl Icons {
     /// Draw an application's own icon (`path`: the bundle; `stamp`: its modified time). Until it
     /// has loaded, or when it has none, or the setting is off, a drawn application glyph.
     pub fn paint_app(&mut self, ui: &egui::Ui, rect: Rect, path: &Path, stamp: i64) {
-        let ctx = ui.ctx().clone();
+        self.paint_app_on(ui.ctx(), ui.painter(), rect, path, stamp);
+    }
+
+    /// [`Self::paint_app`] with any painter (the maps draw with clipped ones).
+    pub fn paint_app_on(&mut self, ctx: &egui::Context, painter: &egui::Painter, rect: Rect, path: &Path, stamp: i64) {
+        let ctx = ctx.clone();
         self.take_loaded(&ctx);
         if crate::apps::prefs().icons {
             match self.apps.get(path) {
                 Some(a) if a.stamp == stamp => {
                     if let Some(t) = &a.tex {
                         let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                        ui.painter().image(t.id(), rect, uv, Color32::WHITE);
+                        painter.image(t.id(), rect, uv, Color32::WHITE);
                         return;
                     }
                 }
                 _ => self.ask_app(&ctx, path, stamp),
             }
         }
-        paint_app_glyph(ui.painter(), rect);
+        paint_app_glyph(painter, rect);
     }
 
     fn ask_app(&mut self, ctx: &egui::Context, path: &Path, stamp: i64) {
