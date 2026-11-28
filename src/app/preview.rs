@@ -1197,10 +1197,22 @@ impl App {
         ui.add_space(8.0);
         ui.add(egui::Label::new(egui::RichText::new(crate::apps::shown_name(&e.name, e.bundle)).strong()).wrap());
         ui.add_space(4.0);
+        let is_app = crate::apps::is_app(e.bundle) && !crate::fsys::remote::is_remote(&path) && !crate::fsys::archive::inside(&path);
+        let app_info = if is_app { self.files.app_info.get(ui.ctx(), &path, e.modified) } else { None };
         let actions = |app: &mut Self, ui: &mut egui::Ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-                if kit::button(ui, K::Secondary, Some(Icon::External), "Open").on_hover_text("Open it with its usual app").clicked() {
+                if is_app {
+                    // An application: launch it (never just by selecting or previewing it).
+                    let r = ui.add_enabled_ui(crate::apps::CAN_LAUNCH, |ui| kit::button(ui, K::Primary, Some(Icon::External), "Launch Application")).inner;
+                    if r.clicked() {
+                        app.launch_apps(vec![path.clone()]);
+                    }
+                    r.on_hover_text("Open it, as Finder would").on_disabled_hover_text("This is a macOS application: it can only be launched on a Mac.");
+                    if kit::button(ui, K::Secondary, Some(Icon::Folder), "Show Contents").on_hover_text("Go inside the application (Show Package Contents)").clicked() {
+                        app.files.go(crate::fsys::history::Location::Dir(path.clone()));
+                    }
+                } else if kit::button(ui, K::Secondary, Some(Icon::External), "Open").on_hover_text("Open it with its usual app").clicked() {
                     let p = path.clone();
                     app.files.spawn(move || crate::actions::open(&p));
                 }
@@ -1225,7 +1237,13 @@ impl App {
         if !details {
             // The Preview tab: what it is and how big, in one line; the rest is under Details.
             let what = browser::entry_kind(&e);
-            let line = if !e.is_dir {
+            let what = match app_info.as_ref().and_then(|d| d.info.as_ref()).and_then(|i| i.version.clone()) {
+                Some(v) => format!("{what} · version {v}"),
+                None => what,
+            };
+            let line = if let Some(d) = &app_info {
+                format!("{what} · {}", crate::scan::human(if crate::scan::metric() == crate::scan::Metric::Logical { d.size.0 } else { d.size.1 }))
+            } else if !e.is_dir {
                 format!("{what} · {}", crate::scan::human(e.size))
             } else if let Some(&(b, f)) = self.files.cur().sizes.as_ref().and_then(|s| s.1.get(&e.name)) {
                 format!("{what} · {} · {} files", crate::scan::human(b), group(f))
@@ -1243,7 +1261,9 @@ impl App {
             ui.weak("Kind");
             ui.label(browser::entry_kind(&e));
             ui.end_row();
-            if !e.is_dir {
+            if is_app {
+                app_facts(ui, app_info.as_deref());
+            } else if !e.is_dir {
                 ui.weak("Size");
                 ui.label(format!("{} ({} bytes)", crate::scan::human(e.size), group(e.size)));
                 ui.end_row();
@@ -3079,5 +3099,55 @@ mod splat_save_tests {
         // Something was drawn.
         assert!(img.pixels().filter(|p| p[3] > 100 && p[0] > 60).count() > 200);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// An application's rows in the preview pane's Details: from its Info.plist, its program's
+/// header and, on macOS, its signature. "Reading…" until the details have been worked out.
+fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
+    let mut row = |k: &str, v: String| {
+        ui.weak(k);
+        ui.add(egui::Label::new(v).wrap());
+        ui.end_row();
+    };
+    let Some(d) = d else {
+        row("Details", "Reading…".into());
+        return;
+    };
+    let i = d.info.clone().unwrap_or_default();
+    if let Some(n) = i.name.clone() {
+        row("Name", n);
+    }
+    if let Some(p) = d.publisher() {
+        row("Publisher", p);
+    }
+    match (i.version.clone(), i.build.clone()) {
+        (Some(v), Some(b)) if b != v => row("Version", format!("{v} (build {b})")),
+        (Some(v), _) => row("Version", v),
+        (None, Some(b)) => row("Version", format!("build {b}")),
+        _ => {}
+    }
+    if let Some(id) = i.id.clone() {
+        row("Identifier", id);
+    }
+    if let Some(a) = d.arch.clone() {
+        row("Runs on", a);
+    }
+    if let Some(m) = i.min_os.clone() {
+        row("Needs", format!("macOS {m} or later"));
+    }
+    let (bytes, alloc, files) = d.size;
+    row("Size", format!("{} on disk, {} of data, in {} files", crate::scan::human(alloc), crate::scan::human(bytes), group(files)));
+    if let Some(s) = d.signed.clone() {
+        row("Signed", s);
+    }
+    if let Some(g) = d.gatekeeper.clone() {
+        row("Gatekeeper", g);
+    }
+    if d.quarantined {
+        row("Downloaded", "From the internet, not opened yet: macOS will ask before it first opens".into());
+    }
+    if let Some(p) = d.problem.clone() {
+        row("Problem", p);
     }
 }

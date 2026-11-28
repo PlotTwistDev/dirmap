@@ -328,6 +328,243 @@ pub fn icns_image(data: &[u8], size: u32) -> Option<image::RgbaImage> {
     Some(if img.width() > size * 2 { image::imageops::resize(&img, size, size, image::imageops::FilterType::Triangle) } else { img })
 }
 
+/// Everything the preview pane shows about an application. Slow to work out (it reads the
+/// program's header, adds up the bundle and, on macOS, asks the system's `codesign` and `spctl`
+/// tools about it), so it's made on a worker thread: see [`DetailsCache`].
+#[derive(Clone, Debug, Default)]
+pub struct Details {
+    pub info: Option<Info>,
+    /// "Apple silicon", "Intel", "Universal (Apple silicon and Intel)".
+    pub arch: Option<String>,
+    /// Bytes, space on disk, and files in the bundle.
+    pub size: (u64, u64, u64),
+    /// Who signed it, as macOS says ("Developer ID: Acme Ltd (TEAMID)", "Mac App Store",
+    /// "Apple", "Signed for this Mac only", "Not signed").
+    pub signed: Option<String>,
+    /// Whether Gatekeeper accepts it, and why ("Notarised by Apple", "Rejected").
+    pub gatekeeper: Option<String>,
+    /// Downloaded from the internet and not opened yet (the quarantine flag).
+    pub quarantined: bool,
+    /// What's wrong with it, if it can't be launched.
+    pub problem: Option<String>,
+}
+
+impl Details {
+    /// The publisher: from the signature when there is one, else the copyright line.
+    pub fn publisher(&self) -> Option<String> {
+        let from_sig = self.signed.as_deref().and_then(|s| {
+            let s = s.strip_prefix("Developer ID: ")?;
+            Some(s.rsplit_once(" (").map_or(s, |(n, _)| n).to_string())
+        });
+        from_sig.or_else(|| match self.signed.as_deref() {
+            Some("Apple") => Some("Apple".into()),
+            _ => None,
+        })
+        .or_else(|| self.info.as_ref()?.copyright.clone())
+    }
+}
+
+/// Work out an application's details (slow: call it off the UI thread). Nothing in the app is
+/// run: its program's header is read as data, and macOS's own tools check the signature.
+pub fn details(app: &Path) -> Details {
+    let info = info(app);
+    let exe = info.as_ref().and_then(|i| i.executable.clone()).map(|e| app.join("Contents/MacOS").join(e));
+    let arch = exe.as_deref().and_then(arch_of);
+    let size = bundle_size(app);
+    let (signed, gatekeeper) = signature(app);
+    Details { info, arch, size, signed, gatekeeper, quarantined: quarantined(app), problem: problem(app) }
+}
+
+/// Which processors a Mach-O program runs on, from its header.
+pub fn arch_of(exe: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut head = vec![0u8; 4096];
+    let n = std::fs::File::open(exe).ok()?.read(&mut head).ok()?;
+    arch_label(&cpus(&head[..n])?)
+}
+
+const CPU_X86_64: u32 = 0x0100_0007;
+const CPU_ARM64: u32 = 0x0100_000c;
+
+/// The CPU types in a Mach-O header (thin or universal).
+fn cpus(h: &[u8]) -> Option<Vec<u32>> {
+    let be = |at: usize| h.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()));
+    let le = |at: usize| h.get(at..at + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    match be(0)? {
+        // A universal binary: a table of architectures (32- or 64-bit entries). Java class
+        // files share the magic number but have a version where the count would be.
+        m @ (0xcafe_babe | 0xcafe_babf) => {
+            let n = be(4)? as usize;
+            if n == 0 || n > 16 {
+                return None;
+            }
+            let step = if m == 0xcafe_babf { 32 } else { 20 };
+            (0..n).map(|i| be(8 + i * step)).collect()
+        }
+        // Thin, little-endian 64- or 32-bit.
+        0xcffa_edfe | 0xcefa_edfe => Some(vec![le(4)?]),
+        _ => None,
+    }
+}
+
+fn arch_label(cpus: &[u32]) -> Option<String> {
+    let arm = cpus.contains(&CPU_ARM64);
+    let intel = cpus.contains(&CPU_X86_64);
+    Some(match (arm, intel) {
+        (true, true) => "Universal (Apple silicon and Intel)",
+        (true, false) => "Apple silicon",
+        (false, true) => "Intel",
+        _ => "Other (older or unusual processor)",
+    }.into())
+}
+
+/// Bytes, space on disk and files in a bundle, not following links.
+fn bundle_size(dir: &Path) -> (u64, u64, u64) {
+    let (mut bytes, mut alloc, mut files) = (0, 0, 0);
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let Ok(md) = e.metadata() else { continue };
+            if md.is_dir() {
+                todo.push(e.path());
+            } else {
+                bytes += md.len();
+                files += 1;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    alloc += md.blocks() * 512;
+                }
+                #[cfg(not(unix))]
+                {
+                    alloc += md.len();
+                }
+            }
+        }
+    }
+    (bytes, alloc, files)
+}
+
+/// The signature and Gatekeeper's verdict, from macOS's `codesign` and `spctl`.
+#[cfg(target_os = "macos")]
+fn signature(app: &Path) -> (Option<String>, Option<String>) {
+    use std::process::Command;
+    let err = |c: &mut Command| c.output().ok().map(|o| String::from_utf8_lossy(&o.stderr).into_owned());
+    let signed = err(Command::new("/usr/bin/codesign").args(["-dv", "--verbose=2"]).arg(app)).map(|t| signer(&t));
+    let gk = err(Command::new("/usr/sbin/spctl").args(["-a", "-vv", "-t", "exec"]).arg(app)).map(|t| gatekeeper(&t));
+    (signed, gk)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn signature(_app: &Path) -> (Option<String>, Option<String>) {
+    (None, None)
+}
+
+/// Who signed it, from `codesign -dv` output.
+fn signer(t: &str) -> String {
+    if t.contains("not signed at all") {
+        return "Not signed".into();
+    }
+    if t.contains("Signature=adhoc") {
+        return "Signed for this Mac only (ad hoc)".into();
+    }
+    let first = t.lines().find_map(|l| l.strip_prefix("Authority=")).unwrap_or("");
+    if first.contains("Apple Mac OS Application Signing") {
+        "Mac App Store".into()
+    } else if first == "Software Signing" {
+        "Apple".into()
+    } else if let Some(d) = first.strip_prefix("Developer ID Application: ") {
+        format!("Developer ID: {d}")
+    } else if first.is_empty() {
+        "Signed (no details)".into()
+    } else {
+        first.to_string()
+    }
+}
+
+/// Gatekeeper's verdict, from `spctl -a -vv` output.
+fn gatekeeper(t: &str) -> String {
+    let source = t.lines().find_map(|l| l.trim().strip_prefix("source=")).unwrap_or("");
+    if t.contains(": accepted") || t.lines().any(|l| l.trim() == "accepted") {
+        match source {
+            "Notarized Developer ID" => "Allowed: notarised by Apple".into(),
+            "Apple System" => "Allowed: part of macOS".into(),
+            "Mac App Store" => "Allowed: from the Mac App Store".into(),
+            "" => "Allowed".into(),
+            s => format!("Allowed ({s})"),
+        }
+    } else if t.contains("rejected") {
+        if source.is_empty() { "Blocked by Gatekeeper".into() } else { format!("Blocked by Gatekeeper ({source})") }
+    } else {
+        "Unknown".into()
+    }
+}
+
+/// Whether macOS has marked it as downloaded from the internet and not yet opened.
+fn quarantined(app: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let (Ok(p), Ok(n)) = (std::ffi::CString::new(app.as_os_str().as_bytes()), std::ffi::CString::new("com.apple.quarantine")) else { return false };
+        // SAFETY: NUL-terminated strings; a null buffer asks only for the size.
+        unsafe { libc::getxattr(p.as_ptr(), n.as_ptr(), std::ptr::null_mut(), 0, 0, 0) >= 0 }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        false
+    }
+}
+
+/// Applications' details, made one at a time on a worker thread and kept by path and modified
+/// time (an updated app is read again).
+#[derive(Default)]
+pub struct DetailsCache {
+    map: std::collections::HashMap<PathBuf, (i64, Option<std::sync::Arc<Details>>)>,
+    worker: Option<(std::sync::mpsc::Sender<(PathBuf, i64)>, std::sync::mpsc::Receiver<(PathBuf, i64, Details)>)>,
+}
+
+impl DetailsCache {
+    /// The details if ready; otherwise asks for them (and the context repaints when they come).
+    pub fn get(&mut self, ctx: &eframe::egui::Context, app: &Path, stamp: i64) -> Option<std::sync::Arc<Details>> {
+        if let Some((_, rx)) = &self.worker {
+            while let Ok((p, st, d)) = rx.try_recv() {
+                if let Some(e) = self.map.get_mut(&p)
+                    && e.0 == st
+                {
+                    e.1 = Some(std::sync::Arc::new(d));
+                }
+            }
+        }
+        match self.map.get(app) {
+            Some((st, d)) if *st == stamp => return d.clone(),
+            _ => {}
+        }
+        if self.map.len() > 200 {
+            self.map.clear();
+        }
+        self.map.insert(app.to_path_buf(), (stamp, None));
+        let (tx, _) = self.worker.get_or_insert_with(|| {
+            let (ask, jobs) = std::sync::mpsc::channel::<(PathBuf, i64)>();
+            let (done, rx) = std::sync::mpsc::channel();
+            let ctx = ctx.clone();
+            let _ = std::thread::Builder::new().name("app-details".into()).spawn(move || {
+                while let Ok((p, st)) = jobs.recv() {
+                    let d = details(&p);
+                    if done.send((p, st, d)).is_err() {
+                        return;
+                    }
+                    ctx.request_repaint();
+                }
+            });
+            (ask, rx)
+        });
+        let _ = tx.send((app.to_path_buf(), stamp));
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,5 +682,46 @@ mod tests {
         std::fs::write(app.join("Contents/Resources/AppIcon.icns"), &file).unwrap();
         #[cfg(not(target_os = "macos"))]
         assert_eq!(icon(&app, 128).map(|i| i.0), Some(128));
+    }
+
+    #[test]
+    fn architectures_and_signatures() {
+        let thin = |cpu: u32| {
+            let mut h = vec![0xcf, 0xfa, 0xed, 0xfe];
+            h.extend_from_slice(&cpu.to_le_bytes());
+            h
+        };
+        assert_eq!(arch_label(&cpus(&thin(CPU_ARM64)).unwrap()).unwrap(), "Apple silicon");
+        assert_eq!(arch_label(&cpus(&thin(CPU_X86_64)).unwrap()).unwrap(), "Intel");
+        let mut fat = vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 2];
+        for cpu in [CPU_X86_64, CPU_ARM64] {
+            fat.extend_from_slice(&cpu.to_be_bytes());
+            fat.extend_from_slice(&[0; 16]);
+        }
+        assert_eq!(arch_label(&cpus(&fat).unwrap()).unwrap(), "Universal (Apple silicon and Intel)");
+        // A Java class file (same magic, a version where the count would be).
+        assert!(cpus(&[0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 52]).is_none());
+        assert!(cpus(b"#!/bin/sh").is_none());
+
+        assert_eq!(signer("Executable=/x\nAuthority=Developer ID Application: Acme Ltd (AB12CD34)\nAuthority=Developer ID Certification Authority\n"), "Developer ID: Acme Ltd (AB12CD34)");
+        assert_eq!(signer("Authority=Apple Mac OS Application Signing\n"), "Mac App Store");
+        assert_eq!(signer("Authority=Software Signing\n"), "Apple");
+        assert_eq!(signer("Signature=adhoc\n"), "Signed for this Mac only (ad hoc)");
+        assert_eq!(signer("/x: code object is not signed at all\n"), "Not signed");
+        assert_eq!(gatekeeper("/A.app: accepted\nsource=Notarized Developer ID\norigin=Developer ID Application: Acme\n"), "Allowed: notarised by Apple");
+        assert_eq!(gatekeeper("/A.app: rejected\n"), "Blocked by Gatekeeper");
+        let d = Details { signed: Some("Developer ID: Acme Ltd (AB12CD34)".into()), ..Default::default() };
+        assert_eq!(d.publisher().as_deref(), Some("Acme Ltd"));
+    }
+
+    #[test]
+    fn details_of_a_bundle() {
+        let d = tmp("details");
+        let app = make_app(&d, "Sketchpad.app", true);
+        let x = details(&app);
+        assert_eq!(x.info.unwrap().version.as_deref(), Some("2.4.1"));
+        assert_eq!(x.size.2, 2);
+        assert!(x.problem.is_none());
+        assert_eq!(x.arch, None, "4 bytes is too short a header to tell");
     }
 }
