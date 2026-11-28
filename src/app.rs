@@ -2779,6 +2779,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.stop_unseen_media();
         let view_theme = self.view().theme;
         if self.applied_theme != Some(view_theme) {
             self.view().apply_theme(&ctx);
