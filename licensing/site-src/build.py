@@ -101,11 +101,52 @@ JSONLD = {
 }
 
 
+# How deep each format's preview goes, and which group it's filed under on the Supported formats
+# page. Keyed by the format's Category in src/formats.rs, with a few formats singled out by id.
+LEVELS = {  # key: (label, what it means)
+    "rendered": ("Rendered", "The picture, page, drawing, model, sound or video itself"),
+    "embedded": ("Saved preview", "The preview picture the app that made it saved inside the file"),
+    "content": ("Contents", "The text, cells, tables, tracks or files inside, laid out by Filescape"),
+    "details": ("Details only", "What the file says about itself, without drawing it"),
+}
+LEVEL_BY_CATEGORY = {
+    "Picture": "rendered", "LinearPicture": "rendered", "SystemPicture": "rendered", "Drawing": "rendered",
+    "Font": "rendered", "Video": "rendered", "Audio": "rendered", "Pdf": "rendered", "Midi": "rendered",
+    "Model": "rendered", "Splat": "rendered", "Map": "rendered", "Science": "rendered",
+    "Raw": "embedded", "Photoshop": "embedded", "Saved": "embedded",
+    "Text": "content", "Spreadsheet": "content", "Database": "content", "Document": "content",
+    "DiskImage": "content", "Cad": "rendered",
+}
+LEVEL_BY_ID = {"layered": ["rendered"], "aep": ["content"], "daw": ["content"],
+               "cad": ["rendered", "details"], "archive": ["content"]}
+GROUPS = {  # key: label
+    "images": "Images and photos", "design": "Design, fonts and creative apps",
+    "documents": "Documents and books", "media": "Audio, video and music",
+    "3d": "3D, CAD and splats", "data": "Code, text and data", "mail": "Mail, contacts and calendars",
+    "maps": "Maps", "archives": "Archives and disk images",
+}
+GROUP_BY_CATEGORY = {
+    "Picture": "images", "LinearPicture": "images", "SystemPicture": "images", "Raw": "images", "Science": "images",
+    "Photoshop": "design", "Saved": "design", "Drawing": "design", "Font": "design",
+    "Pdf": "documents", "Document": "documents", "Text": "data", "Spreadsheet": "data", "Database": "data",
+    "Video": "media", "Audio": "media", "Midi": "media", "Model": "3d", "Splat": "3d", "Cad": "3d",
+    "Map": "maps", "DiskImage": "archives",
+}
+GROUP_BY_ID = {"markdown": "documents", "iwork": "documents", "sheet": "data", "csv": "data",
+               "daw": "media", "mail": "mail", "mbox": "mail", "vcard": "mail", "ical": "mail",
+               "archive": "archives"}
+
+
 def formats_table():
-    """The Supported formats table, from the generated part of the Help Centre's formats page."""
+    """The Supported formats table, from the generated part of the Help Centre's formats page, with
+    each row's group and preview depth from the app's format registry (src/formats.rs)."""
     md = (REPO / "docs/src/reference/formats.md").read_text()
     part = md[md.index("<!-- BEGIN GENERATED"):md.index("<!-- END GENERATED")]
-    rows = [l for l in part.splitlines() if l.startswith("| ")][2:]  # skip the header and |---|
+    rows = [l for l in part.splitlines() if l.startswith("| ")][1:]  # skip the header (|---| isn't "| ")
+    registry = {name: (fid, cat) for fid, name, cat in re.findall(
+        r'Format\s*\{\s*id:\s*"([^"]+)",\s*name:\s*"([^"]+)",\s*category:\s*Category::(\w+)',
+        (REPO / "src/formats.rs").read_text())}
+    registry.setdefault("Archives", ("archive", None))  # archives are browsed, not in the registry
     out, exts = [], 0
 
     def inline(text):
@@ -116,10 +157,25 @@ def formats_table():
     for row in rows:
         cells = [c.strip() for c in row.strip("|").split("|")]
         name, ext, shows = cells[0], cells[1], cells[2]
+        assert name in registry, f"formats.md row {name!r} isn't in src/formats.rs"
+        fid, cat = registry[name]
+        levels = LEVEL_BY_ID.get(fid) or [LEVEL_BY_CATEGORY[cat]]
+        group = GROUP_BY_ID.get(fid) or GROUP_BY_CATEGORY[cat]
         exts += ext.count("`") // 2
-        out.append(f"<tr><th scope=\"row\">{inline(name)}</th><td class=\"exts\">{inline(ext)}</td>"
-                   f"<td>{inline(shows)}</td></tr>")
+        tags = "".join(f'<span class="lvl lvl-{l}" title="{html.escape(LEVELS[l][1])}">{LEVELS[l][0]}</span>' for l in levels)
+        out.append(f'<tr data-group="{group}" data-level="{" ".join(levels)}" '
+                   f'data-search="{html.escape((name + " " + ext.replace("`", "")).lower())}">'
+                   f"<th scope=\"row\">{inline(name)}<span class=\"grp\">{GROUPS[group]}</span></th>"
+                   f"<td class=\"exts\">{inline(ext)}</td><td>{inline(shows)}</td><td>{tags}</td></tr>")
     return "\n".join(out), len(rows), exts
+
+
+def formats_filters():
+    """The group and depth pickers above the Supported formats table."""
+    groups = "".join(f'<option value="{k}">{v}</option>' for k, v in GROUPS.items())
+    levels = "".join(f'<option value="{k}">{v[0]}</option>' for k, v in LEVELS.items())
+    legend = "".join(f'<li><span class="lvl lvl-{k}">{v[0]}</span> {v[1]}.</li>' for k, v in LEVELS.items())
+    return groups, levels, legend
 
 
 def md_inline(text):
@@ -212,6 +268,7 @@ for f in (SRC / "fonts").glob("*.woff2"):
     shutil.copy(f, DIST / "fonts" / f.name)
 
 table, n_formats, n_exts = formats_table()
+F_GROUPS, F_LEVELS, F_LEGEND = formats_filters()
 NEWS, NEWS_JUMP = whats_new()
 urls = []
 # Download checksums: published only when ../site/SHA256SUMS.txt exists (licensing/SETUP.md step 9
@@ -226,6 +283,9 @@ def render(path, out, src, title, og_title, desc, key, extra_head=""):
     body = (SRC / src).read_text()
     body = (body.replace("{{formats_table}}", table)
                 .replace("{{formats_count}}", str(n_formats))
+                .replace("{{formats_groups}}", F_GROUPS)
+                .replace("{{formats_levels}}", F_LEVELS)
+                .replace("{{formats_legend}}", F_LEGEND)
                 .replace("{{extensions_count}}", str(n_exts))
                 .replace("{{version}}", VERSION)
                 .replace("{{checksums}}", CHECKSUMS)
@@ -262,7 +322,7 @@ for path, out, src, title, og_title, desc, key, priority in PAGES:
     render(path, out, src, title, og_title, desc, key)
     sources = [SRC / "head.html", SRC / "nav.html", SRC / "foot.html", SRC / src]
     if out == "formats.html":
-        sources.append(REPO / "docs/src/reference/formats.md")
+        sources += [REPO / "docs/src/reference/formats.md", REPO / "src/formats.rs"]
     if out == "whats-new.html":
         sources.append(REPO / "docs/src/about/whats-new.md")
     urls.append((path, lastmod(*sources), priority))

@@ -52,18 +52,50 @@
       <div class="section-head">
         <span class="eyebrow">Supported formats</span>
         <h2>{{formats_count}} kinds of file, {{extensions_count}} extensions.</h2>
-        <p class="lede">This list comes from the app's own Help Centre (Help › Supported Formats), so it matches what Filescape really previews. Other files still show their details, and a file with a missing or wrong extension is previewed by what it really is when Filescape can tell from its first bytes.</p>
+        <p class="lede">This list is built from the app's own format list and Help Centre (Help › Supported Formats), so it matches what Filescape really previews. Search by name or extension, or narrow it by kind of file and how deep the preview goes. Other files still show their details, and a file with a missing or wrong extension is previewed by what it really is when Filescape can tell from its first bytes.</p>
       </div>
-      <div class="fmt" role="region" aria-label="Every format Filescape previews">
+      <form class="fmt-tools" role="search" aria-label="Filter the formats" onsubmit="return false">
+        <label class="fmt-q"><span class="sr">Search by name or extension</span><input type="search" id="fmt-q" placeholder="Search: .exr, raw, blender…" autocomplete="off"></label>
+        <label><span class="sr">Kind of file</span><select id="fmt-group"><option value="">All kinds of file</option>{{formats_groups}}</select></label>
+        <label><span class="sr">Preview depth</span><select id="fmt-level"><option value="">Any preview</option>{{formats_levels}}</select></label>
+        <output id="fmt-count" class="fmt-count" aria-live="polite"></output>
+      </form>
+      <ul class="lvl-legend">{{formats_legend}}</ul>
+      <div class="fmt" role="region" aria-label="Every format Filescape previews" tabindex="0">
         <div class="fmt-scroll">
-          <table>
-            <thead><tr><th scope="col">Format</th><th scope="col">Extensions</th><th scope="col">What you see</th></tr></thead>
+          <table id="fmt-table">
+            <thead><tr><th scope="col">Format</th><th scope="col">Extensions</th><th scope="col">What you see</th><th scope="col">Preview</th></tr></thead>
             <tbody>
 {{formats_table}}
             </tbody>
           </table>
+          <p class="fmt-none" id="fmt-none" hidden>Nothing matches. Filescape still shows any file's size, dates and kind, and opens it in its own app. <a href="/contact?topic=feature">Ask for a format</a>.</p>
         </div>
       </div>
+      <script>
+      (() => {
+        const q = document.getElementById("fmt-q"), g = document.getElementById("fmt-group"), l = document.getElementById("fmt-level");
+        const rows = [...document.querySelectorAll("#fmt-table tbody tr")], count = document.getElementById("fmt-count"), none = document.getElementById("fmt-none");
+        const params = new URLSearchParams(location.search);
+        q.value = params.get("q") || ""; g.value = params.get("kind") || ""; l.value = params.get("preview") || "";
+        const run = () => {
+          const words = q.value.toLowerCase().split(/[\s,]+/).map(w => w.replace(/^\./, "")).filter(Boolean);
+          let n = 0;
+          for (const r of rows) {
+            const show = (!g.value || r.dataset.group === g.value) && (!l.value || r.dataset.level.split(" ").includes(l.value))
+              && words.every(w => r.dataset.search.includes(w));
+            r.hidden = !show; n += show;
+          }
+          count.textContent = n === rows.length ? `${n} formats` : `${n} of ${rows.length} formats`;
+          none.hidden = n > 0;
+          const u = new URLSearchParams();
+          if (q.value) u.set("q", q.value); if (g.value) u.set("kind", g.value); if (l.value) u.set("preview", l.value);
+          history.replaceState(null, "", (u.toString() ? "?" + u : location.pathname) + location.hash);
+        };
+        [q, g, l].forEach(e => e.addEventListener("input", run));
+        run();
+      })();
+      </script>
       <p class="small" style="margin-top:12px">HEIC, AVIF and video use your system's own decoders: built into macOS; on Windows, the free HEIF and AV1 extensions from the Microsoft Store; on Linux, libheif or ffmpeg.</p>
 
       <div class="cta">
