@@ -69,11 +69,29 @@ the model, delete its file from the folder above.
 
 ## Asking
 
-Type a question and press **Enter**, or **Send**. **Shift+Enter** starts a new line. The answer
-appears as it's written; **■ Stop** ends it early. **New chat** starts a new conversation with
-the same model, and **Copy** under an answer copies it.
+Type a question and press **Enter**, or the round **Send** button. **Shift+Enter** starts a new
+line, and the box grows with what you type, up to eight lines. The answer appears as it's
+written; while it's being written the Send button becomes **Stop**, which ends it early. **New
+chat** starts a new conversation with the same model. **+** in the question box asks about a
+file or folder, and the box says how many items the conversation is about.
 
-Some models, such as Qwen 3 and DeepSeek R1, think before they answer. Their thinking is folded
+Under each answer is a row of buttons: **Copy** (the answer as plain text), **Copy as Markdown**
+(with its formatting marks), **Save** (as a Markdown or text file of your choosing) and, under the
+latest answer, **Write again**, which asks the model for a new answer to the same question.
+
+If you scroll up while an answer is being written, the conversation stays where you are; **Jump
+to latest** takes you back to the end.
+
+Your questions sit on the right in a tinted bubble, with what they were about beside **You**;
+hover that to see exactly what the model was told. Answers start under the model's name and are
+set out from their Markdown: headings, lists, bold and italics, quotes, tables (a wide one
+scrolls sideways in a narrow panel) and code, coloured by its language once the answer is
+complete, with **Copy** above each block. Nothing in an answer is run or loaded: a web link
+opens in your browser only when you click it. Text is held to a comfortable line length when the
+panel is wide. To make the conversation's text bigger or smaller without changing the rest of
+Filescape, use **Conversation text size** in Settings › Files › Ask AI.
+
+Some models, such as Qwen 3, DeepSeek R1, Gemma 4 and gpt-oss, think before they answer. Their thinking is folded
 away under **Thought about it**; click it to read it.
 
 Under the last answer, Filescape shows how many tokens it took and how fast they were written.
@@ -102,10 +120,10 @@ From the top, the tab shows:
   text, code, PDF, EPUB, Word, PowerPoint, OpenDocument and Excel files. A picture gets
   **Describe this picture** and **What text is in it?** when the loaded model can see images
   (see [Asking about pictures](#asking-about-pictures)).
-- **The conversation**, with **Copy** and **Based on** under each answer, as below.
-- **The question box**. **Enter** sends; follow-up questions keep what the chat is about. **…**
-  has **New chat** and **Open in AI Models**, which carries the conversation on in the AI Models
-  workspace with more room (it replaces the conversation there).
+- **The conversation**, with the answer buttons and **Based on** under each answer, as below.
+- **The question box**. **Enter** sends; follow-up questions keep what the chat is about. Beside
+  Send, **+** starts a new chat and **Open in AI Models** carries the conversation on in the AI
+  Models workspace with more room (it replaces the conversation there).
 
 **Include the file's contents** is ticked for a single file Filescape can read, so its text goes
 with the first question. Folders are described by their names, sizes and dates, not by reading
@@ -186,7 +204,7 @@ Right-click a file or folder in Storage Analysis and choose **💬 Ask AI About 
 attached to your next question, shown above the question box as **📎 About …**. Ask something like
 "What is this folder for?" or "What could I delete here?".
 
-From inside Ask AI, press **Attach…** under **Send** and choose **A file…** or **A folder…**, or
+From inside Ask AI, press **+** in the question box and choose **A file…** or **A folder…**, or
 drop files and folders from your file manager onto Ask AI.
 
 What the model is told:
@@ -207,10 +225,14 @@ What the model is told:
 - Nothing is opened to describe a folder, and Filescape looks no deeper than three levels, so a
   question about a large folder is answered quickly.
 - **Not** what's inside the files, unless you tick **Include the file's contents**. That box
-  appears when you ask about files, and applies to that one question: Filescape then reads the
-  start of each chosen text file, or the text of a PDF, EPUB book, Word, PowerPoint, OpenDocument
-  or Excel file, as much as fits in the model's context. A PDF is read page by page from the
-  first. Other files, and files that are only in the cloud, aren't read, so asking never
+  appears when you ask about files, and applies to that one question: Filescape then reads each
+  chosen text file, or the text of a PDF, EPUB book, Word, PowerPoint, OpenDocument or Excel
+  file. A document that fits in the model's context goes in whole. One that doesn't is cut to
+  the parts that matter for the question: the start, then the passages that match it. **Can I
+  use this commercially?** finds the clauses about commercial use, sale and permissions; a
+  question that names nothing in particular, such as **Summarise**, gets passages from all
+  through the document. The model is told which lines it was given and that the rest was left
+  out, and **⚠ Partly included** tells you. A PDF is read page by page from the first. Other files, and files that are only in the cloud, aren't read, so asking never
   downloads anything. PDFs over 256 MB, password-protected PDFs and scanned pages (pictures of
   text, with no text in them) can't be read either.
 
@@ -222,11 +244,20 @@ Under the answer, **Based on** lists the files and folders it was given, and whe
 only their names, sizes and dates or the text of the files too. Click one to show it in Files.
 
 When the model wasn't given everything, a **⚠ Partly included** line under **Based on** says
-what was left out: a file read only in part ("report.pdf: read the start only, pages 1 to 6 of
-40"), a file not read, files left unread for lack of room, or a large folder whose items were
+what was left out: a file read only in part ("LICENSE: included only the parts most related to
+the question: lines 1–40, 120–160 and 300 of 900", or "report.pdf: read the start only, pages 1
+to 6 of 40"), a file not read, files left unread for lack of room, or a large folder whose items were
 only partly listed ("Samples: listed 40 of 1,250 items by name, the rest only counted"). The
 answer covers only what the model was given. Hover the line to see everything; ask about fewer
 items, or one on its own, to give it more room.
+
+When text files were only partly given, **Review the rest** beside the line asks the question
+again with the parts of them the model hasn't seen yet, in place of the parts it has, so the
+rest gets the room. Press it again to keep going; when nothing is left, the line says so.
+
+If a file's text turns out denser than expected and the question doesn't fit in the model's
+context, Filescape reads less of it and sends the question again by itself, rather than stopping
+with an error.
 
 Ask AI asks the model to cite the files it relies on, like `[config.yaml:12]`, and sends text
 files with their lines numbered so it can. Under the answer, **Cited** lists those references,

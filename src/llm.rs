@@ -129,6 +129,9 @@ pub enum Event {
     /// layer's typical output.
     Steered { plain: crate::lab::Run, steered: crate::lab::Run, push: f32 },
     Unloaded,
+    /// The question alone, with what's attached to it, came to `tokens`, more than the `fits`
+    /// the context has room for. An [`Event::Error`] follows, unless the asker sends it shorter.
+    TooLong { tokens: usize, fits: usize },
     Error(String),
 }
 
@@ -450,6 +453,7 @@ fn answer(
             if toks.len() + 256 <= n_ctx {
                 break toks;
             }
+            let _ = tx.send(Event::TooLong { tokens: toks.len(), fits: n_ctx.saturating_sub(room) });
             return Err(format!("The question is too long for this model's context ({n_ctx} tokens). Shorten it, or choose a longer context."));
         }
         conv.remove(first);

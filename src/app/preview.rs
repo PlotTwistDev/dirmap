@@ -2827,6 +2827,7 @@ fn doc_blocks(ui: &mut egui::Ui, blocks: &[crate::help::doc::Block]) {
     static NO_DOCS: std::sync::OnceLock<doc::Docs> = std::sync::OnceLock::new();
     let mut images = HashMap::new();
     let mut out = render::Out {
+        look: render::Look::default(),
         page: "",
         docs: NO_DOCS.get_or_init(|| doc::Docs::from_sources(&[])),
         images: &mut images,

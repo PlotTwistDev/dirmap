@@ -22,7 +22,29 @@ pub enum Request {
     ApplyFilter(String),
 }
 
+/// How text is set: the help pages' defaults, or roomier for Ask AI's answers.
+#[derive(Clone, Copy)]
+pub struct Look {
+    pub body: f32,
+    /// Line height as a multiple of the font size; 0 for the font's own.
+    pub line: f32,
+    /// Space between paragraphs, lists and other blocks.
+    pub gap: f32,
+    /// An answer from a model: smaller headings with no rule, tables that scroll sideways rather
+    /// than squeeze, and links that only open web pages, on a click, never on their own.
+    pub chat: bool,
+    /// Colour code blocks by their language (not while an answer is still arriving).
+    pub colour_code: bool,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Look { body: BODY, line: 0.0, gap: 7.0, chat: false, colour_code: false }
+    }
+}
+
 pub struct Out<'a> {
+    pub look: Look,
     pub page: &'a str,
     pub docs: &'a Docs,
     pub images: &'a mut HashMap<String, Option<TextureHandle>>,
@@ -34,6 +56,13 @@ pub struct Out<'a> {
 
 impl Out<'_> {
     fn follow(&mut self, link: &str) {
+        if self.look.chat {
+            let l = link.trim();
+            if l.starts_with("https://") || l.starts_with("http://") {
+                self.nav = Some(Nav::Url(l.to_string()));
+            }
+            return;
+        }
         self.nav = Some(match doc::resolve(self.page, link) {
             Some((p, a)) => Nav::Page(p, a),
             None => Nav::Url(link.to_string()),
@@ -44,10 +73,11 @@ impl Out<'_> {
 pub fn blocks(ui: &mut egui::Ui, out: &mut Out, blocks: &[Block]) {
     for (i, b) in blocks.iter().enumerate() {
         if i > 0 {
+            let g = out.look.gap;
             ui.add_space(match b {
-                Block::Heading { level: 2, .. } => 14.0,
-                Block::Heading { .. } => 10.0,
-                _ => 7.0,
+                Block::Heading { level: 2, .. } => g * 2.0,
+                Block::Heading { .. } => g * 1.4,
+                _ => g,
             });
         }
         block(ui, out, b);
@@ -57,22 +87,28 @@ pub fn blocks(ui: &mut egui::Ui, out: &mut Out, blocks: &[Block]) {
 fn block(ui: &mut egui::Ui, out: &mut Out, b: &Block) {
     match b {
         Block::Heading { level, spans, id } => {
-            let size = match level {
-                1 => 25.0,
-                2 => 19.5,
-                3 => 16.5,
-                _ => 15.0,
+            let b = out.look.body;
+            let size = match (out.look.chat, level) {
+                (false, 1) => 25.0,
+                (false, 2) => 19.5,
+                (false, 3) => 16.5,
+                (false, _) => 15.0,
+                (true, 1) => b + 5.0,
+                (true, 2) => b + 3.0,
+                (true, 3) => b + 1.5,
+                (true, _) => b,
             };
             let rect = text(ui, out, spans, size, true);
             out.anchors.push((id.clone(), rect));
-            if *level == 2 {
+            if *level == 2 && !out.look.chat {
                 let y = rect.bottom() + 3.0;
                 ui.painter().hline(rect.left()..=ui.max_rect().right(), y, Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color));
                 ui.add_space(4.0);
             }
         }
         Block::Para(spans) => {
-            text(ui, out, spans, BODY, false);
+            let b = out.look.body;
+            text(ui, out, spans, b, false);
         }
         Block::List { start, items } => {
             for (k, item) in items.iter().enumerate() {
@@ -80,12 +116,15 @@ fn block(ui: &mut egui::Ui, out: &mut Out, b: &Block) {
                     Some(n) => format!("{}.", n + k as u64),
                     None => "•".to_string(),
                 };
+                let (b, line) = (out.look.body, out.look.line);
+                // The marker sits on the item's first line, whatever its line height.
+                let top = if line > 0.0 { (b * line - b) / 2.0 + 1.0 } else { 1.0 };
                 ui.horizontal_top(|ui| {
                     ui.add_space(6.0);
-                    let (r, _) = ui.allocate_exact_size(vec2(18.0, BODY + 4.0), Sense::hover());
-                    ui.painter().text(pos2(r.right() - 4.0, r.top() + 1.0), egui::Align2::RIGHT_TOP, marker, FontId::proportional(BODY), ui.visuals().text_color());
+                    let (r, _) = ui.allocate_exact_size(vec2(18.0, b + 4.0), Sense::hover());
+                    ui.painter().text(pos2(r.right() - 4.0, r.top() + top), egui::Align2::RIGHT_TOP, marker, FontId::proportional(b), ui.visuals().text_color());
                     ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 3.0;
+                        ui.spacing_mut().item_spacing.y = if out.look.chat { 4.0 } else { 3.0 };
                         blocks(ui, out, item);
                     });
                 });
@@ -114,7 +153,7 @@ fn block(ui: &mut egui::Ui, out: &mut Out, b: &Block) {
 }
 
 /// Lay out styled spans, wrapped to the available width. Returns the char ranges of links too.
-fn layout(ui: &egui::Ui, spans: &[Span], size: f32, strong: bool, width: f32) -> (Arc<Galley>, Vec<(usize, usize, String)>) {
+fn layout(ui: &egui::Ui, look: &Look, spans: &[Span], size: f32, strong: bool, width: f32) -> (Arc<Galley>, Vec<(usize, usize, String)>) {
     let vis = ui.visuals();
     let mut job = LayoutJob::default();
     job.wrap.max_width = width;
@@ -125,6 +164,7 @@ fn layout(ui: &egui::Ui, spans: &[Span], size: f32, strong: bool, width: f32) ->
             font_id: if s.code { FontId::monospace(size - 1.5) } else { FontId::proportional(size) },
             color: if strong || s.bold { vis.strong_text_color() } else { vis.text_color() },
             italics: s.italic,
+            line_height: (look.line > 0.0).then_some((size * look.line).round()),
             ..Default::default()
         };
         if s.code {
@@ -146,7 +186,7 @@ fn layout(ui: &egui::Ui, spans: &[Span], size: f32, strong: bool, width: f32) ->
 
 /// A wrapped run of text with working links. Returns where it was drawn.
 fn text(ui: &mut egui::Ui, out: &mut Out, spans: &[Span], size: f32, strong: bool) -> Rect {
-    let (galley, links) = layout(ui, spans, size, strong, ui.available_width());
+    let (galley, links) = layout(ui, &out.look, spans, size, strong, ui.available_width());
     let sense = if links.is_empty() { Sense::hover() } else { Sense::click() };
     let (rect, resp) = ui.allocate_exact_size(galley.size(), sense);
     if let Some(l) = hovered_link(&galley, rect, &resp, &links) {
@@ -183,6 +223,10 @@ fn hovered_link(galley: &Galley, rect: Rect, resp: &egui::Response, links: &[(us
 
 /// Tooltip for a link: the page title, or the web address.
 fn describe(out: &Out, link: &str) -> String {
+    if out.look.chat {
+        let l = link.trim();
+        return if l.starts_with("https://") || l.starts_with("http://") { format!("Open in your browser: {l}") } else { format!("Not a web address, so it isn't opened: {l}") };
+    }
     match doc::resolve(out.page, link) {
         Some((p, _)) => format!("Go to: {}", out.docs.title(&p)),
         None => format!("Open in your browser: {link}"),
@@ -190,6 +234,9 @@ fn describe(out: &Out, link: &str) -> String {
 }
 
 fn code(ui: &mut egui::Ui, out: &mut Out, lang: &str, text: &str) {
+    if out.look.chat {
+        return chat_code(ui, out, lang, text);
+    }
     let frame = egui::Frame::new().fill(ui.visuals().code_bg_color).inner_margin(8).corner_radius(4.0);
     frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -213,6 +260,50 @@ fn code(ui: &mut egui::Ui, out: &mut Out, lang: &str, text: &str) {
     });
 }
 
+/// Code in an answer: its language and a copy button above, coloured once the answer is
+/// complete, never run. Long lines scroll sideways rather than wrap.
+fn chat_code(ui: &mut egui::Ui, out: &mut Out, lang: &str, text: &str) {
+    let vis = ui.visuals().clone();
+    let size = out.look.body - 1.5;
+    let text = text.trim_end_matches('\n');
+    let frame = egui::Frame::new().fill(vis.code_bg_color).inner_margin(egui::Margin { left: 10, right: 6, top: 4, bottom: 8 }).corner_radius(6.0);
+    frame.show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(if lang.is_empty() { "code" } else { lang }).size(11.5).weak());
+            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                let r = ui.add(egui::Button::new(egui::RichText::new("⧉ Copy").size(11.5)).frame(false)).on_hover_text("Copy this code");
+                if r.clicked() {
+                    ui.ctx().copy_text(text.to_string());
+                }
+            });
+        });
+        let colours = if out.look.colour_code && !lang.is_empty() { coloured(ui, lang, text) } else { None };
+        egui::ScrollArea::horizontal().id_salt(ui.next_auto_id()).auto_shrink([false, true]).show(ui, |ui| {
+            let job = match colours {
+                Some(spans) => crate::highlight::job(text, &spans, FontId::monospace(size), vis.text_color()),
+                None => LayoutJob::simple(text.to_string(), FontId::monospace(size), vis.text_color(), f32::INFINITY),
+            };
+            ui.add(egui::Label::new(job).extend().selectable(true));
+        });
+    });
+}
+
+/// `text`'s colours as `lang` code, in this theme, remembered for the next frame.
+fn coloured(ui: &egui::Ui, lang: &str, text: &str) -> Option<Arc<Vec<crate::highlight::Span>>> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (lang, text).hash(&mut h);
+    let dark = ui.visuals().dark_mode;
+    let key = egui::Id::new(("chat-code", h.finish(), dark));
+    if let Some(v) = ui.data(|d| d.get_temp::<Option<Arc<Vec<crate::highlight::Span>>>>(key)) {
+        return v;
+    }
+    let v = crate::highlight::colour_lang(lang, text).map(|c| Arc::new(if dark { c.dark } else { c.light }));
+    ui.data_mut(|d| d.insert_temp(key, v.clone()));
+    v
+}
+
 /// Tables are laid out by hand so cells wrap: each column gets its natural width when
 /// everything fits, otherwise the widest columns give way.
 fn table(ui: &mut egui::Ui, out: &mut Out, head: &[Vec<Span>], rows: &[Vec<Vec<Span>>]) {
@@ -221,11 +312,26 @@ fn table(ui: &mut egui::Ui, out: &mut Out, head: &[Vec<Span>], rows: &[Vec<Vec<S
         return;
     }
     let pad = 8.0;
+    if out.look.chat {
+        // In a narrow panel a wide table scrolls sideways rather than squeezing every column.
+        let id = ui.next_auto_id();
+        egui::ScrollArea::horizontal().id_salt(id).auto_shrink([false, true]).show(ui, |ui| {
+            let avail = ui.available_width().max(cols as f32 * 110.0);
+            ui.set_min_width(0.0);
+            rows_of(ui, out, head, rows, cols, pad, avail);
+        });
+        return;
+    }
     let avail = ui.available_width();
+    rows_of(ui, out, head, rows, cols, pad, avail);
+}
+
+fn rows_of(ui: &mut egui::Ui, out: &mut Out, head: &[Vec<Span>], rows: &[Vec<Vec<Span>>], cols: usize, pad: f32, avail: f32) {
+    let (look, body) = (out.look, out.look.body);
     let mut natural = vec![30.0f32; cols];
     for (r, row) in std::iter::once(head).chain(rows.iter().map(|r| r.as_slice())).enumerate() {
         for (c, cell) in row.iter().enumerate() {
-            let (g, _) = layout(ui, cell, BODY, r == 0, f32::INFINITY);
+            let (g, _) = layout(ui, &look, cell, body, r == 0, f32::INFINITY);
             natural[c] = natural[c].max(g.size().x + 2.0 * pad);
         }
     }
@@ -234,7 +340,7 @@ fn table(ui: &mut egui::Ui, out: &mut Out, head: &[Vec<Span>], rows: &[Vec<Vec<S
     let line = vis.widgets.noninteractive.bg_stroke.color;
     for (r, row) in std::iter::once(head).chain(rows.iter().map(|r| r.as_slice())).enumerate() {
         let cells: Vec<_> = (0..cols)
-            .map(|c| row.get(c).map(|cell| layout(ui, cell, BODY, r == 0, widths[c] - 2.0 * pad)))
+            .map(|c| row.get(c).map(|cell| layout(ui, &look, cell, body, r == 0, widths[c] - 2.0 * pad)))
             .collect();
         let h = cells.iter().flatten().map(|(g, _)| g.size().y).fold(0.0f32, f32::max) + 2.0 * 5.0;
         let (rect, resp) = ui.allocate_exact_size(vec2(widths.iter().sum(), h), Sense::click());

@@ -57,6 +57,7 @@ mod vocab;
 mod modeldiff;
 mod llm;
 mod askabout;
+mod askpick;
 mod askrefs;
 mod asksuggest;
 mod lab;

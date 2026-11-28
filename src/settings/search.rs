@@ -34,6 +34,7 @@ pub const ENTRIES: &[Entry] = &[
     e(Tab::Files, "apps", "Applications & Executables", "Hide .app extensions", "applications apps extension .app hide names"),
     e(Tab::Files, "apps", "Applications & Executables", "Double-click to launch applications", "applications apps double click launch run start open enter"),
     e(Tab::Files, "ask-ai", "Ask AI", "Show Ask AI in Files", "ai ask llm assistant chat model question preview pane quick look hide"),
+    e(Tab::Files, "ask-ai", "Ask AI", "Conversation text size", "ai ask chat answer font text size larger smaller readable"),
     e(Tab::Files, "apps", "Applications & Executables", "Treat application bundles as folders", "applications apps bundles folders show package contents developers inside navigate"),
     e(Tab::Filtering, "summary", "Active rules", "Active filter rules", "filters summary rescan exclusions rules"),
     e(Tab::Filtering, "folders", "Skipped folders", "Folders to skip", "exclude ignore folder directory path skip browse"),

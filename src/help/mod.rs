@@ -217,7 +217,7 @@ impl Help {
         // ---- the page ----
         egui::CentralPanel::default().show(ui, |ui| {
             let Some(page) = docs.page(&at.page) else { return };
-            let mut out = Out { page: &page.path, docs: &docs, images: &mut self.images, nav: None, request: None, anchors: Vec::new() };
+            let mut out = Out { look: Default::default(), page: &page.path, docs: &docs, images: &mut self.images, nav: None, request: None, anchors: Vec::new() };
             let mut area = egui::ScrollArea::vertical().auto_shrink(false).id_salt(("help-page", &page.path));
             if self.jump && at.anchor.is_none() {
                 area = area.vertical_scroll_offset(0.0);

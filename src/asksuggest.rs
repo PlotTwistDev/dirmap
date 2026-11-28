@@ -175,6 +175,18 @@ pub fn shown() -> bool {
     SHOWN.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Ask AI's conversation text size (Settings › Files › Ask AI): 0 small, 1 medium, 2 large.
+static TEXT_SIZE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+
+pub fn set_text_size(size: u8) {
+    TEXT_SIZE.store(size.min(2), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The body size of Ask AI's conversation text, in points.
+pub fn text_size() -> f32 {
+    [13.5, 15.0, 16.5][TEXT_SIZE.load(std::sync::atomic::Ordering::Relaxed).min(2) as usize]
+}
+
 /// The loaded model can look at pictures (it has a vision projector). Set when a model loads.
 static VISION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
