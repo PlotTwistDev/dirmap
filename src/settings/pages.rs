@@ -1051,3 +1051,129 @@ fn permissions(ui: &mut egui::Ui, d: &mut Settings, restart: &mut bool, fda_miss
         }
     });
 }
+
+/// How an app is named when only its id is kept (a pin): the system's name for it where the
+/// page knows one, else the id made readable ("libreoffice-writer.desktop" → "libreoffice-writer").
+fn app_label(o: &crate::openapps::prefs::OpenPrefs, id: &str) -> String {
+    let known = o.defaults.values().chain(o.kind_defaults.values()).chain(o.remembered.values().flatten()).find(|h| h.id == id);
+    if let Some(h) = known {
+        return h.name.clone();
+    }
+    let p = std::path::Path::new(id);
+    p.file_stem().map(|s| s.to_string_lossy().into_owned()).filter(|s| !s.is_empty()).unwrap_or_else(|| id.to_string())
+}
+
+/// How a type's settings key is written for people (".txt files", "text files", "folders").
+fn type_label(key: &str) -> String {
+    match key {
+        "(text)" => "Text files".into(),
+        "(folder)" => "Folders".into(),
+        e => format!(".{e} files"),
+    }
+}
+
+/// One line of a list: what it is at the left, a button at the right. True when it's clicked.
+fn list_row(ui: &mut egui::Ui, what: &str, app: &str, button: &str, tip: &str) -> bool {
+    let mut hit = false;
+    ui.horizontal(|ui| {
+        ui.set_min_height(26.0);
+        ui.label(egui::RichText::new(what).strong());
+        if !app.is_empty() {
+            ui.weak("open in");
+            ui.label(app);
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            hit = kit::button(ui, kit::Kind::Secondary, None, button).on_hover_text(tip).clicked();
+        });
+    });
+    hit
+}
+
+pub fn associations(ui: &mut egui::Ui, cx: &mut PageCx) {
+    use crate::openapps::prefs::kind_name;
+    let f = cx.focuser();
+    let o = &mut cx.d.open_with;
+    kit::section(ui, Icon::External, "Default apps", f.of("defaults"), |ui| {
+        kit::note(
+            ui,
+            "Double-click, Enter and Open in open a file in Filescape's default for its type, then its default for the kind of file, then the system's default app; with none, Filescape asks. Choose one with Change Default Application… on Open With or the Open in button's arrow.",
+        );
+        let mut kinds: Vec<(String, String)> = o.kind_defaults.iter().map(|(k, h)| (k.clone(), h.name.clone())).collect();
+        kinds.sort();
+        let mut types: Vec<(String, String)> = o.defaults.iter().map(|(k, h)| (k.clone(), h.name.clone())).collect();
+        types.sort();
+        if kinds.is_empty() && types.is_empty() {
+            kit::divider(ui);
+            ui.weak("None yet: files open in the system's default apps.");
+        }
+        for (k, app) in kinds {
+            kit::divider(ui);
+            let name = crate::categories::Category::ALL.iter().find(|c| format!("{c:?}") == k).map(|c| kind_name(*c)).unwrap_or(k.to_lowercase());
+            if list_row(ui, &format!("All {name}"), &app, "Reset", &format!("Open {name} in the system's default app again")) {
+                o.kind_defaults.remove(&k);
+            }
+        }
+        for (k, app) in types {
+            kit::divider(ui);
+            let what = type_label(&k);
+            if list_row(ui, &what, &app, "Reset", &format!("Open {} in the system's default app again", what.to_lowercase())) {
+                o.defaults.remove(&k);
+            }
+        }
+        kit::divider(ui);
+        kit::note(
+            ui,
+            if cfg!(windows) {
+                "These are Filescape's own. To change Windows' default app for a type, use Change System Default… in Choose Another Application, which shows Windows' Open with box."
+            } else {
+                "These are Filescape's own. To change the system's default app for a type, use Change System Default… in Choose Another Application; Filescape asks before changing it."
+            },
+        );
+    });
+    kit::section(ui, Icon::List, "Open With lists", f.of("lists"), |ui| {
+        ui.label(egui::RichText::new("Pinned apps").strong());
+        kit::note(ui, "Listed near the top of every Open With list, after the default. Pin or unpin an app with the pin beside it in the list.");
+        if o.pinned.is_empty() {
+            ui.weak("None pinned.");
+        }
+        let mut unpin = None;
+        for id in &o.pinned {
+            kit::divider(ui);
+            if list_row(ui, &app_label(o, id), "", "Unpin", "Stop keeping it near the top of every list") {
+                unpin = Some(id.clone());
+            }
+        }
+        if let Some(id) = unpin {
+            o.pinned.retain(|p| *p != id);
+        }
+        kit::divider(ui);
+        ui.label(egui::RichText::new("Apps added for a type").strong());
+        kit::note(ui, "Apps you chose to list for a type in Choose Another Application.");
+        let mut added: Vec<(String, String, String)> = o.remembered.iter().flat_map(|(k, v)| v.iter().map(move |h| (k.clone(), h.name.clone(), h.id.clone()))).collect();
+        added.sort();
+        if added.is_empty() {
+            ui.weak("None added.");
+        }
+        let mut drop = None;
+        for (k, app, id) in &added {
+            kit::divider(ui);
+            if list_row(ui, &type_label(k), app, "Remove", "Stop listing it for this type (unless the system lists it)") {
+                drop = Some((k.clone(), id.clone()));
+            }
+        }
+        if let Some((k, id)) = drop {
+            if let Some(v) = o.remembered.get_mut(&k) {
+                v.retain(|h| h.id != id);
+                if v.is_empty() {
+                    o.remembered.remove(&k);
+                }
+            }
+        }
+        kit::divider(ui);
+        let used: usize = o.recent.values().map(Vec::len).sum();
+        kit::row(ui, "Recently used apps", Some("Apps you opened each type with last are listed after the pinned ones."), |ui| {
+            ui.add_enabled_ui(used > 0, |ui| kit::button(ui, kit::Kind::Secondary, None, "Forget")).inner.on_hover_text("Forget which apps were used last").clicked()
+        })
+        .then(|| o.recent.clear());
+    });
+}

@@ -70,6 +70,19 @@ How the Files workspace shows and opens applications. See [Applications](../view
 | **Show Ask AI in Files** <!-- setting:ask_in_files --> | On | Shows the **Ask AI** tab beside **Preview** and **Details** in the Files preview pane, and the **Ask AI** buttons in the preview pane and Quick Look. Off hides them; Ask AI is still in the [AI Models workspace](../views/ask-ai.md). |
 | **Conversation text size** <!-- setting:ask_text --> | Medium | The size of questions and answers in Ask AI (Small, Medium or Large), apart from the rest of Filescape's text. |
 
+## Apps & file associations
+
+Which apps Filescape opens files in, and what [Open With](../views/file-manager.md#open-with)
+lists. Everything here is Filescape's own: your system's default apps are never changed from
+this page.
+
+| Setting | Default | Effect |
+|---|---|---|
+| **Default apps** <!-- setting:open_with --> | None | Filescape's own default apps: for a type (`.txt files → Kate`) or a whole kind of file (`All documents → LibreOffice Writer`). Opening a file uses the type's default, then the kind's, then the system's; with none, Filescape asks. **Reset** next to one goes back to the system's app. Add one with **Change Default Application…** on Open With. To change the system's own default, use **Change System Default…** in Choose Another Application. |
+| **Pinned apps** | None | Apps listed near the top of every Open With list, after the default. **Unpin** removes one. |
+| **Apps added for a type** | None | Apps you chose to list for a type in Choose Another Application. **Remove** takes one off that type's list. |
+| **Recently used apps** | | The apps you opened each type with last, listed after the pinned ones. **Forget** clears them. |
+
 ## Filtering
 
 These are scan exclusions: they **need a rescan** and change the totals. See

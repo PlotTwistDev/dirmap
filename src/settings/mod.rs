@@ -72,6 +72,8 @@ pub struct Settings {
     pub ask_in_files: bool,
     /// Ask AI's conversation text: 0 small, 1 medium, 2 large.
     pub ask_text: u8,
+    /// Open With: pinned and recent apps, and Filescape's own default apps.
+    pub open_with: crate::openapps::prefs::OpenPrefs,
 
     // General
     pub theme: Theme,
@@ -215,6 +217,7 @@ impl Default for Settings {
             app_as_folders: false,
             ask_in_files: true,
             ask_text: 1,
+            open_with: Default::default(),
             col_percent: true,
             col_files: true,
             col_modified: true,
@@ -301,6 +304,7 @@ impl Settings {
                 (self.app_recognise, self.app_icons, self.app_hide_ext, self.app_double_click, self.app_as_folders, self.ask_in_files, self.ask_text) =
                     (def.app_recognise, def.app_icons, def.app_hide_ext, def.app_double_click, def.app_as_folders, def.ask_in_files, def.ask_text);
             }
+            Tab::Apps => self.open_with = def.open_with,
             Tab::Filtering => {
                 self.exclude_folders = def.exclude_folders;
                 self.exclude_files = def.exclude_files;
@@ -415,6 +419,7 @@ pub enum Tab {
     #[default]
     General,
     Files,
+    Apps,
     Filtering,
     FolderList,
     Treemap,
@@ -425,12 +430,13 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 9] = [Tab::General, Tab::Files, Tab::Filtering, Tab::FolderList, Tab::Treemap, Tab::Cloud, Tab::Previews, Tab::Advanced, Tab::Licensing];
+    pub const ALL: [Tab; 10] = [Tab::General, Tab::Files, Tab::Apps, Tab::Filtering, Tab::FolderList, Tab::Treemap, Tab::Cloud, Tab::Previews, Tab::Advanced, Tab::Licensing];
 
     pub fn name(self) -> &'static str {
         match self {
             Tab::General => "General",
             Tab::Files => "Files",
+            Tab::Apps => "Apps & file associations",
             Tab::Filtering => "Filtering",
             Tab::FolderList => "Folder list",
             Tab::Treemap => "Treemap",
@@ -445,6 +451,7 @@ impl Tab {
         match self {
             Tab::General => Icon::Gear,
             Tab::Files => Icon::Folder,
+            Tab::Apps => Icon::External,
             Tab::Filtering => Icon::Filter,
             Tab::FolderList => Icon::List,
             Tab::Treemap => Icon::Grid,
@@ -459,6 +466,7 @@ impl Tab {
         match self {
             Tab::General => "Appearance, how sizes are written, scanning and updates.",
             Tab::Files => "How the Files workspace shows and opens applications.",
+            Tab::Apps => "Which apps Filescape opens files in, and what Open With lists. Your system's own default apps are never changed here.",
             Tab::Filtering => "Choose what scans skip and what they count. These rules apply from the next scan.",
             Tab::FolderList => "Choose the columns of the folder list in Storage Analysis.",
             Tab::Treemap => "How the treemap looks and moves. Every change previews live in the main window.",
@@ -603,6 +611,7 @@ impl Dialog {
         match self.tab {
             Tab::General => topics::SETTINGS_GENERAL,
             Tab::Files => topics::SETTINGS_FILES,
+            Tab::Apps => topics::SETTINGS_APPS,
             Tab::Filtering => topics::SETTINGS_FILTERING,
             Tab::FolderList => topics::SETTINGS_FOLDER_LIST,
             Tab::Treemap => topics::SETTINGS_TREEMAP,
@@ -745,6 +754,7 @@ impl Dialog {
                             match self.tab {
                                 Tab::General => pages::general(ui, &mut cx, licence),
                                 Tab::Files => pages::files(ui, &mut cx),
+                                Tab::Apps => pages::associations(ui, &mut cx),
                                 Tab::Filtering => pages::filtering(ui, &mut cx),
                                 Tab::FolderList => pages::folder_list(ui, &mut cx),
                                 Tab::Treemap => pages::treemap(ui, &mut cx),

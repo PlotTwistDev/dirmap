@@ -455,7 +455,8 @@ Opening an item (double-click, **Enter**, **Open in** *app*) uses, in this order
 default for its type, then Filescape's default for its kind of file, then the system's default.
 With none, Filescape asks which app to use. Filescape's defaults never change your system's: in
 the list, the app it opens in is marked **Default** and the system's own choice, when that's
-different, **System default**.
+different, **System default**. Settings > [Apps & file associations](../settings/reference.md#apps--file-associations)
+lists Filescape's defaults, pinned apps and apps added for a type, and resets them.
 
 Files on a server, or in an archive, are copied to a temporary folder first, as **Open** does.
 

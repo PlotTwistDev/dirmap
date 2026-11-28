@@ -187,117 +187,8 @@ fn pick(h: &crate::openapps::Handler, p: Pick) -> Option<Pick> {
 /// At most this many apps are listed; the rest are a click away under Choose.
 const MENU_APPS: usize = 12;
 
-/// Apps used last for each type, at most this many.
-const RECENTS: usize = 5;
-
-/// Open With's own memory: apps pinned to the top of every list, and the ones used last for
-/// each type of file. Kept by Filescape only: the system's own settings are never touched.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub(super) struct OpenPrefs {
-    /// Apps (by their system id) listed first after the default, in the order pinned.
-    pub pinned: Vec<String>,
-    /// For each type ([`crate::openapps::Type::key`]), apps used last, newest first.
-    pub recent: std::collections::HashMap<String, Vec<String>>,
-    /// Filescape's own default app for a type, used before the system's.
-    pub defaults: std::collections::HashMap<String, Handler>,
-    /// Filescape's own default app for a whole kind of file (by [`kind_key`]), used when the
-    /// type has none of its own.
-    pub kind_defaults: std::collections::HashMap<String, Handler>,
-    /// Apps added to a type's list from Choose Another Application ("Remember in Open With").
-    pub remembered: std::collections::HashMap<String, Vec<Handler>>,
-}
-
 use crate::openapps::Handler;
-
-/// Where the app an item opens in comes from.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum Source {
-    /// Filescape's default for this type.
-    Type,
-    /// Filescape's default for this kind of file.
-    Kind,
-    /// The system's default.
-    System,
-}
-
-/// How a kind of file is kept in settings ("Documents").
-pub(super) fn kind_key(c: crate::categories::Category) -> String {
-    format!("{c:?}")
-}
-
-/// A kind's name for people ("documents").
-pub(super) fn kind_name(c: crate::categories::Category) -> String {
-    let l = c.label();
-    l.split_once(' ').map_or(l, |(_, n)| n).to_lowercase()
-}
-
-impl OpenPrefs {
-    pub fn is_pinned(&self, id: &str) -> bool {
-        self.pinned.iter().any(|p| p == id)
-    }
-
-    pub fn toggle_pin(&mut self, id: &str) {
-        if self.is_pinned(id) {
-            self.pinned.retain(|p| p != id);
-        } else {
-            self.pinned.push(id.to_string());
-        }
-    }
-
-    /// Filescape's own default for a type: the type's, else its kind's.
-    pub fn own_default(&self, t: &crate::openapps::Type) -> Option<(Handler, Source)> {
-        if let Some(h) = t.key().and_then(|k| self.defaults.get(&k)) {
-            return Some((h.clone(), Source::Type));
-        }
-        let h = t.category().and_then(|c| self.kind_defaults.get(&kind_key(c)))?;
-        Some((h.clone(), Source::Kind))
-    }
-
-    /// The app an item opens in: Filescape's default for its type, then for its kind, then the
-    /// system's (None while the system's list isn't known, or it has no default).
-    pub fn default_for(&self, t: &crate::openapps::Type, found: Option<&[Handler]>) -> Option<(Handler, Source)> {
-        self.own_default(t).or_else(|| found?.iter().find(|h| h.default).map(|h| (h.clone(), Source::System)))
-    }
-
-    /// The apps listed for a type: the system's, those remembered for it, and Filescape's
-    /// default; `default` marks the one it opens in. Also the system default's id.
-    pub fn listing(&self, t: &crate::openapps::Type, found: &[Handler]) -> (Vec<Handler>, Option<String>) {
-        let system = found.iter().find(|h| h.default).map(|h| h.id.clone());
-        let mut list: Vec<Handler> = found.to_vec();
-        let extra = t.key().and_then(|k| self.remembered.get(&k)).into_iter().flatten();
-        for h in extra.chain(self.own_default(t).as_ref().map(|(h, _)| h)) {
-            if !list.iter().any(|x| x.id == h.id) {
-                list.push(h.clone());
-            }
-        }
-        let chosen = self.default_for(t, Some(found)).map(|(h, _)| h.id);
-        for h in &mut list {
-            h.default = chosen.as_ref() == Some(&h.id);
-        }
-        (list, system)
-    }
-
-    /// Add an app to a type's list.
-    pub fn remember(&mut self, t: &crate::openapps::Type, h: &Handler) {
-        let Some(k) = t.key() else { return };
-        let r = self.remembered.entry(k).or_default();
-        if !r.iter().any(|x| x.id == h.id) {
-            let mut h = h.clone();
-            h.default = false;
-            r.push(h);
-        }
-    }
-
-    /// Remember an app was used for a type.
-    pub fn used(&mut self, t: &crate::openapps::Type, id: &str) {
-        let Some(k) = t.key() else { return };
-        let r = self.recent.entry(k).or_default();
-        r.retain(|x| x != id);
-        r.insert(0, id.to_string());
-        r.truncate(RECENTS);
-    }
-}
+use crate::openapps::prefs::{OpenPrefs, Source, kind_key, kind_name};
 
 /// Why an app is where it is in the list.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -558,7 +449,7 @@ impl App {
         use crate::kit::{self, Icon};
         let t = type_of(path, is_dir);
         let found = found_for(ui.ctx(), &t);
-        let def = self.files.prefs.open.default_for(&t, found.as_deref().map(|v| v.as_slice())).map(|(h, _)| h);
+        let def = self.settings.open_with.default_for(&t, found.as_deref().map(|v| v.as_slice())).map(|(h, _)| h);
         let full = def.as_ref().map(|h| format!("Open in {}", h.name));
         let width = |s: &str| ui.painter().layout_no_wrap(s.to_string(), egui::FontId::proportional(kit::LABEL), egui::Color32::WHITE).size().x;
         let label = match &full {
@@ -577,7 +468,7 @@ impl App {
         let mut chosen = None;
         egui::Popup::menu(&arrow).show(|ui| {
             ui.set_min_width(220.0);
-            chosen = app_list(ui, &self.files.prefs.apps, &self.files.prefs.open, path, &ext, is_dir);
+            chosen = app_list(ui, &self.files.prefs.apps, &self.settings.open_with, path, &ext, is_dir);
         });
         if let Some(p) = chosen {
             self.open_with(p, vec![path.to_path_buf()]);
@@ -588,7 +479,7 @@ impl App {
     /// system's; with neither, ask which app (Choose Another Application).
     pub(super) fn open_default(&mut self, path: PathBuf, is_dir: bool, found: Option<&[Handler]>) {
         let t = type_of(&path, is_dir);
-        match self.files.prefs.open.default_for(&t, found) {
+        match self.settings.open_with.default_for(&t, found) {
             Some((h, Source::Type | Source::Kind)) => {
                 let _ = pick(&h, Pick::System);
                 self.open_with(Pick::System, vec![path]);
@@ -603,7 +494,7 @@ impl App {
     pub(super) fn picker_window(&mut self, ctx: &egui::Context) {
         use crate::kit::{self, Icon, Kind};
         let Some(pk) = &mut self.files.picker else { return };
-        let prefs = &self.files.prefs.open;
+        let prefs = &self.settings.open_with;
         let mut close = false;
         let mut go = false;
         let mut browse = false;
@@ -752,18 +643,23 @@ impl App {
         }
         if go && let Some(pk) = self.files.picker.take() {
             let Some(h) = pk.chosen.clone() else { return };
-            let o = &mut self.files.prefs.open;
+            let t = pk.t.clone();
+            let saved = Handler { default: false, ..h.clone() };
             match pk.how {
                 How::Once => {}
-                How::Remember => o.remember(&pk.t, &h),
+                How::Remember => self.assoc(|o| o.remember(&t, &saved)),
                 How::TypeDefault => {
-                    if let Some(k) = pk.t.key() {
-                        o.defaults.insert(k, Handler { default: false, ..h.clone() });
+                    if let Some(k) = t.key() {
+                        self.assoc(|o| {
+                            o.defaults.insert(k.clone(), saved.clone());
+                        });
                     }
                 }
                 How::KindDefault => {
-                    if let Some(c) = pk.t.category() {
-                        o.kind_defaults.insert(kind_key(c), Handler { default: false, ..h.clone() });
+                    if let Some(c) = t.category() {
+                        self.assoc(|o| {
+                            o.kind_defaults.insert(kind_key(c), saved.clone());
+                        });
                     }
                 }
             }
@@ -776,6 +672,15 @@ impl App {
         }
         if close {
             self.files.picker = None;
+        }
+    }
+
+    /// Change Filescape's Open With choices, in the settings and in the Settings window's draft
+    /// while it's open (so Apply there doesn't put back what was just changed).
+    pub(super) fn assoc(&mut self, f: impl Fn(&mut OpenPrefs)) {
+        f(&mut self.settings.open_with);
+        if self.dialog.open {
+            f(&mut self.dialog.draft.open_with);
         }
     }
 
@@ -796,7 +701,8 @@ impl App {
                     return;
                 };
                 let is_dir = paths.len() == 1 && first.is_dir();
-                self.files.prefs.open.used(&type_of(&first, is_dir), &h.id);
+                let t = type_of(&first, is_dir);
+                self.assoc(|o| o.used(&t, &h.id));
                 self.files.spawn(move || {
                     let r = crate::openapps::open(&h, &local_copies(&paths)?);
                     // An app that's gone: look again next time.
@@ -810,19 +716,24 @@ impl App {
                 let is_dir = paths.len() == 1 && first.is_dir();
                 let t = type_of(&first, is_dir);
                 let how = if pick == Pick::ChangeDefault { How::TypeDefault } else { How::Once };
-                let chosen = (pick == Pick::ChangeDefault).then(|| self.files.prefs.open.own_default(&t).map(|(h, _)| h)).flatten();
+                let chosen = (pick == Pick::ChangeDefault).then(|| self.settings.open_with.own_default(&t).map(|(h, _)| h)).flatten();
                 self.files.picker = Some(Picker { paths, t, search: String::new(), chosen, how, confirm: false, focus: true, just_set: pick == Pick::ChangeDefault });
             }
             Pick::ResetDefault => {
                 let is_dir = paths.len() == 1 && first.is_dir();
                 let t = type_of(&first, is_dir);
-                let o = &mut self.files.prefs.open;
-                match o.own_default(&t) {
+                match self.settings.open_with.own_default(&t) {
                     Some((_, Source::Type)) => {
-                        o.defaults.remove(&t.key().unwrap_or_default());
+                        let k = t.key().unwrap_or_default();
+                        self.assoc(|o| {
+                            o.defaults.remove(&k);
+                        });
                     }
                     Some((_, Source::Kind)) => {
-                        o.kind_defaults.remove(&t.category().map(kind_key).unwrap_or_default());
+                        let k = t.category().map(kind_key).unwrap_or_default();
+                        self.assoc(|o| {
+                            o.kind_defaults.remove(&k);
+                        });
                     }
                     _ => {}
                 }
@@ -888,7 +799,7 @@ impl App {
             }
             Pick::Pin => {
                 if let Some(h) = PICKED.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    self.files.prefs.open.toggle_pin(&h.id);
+                    self.assoc(|o| o.toggle_pin(&h.id));
                 }
             }
             Pick::Manage => self.files.apps_box = Some(AppsBox::new(&self.files.prefs.apps)),
@@ -1034,32 +945,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn filescape_defaults_come_before_the_systems() {
-        use crate::openapps::{Handler, Type};
-        let h = |id: &str, default: bool| Handler { id: id.into(), name: id.into(), app: PathBuf::new(), default };
-        let found = vec![h("vim", true), h("kate", false)];
-        let txt = Type::Ext("txt".into());
-        let md = Type::Ext("md".into());
-        let mut prefs = OpenPrefs::default();
-        assert_eq!(prefs.default_for(&txt, Some(&found)).map(|(h, s)| (h.id, s)), Some(("vim".into(), Source::System)));
-        assert_eq!(prefs.default_for(&txt, None), None);
-        prefs.kind_defaults.insert(kind_key(crate::categories::Category::Documents), h("writer", false));
-        assert_eq!(prefs.default_for(&md, Some(&found)).map(|(h, s)| (h.id, s)), Some(("writer".into(), Source::Kind)));
-        prefs.defaults.insert("txt".into(), h("kate", false));
-        assert_eq!(prefs.default_for(&txt, None).map(|(h, s)| (h.id, s)), Some(("kate".into(), Source::Type)));
-        // The list marks Filescape's choice, adds apps it wouldn't have, and names the system's.
-        prefs.remember(&txt, &h("zed", false));
-        let (list, system) = prefs.listing(&txt, &found);
-        let marked: Vec<_> = list.iter().map(|h| (h.id.as_str(), h.default)).collect();
-        assert_eq!(marked, [("vim", false), ("kate", true), ("zed", false)]);
-        assert_eq!(system.as_deref(), Some("vim"));
-        let (list, _) = prefs.listing(&md, &found);
-        assert!(list.iter().any(|h| h.id == "writer" && h.default));
-        assert_eq!(Type::Folder.category(), None);
-        assert_eq!(kind_name(crate::categories::Category::Images), "images");
-    }
-
-    #[test]
     fn lists_default_pinned_recent_then_the_rest() {
         use crate::openapps::{Handler, Type};
         let h = |id: &str, default: bool| Handler { id: id.into(), name: id.into(), app: PathBuf::new(), default };
@@ -1079,7 +964,7 @@ mod tests {
         }
         prefs.used(&t, "app3");
         let r = &prefs.recent["txt"];
-        assert_eq!((r.len(), r[0].as_str(), r[1].as_str()), (RECENTS, "app3", "app8"));
+        assert_eq!((r.len(), r[0].as_str(), r[1].as_str()), (crate::openapps::prefs::RECENTS, "app3", "app8"));
         prefs.used(&Type::Unknown, "x");
         assert_eq!(prefs.recent.len(), 2);
     }
