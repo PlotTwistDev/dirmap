@@ -1320,9 +1320,8 @@ impl App {
                     if kit::button(ui, K::Secondary, Some(Icon::Folder), "Show Contents").on_hover_text("Go inside the application (Show Package Contents)").clicked() {
                         app.files.go(crate::fsys::history::Location::Dir(path.clone()));
                     }
-                } else if kit::button(ui, K::Secondary, Some(Icon::External), "Open").on_hover_text("Open it with its usual app").clicked() {
-                    let p = path.clone();
-                    app.files.spawn(move || crate::actions::open(&p));
+                } else {
+                    app.open_button(ui, &path, e.is_dir);
                 }
                 if !e.is_dir && kit::button(ui, K::Secondary, Some(Icon::Eye), "Quick Look").on_hover_text("A large preview (Space)").clicked() {
                     app.files.look.open = true;

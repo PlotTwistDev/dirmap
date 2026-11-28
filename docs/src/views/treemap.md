@@ -147,7 +147,8 @@ The **Preview** pane beside the map shows the item you clicked. It has two tabs:
   (picture dimensions, audio and video details, fonts). For a folder it lists the largest items
   inside; click one to select it.
 
-Under both, **Open** opens the item, **Quick Look** shows a large preview, **Reveal in Files**
+Under both, **Open in** *app* opens the item in its usual app (its arrow lists others, as
+[Open With](file-manager.md#open-with) does), **Quick Look** shows a large preview, **Reveal in Files**
 switches to the Files workspace with the item selected in its folder, and **⋯** has **Show in
 folder** (**Show in Finder** on macOS) and **Copy path**. With nothing selected the pane says how
 to pick something.

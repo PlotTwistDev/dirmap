@@ -411,9 +411,9 @@ replaced and deleted items are deleted, as a server has no bin.
 
 ## Open With
 
-**Open With** on the right-click menu opens an item in another app instead of its usual one. It
-lists the apps your system knows can open that kind of item, with their own names and icons,
-and the system's usual choice marked **Default**. Filescape asks the system each time it meets a new
+**Open With** on the right-click menu, and the arrow beside **Open in** *app* in the preview pane
+(the same list), open an item in another app instead of its usual one. They list the apps your system knows can open that kind of item, with their own names and icons,
+and the system's usual choice marked **Default** ✓ at the top. Filescape asks the system each time it meets a new
 type: Launch Services on a Mac, the apps registered for the extension on Windows (the same list as
 Explorer's Open with), and the desktop's application launchers and `mimeapps.list` on Linux.
 Files without an extension are recognised too. LICENSE, README, Makefile, Dockerfile and similar
@@ -421,11 +421,16 @@ names, and any file whose contents are plain text, offer text editors, while fil
 are unknown don't get a guess. Several items open in one go, in a single copy of the app where it
 takes several.
 
+Hover over an app and click its pin to keep it near the top of every list (pinned apps come
+straight after the default, in the order you pinned them); click the pin again to unpin it. After
+the pinned apps come the ones you used last for that type, then the rest by name. Pins and recent
+apps are Filescape's own: your system's settings are not changed.
+
 Below the system's apps come the apps you've added yourself, then:
 
-- **Choose an App for .ext files…**, which picks a program, opens the item in it and adds it to
+- **Choose Another Application…**, which picks a program, opens the item in it and adds it to
   the list for that type;
-- **Manage Apps…**, which lists your apps. Each has a name, the program, its arguments, and the
+- **Manage Applications…**, which lists your apps. Each has a name, the program, its arguments, and the
   types it's offered for: extensions such as `exr, dpx`, `folder` for folders, or nothing for
   everything. `{file}` in the arguments is where the item's path goes (it's added at the end if
   you leave it out), for example `--view {file}`. On a Mac, choose the app itself (`Nuke.app`).
@@ -468,7 +473,9 @@ back. Quick Look works in Storage Analysis too: see
 
 **👁** on the toolbar, or **Alt+P**, shows the preview pane at the right of the window, laid out as
 in Storage Analysis. The **Preview** tab gives the preview all the room in the pane, with the
-item's name, kind and size and **Open** / **Quick Look** under it; **Details** lists everything
+item's name, kind and size and **Open in** *app* / **Quick Look** under it. **Open in** names the
+app the file opens in (**Open in TextEdit**), or just says **Open** when the pane is narrow; the
+arrow beside it lists other apps, as [Open With](#open-with) does; **Details** lists everything
 known about it: kind, size, dates and, for images, the dimensions and pixel format. Drag its edge
 to make it wider.
 
