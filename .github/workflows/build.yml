@@ -70,7 +70,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p target/release/build/deps target/debug/build/deps
-          find target -maxdepth 4 -xtype l -print -delete
+          find target -maxdepth 4 -type l ! -exec test -e {} \; -print -exec rm {} \; || true
 
       - name: Test
         run: cargo test --release
