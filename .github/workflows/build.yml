@@ -64,9 +64,13 @@ jobs:
       # llama-cpp-sys-2 copies its libraries to a folder it works out from Cargo's build folder,
       # which newer Cargo puts a level deeper: make sure that folder exists. (Filescape's own
       # build script puts the libraries where they're needed.)
+      # Links left there by a cached build can point at libraries the cache dropped; llama-cpp-sys-2
+      # doesn't see a broken link and fails with "File exists", so they're removed first.
       - name: Folders for the AI engine's build
         shell: bash
-        run: mkdir -p target/release/build/deps target/debug/build/deps
+        run: |
+          mkdir -p target/release/build/deps target/debug/build/deps
+          find target -maxdepth 4 -xtype l -print -delete
 
       - name: Test
         run: cargo test --release
