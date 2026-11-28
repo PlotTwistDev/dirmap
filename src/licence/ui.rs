@@ -23,6 +23,10 @@ pub struct State {
     pub(super) serial_for_keychain: Option<String>,
     /// Deactivate This Computer… was pressed: asking to confirm.
     confirm_deactivate: bool,
+    /// Check Now was pressed: say what the check found.
+    pub(super) checking: bool,
+    /// A link to open in the browser once the server answered (the renewal checkout).
+    pub(super) open_url: Option<String>,
     /// File pickers waiting for an answer (polled by the app each frame).
     pub asking: Vec<crate::asking::Asking<Licensing>>,
     #[cfg(feature = "licence-dev")]
@@ -60,13 +64,22 @@ impl Licensing {
         if self.ui.banner_closed {
             return false;
         }
+        let now = self.now();
+        let ending = match &self.standing {
+            Standing::Perpetual(c) => match c.updates_until.map(|u| core::maintenance::status(u, now)) {
+                Some(core::maintenance::MaintenanceStatus::Active { days_left, .. }) if days_left <= 30 => Some(days_left),
+                _ => None,
+            },
+            _ => None,
+        };
         let (text, urgent) = match &self.standing {
+            _ if ending.is_some() => (format!("Filescape software maintenance ends in {}. Extend it to keep getting new versions; this version keeps working either way.", days(ending.unwrap_or(0))), false),
             Standing::Temporary { days_left, .. } if *days_left <= 7 => (format!("Your temporary Filescape licence ends in {}.", days(*days_left)), false),
             Standing::Evaluation { days_left, .. } if *days_left <= 7 => (format!("Filescape evaluation: {} left.", days(*days_left)), false),
             Standing::Restricted(Reason::TemporaryExpired(_)) => ("Your temporary Filescape licence has expired. Your files, settings and saved data are intact.".into(), true),
             Standing::Restricted(Reason::EvaluationOver) => ("The Filescape evaluation has ended. The file browser, the disk map and the AI Models workspace stay free.".into(), true),
             Standing::Restricted(Reason::ClockRollback) => ("This computer's clock is behind a time Filescape has already seen, so time-limited licences are paused until it's right again.".into(), true),
-            Standing::Restricted(Reason::UpdatesLapsed(_)) => ("Your Filescape licence's updates ended before this version was released.".into(), true),
+            Standing::Restricted(Reason::UpdatesLapsed(_)) => ("Your Filescape software maintenance ended before this version was released, so it runs with the free features.".into(), true),
             Standing::Restricted(Reason::Revoked) => ("Your Filescape licence has been revoked.".into(), true),
             _ => return false,
         };
@@ -79,7 +92,11 @@ impl Licensing {
                 if ui.small_button("Licence…").clicked() {
                     self.ui.open_settings = true;
                 }
-                if urgent && ui.small_button("Purchase").clicked() {
+                if self.maintained() {
+                    if ui.add_enabled(!self.busy(), egui::Button::new("Extend Maintenance…").small()).on_hover_text("Opens the renewal checkout in your browser").clicked() {
+                        self.renew();
+                    }
+                } else if urgent && ui.small_button("Purchase").clicked() {
                     ui.ctx().open_url(egui::OpenUrl::new_tab(PURCHASE_URL));
                 }
                 if ui.small_button("✖").on_hover_text("Hide until Filescape restarts").clicked() {
@@ -99,6 +116,7 @@ impl Licensing {
             ui.label(match &self.standing {
                 Standing::Restricted(Reason::TemporaryExpired(_)) => "Your temporary licence has expired. Enter another licence, or buy a perpetual one.",
                 Standing::Restricted(Reason::ClockRollback) => "Time-limited licences are paused because this computer's clock is behind. Set the clock right and try again.",
+                Standing::Restricted(Reason::UpdatesLapsed(_)) => "Your licence's software maintenance ended before this version was released. Extend maintenance to unlock it, or use a version released before then.",
                 _ => "Enter a licence, or buy one. The file browser, the disk map and the AI Models workspace stay free.",
             });
             ui.label(RichText::new("Your files, settings and saved data are untouched, and anything already running carries on.").weak());
@@ -108,7 +126,12 @@ impl Licensing {
                     self.ui.open_settings = true;
                     self.ui.prompt = None;
                 }
-                if ui.button("Purchase Perpetual Licence").clicked() {
+                if matches!(self.standing, Standing::Restricted(Reason::UpdatesLapsed(_))) {
+                    if ui.add_enabled(!self.busy(), egui::Button::new("Extend Maintenance…")).clicked() {
+                        self.renew();
+                        self.ui.prompt = None;
+                    }
+                } else if ui.button("Purchase Perpetual Licence").clicked() {
                     ui.ctx().open_url(egui::OpenUrl::new_tab(PURCHASE_URL));
                 }
                 if ui.button("Not now").clicked() {
@@ -162,7 +185,7 @@ impl Licensing {
                     "Filescape Free",
                     match r {
                         Reason::ClockRollback => "This computer's clock is behind a time Filescape has already seen, so time-limited licences are paused. Set the clock right, or go online so Filescape can check the time.",
-                        Reason::UpdatesLapsed(_) => "Your licence covers versions released while its updates last. This version is newer, so it runs with the free features; use an earlier version, or buy a new licence.",
+                        Reason::UpdatesLapsed(_) => "Your licence is still valid, but its software maintenance ended before this version was released, so this version runs with the free features. Extend maintenance to unlock it and get 12 more months of new versions, or keep using a version released before maintenance ended.",
                         Reason::Revoked => "Your licence has been revoked. If you think this is a mistake, write to us at filescape.app/contact (Help > Contact Filescape).",
                         _ => "The evaluation has ended. The file browser, the disk map and the AI Models workspace stay free.",
                     }
@@ -197,15 +220,19 @@ impl Licensing {
                     });
                     ui.add_space(8.0);
                 }
-                Standing::Perpetual(cert) => {
+                Standing::Perpetual(cert) | Standing::Restricted(Reason::UpdatesLapsed(cert)) => {
                     egui::Grid::new("lic-perp").num_columns(2).spacing([24.0, 8.0]).show(ui, |ui| {
-                        kit::kv(ui, "Ownership", "Perpetual: yours to keep");
-                        kit::kv(ui, "Updates included until", cert.updates_until.map(date_time).unwrap_or_else(|| "Every future version".into()));
+                        kit::kv(ui, "Licence", "Perpetual: never expires");
+                        kit::kv(ui, "Software maintenance", maintenance_line(cert.updates_until, now));
                         kit::kv(ui, "Computers active", format!("{} of {}", cert.activations_used, cert.max_activations));
                     });
                     ui.add_space(6.0);
-                    if cert.updates_until.is_some() {
-                        kit::note(ui, "Your licence never expires. The updates date only decides which new versions it unlocks: versions released before it are covered for good, and this one keeps working after it.");
+                    if let Some(until) = cert.updates_until {
+                        if let core::maintenance::MaintenanceStatus::Active { days_left, .. } = core::maintenance::status(until, now) {
+                            kit::progress(ui, (days_left as f32 / 365.0).min(1.0), if days_left <= 30 { Tone::Warn } else { Tone::Success });
+                            ui.add_space(6.0);
+                        }
+                        kit::note(ui, "Your licence never expires. Software maintenance decides which new versions it unlocks: every version released before its end date keeps Pro for good, even after maintenance ends. Extending adds 12 months to the end date, or starts 12 new months if it has already ended.");
                         ui.add_space(8.0);
                     }
                 }
@@ -216,10 +243,26 @@ impl Licensing {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
                 // No Renew button for temporary licences: more time means a new serial.
-                if !matches!(self.standing, Standing::Perpetual(_))
+                let maintained = self.maintained();
+                if !maintained
+                    && !matches!(self.standing, Standing::Perpetual(_))
                     && kit::button(ui, Kind::Primary, Some(Icon::External), "Buy Filescape Professional").on_hover_text("Opens filescape.app in your browser").clicked()
                 {
                     ui.ctx().open_url(egui::OpenUrl::new_tab(PURCHASE_URL));
+                }
+                if maintained {
+                    let busy = self.busy();
+                    let r = ui.add_enabled_ui(!busy, |ui| kit::button(ui, Kind::Primary, Some(Icon::External), "Extend Maintenance…")).inner;
+                    if r.on_hover_text("Opens the renewal checkout in your browser: 12 more months of new versions. Your serial and computers stay as they are.").clicked() {
+                        self.renew();
+                    }
+                }
+                if cert.is_some() {
+                    let busy = self.busy();
+                    let r = ui.add_enabled_ui(!busy, |ui| kit::button(ui, Kind::Secondary, Some(Icon::Refresh), if self.ui.checking { "Checking…" } else { "Check Now" })).inner;
+                    if r.on_hover_text("Ask the licence server for this licence's latest details, such as a new maintenance date").clicked() {
+                        self.check_now();
+                    }
                 }
                 if let Some(c) = &cert {
                     if let Some(serial) = self.serial_of(&c.licence_id)
@@ -302,13 +345,23 @@ impl Licensing {
         });
     }
 
+    /// A perpetual licence whose maintenance can be extended (running, or ended before this
+    /// version). Temporary licences can't be renewed.
+    pub fn maintained(&self) -> bool {
+        match &self.standing {
+            Standing::Perpetual(c) => c.updates_until.is_some(),
+            Standing::Restricted(Reason::UpdatesLapsed(_)) => true,
+            _ => false,
+        }
+    }
+
     fn status_label(&self) -> String {
         match &self.standing {
             Standing::Temporary { .. } | Standing::Perpetual(_) => "Active".into(),
             Standing::Restricted(Reason::TemporaryExpired(_)) => "Expired".into(),
             Standing::Restricted(Reason::Revoked) => "Revoked".into(),
             Standing::Restricted(Reason::ClockRollback) => "Paused (clock behind)".into(),
-            Standing::Restricted(Reason::UpdatesLapsed(_)) => "Updates ended before this version".into(),
+            Standing::Restricted(Reason::UpdatesLapsed(_)) => "Maintenance ended before this version".into(),
             _ => "Not licensed".into(),
         }
     }
@@ -474,6 +527,16 @@ impl Licensing {
             t.save();
             self.refresh();
         }
+    }
+}
+
+/// "Active until 28 Nov 2027 (365 days left)" or "Ended 28 Nov 2027".
+pub fn maintenance_line(until: Option<core::Ts>, now: core::Ts) -> String {
+    let Some(u) = until else { return "Every future version".into() };
+    let day = date_time(u).split(',').next().unwrap_or_default().to_string();
+    match core::maintenance::status(u, now) {
+        core::maintenance::MaintenanceStatus::Active { days_left, .. } => format!("Active until {day} ({} left)", days(days_left)),
+        core::maintenance::MaintenanceStatus::Ended { .. } => format!("Ended {day}"),
     }
 }
 

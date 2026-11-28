@@ -44,7 +44,7 @@ a temporary licence ending never starts the evaluation again.
 
 | Type | What it does |
 |---|---|
-| **Perpetual** | Never expires. It covers every version released while its updates last (12 months from purchase), and can be active on up to 3 computers at once. |
+| **Perpetual** | Never expires. It includes 12 months of software maintenance: every version released during maintenance unlocks Professional, for good. Maintenance can be extended for another 12 months at a time (see below). It can be active on up to 3 computers at once. |
 | **Temporary** | Full access for a set time: usually 30 days from the first time it's activated, or until a fixed date. It can't be renewed; when it ends you can enter another licence or buy a perpetual one. |
 
 If you have both, the perpetual licence is used. When a temporary licence expires, Filescape
@@ -60,7 +60,7 @@ it never slows the start). When there's a newer one, a notice at the top of the 
 | Notice | Meaning |
 |---|---|
 | **Your licence covers it.** | Your perpetual licence's updates include the new version: install it and everything stays unlocked. |
-| **Your licence's updates ended on …** | The new version was released after your updates ended. You can still install it, but only the free features would be unlocked there. The version you have keeps working with everything unlocked, as long as you like. **Buy a licence** opens the shop. |
+| **Your software maintenance ended on …** | The new version was released after your maintenance ended. You can still install it, but only the free features would be unlocked there until you extend maintenance. The version you have keeps working with everything unlocked, as long as you like. **Extend Maintenance…** opens the renewal checkout. |
 | **It's a free update.** | You're using the free features, the evaluation or a temporary licence, which work the same in the new version. |
 
 **Download** gets the new version for your system and **What's new** opens the release notes.
@@ -78,8 +78,8 @@ Type or paste the serial number (it starts with `FST-` for a temporary licence o
 perpetual one) into the box and press **Activate**. Spaces, dashes and the case of letters don't
 matter, and a mistyped serial is caught at once without using an activation.
 
-The status screen then shows the licence type, the expiry date (or the end of updates for a
-perpetual licence), the days remaining, and how many computers are active (perpetual) or activations used (temporary). **Licence
+The status screen then shows the licence type, the expiry date (or **Software maintenance** for a
+perpetual licence: active until a date, with the days left, or ended), the days remaining, and how many computers are active (perpetual) or activations used (temporary). **Licence
 Details** lists the registered owner, licence ID, serial number, and the dates issued, activated
 and expiring.
 
@@ -89,7 +89,27 @@ and expiring.
 | **Export Licence ⏷ > Licence Certificate (signed)…** | Saves a `.filescape-licence` file signed by Filescape, as proof of purchase. **Verify a licence certificate** checks one. |
 | **Export Licence ⏷ > Licence Details (text)…** | Saves the details as plain text. |
 | **Deactivate This Computer…** | Ends the licence on this computer. For a perpetual licence this frees the computer's place for another one; a temporary licence's activation isn't given back. |
+| **Extend Maintenance…** | Perpetual licences: opens a checkout in your browser for 12 more months of maintenance. Your serial number and computers stay as they are. |
+| **Check Now** | Asks the licence server for the licence's latest details at once, such as a new maintenance date after you renew. Otherwise Filescape checks once a week. |
 | **Purchase Perpetual Licence** | Opens the Filescape website. |
+
+## Software maintenance
+
+A perpetual licence never expires. Its **software maintenance** decides which new versions it
+unlocks: every version released before maintenance ends keeps Professional for good, and the
+version you have keeps working after it ends. Maintenance is the same on every computer the
+licence is active on.
+
+- **Extend Maintenance…** (in **Help > Licence**, or **Extend maintenance** on your account page at
+  `account.filescape.app`) is a one-time payment, not a subscription. Renewing while maintenance
+  runs adds 12 months to its end date, so renewing early loses nothing. Renewing after it ended
+  starts 12 new months from the day you pay, and nothing is charged for the time in between.
+- Filescape picks up the new date at its next weekly check; press **Check Now** to see it at once.
+- In the last 30 days of maintenance, a line at the top of the window says when it ends.
+- If you run a version released after maintenance ended, it runs with the free features and the
+  status screen says **Maintenance ended before this version**. Extend maintenance to unlock it,
+  or use a version released before maintenance ended.
+- Temporary licences can't be extended: they come with every feature until they end.
 
 ## Activations
 

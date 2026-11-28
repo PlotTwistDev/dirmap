@@ -107,6 +107,8 @@ enum Answer {
     /// revoked. Unsigned errors (offline, server faults, "not found") aren't passed on at all.
     Validated(Vec<(String, Result<ActivationResponse, Envelope>)>),
     Deactivated(String, Result<(), String>),
+    /// The renewal checkout link for this computer's licence, or why there isn't one.
+    Renew(Result<String, String>),
 }
 
 pub struct Licensing {
@@ -246,6 +248,9 @@ impl Licensing {
                 Ok(a) => {
                     self.rx = None;
                     self.answer(a);
+                    if let Some(url) = self.ui.open_url.take() {
+                        ctx.open_url(eframe::egui::OpenUrl::new_tab(url));
+                    }
                 }
                 Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(200)),
                 Err(mpsc::TryRecvError::Disconnected) => self.rx = None,
@@ -431,7 +436,22 @@ impl Licensing {
                 }
                 self.stored.last_validated = self.now();
                 self.refresh();
+                if std::mem::take(&mut self.ui.checking) {
+                    let msg = match &self.standing {
+                        Standing::Perpetual(c) | Standing::Restricted(core::standing::Reason::UpdatesLapsed(c)) => match c.updates_until {
+                            Some(u) => format!("Checked. Software maintenance runs until {}.", core::export::date_time(u).split(',').next().unwrap_or_default()),
+                            None => "Checked. Your licence is up to date.".into(),
+                        },
+                        _ => "Checked with the licence server.".into(),
+                    };
+                    self.ui.say(msg, false);
+                }
             }
+            Answer::Renew(Ok(url)) => {
+                self.ui.open_url = Some(url);
+                self.ui.say("The renewal checkout is open in your browser. After paying, press Check Now here to pick up the new date.".into(), false);
+            }
+            Answer::Renew(Err(e)) => self.ui.say(e, true),
             Answer::Deactivated(activation_id, Ok(())) => {
                 self.stored.state.forget(&self.verifier, &activation_id);
                 self.refresh();
@@ -473,6 +493,41 @@ impl Licensing {
                 self.rx = Some(rx);
                 // Don't retry every frame while offline.
                 self.stored.last_validated = now;
+            }
+        }
+    }
+
+    /// Settings > Licensing > Check Now: the weekly check, at once, saying what it found.
+    pub fn check_now(&mut self) {
+        if self.rx.is_some() || self.stored.state.certs.is_empty() {
+            return;
+        }
+        self.ui.checking = true;
+        self.revalidate();
+    }
+
+    /// Extend Maintenance: asks the server for a renewal checkout link for this computer's
+    /// licence (proved by its activation), then opens it in the browser. The serial isn't sent.
+    pub fn renew(&mut self) {
+        let Some(c) = self.shown_cert() else { return };
+        if self.rx.is_some() {
+            return;
+        }
+        let (id, device) = (c.activation_id.clone(), self.device.clone());
+        match &mut self.server {
+            #[cfg(feature = "licence-dev")]
+            Server::Test(_) => self.answer(Answer::Renew(Err("Maintenance renewals need the real licence server.".into()))),
+            Server::Online(base) => {
+                let url = format!("{base}/v1/renew");
+                let (tx, rx) = mpsc::channel();
+                std::thread::spawn(move || {
+                    let body = serde_json::json!({ "activation_id": id, "device_hash": device });
+                    let r = post::<_, serde_json::Value>(&url, &body).and_then(|v| {
+                        v["url"].as_str().filter(|u| u.starts_with("https://") || u.starts_with("http://localhost")).map(str::to_string).ok_or_else(|| "The licence server's answer couldn't be read.".to_string())
+                    });
+                    let _ = tx.send(Answer::Renew(r));
+                });
+                self.rx = Some(rx);
             }
         }
     }
@@ -546,7 +601,11 @@ fn post_full<B: Serialize, R: serde::de::DeserializeOwned>(url: &str, body: &B) 
         }
         Err(match serde_json::from_str::<E>(&text) {
             Ok(e) => PostError { message: e.error.message().to_string(), status: e.status },
-            Err(_) => fail(format!("The licence server said no ({}).", resp.status())),
+            // Answers outside the licence rules (e.g. renewals) carry their own sentence.
+            Err(_) => match serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v["message"].as_str().map(str::to_string)) {
+                Some(m) => fail(m),
+                None => fail(format!("The licence server said no ({}).", resp.status())),
+            },
         })
     }
 }
@@ -753,6 +812,30 @@ mod tests {
         let d = std::env::temp_dir().join(format!("filescape-licence-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn a_perpetual_licence_shows_maintenance_and_can_ask_to_extend_it() {
+        let dir = temp_dir("maintenance");
+        let mut l = open(&dir);
+        let now = l.now();
+        test_server(&mut l).issue_perpetual(now);
+        let serial = test_server(&mut l).issued.last().unwrap().0.clone();
+        l.activate(&serial);
+        assert!(matches!(l.standing, Standing::Perpetual(_)), "{:?}", l.standing);
+        assert!(l.maintained());
+        let Standing::Perpetual(c) = l.standing.clone() else { unreachable!() };
+        assert!(ui::maintenance_line(c.updates_until, now).starts_with("Active until"));
+        assert!(ui::maintenance_line(c.updates_until, c.updates_until.unwrap()).starts_with("Ended"));
+        // Check Now asks the server and says the date.
+        l.check_now();
+        let (msg, err) = l.ui.message.clone().unwrap();
+        assert!(!err && msg.contains("Software maintenance runs until"), "{msg}");
+        // Extend Maintenance: the test server can't sell renewals and says so.
+        l.renew();
+        let (msg, err) = l.ui.message.clone().unwrap();
+        assert!(err && msg.contains("real licence server"), "{msg}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
