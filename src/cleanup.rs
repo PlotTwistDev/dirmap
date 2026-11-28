@@ -61,6 +61,29 @@ pub struct Item {
     pub can_trash: bool,
     /// Can be shared with what it's a copy of: one file on disk, under both names (hard links).
     pub can_share: bool,
+    /// How sure Filescape is that nothing needs it.
+    pub sure: Sure,
+    /// The evidence, one plain sentence each, for the list and the confirmation.
+    pub reasons: Vec<String>,
+}
+
+/// How sure Filescape is that something can go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sure {
+    /// The app's own records say nothing uses it.
+    Certain,
+    /// Nothing Filescape can see uses it, but something it can't see might (a program asking for
+    /// an exact older version, a download that may still resume).
+    Likely,
+}
+
+impl Sure {
+    pub fn label(self) -> &'static str {
+        match self {
+            Sure::Certain => "Safe to remove",
+            Sure::Likely => "Probably unused",
+        }
+    }
 }
 
 /// A download written to in the last few minutes may still be going: it's left alone.
@@ -123,11 +146,154 @@ pub fn find(places: &[PathBuf], models: &[Model]) -> Vec<Item> {
         partial_files(p, p, 4, &mut out);
     }
     copies(models, &mut out);
+    keep_linked(&mut out, places, models);
     // A loose partial can be inside a store too (looked at twice): keep the first.
     let mut seen = HashSet::new();
     out.retain(|i| i.paths.first().is_none_or(|p| seen.insert(p.clone())));
     out.sort_by(|a, b| a.kind.cmp(&b.kind).then(b.bytes.cmp(&a.bytes)).then(a.title.cmp(&b.title)));
     out
+}
+
+/// Every path a link passes through on the way to its file: the link's own target, that
+/// target's target and so on, then the file itself. Removing any of them breaks the link.
+fn link_chain(link: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut at = link.to_path_buf();
+    for _ in 0..16 {
+        let Ok(t) = std::fs::read_link(&at) else { break };
+        let t = if t.is_absolute() { t } else { at.parent().map(|d| d.join(&t)).unwrap_or(t) };
+        out.push(t.clone());
+        at = t;
+    }
+    if let Ok(c) = std::fs::canonicalize(link) {
+        out.push(c);
+    }
+    out
+}
+
+/// Every link to a file among the models and in the places, as (a path the link passes through,
+/// who the link belongs to, the link itself).
+fn links(places: &[PathBuf], models: &[Model]) -> Vec<(PathBuf, String, PathBuf)> {
+    // (a path a link passes through, who the link belongs to, the link itself)
+    let mut through: Vec<(PathBuf, String, PathBuf)> = Vec::new();
+    let mut add = |link: &Path, who: String| {
+        for hop in link_chain(link) {
+            through.push((hop, who.clone(), link.to_path_buf()));
+        }
+    };
+    let mut seen = HashSet::new();
+    for m in models {
+        for f in &m.files {
+            if std::fs::symlink_metadata(&f.path).is_ok_and(|md| md.file_type().is_symlink()) && seen.insert(f.path.clone()) {
+                add(&f.path, format!("{} ({})", m.name, m.source.label()));
+            }
+        }
+    }
+    // Links the library doesn't list as models (it doesn't follow links), in the places it looked.
+    for place in places {
+        let mut links = Vec::new();
+        file_links(place, 8, &mut links);
+        for l in links {
+            if seen.insert(l.clone()) {
+                add(&l, l.display().to_string());
+            }
+        }
+    }
+    through
+}
+
+/// Who, outside the item's own folder, links to `p` (or into it, for a folder).
+fn users_of(it: &Item, p: &Path, through: &[(PathBuf, String, PathBuf)]) -> Vec<String> {
+    let canon_within = std::fs::canonicalize(&it.within).unwrap_or(it.within.clone());
+    let canon = std::fs::canonicalize(p).unwrap_or(p.to_path_buf());
+    let mut who: Vec<String> = Vec::new();
+    for (hop, w, link) in through {
+        // A link inside the same store (a Hugging Face version's own links) isn't a user from elsewhere.
+        if link.starts_with(&it.within) || link.starts_with(&canon_within) || it.paths.contains(link) {
+            continue;
+        }
+        if (hop.starts_with(p) || hop.starts_with(&canon)) && !who.contains(w) {
+            who.push(w.clone());
+        }
+    }
+    who
+}
+
+/// Who links to anything removing `it` would remove, from the models and places given.
+pub fn linked_from(it: &Item, places: &[PathBuf], models: &[Model]) -> Vec<String> {
+    let through = links(places, models);
+    let mut who: Vec<String> = Vec::new();
+    for p in &it.paths {
+        for w in users_of(it, p, &through) {
+            if !who.contains(&w) {
+                who.push(w);
+            }
+        }
+    }
+    who
+}
+
+/// Takes out of each item what a model elsewhere links to, such as an Ollama download a tool
+/// linked into LM Studio's folder: removing it would break that model. An item left with
+/// nothing is dropped; the others say what was kept and why.
+fn keep_linked(out: &mut Vec<Item>, places: &[PathBuf], models: &[Model]) {
+    let through = links(places, models);
+    for it in out.iter_mut() {
+        if !matches!(it.kind, Kind::Unused | Kind::Partial | Kind::OldVersion) {
+            continue;
+        }
+        let mut kept: Vec<String> = Vec::new();
+        let mut freed_less = 0u64;
+        let snapshot = it.clone();
+        it.paths.retain(|p| {
+            let users = users_of(&snapshot, p, &through);
+            if users.is_empty() {
+                return true;
+            }
+            for who in users {
+                if !kept.contains(&who) {
+                    kept.push(who);
+                }
+            }
+            freed_less += own_bytes(p);
+            false
+        });
+        if kept.is_empty() {
+            if matches!(it.kind, Kind::Unused | Kind::OldVersion) {
+                it.reasons.push("No other model Filescape found links to it".into());
+            }
+            continue;
+        }
+        it.bytes = it.bytes.saturating_sub(freed_less);
+        it.reasons.push(format!("Part of it is kept, because of a link to it from {}", kept.join(", ")));
+    }
+    out.retain(|it| !it.paths.is_empty() && it.bytes > 0);
+}
+
+/// Links to files (not folders) under `dir`, without following links to folders.
+fn file_links(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let Ok(t) = e.file_type() else { continue };
+        if t.is_symlink() {
+            if std::fs::metadata(e.path()).is_ok_and(|m| m.is_file()) {
+                out.push(e.path());
+            }
+        } else if t.is_dir() && depth > 0 {
+            file_links(&e.path(), depth - 1, out);
+        }
+    }
+}
+
+/// The bytes removing a path frees: a file's size, or the files (not links) in a folder.
+fn own_bytes(p: &Path) -> u64 {
+    if std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir()) {
+        let mut files = Vec::new();
+        let _ = list_files(p, 8, &mut files);
+        files.iter().filter(|f| std::fs::symlink_metadata(f).is_ok_and(|m| m.is_file())).map(|f| size(f)).sum()
+    } else {
+        size(p)
+    }
 }
 
 fn is_ollama_store(p: &Path) -> bool {
@@ -160,6 +326,18 @@ fn ago(p: &Path) -> String {
         (s / 60, "minutes")
     };
     format!("last written {n} {unit} ago")
+}
+
+/// How sure a stopped download can go, and why: one left a day or more is certainly stopped; a
+/// newer one might be paused and resume from where it got to.
+fn stopped(p: &Path, why: &str) -> (Sure, Vec<String>) {
+    let mut reasons = vec![why.to_string(), format!("Nothing has written to it for a while: {}", ago(p))];
+    if age(p).is_some_and(|a| a >= Duration::from_secs(86_400)) {
+        (Sure::Certain, reasons)
+    } else {
+        reasons.push("Stopped less than a day ago: a paused download could still carry on from it".into());
+        (Sure::Likely, reasons)
+    }
 }
 
 fn list_files(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -223,6 +401,11 @@ fn ollama_items(store: &Path, out: &mut Vec<Item>) {
             let title = info.as_ref().and_then(|i| i.name.clone()).unwrap_or_else(|| short_digest(&name));
             out.push(Item {
                 kind: Kind::Unused,
+                sure: Sure::Certain,
+                reasons: vec![
+                    format!("None of the {} model{} in Ollama's own list names it", manifests.len(), if manifests.len() == 1 { "" } else { "s" }),
+                    format!("Not a download in progress: {}", ago(&path)),
+                ],
                 keep: Vec::new(),
                 can_trash: true,
                 can_share: false,
@@ -240,8 +423,11 @@ fn ollama_items(store: &Path, out: &mut Vec<Item>) {
             continue;
         }
         paths.sort();
+        let (sure, reasons) = stopped(&paths[0], "Its name ends in \u{201C}-partial\u{201D}: Ollama hadn't finished it");
         out.push(Item {
             kind: Kind::Partial,
+            sure,
+            reasons,
             keep: Vec::new(),
             can_trash: true,
             can_share: false,
@@ -285,6 +471,8 @@ pub fn plan(m: &Model) -> Result<Item, String> {
             let tags = gone.len();
             Ok(Item {
                 kind: Kind::Model,
+                sure: Sure::Certain,
+                reasons: Vec::new(),
                 keep: Vec::new(),
                 can_trash: true,
                 can_share: false,
@@ -313,6 +501,8 @@ pub fn plan(m: &Model) -> Result<Item, String> {
             }
             Ok(Item {
                 kind: Kind::Model,
+                sure: Sure::Certain,
+                reasons: Vec::new(),
                 keep: Vec::new(),
                 can_trash: true,
                 can_share: false,
@@ -328,6 +518,8 @@ pub fn plan(m: &Model) -> Result<Item, String> {
             let within = common_parent(m.files.iter().map(|f| f.path.as_path())).ok_or("These files have no common folder.")?;
             Ok(Item {
                 kind: Kind::Model,
+                sure: Sure::Certain,
+                reasons: Vec::new(),
                 keep: Vec::new(),
                 can_trash: true,
                 can_share: false,
@@ -374,8 +566,11 @@ fn hf_items(repo: &Path, out: &mut Vec<Item>) {
     // Unfinished downloads are worth offering even when the versions can't be told apart.
     let partial: Vec<PathBuf> = blob_files.iter().filter(|p| p.extension().is_some_and(|e| e == "incomplete") && !busy(p)).cloned().collect();
     if !partial.is_empty() {
+        let (sure, reasons) = stopped(&partial[0], "Hugging Face names files \u{201C}.incomplete\u{201D} until they finish");
         out.push(Item {
             kind: Kind::Partial,
+            sure,
+            reasons,
             keep: Vec::new(),
             can_trash: true,
             can_share: false,
@@ -446,8 +641,20 @@ fn hf_items(repo: &Path, out: &mut Vec<Item>) {
         return;
     }
     let n = old.len();
+    let mut reasons = Vec::new();
+    if n > 0 {
+        reasons.push(format!("No branch or tag (such as main) points at {}; the current version is kept", if n == 1 { "this older version".to_string() } else { format!("these {n} older versions") }));
+        reasons.push("A program that asks for an exact version by its code would still use it; most ask for main".into());
+        reasons.push("Files the current version also uses are kept".into());
+    }
+    if loose > 0 {
+        reasons.push(format!("{} of files no version links to at all", crate::scan::human(loose)));
+    }
     out.push(Item {
         kind: Kind::OldVersion,
+        // Unreferenced versions are only probably unused (see above); stray blobs certainly are.
+        sure: if n > 0 { Sure::Likely } else { Sure::Certain },
+        reasons,
         keep: Vec::new(),
         can_trash: true,
         can_share: false,
@@ -487,8 +694,11 @@ fn partial_files(root: &Path, dir: &Path, depth: u32, out: &mut Vec<Item>) {
             partial_files(root, &e.path(), depth - 1, out);
         } else if t.is_file() && is_partial_model(&name) && !busy(&e.path()) {
             let p = e.path();
+            let (sure, reasons) = stopped(&p, "Its name ends the way unfinished downloads do");
             out.push(Item {
                 kind: Kind::Partial,
+                sure,
+                reasons,
                 keep: Vec::new(),
                 can_trash: true,
                 can_share: false,
@@ -520,8 +730,17 @@ fn copies(models: &[Model], out: &mut Vec<Item>) {
         let other = m.copies.iter().filter_map(|&i| models.get(i)).next();
         let bytes: u64 = pairs.iter().map(|(f, _)| f.size).sum();
         let whole = bytes >= m.size;
+        let mut reasons = vec!["Same size and the same contents, compared in full".to_string()];
+        if let Some(k) = pairs.first().map(|(_, k)| k) {
+            reasons.push(format!("The copy kept: {}", k.display()));
+        }
+        if !can_trash {
+            reasons.push(format!("{} keeps this copy itself, so it can only be shared, not removed", m.source.label()));
+        }
         out.push(Item {
             kind: Kind::Copy,
+            sure: Sure::Certain,
+            reasons,
             title: m.name.clone(),
             detail: match other {
                 Some(o) => format!(
@@ -724,6 +943,65 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn what_another_model_links_to_is_kept() {
+        let d = tempdir("linked");
+        let s = d.path().join("models");
+        manifest(&s, "a", &["sha256-aaa"]);
+        for b in ["sha256-aaa", "sha256-gone", "sha256-lost"] {
+            write(&s.join("blobs").join(b), 100);
+        }
+        // A tool linked an Ollama download into LM Studio's folder; then the Ollama model was removed.
+        let lms = d.path().join("lmstudio/pub/m/m.gguf");
+        fs::create_dir_all(lms.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(s.join("blobs/sha256-gone"), &lms).unwrap();
+        let m = Model {
+            name: "Linked".into(),
+            source: Source::LmStudio,
+            format: Format::Gguf,
+            info: Default::default(),
+            files: vec![crate::models::File { path: lms, size: 100, not_local: false }],
+            size: 100,
+            copies: vec![],
+            extra: 0,
+            same_as: vec![],
+            orphan: false,
+        };
+        let items = find(std::slice::from_ref(&s), std::slice::from_ref(&m));
+        let unused: Vec<_> = items.iter().filter(|i| i.kind == Kind::Unused).collect();
+        assert_eq!(unused.len(), 1, "{items:?}");
+        assert_eq!(unused[0].paths, [s.join("blobs/sha256-lost")]);
+        assert_eq!(unused[0].sure, Sure::Certain);
+        assert!(unused[0].reasons[0].contains("None of the 1 model in Ollama's own list"), "{:?}", unused[0].reasons);
+        assert!(unused[0].reasons.iter().any(|r| r.contains("No other model")));
+        // The same link found by looking in LM Studio's folder, not in the list of models.
+        let items = find(&[s.clone(), d.path().join("lmstudio")], &[]);
+        let gone: Vec<_> = items.iter().filter(|i| i.kind == Kind::Unused).flat_map(|i| i.paths.iter()).collect();
+        assert_eq!(gone, [&s.join("blobs/sha256-lost")]);
+        // Removing the download as a model from the list is refused for the same reason.
+        let orphan = Model { name: "gone".into(), source: Source::Ollama, orphan: true, files: vec![crate::models::File { path: s.join("blobs/sha256-gone"), size: 100, not_local: false }], ..m };
+        let p = plan(&orphan).unwrap();
+        let who = linked_from(&p, &[d.path().join("lmstudio")], &[]);
+        assert_eq!(who.len(), 1);
+        assert!(who[0].ends_with("m.gguf"), "{who:?}");
+        assert!(linked_from(&p, &[s.clone()], &[]).is_empty());
+    }
+
+    #[test]
+    fn newer_stopped_downloads_are_only_probably_unused() {
+        let d = tempdir("stopped");
+        let old_one = d.path().join("old.gguf.crdownload");
+        let new_one = d.path().join("new.gguf.part");
+        write(&old_one, 100);
+        write(&new_one, 100);
+        fs::File::options().write(true).open(&new_one).unwrap().set_modified(SystemTime::now() - Duration::from_secs(3600)).unwrap();
+        let items = find(&[d.path().to_path_buf()], &[]);
+        let sure = |n: &str| items.iter().find(|i| i.title == n).unwrap().sure;
+        assert_eq!((sure("old.gguf.crdownload"), sure("new.gguf.part")), (Sure::Certain, Sure::Likely));
+        assert!(items.iter().find(|i| i.title == "new.gguf.part").unwrap().reasons.iter().any(|r| r.contains("carry on")));
+    }
+
+    #[test]
     fn removing_an_ollama_model_keeps_shared_files() {
         let d = tempdir("rmollama");
         let s = d.path().join("models");
@@ -781,6 +1059,29 @@ mod tests {
         assert!(names.contains(&"rev1".into()) && names.contains(&"old".into()) && names.contains(&"stray".into()), "{names:?}");
         assert!(!names.contains(&"same".into()) && !names.contains(&"new".into()));
         assert!(items.iter().any(|i| i.kind == Kind::Partial && i.bytes == 500));
+        assert_eq!(old[0].sure, Sure::Likely);
+        // A folder elsewhere links to the old version's file: that version and its file stay.
+        let link = d.path().join("comfy/model.safetensors");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(r.join("snapshots/rev1/model.safetensors"), &link).unwrap();
+        let m = Model {
+            name: "Comfy".into(),
+            source: Source::Folder,
+            format: Format::Safetensors,
+            info: Default::default(),
+            files: vec![crate::models::File { path: link, size: 1000, not_local: false }],
+            size: 1000,
+            copies: vec![],
+            extra: 0,
+            same_as: vec![],
+            orphan: false,
+        };
+        let items = find(&[d.path().to_path_buf()], std::slice::from_ref(&m));
+        let old = items.iter().find(|i| i.kind == Kind::OldVersion).unwrap();
+        let names: Vec<String> = old.paths.iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
+        assert_eq!(names, ["stray"]);
+        assert_eq!(old.bytes, 1000);
+        assert!(old.reasons.iter().any(|r| r.contains("because of a link to it from Comfy (")), "{:?}", old.reasons);
         // No refs: the versions can't be told apart, so none is offered.
         fs::remove_file(r.join("refs/main")).unwrap();
         assert!(find(&[d.path().to_path_buf()], &[]).iter().all(|i| i.kind != Kind::OldVersion));
@@ -796,6 +1097,8 @@ mod tests {
         assert!(same_drive(&copy, &keep));
         let item = Item {
             kind: Kind::Copy,
+            sure: Sure::Certain,
+            reasons: Vec::new(),
             title: "m".into(),
             detail: String::new(),
             app: "Folder",
@@ -838,7 +1141,7 @@ mod tests {
         let outside = d.path().join("out/y.gguf");
         write(&inside, 10);
         write(&outside, 10);
-        let item = Item { kind: Kind::Copy, keep: vec![], can_trash: true, can_share: false, title: "x".into(), detail: String::new(), app: "Folder", paths: vec![inside.clone(), outside.clone()], bytes: 20, within: d.path().join("in") };
+        let item = Item { kind: Kind::Copy, sure: Sure::Certain, reasons: vec![], keep: vec![], can_trash: true, can_share: false, title: "x".into(), detail: String::new(), app: "Folder", paths: vec![inside.clone(), outside.clone()], bytes: 20, within: d.path().join("in") };
         let r = remove(&item, false);
         assert!(r[0].result.is_ok() && r[1].result.is_err());
         assert!(!inside.exists() && outside.exists());

@@ -2,7 +2,7 @@
 //! original is never changed. Model quantisation is Professional, checked when it's opened.
 
 use super::*;
-use crate::quantize::{self, Run, Target};
+use crate::quantize::{self, Checked, Run, Target};
 use std::path::Path;
 
 pub(in crate::app) struct Shrink {
@@ -16,6 +16,8 @@ pub(in crate::app) struct Shrink {
     /// The folder the new file goes in.
     folder: String,
     run: Option<Run>,
+    /// The new file, checked, and how it compares with the original.
+    done: Option<(PathBuf, Checked)>,
 }
 
 impl Shrink {
@@ -77,6 +79,7 @@ impl App {
             target,
             folder: default_folder(m).to_string_lossy().to_string(),
             run: None,
+            done: None,
         });
     }
 
@@ -87,18 +90,24 @@ impl App {
             let result = r.result.lock().unwrap().take();
             if let Some(result) = result {
                 let out = r.out.clone();
-                self.models.storage.outcome = Some(match result {
-                    Ok(()) => {
-                        let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
-                        (Tone::Success, format!("Done: {} ({}). The original is unchanged.", out.shown(), scan::human(size)))
+                s.run = None;
+                match result {
+                    Ok(c) => s.done = Some((out, c)),
+                    Err(e) => {
+                        self.models.storage.outcome = Some((Tone::Warn, e));
+                        self.models.storage.shrink = None;
+                        return;
                     }
-                    Err(e) => (Tone::Warn, e),
-                });
-                self.models.storage.shrink = None;
+                }
+                // The new file joins the list while the result is on screen.
                 self.start_models();
                 return;
             }
             ctx.request_repaint_after(Duration::from_millis(200));
+        }
+        if s.done.is_some() {
+            self.shrink_result(ctx);
+            return;
         }
         let mut go = false;
         let mut pick = false;
@@ -169,13 +178,94 @@ impl App {
             self.models.storage.shrink = None;
         } else if go {
             let threads = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(4);
-            match quantize::start(&s.input, &s.out(), s.target, threads) {
+            match quantize::start(&s.input, s.size, &s.out(), s.target, threads) {
                 Ok(r) => s.run = Some(r),
                 Err(e) => {
                     self.models.storage.outcome = Some((Tone::Warn, e));
                     self.models.storage.shrink = None;
                 }
             }
+        }
+    }
+
+    /// The new file's check and the original beside it.
+    fn shrink_result(&mut self, ctx: &egui::Context) {
+        let Some(s) = &self.models.storage.shrink else { return };
+        let Some((out, c)) = &s.done else { return };
+        let (out, input) = (out.clone(), s.input.clone());
+        let (mut close, mut show, mut compare) = (false, false, false);
+        egui::Modal::new(egui::Id::new("storage-shrink")).show(ctx, |ui| {
+            ui.set_max_width(560.0);
+            ui.heading("Optimise model size");
+            kit::callout(ui, Tone::Success, format!("Done, and checked: {}", out.shown()));
+            ui.add_space(6.0);
+            let precision = |p: &Option<String>| p.clone().unwrap_or_else(|| "not stated".into());
+            let bits = |b: Option<f64>| b.map_or("—".to_string(), |b| format!("{b:.2}"));
+            let count = |n: usize| if n == 0 { "—".to_string() } else { crate::inspect::group(n as u64) };
+            let params = |n: u64| if n == 0 { "—".to_string() } else { crate::inspect::group(n) };
+            egui::Grid::new("shrink-result").num_columns(3).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
+                ui.strong("");
+                ui.strong("Original");
+                ui.strong("New file");
+                ui.end_row();
+                ui.label("Size on disk");
+                ui.label(scan::human(c.before.bytes));
+                ui.label(scan::human(c.after.bytes));
+                ui.end_row();
+                ui.label("Precision");
+                ui.label(precision(&c.before.precision));
+                ui.label(precision(&c.after.precision));
+                ui.end_row();
+                ui.label("Bits per weight").on_hover_text("The file's size in bits over its weights: measured from the files, not estimated.");
+                ui.label(bits(c.before.bits()));
+                ui.label(bits(c.after.bits()));
+                ui.end_row();
+                ui.label("Weights");
+                ui.label(params(c.before.params));
+                ui.label(params(c.after.params));
+                ui.end_row();
+                ui.label("Tensors");
+                ui.label(count(c.before.tensors));
+                ui.label(count(c.after.tensors));
+                ui.end_row();
+            });
+            ui.add_space(4.0);
+            if c.before.bytes > c.after.bytes {
+                let saved = c.before.bytes - c.after.bytes;
+                ui.label(format!("{} smaller ({:.0}% of the original).", scan::human(saved), c.after.bytes as f64 * 100.0 / c.before.bytes.max(1) as f64));
+            }
+            if c.changed > 0 {
+                ui.weak(format!("{} of {} tensors now use fewer bits; the rest, such as normalisation weights, stay precise on purpose.", c.changed, c.after.tensors));
+            }
+            ui.add_space(6.0);
+            ui.strong("Checked");
+            let ok = kit::tokens(ui).success;
+            for line in &c.checks {
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+                    crate::kit::icons::paint(ui.painter(), r, crate::kit::icons::Icon::Check, ok);
+                    ui.label(line);
+                });
+            }
+            ui.weak("These checks say the file is complete and well formed. How well it writes is worth trying in Ask AI or the Lab's Compare page.");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                compare = ui
+                    .add_enabled(self.models.list.is_some(), egui::Button::new("Compare with the original"))
+                    .on_hover_text("Open both side by side in the model's page: every tensor, before and after")
+                    .clicked();
+                show = ui.button("Show in Files").clicked();
+                close = kit::button(ui, kit::Kind::Primary, None, "Done").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
+            });
+        });
+        if compare {
+            self.models.storage.shrink = None;
+            self.compare_files(&input, &out);
+        } else if show {
+            self.models.storage.shrink = None;
+            self.show_model_file(&out);
+        } else if close {
+            self.models.storage.shrink = None;
         }
     }
 }
