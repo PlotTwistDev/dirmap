@@ -1159,100 +1159,176 @@ impl App {
     }
 
     /// Back, Forward, Up, the path, file commands, and the layout and sort controls.
+    ///
+    /// The controls on the right are laid out first, so the path only gets the space that's
+    /// left and never draws underneath them.
     fn browser_bar(&mut self, ui: &mut egui::Ui, tree: &Arc<Node>, picks: &mut Picks) {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let ctx = ui.ctx().clone();
-            let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
-            let (can_back, can_fwd) = {
-                let t = &self.browser.tabs[self.browser.active];
-                (!t.back.is_empty(), !t.fwd.is_empty())
-            };
-            if ui.add_enabled(can_back, egui::Button::new("◀")).on_hover_text(format!("Back ({})", k(egui::Modifiers::ALT, egui::Key::ArrowLeft))).clicked() {
-                self.browser_back();
-            }
-            if ui.add_enabled(can_fwd, egui::Button::new("▶")).on_hover_text(format!("Forward ({})", k(egui::Modifiers::ALT, egui::Key::ArrowRight))).clicked() {
-                self.browser_forward();
-            }
-            if ui.add_enabled(!self.browser.folder.is_empty(), egui::Button::new("⏶")).on_hover_text(format!("Up to the enclosing folder (Backspace or {})", k(egui::Modifiers::COMMAND, egui::Key::ArrowUp))).clicked() {
-                self.browse_up();
-            }
+        // How wide the controls were last frame: when that leaves too little for the path, the
+        // controls go on a row of their own under it.
+        let id = ui.id().with("browser-bar-controls");
+        let controls_w: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
+        let narrow = ui.available_width() - controls_w < 280.0;
+        let width = if narrow {
+            ui.horizontal(|ui| self.bar_path(ui, tree, picks));
+            // Wraps onto more rows when even that is too narrow.
+            let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+            ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true), |ui| {
+                self.bar_controls(ui, picks);
+                ui.min_rect().width()
+            })
+            .inner
+        } else {
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.bar_controls(ui, picks);
+                    let w = ui.min_rect().width();
+                    ui.add_space(12.0);
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| self.bar_path(ui, tree, picks));
+                    w
+                })
+                .inner
+            })
+            .inner
+        };
+        ui.data_mut(|d| d.insert_temp(id, width));
+    }
+
+    /// File commands, layouts and sort, laid out right to left.
+    fn bar_controls(&mut self, ui: &mut egui::Ui, picks: &mut Picks) {
+        let ctx = ui.ctx().clone();
+        let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
+        ui.spacing_mut().item_spacing.x = 2.0;
+        if self.browser.layout() != Layout::Tree {
+            let b = &mut self.browser;
+            let arrow = if b.reversed != b.sort.natural_desc() { "⏷" } else { "⏶" };
+            egui::ComboBox::from_id_salt("browser-sort")
+                .selected_text(format!("Sort: {} {arrow}", b.sort.label()))
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for key in SortKey::ALL {
+                        if ui.selectable_label(b.sort == key, key.label()).clicked() {
+                            picks.sort = Some(key);
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Choose the order; pick the same one again to reverse it");
             ui.add_space(6.0);
-            // The path, each part clickable and a place to drop.
-            ui.spacing_mut().item_spacing.x = 3.0;
-            let mut n: &Node = tree;
-            let crumbs: Vec<(usize, String)> = std::iter::once((0, format!("🖴 {}", tree.name)))
-                .chain(self.browser.folder.iter().enumerate().filter_map(|(k, &i)| {
-                    n = n.children.get(i as usize)?;
-                    Some((k + 1, n.name.to_string()))
-                }))
-                .collect();
-            let last = crumbs.len() - 1;
-            for (k, (depth, label)) in crumbs.into_iter().enumerate() {
-                if k > 0 {
+        }
+        let t = self.browser.tab();
+        for (layout, label, tip) in [
+            (Layout::Columns, "☰ Columns", "A column per folder, from the top of the scan down to here"),
+            (Layout::Icons, "⊞ Icons", "Large icons in a grid"),
+            (Layout::List, "☰ List", "One line per item, with sizes and dates"),
+            (Layout::Tree, "🌲 Tree", "The whole scan as a folder tree"),
+        ] {
+            ui.selectable_value(&mut t.layout, layout, label).on_hover_text(tip);
+        }
+        ui.add_space(6.0);
+        let busy = self.ops.job.is_some();
+        let paste_tip = match &self.browser.clip {
+            Some(c) => format!("Paste {} here ({})", if c.paths.len() == 1 { "1 item".into() } else { format!("{} items", c.paths.len()) }, k(egui::Modifiers::COMMAND, egui::Key::V)),
+            None => "Paste: copy or cut something first".into(),
+        };
+        if ui.add_enabled(self.browser.clip.is_some() && !busy, egui::Button::new("Paste")).on_hover_text(paste_tip).on_disabled_hover_text("Paste: copy or cut something first").clicked() {
+            picks.paste = true;
+        }
+        if ui.add_enabled(!busy, egui::Button::new("New Folder")).on_hover_text(format!("New folder here ({})", k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::N))).clicked() {
+            picks.new_folder = true;
+        }
+    }
+
+    /// Back, Forward, Up and the path.
+    fn bar_path(&mut self, ui: &mut egui::Ui, tree: &Arc<Node>, picks: &mut Picks) {
+        let ctx = ui.ctx().clone();
+        let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let (can_back, can_fwd) = {
+            let t = &self.browser.tabs[self.browser.active];
+            (!t.back.is_empty(), !t.fwd.is_empty())
+        };
+        if ui.add_enabled(can_back, egui::Button::new("◀")).on_hover_text(format!("Back ({})", k(egui::Modifiers::ALT, egui::Key::ArrowLeft))).clicked() {
+            self.browser_back();
+        }
+        if ui.add_enabled(can_fwd, egui::Button::new("▶")).on_hover_text(format!("Forward ({})", k(egui::Modifiers::ALT, egui::Key::ArrowRight))).clicked() {
+            self.browser_forward();
+        }
+        if ui.add_enabled(!self.browser.folder.is_empty(), egui::Button::new("⏶")).on_hover_text(format!("Up to the enclosing folder (Backspace or {})", k(egui::Modifiers::COMMAND, egui::Key::ArrowUp))).clicked() {
+            self.browse_up();
+        }
+        ui.add_space(6.0);
+        self.path_crumbs(ui, tree, picks);
+    }
+
+    /// The path, each part clickable and a place to drop. When it's too long for the space,
+    /// the middle folders fold into a "…" menu, and a last name that still doesn't fit is cut
+    /// short.
+    fn path_crumbs(&mut self, ui: &mut egui::Ui, tree: &Arc<Node>, picks: &mut Picks) {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        let clip = ui.clip_rect().intersect(ui.max_rect());
+        ui.set_clip_rect(clip);
+        let mut n: &Node = tree;
+        let crumbs: Vec<(usize, String)> = std::iter::once((0, format!("🖴 {}", tree.name)))
+            .chain(self.browser.folder.iter().enumerate().filter_map(|(k, &i)| {
+                n = n.children.get(i as usize)?;
+                Some((k + 1, n.name.to_string()))
+            }))
+            .collect();
+        let last = crumbs.len() - 1;
+        let text = |k: usize, label: &str| if k == last { egui::RichText::new(label).strong() } else { egui::RichText::new(label) };
+        let measure = |ui: &egui::Ui, t: egui::RichText| egui::WidgetText::from(t).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button).size().x;
+        let pad = ui.spacing().button_padding.x * 2.0;
+        let gap = ui.spacing().item_spacing.x;
+        let widths: Vec<f32> = crumbs.iter().enumerate().map(|(k, (_, l))| measure(ui, text(k, l)) + pad).collect();
+        let sep = measure(ui, egui::RichText::new("›")) + gap * 2.0;
+        let more = measure(ui, egui::RichText::new("…")) + pad + sep;
+        let shown = fit_crumbs(&widths, sep, more, ui.available_width());
+        let mut next = 0;
+        for (j, &k) in shown.iter().enumerate() {
+            if k > next {
+                // Folded folders, from `next` up to `k`.
+                if j > 0 {
                     ui.weak("›");
                 }
-                let text = if k == last { egui::RichText::new(label).strong() } else { egui::RichText::new(label) };
-                let resp = ui.add(egui::Button::new(text).frame(false));
-                if resp.clicked() && k != last {
-                    picks.go = Some(self.browser.folder[..depth].to_vec());
-                }
-                resp.context_menu(|ui| {
-                    if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
-                        picks.copy = Some(self.full_path(&self.browser.folder[..depth]));
+                ui.menu_button("…", |ui| {
+                    for (depth, label) in &crumbs[next..k] {
+                        if ui.button(label.as_str()).clicked() {
+                            picks.go = Some(self.browser.folder[..*depth].to_vec());
+                            ui.close();
+                        }
                     }
-                });
-                if resp.dnd_hover_payload::<DragItems>().is_some() {
-                    ui.painter().rect_stroke(resp.rect, 3.0, Stroke::new(2.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
-                }
-                if let Some(p) = resp.dnd_release_payload::<DragItems>() {
-                    let dest = self.full_path(&self.browser.folder[..depth]);
-                    let copy = dnd::op_for(&p.0, &dest, ui.input(|i| i.modifiers), &self.drives) == dnd::DropOp::Copy;
-                    picks.drop = Some((p.0.clone(), dest, copy));
-                }
+                })
+                .response
+                .on_hover_text("More folders in the path");
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                if self.browser.layout() != Layout::Tree {
-                    let b = &mut self.browser;
-                    let arrow = if b.reversed != b.sort.natural_desc() { "⏷" } else { "⏶" };
-                    egui::ComboBox::from_id_salt("browser-sort")
-                        .selected_text(format!("Sort: {} {arrow}", b.sort.label()))
-                        .width(140.0)
-                        .show_ui(ui, |ui| {
-                            for key in SortKey::ALL {
-                                if ui.selectable_label(b.sort == key, key.label()).clicked() {
-                                    picks.sort = Some(key);
-                                }
-                            }
-                        })
-                        .response
-                        .on_hover_text("Choose the order; pick the same one again to reverse it");
-                    ui.add_space(6.0);
-                }
-                let t = self.browser.tab();
-                for (layout, label, tip) in [
-                    (Layout::Columns, "☰ Columns", "A column per folder, from the top of the scan down to here"),
-                    (Layout::Icons, "⊞ Icons", "Large icons in a grid"),
-                    (Layout::List, "☰ List", "One line per item, with sizes and dates"),
-                    (Layout::Tree, "🌲 Tree", "The whole scan as a folder tree"),
-                ] {
-                    ui.selectable_value(&mut t.layout, layout, label).on_hover_text(tip);
-                }
-                ui.add_space(6.0);
-                let busy = self.ops.job.is_some();
-                let paste_tip = match &self.browser.clip {
-                    Some(c) => format!("Paste {} here ({})", if c.paths.len() == 1 { "1 item".into() } else { format!("{} items", c.paths.len()) }, k(egui::Modifiers::COMMAND, egui::Key::V)),
-                    None => "Paste: copy or cut something first".into(),
-                };
-                if ui.add_enabled(self.browser.clip.is_some() && !busy, egui::Button::new("Paste")).on_hover_text(paste_tip).on_disabled_hover_text("Paste: copy or cut something first").clicked() {
-                    picks.paste = true;
-                }
-                if ui.add_enabled(!busy, egui::Button::new("New Folder")).on_hover_text(format!("New folder here ({})", k(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::N))).clicked() {
-                    picks.new_folder = true;
+            if j > 0 || k > 0 {
+                ui.weak("›");
+            }
+            next = k + 1;
+            let (depth, label) = &crumbs[k];
+            let depth = *depth;
+            let mut button = egui::Button::new(text(k, label)).frame(false);
+            if k == last {
+                button = button.truncate();
+            }
+            let resp = ui.add(button);
+            if resp.clicked() && k != last {
+                picks.go = Some(self.browser.folder[..depth].to_vec());
+            }
+            resp.context_menu(|ui| {
+                if ui.add(egui::Button::new(style::mi("Copy Path"))).clicked() {
+                    picks.copy = Some(self.full_path(&self.browser.folder[..depth]));
                 }
             });
-        });
+            if resp.dnd_hover_payload::<DragItems>().is_some() {
+                ui.painter().rect_stroke(resp.rect, 3.0, Stroke::new(2.0, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
+            }
+            if let Some(p) = resp.dnd_release_payload::<DragItems>() {
+                let dest = self.full_path(&self.browser.folder[..depth]);
+                let copy = dnd::op_for(&p.0, &dest, ui.input(|i| i.modifiers), &self.drives) == dnd::DropOp::Copy;
+                picks.drop = Some((p.0.clone(), dest, copy));
+            }
+        }
     }
 
     /// Count and total of the folder, and what's selected.
@@ -2023,9 +2099,56 @@ pub(super) fn keep_in_view(view: (f32, f32), y: f32, h: f32) -> f32 {
     }
 }
 
+/// Which parts of the path to show in `avail` points: all of them if they fit, otherwise the
+/// top, a "…" (`more` wide, its separator included) and as many of the deepest parts as fit.
+/// When even that is too wide the top goes too, and the last part is always kept (cut short
+/// by the caller). A gap in the returned indices is where the "…" goes.
+pub(super) fn fit_crumbs(widths: &[f32], sep: f32, more: f32, avail: f32) -> Vec<usize> {
+    let n = widths.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let total: f32 = widths.iter().sum::<f32>() + sep * (n - 1) as f32;
+    if total <= avail || n == 1 {
+        return (0..n).collect();
+    }
+    let last = n - 1;
+    // Keep the top when it fits beside the "…" and the last part.
+    let keep_top = widths[0] + sep + more + widths[last] <= avail;
+    let mut used = widths[last] + more + if keep_top { widths[0] + sep } else { 0.0 };
+    let mut tail = vec![last];
+    for k in (1..last).rev() {
+        if used + widths[k] + sep > avail {
+            break;
+        }
+        used += widths[k] + sep;
+        tail.push(k);
+    }
+    tail.reverse();
+    if keep_top {
+        tail.insert(0, 0);
+    }
+    tail
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_paths_fold_in_the_middle() {
+        let w = [50.0, 40.0, 40.0, 40.0, 40.0, 60.0];
+        // Everything fits.
+        assert_eq!(fit_crumbs(&w, 10.0, 20.0, 1000.0), vec![0, 1, 2, 3, 4, 5]);
+        // Top, "…", then the deepest parts that fit: 50+10+20+60 = 140, +50 for part 4.
+        assert_eq!(fit_crumbs(&w, 10.0, 20.0, 190.0), vec![0, 4, 5]);
+        assert_eq!(fit_crumbs(&w, 10.0, 20.0, 189.0), vec![0, 5]);
+        // No room for the top: only "…" and the last part.
+        assert_eq!(fit_crumbs(&w, 10.0, 20.0, 100.0), vec![5]);
+        assert_eq!(fit_crumbs(&w, 10.0, 20.0, 10.0), vec![5]);
+        assert_eq!(fit_crumbs(&[80.0], 10.0, 20.0, 10.0), vec![0]);
+        assert!(fit_crumbs(&[], 10.0, 20.0, 10.0).is_empty());
+    }
 
     fn file(name: &str, size: u64, modified: i64) -> Node {
         Node { name: name.into(), size, logical: size, alloc: size, flags: 0, files: 1, modified, is_dir: false, children: Vec::new() }

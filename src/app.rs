@@ -1001,15 +1001,9 @@ impl App {
     // ---------- toolbar ----------
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
+        // Settings, Help and Rescan go on first, so the breadcrumb only gets the space that's
+        // left and never runs under them.
         ui.horizontal(|ui| {
-            self.workspace_switch(ui);
-            // Before the first scan the folder box is right here; after it, it's behind the
-            // breadcrumb so the toolbar can say where you are.
-            if self.tree.is_none() && self.job.is_none() {
-                self.scan_controls(ui, 380.0);
-            } else {
-                self.analysis_nav(ui);
-            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("⚙ Settings").on_hover_text("Appearance, scan filters, treemap look and more").clicked() {
                     self.dialog.open(&self.settings);
@@ -1019,6 +1013,17 @@ impl App {
                     self.path_input = self.scanned_path.shown();
                     self.start_scan();
                 }
+                ui.add_space(8.0);
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    self.workspace_switch(ui);
+                    // Before the first scan the folder box is right here; after it, it's behind
+                    // the breadcrumb so the toolbar can say where you are.
+                    if self.tree.is_none() && self.job.is_none() {
+                        self.scan_controls(ui, 380.0);
+                    } else {
+                        self.analysis_nav(ui);
+                    }
+                });
             });
         });
     }
