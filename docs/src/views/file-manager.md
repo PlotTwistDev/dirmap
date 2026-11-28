@@ -308,7 +308,7 @@ read shows its type's icon instead.
 |---|---|
 | **Open** / **Open in New Tab** / **Open in Other Pane** | Opens folders here, in a new tab or in the other pane, and files in their apps. |
 | **Open Application** / **Show Package Contents** / **Get Application Info** | On an [application](#applications): launches it, goes inside it, or shows its details in the preview pane. |
-| **Open With** | Opens the item in one of [your apps](#open-with), or lets you choose one. |
+| **Open With** | Opens the item in [another app](#open-with): the ones your system knows can open it, or your own. |
 | **Quick Look** (**Space**) | A [large preview](#quick-look-and-the-preview-pane) of the file. |
 | **Copy** / **Cut** / **Paste** (**Ctrl+C**, **Ctrl+X**, **Ctrl+V**) | See [Copying, moving and deleting](#copying-moving-and-deleting). |
 | **Copy to Other Pane** / **Move to Other Pane** (**Shift+F5**, **Shift+F6**) | With two panes. |
@@ -412,7 +412,16 @@ replaced and deleted items are deleted, as a server has no bin.
 ## Open With
 
 **Open With** on the right-click menu opens an item in another app instead of its usual one. It
-lists the apps you've added for that kind of item, then:
+lists the apps your system knows can open that kind of item, with their own names and icons,
+and the system's usual choice marked **Default**. Filescape asks the system each time it meets a new
+type: Launch Services on a Mac, the apps registered for the extension on Windows (the same list as
+Explorer's Open with), and the desktop's application launchers and `mimeapps.list` on Linux.
+Files without an extension are recognised too. LICENSE, README, Makefile, Dockerfile and similar
+names, and any file whose contents are plain text, offer text editors, while files whose contents
+are unknown don't get a guess. Several items open in one go, in a single copy of the app where it
+takes several.
+
+Below the system's apps come the apps you've added yourself, then:
 
 - **Choose an App for .ext files…**, which picks a program, opens the item in it and adds it to
   the list for that type;

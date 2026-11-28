@@ -88,19 +88,7 @@ impl UserApp {
     }
 
     pub fn run(&self, file: &Path) -> Result<(), String> {
-        let local = if archive::inside(file) {
-            super::files::archive_temp(file)
-                .map_err(|e| format!("Couldn't take it out of the archive: {e}"))?
-        } else if remote::is_remote(file) {
-            remote::edit::open_copy(file).map_err(|e| {
-                format!(
-                    "Couldn't fetch it from the server: {}",
-                    remote::describe(&e)
-                )
-            })?
-        } else {
-            file.to_path_buf()
-        };
+        let local = local_copies(&[file.to_path_buf()])?.remove(0);
         let (exe, args) = self.command(&local);
         let mut cmd = std::process::Command::new(&exe);
         cmd.args(&args);
@@ -141,35 +129,121 @@ fn app_name(exe: &Path) -> String {
         .unwrap_or_else(|| exe.display().to_string())
 }
 
-/// The Open With submenu: the apps for this kind of item, then Choose and Manage.
-pub(super) fn menu(ui: &mut egui::Ui, apps: &[UserApp], ext: &str, is_dir: bool) -> Option<Pick> {
+/// Icons of apps in the Open With menu, small, read on worker threads and kept for the session.
+mod icons {
+    use eframe::egui;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, OnceLock};
+
+    enum State {
+        Loading,
+        Pixels(Option<(u32, u32, Vec<u8>)>),
+        Ready(Option<egui::TextureHandle>),
+    }
+
+    fn all() -> &'static Mutex<HashMap<PathBuf, State>> {
+        static A: OnceLock<Mutex<HashMap<PathBuf, State>>> = OnceLock::new();
+        A.get_or_init(Default::default)
+    }
+
+    /// The app's icon, or None while it loads (or when it has none).
+    pub fn get(ctx: &egui::Context, app: &Path) -> Option<egui::TextureHandle> {
+        let mut m = all().lock().unwrap_or_else(|e| e.into_inner());
+        match m.get_mut(app) {
+            Some(State::Ready(t)) => return t.clone(),
+            Some(State::Loading) => return None,
+            Some(s @ State::Pixels(_)) => {
+                let State::Pixels(px) = std::mem::replace(s, State::Loading) else { unreachable!() };
+                let tex = px.map(|(w, h, rgba)| {
+                    let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+                    ctx.load_texture(format!("open-with:{}", app.display()), img, egui::TextureOptions::LINEAR)
+                });
+                *s = State::Ready(tex.clone());
+                return tex;
+            }
+            None => {}
+        }
+        m.insert(app.to_path_buf(), State::Loading);
+        drop(m);
+        let (ctx, app) = (ctx.clone(), app.to_path_buf());
+        let _ = std::thread::Builder::new().name("open-with-icon".into()).spawn(move || {
+            let px = crate::apps::icon(&app, 32);
+            all().lock().unwrap_or_else(|e| e.into_inner()).insert(app, State::Pixels(px));
+            ctx.request_repaint();
+        });
+        None
+    }
+}
+
+/// The app chosen from a menu (menus pass plain values; this holds the rest).
+static PICKED: std::sync::Mutex<Option<crate::openapps::Handler>> = std::sync::Mutex::new(None);
+
+/// At most this many apps are listed; the rest are a click away under Choose.
+const MENU_APPS: usize = 12;
+
+/// One app's row in a menu: its icon and name, and "Default" for the system's choice.
+pub(super) fn app_row(ui: &mut egui::Ui, h: &crate::openapps::Handler) -> egui::Response {
+    let icon = icons::get(ui.ctx(), &h.app);
+    let text = crate::app::style::mi(&h.name);
+    let mut b = match icon {
+        Some(t) => egui::Button::image_and_text(egui::Image::new(&t).fit_to_exact_size(egui::vec2(16.0, 16.0)), h.name.as_str()),
+        None => egui::Button::new(text),
+    };
+    if h.default {
+        b = b.shortcut_text("Default");
+    }
+    ui.add(b).on_hover_text(h.app.display().to_string())
+}
+
+/// The Open With submenu: the apps the system knows can open this kind of item (the default
+/// first), the apps added by hand, then Choose and Manage.
+pub(super) fn menu(ui: &mut egui::Ui, apps: &[UserApp], path: &Path, ext: &str, is_dir: bool) -> Option<Pick> {
     let mut out = None;
     ui.menu_button(crate::app::style::mi("Open With"), |ui| {
+        let t = crate::openapps::identify(path, is_dir);
+        let ctx = ui.ctx().clone();
+        let found = crate::openapps::apps_for(&t, move || ctx.request_repaint());
+        // Apps on another system (a Windows program on a Mac drive) are never offered.
+        let on_system = match &found {
+            crate::openapps::Apps::Found(f) => Some(f.clone()),
+            crate::openapps::Apps::Looking => None,
+        };
+        match &on_system {
+            None => {
+                ui.weak("Looking for apps…");
+            }
+            Some(list) => {
+                for h in list.iter().take(MENU_APPS) {
+                    if app_row(ui, h).clicked() {
+                        *PICKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(h.clone());
+                        out = Some(Pick::System);
+                    }
+                }
+            }
+        }
         let fit: Vec<(usize, &UserApp)> = apps
             .iter()
             .enumerate()
             .filter(|(_, a)| a.fits(ext, is_dir))
             .collect();
+        if !fit.is_empty() && on_system.as_ref().is_some_and(|l| !l.is_empty()) {
+            ui.separator();
+        }
         for (i, a) in &fit {
             if ui
                 .button(&a.name)
-                .on_hover_text(a.exe.display().to_string())
+                .on_hover_text(format!("Added by you: {}", a.exe.display()))
                 .clicked()
             {
                 out = Some(Pick::Run(*i));
             }
         }
-        if fit.is_empty() {
-            ui.weak("No apps added for this type yet");
+        if fit.is_empty() && on_system.as_ref().is_some_and(|l| l.is_empty()) {
+            ui.weak("No apps found for this type");
         }
         ui.separator();
-        let what = if is_dir {
-            "folders".to_string()
-        } else if ext.is_empty() {
-            "these".to_string()
-        } else {
-            format!(".{ext} files")
-        };
+        let what = if t == crate::openapps::Type::Unknown && !ext.is_empty() { format!(".{ext} files") } else { t.label() };
         if ui.add(egui::Button::new(crate::app::style::mi(format!("Choose an App for {what}…")))).clicked() {
             out = Some(Pick::Choose);
         }
@@ -183,8 +257,27 @@ pub(super) fn menu(ui: &mut egui::Ui, apps: &[UserApp], ext: &str, is_dir: bool)
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) enum Pick {
     Run(usize),
+    /// An app the system found (the one in [`PICKED`]).
+    System,
     Choose,
     Manage,
+}
+
+/// Copies of files on servers or inside archives, made on this computer (as Open does); files
+/// here are used as they are.
+fn local_copies(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    files
+        .iter()
+        .map(|file| {
+            if archive::inside(file) {
+                super::files::archive_temp(file).map_err(|e| format!("Couldn't take it out of the archive: {e}"))
+            } else if remote::is_remote(file) {
+                remote::edit::open_copy(file).map_err(|e| format!("Couldn't fetch it from the server: {}", remote::describe(&e)))
+            } else {
+                Ok(file.to_path_buf())
+            }
+        })
+        .collect()
 }
 
 impl App {
@@ -199,6 +292,19 @@ impl App {
                 };
                 self.files
                     .spawn(move || paths.iter().try_for_each(|p| app.run(p)));
+            }
+            Pick::System => {
+                let Some(h) = PICKED.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+                    return;
+                };
+                self.files.spawn(move || {
+                    let r = crate::openapps::open(&h, &local_copies(&paths)?);
+                    // An app that's gone: look again next time.
+                    if r.is_err() {
+                        crate::openapps::forget();
+                    }
+                    r
+                });
             }
             Pick::Choose => {
                 let is_dir = self

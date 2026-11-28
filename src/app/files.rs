@@ -3648,7 +3648,7 @@ impl App {
             .file_name()
             .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
             .unwrap_or_default();
-        let Some(a) = item_menu(ui, &m, &self.files.prefs.apps.clone(), &ext) else { return };
+        let Some(a) = item_menu(ui, &m, &self.files.prefs.apps.clone(), disk, &ext) else { return };
         match a {
             FAction::Open if is_dir || (archive && self.premium(crate::licence::Feature::Archives)) => self.files.go(Location::Dir(disk.to_path_buf())),
             FAction::Open if archive => {}
@@ -4091,14 +4091,14 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
         return;
     }
     resp.context_menu(|ui| {
-        if let Some(a) = item_menu(ui, &ctx_menu, c.apps, e.ext()) {
+        if let Some(a) = item_menu(ui, &ctx_menu, c.apps, &path, e.ext()) {
             let paths = if selected { t.chosen_paths() } else { t.row_paths(dir, l, i) };
             picks.menu = Some((a, paths));
         }
     });
 }
 
-fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &str) -> Option<FAction> {
+fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], path: &Path, ext: &str) -> Option<FAction> {
     use egui::{Key, Modifiers as M};
     let ctx = ui.ctx().clone();
     let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
@@ -4145,7 +4145,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     let with = if m.seq {
         None
     } else {
-        openwith::menu(ui, apps, ext, m.is_dir)
+        openwith::menu(ui, apps, path, ext, m.is_dir)
     };
     if m.archive {
         if !many {
