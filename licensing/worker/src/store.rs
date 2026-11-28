@@ -214,8 +214,8 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
 
     fn insert_stmt(&self, lic: &Licence, serial: &str) -> Stmt {
         (
-            "INSERT INTO licences (id, serial_hash, serial_hint, serial_enc, kind, validity, owner, email, purpose, issued_at, first_activated_at, expires_at, max_activations, activations_used, order_ref) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11, ?12, 0, ?13)",
+            "INSERT INTO licences (id, serial_hash, serial_hint, serial_enc, kind, validity, owner, email, purpose, issued_at, first_activated_at, expires_at, max_activations, activations_used, order_ref, maintenance_until) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11, ?12, 0, ?13, ?14)",
             vec![
                 (&lic.id).into(),
                 serial::hash(serial).into(),
@@ -230,6 +230,7 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
                 lic.expires_at.into(),
                 lic.max_activations.into(),
                 lic.order_ref.clone().into(),
+                lic.validity.updates_until().into(),
             ],
         )
     }
@@ -275,7 +276,8 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
         lic.order_ref = Some(order_ref.into());
         let ins = self.insert_stmt(&lic, &serial);
         let ev = event_stmt(&lic.id, self.now, "issued", &format!("perpetual, {limit} computers at once, order {order_ref}"), actor);
-        match self.db.batch(vec![ins, ev]).await {
+        let grant = self.purchase_grant_stmt(&lic.id, lic.validity.updates_until().unwrap_or(self.now), Some(order_ref), actor);
+        match self.db.batch(vec![ins, ev, grant]).await {
             Ok(_) => {}
             // Two deliveries of the same order at once: the other one won.
             Err(e) if e.contains("UNIQUE") => {

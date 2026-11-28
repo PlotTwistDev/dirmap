@@ -21,6 +21,7 @@ pub mod api;
 pub mod contact;
 pub mod db;
 pub mod mail;
+pub mod maintenance;
 pub mod paddle;
 pub mod portal;
 pub mod secret;

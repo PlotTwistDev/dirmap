@@ -12,11 +12,13 @@
 //! - [`features`]: what is free and what needs a licence, and the start-only [`features::Permit`]
 //! - [`export`]: the licence certificate file and the human-readable details
 //! - [`release`]: the signed newest-release manifest, and whether a licence covers that release
+//! - [`maintenance`]: the maintenance ledger (purchase, renewals, complimentary grants) and its end date
 //!
 //! Times are Unix seconds, UTC.
 
 pub mod export;
 pub mod features;
+pub mod maintenance;
 pub mod model;
 pub mod release;
 pub mod rules;
