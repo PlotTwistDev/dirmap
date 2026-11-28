@@ -153,6 +153,13 @@ fn updates(ui: &mut egui::Ui, cx: &mut PageCx, licence: &mut crate::licence::Lic
                 if kit::button(ui, Kind::Primary, Some(Icon::External), "Download").on_hover_text(m.download_for(platform())).clicked() {
                     ui.ctx().open_url(egui::OpenUrl::new_tab(m.download_for(platform())));
                 }
+                if st.renew {
+                    let busy = licence.busy();
+                    let r = ui.add_enabled_ui(!busy, |ui| kit::button(ui, Kind::Secondary, Some(Icon::External), "Extend Maintenance…")).inner;
+                    if r.on_hover_text("Opens the renewal checkout in your browser: 12 more months of new versions").clicked() {
+                        licence.renew();
+                    }
+                }
             });
             ui.add_space(6.0);
         }

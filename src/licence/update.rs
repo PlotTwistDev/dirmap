@@ -6,7 +6,7 @@
 //! verified is ignored without a word. Nothing is ever locked or delayed by this check, and it's
 //! off when Settings > General > "Check for a new version when Filescape starts" is cleared.
 
-use super::{Licensing, PURCHASE_URL, RELEASE_DATE};
+use super::{Licensing, RELEASE_DATE};
 use eframe::egui::{self, RichText};
 use filescape_licence::export::date_time;
 use filescape_licence::release::{Coverage, ReleaseManifest, coverage};
@@ -174,8 +174,8 @@ impl Licensing {
                 {
                     ui.ctx().open_url(egui::OpenUrl::new_tab(n));
                 }
-                if renew && ui.small_button("Buy a licence").clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(PURCHASE_URL));
+                if renew && ui.add_enabled(!self.busy(), egui::Button::new("Extend Maintenance…").small()).on_hover_text("Opens the renewal checkout in your browser").clicked() {
+                    self.renew();
                 }
                 if ui.small_button("✖").on_hover_text("Hide until Filescape restarts").clicked() {
                     self.update.closed = true;
@@ -192,7 +192,7 @@ pub fn notice_text(c: &Coverage) -> (String, bool) {
         Coverage::Covered => ("Your licence covers it.".into(), false),
         Coverage::NotCovered { updates_until } => (
             format!(
-                "Your licence's updates ended on {}, so in the new version only the free features would be unlocked. This version keeps working as it is.",
+                "Your software maintenance ended on {}, so the new version would run with the free features until you extend maintenance. This version keeps working as it is.",
                 date_time(*updates_until).split(',').next().unwrap_or_default()
             ),
             true,
@@ -311,6 +311,6 @@ mod tests {
         let late = manifest(&next_version(), until + DAY);
         assert_eq!(f.l.release_coverage(&late), Coverage::NotCovered { updates_until: until });
         let (text, renew) = notice_text(&f.l.release_coverage(&late));
-        assert!(renew && text.contains("updates ended") && text.contains("keeps working"), "{text}");
+        assert!(renew && text.contains("maintenance ended") && text.contains("keeps working"), "{text}");
     }
 }
