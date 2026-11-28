@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Filescape: disk space analyzer and file manager</title>
+<title>Filescape: file manager, disk space analyzer, file previews and local AI</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="See where your disk space went: a zoomable map of every file, previews of 300+ file types and a full file manager. Windows, macOS and Linux.">
+<meta name="description" content="Explore your storage, manage your files, preview hundreds of formats and work with local AI models, all in one desktop app for Windows, macOS and Linux. Free, with a 15-day trial of Pro.">
 <link rel="canonical" href="https://filescape.app/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Filescape">
-<meta property="og:title" content="Filescape: see where your disk space went">
-<meta property="og:description" content="See where your disk space went: a zoomable map of every file, previews of 300+ file types and a full file manager. Windows, macOS and Linux.">
+<meta property="og:title" content="Filescape: see your files differently">
+<meta property="og:description" content="Explore your storage, manage your files, preview hundreds of formats and work with local AI models, all in one desktop app for Windows, macOS and Linux. Free, with a 15-day trial of Pro.">
 <meta property="og:url" content="https://filescape.app/">
 <meta property="og:image" content="https://filescape.app/img/og.png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
  "url": "https://filescape.app/",
  "applicationCategory": "UtilitiesApplication",
  "operatingSystem": "Windows 10, Windows 11, macOS 11 or later, Linux",
- "description": "See where your disk space went: a zoomable map of every file, previews of 300+ file types and a full file manager. Windows, macOS and Linux.",
+ "description": "Explore your storage, manage your files, preview hundreds of formats and work with local AI models, all in one desktop app for Windows, macOS and Linux. Free, with a 15-day trial of Pro.",
  "image": "https://filescape.app/img/og.png",
  "offers": [
   {
@@ -45,10 +45,13 @@
  ]
 }
 </script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+/* Fonts served from filescape.app (site-src/fonts), not Google */
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 400 500; font-display: swap; src: url(/fonts/geist-mono-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 400 500; font-display: swap; src: url(/fonts/geist-mono-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400 600; font-display: swap; src: url(/fonts/inter-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400 600; font-display: swap; src: url(/fonts/inter-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 /* Layout: one quiet near-black column; the live treemap is the only loud object on the page. */
 :root {
   --void: #040506;      /* page canvas */
@@ -91,9 +94,25 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .nav-bar { display: flex; align-items: center; gap: 24px; padding: 8px 8px 8px 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(7,8,10,.72); backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%); }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; text-decoration: none; letter-spacing: -.01em; }
 .brand svg { width: 20px; height: 20px; }
-.nav-links { display: flex; gap: 22px; margin-left: auto; font-size: 14px; color: var(--text-2); }
+.nav-links { display: flex; gap: 4px; margin-left: auto; font-size: 14px; color: var(--text-2); }
 .nav-links a { text-decoration: none; }
 .nav-links a:hover { color: var(--text); }
+.nav-group { position: relative; }
+.nav-top { font: inherit; color: inherit; background: none; border: 0; padding: 6px 10px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.nav-top::after { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); opacity: .6; transition: transform .15s ease; }
+.nav-top:hover, .nav-top[aria-expanded="true"] { color: var(--text); background: rgba(255,255,255,.04); }
+.nav-top[aria-expanded="true"]::after { transform: translateY(1px) rotate(225deg); }
+.nav-menu { list-style: none; margin: 0; padding: 6px; position: absolute; top: calc(100% + 12px); left: -6px; min-width: 300px; display: none; border: 1px solid var(--line); border-radius: 12px; background: #0b0c0e; box-shadow: 0 16px 40px rgba(0,0,0,.5); }
+.nav-top[aria-expanded="true"] + .nav-menu { display: grid; }
+.nav-menu a { display: grid; gap: 2px; padding: 9px 12px; border-radius: 8px; color: var(--text); }
+.nav-menu a:hover, .nav-menu a:focus-visible { background: rgba(255,255,255,.05); }
+.nav-menu a[aria-current] { box-shadow: inset 2px 0 0 var(--coral); }
+.nav-menu small { color: var(--text-3); font-size: 12px; }
+.nav-toggle { display: none; margin-left: auto; width: 36px; height: 32px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--obsidian); color: var(--text); cursor: pointer; align-items: center; justify-content: center; }
+.nav-toggle svg { width: 16px; height: 16px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.skip { position: absolute; left: 12px; top: -60px; z-index: 50; padding: 10px 14px; border-radius: 8px; background: var(--key); color: var(--key-text); text-decoration: none; font-weight: 500; }
+.skip:focus { top: 12px; }
 
 /* Buttons: light keys on dark, Raycast style */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 10px; font: 500 14px/1 var(--font); text-decoration: none; cursor: pointer; border: 0; white-space: nowrap; transition: transform .15s ease, background .15s ease; }
@@ -232,6 +251,21 @@ section { padding-block: 112px 0; }
 .faq summary::after { content: "+"; font-family: var(--mono); color: var(--text-3); }
 .faq details[open] summary::after { content: "–"; }
 .faq p { margin-top: 10px; color: var(--text-2); font-size: 15px; max-width: 65ch; }
+.faq ul { margin: 8px 0 0; padding-left: 20px; color: var(--text-2); font-size: 15px; display: grid; gap: 4px; max-width: 65ch; }
+.principles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-top: 56px; }
+.principle { display: grid; gap: 10px; align-content: start; }
+.principle h2 { font-size: 22px; letter-spacing: -.015em; }
+.principle h2::before { content: ""; display: block; width: 18px; height: 3px; border-radius: 2px; margin-bottom: 12px; background: var(--coral); }
+.principle:nth-child(2) h2::before { background: #63a1ff; }
+.principle:nth-child(3) h2::before { background: #e6e6e6; }
+.principle p { color: var(--text-2); font-size: 15px; }
+.principle a { color: var(--text); text-underline-offset: 3px; }
+.terms { list-style: none; padding: 0; margin: 32px 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border-block: 1px solid var(--line); }
+.terms li { padding: 20px 18px; display: grid; gap: 6px; align-content: start; }
+.terms li + li { border-left: 1px solid var(--line); }
+.terms b { font-weight: 500; }
+.terms span { font-size: 13px; color: var(--text-3); }
+.terms a { color: var(--text-2); }
 
 footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32px 48px; }
 .foot { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: center; font-size: 13px; color: var(--text-3); }
@@ -278,6 +312,43 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 .cta { margin-top: 112px; padding: 48px 24px; text-align: center; border-radius: 16px; border: 1px solid var(--line); background: radial-gradient(60% 120% at 50% 0%, var(--ember), var(--ink) 70%); display: grid; gap: 14px; justify-items: center; }
 .cta .lede { text-align: center; }
 .cta .dl-row { margin-top: 10px; }
+/* Buy, contact, Mac and legal pages: one readable column */
+.doc-wrap { max-width: 760px; padding-block: 40px 8px; color: var(--text-2); line-height: 1.6; }
+.doc h1 { color: var(--text); font-size: clamp(30px, 5vw, 44px); line-height: 1.1; letter-spacing: -.03em; margin: 0 0 14px; }
+.doc h2 { color: var(--text); font-size: 19px; letter-spacing: -.01em; margin: 32px 0 8px; }
+.doc b, .doc strong { color: var(--text); font-weight: 500; }
+.doc a { color: var(--text); text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.doc a:hover { text-decoration-color: var(--coral); }
+.doc a.btn { color: var(--key-text); }
+.doc ol, .doc ul { padding-left: 22px; }
+.doc li { margin: 6px 0; }
+.doc .mute { color: var(--text-3); }
+.doc .legal .mute:first-of-type { font-family: var(--mono); font-size: 12px; }
+.doc-hero { padding: 8px 0 24px; }
+.doc-hero p { font-size: 18px; max-width: 620px; }
+.doc .card { background: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin: 24px 0; }
+.doc .card h2 { margin-top: 0; }
+.doc .note { border-left: 2px solid var(--coral); padding: 8px 14px; background: var(--ember); border-radius: 0 8px 8px 0; }
+.doc .form { display: grid; gap: 16px; margin: 24px 0; }
+.doc .form label { display: grid; gap: 6px; color: var(--text); font-size: 14px; font-weight: 500; }
+.doc .form label .mute { font-weight: 400; }
+.doc .form input, .doc .form select, .doc .form textarea { width: 100%; font: 15px/1.5 var(--font); color: var(--text); background: var(--ink); border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; }
+.doc .form textarea { resize: vertical; min-height: 180px; }
+.doc .form input:focus, .doc .form select:focus, .doc .form textarea:focus { outline: 2px solid var(--coral); outline-offset: 1px; border-color: transparent; }
+.doc .form .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.btn:disabled { opacity: .6; cursor: default; }
+[hidden] { display: none !important; }
+.doc pre.code { margin: 12px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px 14px; background: var(--void); border: 1px solid var(--line-strong); border-radius: 10px; font: 13px/1.5 var(--mono); color: var(--text); user-select: all; }
+
+/* Footer columns */
+.foot-cols { display: grid; grid-template-columns: 1.4fr repeat(4, minmax(0, 1fr)); gap: 32px; font-size: 13px; }
+.foot-brand p { margin: 12px 0 0; color: var(--text-3); max-width: 28ch; }
+.foot-col { display: grid; gap: 8px; align-content: start; }
+.foot-col h2 { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); margin: 0 0 4px; }
+.foot-col a { color: var(--text-2); text-decoration: none; }
+.foot-col a:hover { color: var(--text); }
+footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+
 @media (max-width: 900px) {
   .showcase, .showcase.flip { grid-template-columns: minmax(0, 1fr); gap: 28px; }
   .showcase.flip .copy { order: 0; }
@@ -286,11 +357,25 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   .fact:nth-child(3) { border-left: 0; }
   .fact:nth-child(n+3) { border-top: 1px solid var(--line); }
   .reqs { grid-template-columns: minmax(0, 1fr); }
+  .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .foot-brand { grid-column: 1 / -1; }
+  .principles { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .terms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .terms li + li { border-left: 0; }
+  .terms li { border-top: 1px solid var(--line); }
+  .terms li:nth-child(-n+2) { border-top: 0; }
+  .terms li:nth-child(even) { border-left: 1px solid var(--line); }
   .nav-links { gap: 16px; font-size: 13px; }
 }
 @media (max-width: 640px) {
-  .nav-links { display: none; }
-  .nav-bar .btn { margin-left: auto; }
+  .nav-bar { flex-wrap: wrap; gap: 8px; }
+  .nav-toggle { display: inline-flex; }
+  .nav-links { display: none; order: 3; flex-basis: 100%; flex-direction: column; gap: 14px; margin: 6px 0 4px; max-height: calc(100dvh - 120px); overflow-y: auto; padding: 8px 4px 8px 0; border-top: 1px solid var(--line); }
+  .menu-open .nav-links { display: flex; }
+  .nav-top { pointer-events: none; padding: 4px 4px 0; font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+  .nav-top::after { display: none; }
+  .nav-menu, .nav-top + .nav-menu { display: grid; position: static; min-width: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+  .nav-menu a { padding: 8px 4px; }
   .hero { padding-block: 48px 24px; }
   .hero .eyebrow { font-size: 10px; letter-spacing: .05em; }
   .dl-row { flex-direction: column; align-items: stretch; max-width: 320px; margin-inline: auto; }
@@ -315,7 +400,6 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 }
 </style>
 <script src="/config.js"></script>
-<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -323,35 +407,94 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   <symbol id="i-logo" viewBox="0 0 20 20"><rect x="1" y="1" width="10" height="11" rx="2" fill="#ff6363"/><rect x="12" y="1" width="7" height="6" rx="1.5" fill="#e6e6e6"/><rect x="12" y="8" width="7" height="4" rx="1.2" fill="#63a1ff"/><rect x="1" y="13" width="6" height="6" rx="1.5" fill="#e6e6e6"/><rect x="8" y="13" width="5" height="6" rx="1.2" fill="#6a6b6c"/><rect x="14" y="13" width="5" height="6" rx="1.2" fill="#ff6363" opacity=".55"/></symbol>
 </svg>
 
+<a class="skip" href="#top">Skip to content</a>
 <header class="nav">
   <div class="wrap">
     <nav class="nav-bar" aria-label="Main">
       <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
-      <div class="nav-links">
-        <a href="/#features">Features</a>
-        <a href="/formats">File previews</a>
-        <a href="/ai-models">AI models</a>
-        <a href="/vfx">VFX and 3D</a>
-        <a href="/#pricing">Pricing</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links"><span class="sr">Menu</span><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      <div class="nav-links" id="nav-links">
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-product">Product</button>
+          <ul class="nav-menu" id="m-product">
+            <li><a href="/#features">File manager and storage maps<small>Two panes, a zoomable treemap, duplicates, snapshots</small></a></li>
+            <li><a href="/formats">File previews<small>Look inside hundreds of formats, free</small></a></li>
+            <li><a href="/ai-models">AI models<small>Find, inspect and run local models</small></a></li>
+            <li><a href="/#pricing">Pricing<small>Free, or Pro once for <span class="js-price">$4.99</span></small></a></li>
+          </ul>
+        </div>
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-solutions">Solutions</button>
+          <ul class="nav-menu" id="m-solutions">
+            <li><a href="/vfx">VFX, 3D and creative<small>Frame sequences, EXR and DPX, splats</small></a></li>
+          </ul>
+        </div>
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-resources">Resources</button>
+          <ul class="nav-menu" id="m-resources">
+            <li><a href="/#download">Downloads<small>Windows, macOS and Linux</small></a></li>
+            <li><a href="/formats">Supported formats<small>Every format and what it shows</small></a></li>
+            <li><a href="/mac">Opening it on a Mac<small>The one-time Gatekeeper step</small></a></li>
+          </ul>
+        </div>
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-company">Company</button>
+          <ul class="nav-menu" id="m-company">
+            <li><a href="/contact">Contact and support<small>Questions, problems and licences</small></a></li>
+            <li><a href="https://account.filescape.app/">Your licence<small>Your computers, serial and receipts</small></a></li>
+            <li><a href="/privacy">Privacy<small>What Filescape collects and why</small></a></li>
+            <li><a href="/terms">Terms</a></li>
+            <li><a href="/refunds">Refunds<small>14 days, no questions asked</small></a></li>
+          </ul>
+        </div>
       </div>
-      <a class="btn btn-key btn-sm" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
+      <a class="btn btn-key btn-sm nav-dl" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
     </nav>
   </div>
 </header>
-
+<script>
+(() => {
+  // Dropdowns: open on click (and keyboard), close on Escape, outside click or leaving the group.
+  const bar = document.querySelector(".nav-bar");
+  const tops = [...bar.querySelectorAll(".nav-top")];
+  const close = except => tops.forEach(b => { if (b !== except) b.setAttribute("aria-expanded", "false"); });
+  tops.forEach(b => b.addEventListener("click", () => {
+    const open = b.getAttribute("aria-expanded") !== "true";
+    close(b); b.setAttribute("aria-expanded", String(open));
+  }));
+  const toggle = bar.querySelector(".nav-toggle");
+  toggle.addEventListener("click", () => {
+    const open = toggle.getAttribute("aria-expanded") !== "true";
+    toggle.setAttribute("aria-expanded", String(open));
+    document.documentElement.classList.toggle("menu-open", open);
+  });
+  document.addEventListener("click", e => { if (!bar.contains(e.target)) close(); });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    const open = tops.find(b => b.getAttribute("aria-expanded") === "true");
+    if (open) { close(); open.focus(); }
+    else if (toggle.getAttribute("aria-expanded") === "true") { toggle.click(); toggle.focus(); }
+  });
+  bar.addEventListener("focusout", e => { if (!bar.contains(e.relatedTarget)) close(); });
+  // A link inside the phone menu closes it (same-page anchors don't reload).
+  bar.querySelectorAll(".nav-menu a").forEach(a => a.addEventListener("click", () => {
+    close(); if (toggle.getAttribute("aria-expanded") === "true") toggle.click();
+  }));
+})();
+</script>
 <main id="top">
   <div class="hero">
     <div class="hero-glow" aria-hidden="true"></div>
     <div class="wrap">
-      <a class="eyebrow" href="/formats" style="text-decoration:none"><b>New</b> Previews for 300+ file types, and your AI models</a>
-      <h1>See where your disk went.</h1>
-      <p class="lede">Filescape scans a drive in seconds and draws every file as a tile you can zoom through. Zoom in to see what's inside, then deal with it right there in a full file manager.</p>
+      <span class="eyebrow">File manager · storage maps · previews · local AI</span>
+      <h1>See your files differently.</h1>
+      <p class="lede">Explore your storage, manage your files, preview hundreds of formats and work with local AI models, all from one desktop app for Windows, macOS and Linux.</p>
       <div class="dl-row" id="hero-downloads">
         <a class="btn btn-key" data-os="windows" href="https://downloads.filescape.app/latest/windows"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for Windows</a>
         <a class="btn btn-ghost" data-os="mac" href="https://downloads.filescape.app/latest/macos"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for macOS</a>
         <a class="btn btn-ghost" data-os="linux" href="https://downloads.filescape.app/latest/linux-appimage"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for Linux</a>
       </div>
-      <div class="dl-meta"><span>Free to use</span><span>Pro is <s class="js-list">$9.99</s> <span class="js-price">$4.99</span>, once</span><span>v0.2.0</span><span class="mac-help"><a href="/mac">Opening it on a Mac</a></span></div>
+      <div class="dl-meta"><span>Free forever, no sign-up</span><span>Every Pro feature free for 15 days</span><span>Pro is <s class="js-list">$9.99</s> <span class="js-price">$4.99</span>, once</span><span>v0.2.0</span><span class="mac-help"><a href="/mac">Opening it on a Mac</a></span></div>
 
       <div class="window" role="group" aria-label="Interactive example of the Filescape disk map">
         <div class="win-bar">
@@ -374,7 +517,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
         </div>
         <div class="legend" id="legend"></div>
       </div>
-      <p class="demo-cap">A live demo with made-up sample data, so you can try the map before you download. The full app scans your own drives and adds a file manager, filters, duplicates, snapshots and remote servers. <a href="#features">See what's in it</a></p>
+      <p class="demo-cap">A live demo with made-up sample data, so you can try the map before you download. The full app scans your own drives and adds a file manager, previews, AI model tools, duplicates, snapshots and remote servers. <a href="#features">See what's in it</a></p>
     </div>
   </div>
 
@@ -384,6 +527,21 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
       <div class="fact"><b>300+</b><span>file types previewed, free in every edition</span></div>
       <div class="fact"><b>3</b><span>platforms: Windows, macOS and Linux</span></div>
       <div class="fact"><b><s class="js-list">$9.99</s> <span class="js-price">$4.99</span></b><span>once for Pro, on 3 computers at once</span></div>
+    </div>
+
+    <div class="principles" aria-label="What Filescape stands for">
+      <div class="principle">
+        <h2>Explore freely.</h2>
+        <p>Browsing, mapping, previewing and understanding your files is free for everyone, with no account and no time limit. So is finding, inspecting and talking to the AI models on your computer.</p>
+      </div>
+      <div class="principle">
+        <h2>Stay private.</h2>
+        <p>Scans, previews and Ask AI run on your computer. Your files and questions aren't uploaded anywhere. <a href="#privacy">What does go online</a></p>
+      </div>
+      <div class="principle">
+        <h2>Work smarter with Pro.</h2>
+        <p>Filters, batch work, servers, sequences and automation for people who get through a lot of files. One payment, yours to keep, no subscription.</p>
+      </div>
     </div>
   </div>
 
@@ -480,7 +638,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
         <div class="keycard"><span class="kbd">Filters</span><h3>Show only what matters</h3><p>Filter by category, size or name pattern. Highlight matches or hide everything else.</p></div>
         <div class="keycard"><span class="kbd">Ctrl F</span><h3>Search subfolders</h3><p>Search a whole tree from the filter box and save searches you run often.</p></div>
         <div class="keycard"><span class="kbd">What is this?</span><h3>Know what's safe to delete</h3><p>pagefile.sys, WinSxS, the sleep image, /proc and about 170 more, explained offline, with how to shrink them safely.</p></div>
-        <div class="keycard"><span class="kbd">Ctrl Z</span><h3>Undo it</h3><p>Copies, moves, renames, new items and Move to Trash can all be undone, putting deleted items back from the bin.</p></div>
+        <div class="keycard"><span class="kbd">Ctrl Z</span><h3>Undo it</h3><p>Copies, moves, renames, new items and Move to Trash can be undone, putting items back from the bin. Delete Permanently and deleting on a server can't be, so Filescape always asks first.</p></div>
         <div class="keycard"><span class="kbd">Ctrl \</span><h3>Two panes</h3><p>Two folders side by side, each with its own tabs, sort and filter. Drag between them, or copy with Shift F5.</p></div>
         <div class="keycard"><span class="kbd">F1</span><h3>Help built in</h3><p>A searchable Help Centre and context help for every panel, offline.</p></div>
         <div class="keycard"><span class="kbd">--cli</span><h3>Reports from a terminal</h3><p>Print the largest folders or compare snapshots from the command line.</p></div>
@@ -526,19 +684,19 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Pricing</span>
-        <h2>Free to look. <span class="js-price">$4.99</span> to do everything.</h2>
-        <p class="lede">Curiosity is free: exploring, previewing and looking inside your files and models costs nothing. Pro is for getting through a lot at once. No subscription; buy it once and use it on up to 3 of your computers.</p>
+        <h2>Free to explore. <span class="js-price">$4.99</span> to do it all.</h2>
+        <p class="lede">Exploring, previewing and looking inside your files and AI models is free for good, with no sign-up. Pro is for getting through a lot at once. Every Pro feature is unlocked for your first 15 days, so you can try it on your own files before you decide.</p>
       </div>
       <div class="plans">
         <div class="plan">
-          <div><h3>Free</h3><p class="small">Forever, no sign-up</p></div>
+          <div><h3>Free</h3><p class="small">Forever, no account or registration</p></div>
           <div class="price"><b>$0</b></div>
           <ul>
-            <li>The disk map: treemap, sunburst and file types</li>
-            <li>The file manager: browse, copy, move, rename, delete, undo</li>
-            <li>Previews and Quick Look for 300+ file types</li>
+            <li>The disk map: treemap, sunburst, file types and sizes</li>
+            <li>The file manager: two panes, tabs, copy, move, rename, delete and undo</li>
+            <li>Previews and Quick Look for every supported format</li>
             <li>Cloud sizes and status icons, freeing up one file at a time</li>
-            <li>AI Models: find, inspect, health checks, Ask AI and the Lab</li>
+            <li>AI Models: find, inspect, health checks, will-it-run, Ask AI and the Lab, with no limits on model size</li>
             <li>What system files are, and scan exclusions</li>
           </ul>
           <a class="btn btn-ghost" href="#download">Download free</a>
@@ -553,15 +711,21 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
             <li>SFTP, FTP(S) and WebDAV with the transfer queue</li>
             <li>Frame sequences and the sequence player</li>
             <li>Archives, saved searches, and cloud folders freed up in bulk</li>
-            <li>AI models: smaller copies, moving model folders, bulk clean-up and multi-model speed tests</li>
-            <li>Active on 3 of your computers at once</li>
-            <li>Every update for a year, then keep the version you have</li>
+            <li>AI models: smaller copies, and moving or cleaning up many models at once</li>
           </ul>
           <button class="btn btn-key" id="buy" type="button"><span>Buy Filescape Pro for <span class="js-price">$4.99</span></span></button>
           <p class="checkout-note" id="checkout-note" hidden>The checkout couldn't open. Please try again, or <a href="/contact?topic=licence">contact us</a>.</p>
           <p class="small">Checkout and tax are handled by Paddle, our reseller. Your licence key arrives by email.</p>
         </div>
       </div>
+
+      <ul class="terms" aria-label="What a Pro licence includes">
+        <li><b>Try it first</b><span>Every Pro feature works for 15 days from the first launch. No card, no account.</span></li>
+        <li><b>Yours to keep</b><span>A perpetual licence. It never expires and there's no subscription.</span></li>
+        <li><b>3 computers</b><span>Active on 3 of your computers at once. Move it to a new one from the app or your account page.</span></li>
+        <li><b>A year of updates</b><span>Every release in the 12 months after you buy is included. Versions you have keep working after that.</span></li>
+        <li><b>14-day refund</b><span>Not right for you? Ask within 14 days for a full refund. <a href="/refunds">Refund policy</a></span></li>
+      </ul>
     </div>
   </section>
 
@@ -576,6 +740,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <h3>Windows</h3>
           <p>64-bit Windows 10 or 11. Unzip and run. No installer or runtime needed.</p>
           <a class="btn btn-ghost btn-sm" data-os="windows" href="https://downloads.filescape.app/latest/windows"><svg aria-hidden="true"><use href="#i-dl"/></svg>Windows x64</a>
+          <p class="req-alt">Not code-signed yet, so Windows SmartScreen may say it doesn't recognise the app. Choose <b>More info</b>, then <b>Run anyway</b>.</p>
         </div>
         <div class="req">
           <h3>macOS</h3>
@@ -593,9 +758,13 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
       <p class="small" style="margin-top:16px">Memory: allow about 150 MB per million files scanned. Graphics: any GPU with Vulkan, Direct3D 12, Metal or OpenGL 3.3.</p>
 
       <div class="faq">
-        <details><summary>Do my files leave my computer?</summary><p>No. Scanning, the map and previews all run locally. Filescape only goes online to check for a new version (which you can turn off), to activate a Pro licence, or when you ask it to connect to a server or download an AI model.</p></details>
+        <details id="privacy"><summary>Do my files leave my computer?</summary><p>No. Scanning, the map, previews and Ask AI all run on your computer. Filescape goes online only to:</p><ul><li>check for a new version at launch (you can turn this off in Settings),</li><li>activate a Pro licence, and check it about once a week while you're online,</li><li>download an AI model, after you've said yes to it,</li><li>connect to a server you've asked it to open.</li></ul><p>None of these send your files, file names or questions. <a href="/privacy">Privacy policy</a></p></details>
         <details><summary>My Mac says Filescape can't be opened. Is it safe?</summary><p>Yes. Filescape isn't notarised by Apple yet, so macOS asks you to allow it once. Try to open it, click <b>Done</b>, then go to <b>System Settings &gt; Privacy &amp; Security</b> and click <b>Open Anyway</b>. <a href="/mac">Step-by-step instructions</a>.</p></details>
-        <details><summary>Is this a subscription?</summary><p>No. Pro is a single <span class="js-price">$4.99</span> payment. There's nothing to renew.</p></details>
+        <details><summary>Is this a subscription?</summary><p>No. Pro is a single <span class="js-price">$4.99</span> payment for a perpetual licence. It doesn't expire and you never have to pay again to keep using it.</p></details>
+        <details><summary>What happens after the year of updates?</summary><p>Nothing stops working. Every version released in the 12 months after you bought Pro stays fully licensed for good. Versions released after that would run as the free edition, so you choose whether to move to them. You never need to pay again to keep using the versions you have.</p></details>
+        <details><summary>How does the 15-day trial work?</summary><p>Download Filescape and every Pro feature is unlocked for 15 days from the first launch on that computer. There's nothing to sign up for. When it ends, the file manager, the disk map, previews and the AI Models workspace stay free, and nothing you made is deleted.</p></details>
+        <details><summary>Can I get a refund?</summary><p>Yes. Ask within 14 days of buying for a full refund, no questions asked. Paddle handles it: use the link in your receipt or <a href="/contact?topic=licence">contact us</a>. <a href="/refunds">Refund policy</a></p></details>
+        <details><summary>Can I activate a computer that isn't online?</summary><p>Yes. Filescape saves an activation request file. Take it to any computer with internet access, upload it at account.filescape.app/activate, and bring the answer back.</p></details>
         <details><summary>I replaced my computer. Can I move my licence?</summary><p>Yes. Deactivate Filescape on the old computer, or release it from your account at account.filescape.app, and activate on the new one. A licence can be active on 3 computers at once.</p></details>
         <details><summary>How is size calculated?</summary><p>By default Filescape shows each file's size on disk, what it really takes on this computer, as Explorer's "Size on disk" and <span class="mono">du</span> count it. So files that are only in the cloud take almost no space. Switch to <b>Logical</b> for full file sizes, or <b>Cloud only</b> to see what isn't on this computer, without rescanning.</p></details>
         <details><summary>Are previews and the AI features free?</summary><p>Yes. Every preview is free, and so are the AI Models workspace, Ask AI and the Lab, with no limits on model size. Pro is for filters, batch work, servers, sequences and doing many things at once, including making smaller copies of models and moving or cleaning up many models together.</p></details>
@@ -622,27 +791,44 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
     if (mine) row.prepend(a);
   });
 
+  /* ---------- Open the FAQ answer a link points to (#privacy) ---------- */
+  const openHash = () => { const d = location.hash && document.getElementById(location.hash.slice(1)); if (d && d.tagName === "DETAILS") d.open = true; };
+  openHash(); addEventListener("hashchange", openHash);
+
   /* ---------- Paddle checkout ---------- */
-  // Token, price and success page come from /config.js, shared with /buy.
+  // Token, price and success page come from /config.js, shared with /buy. Shown prices are filled
+  // in by foot.html on every page. Paddle.js is loaded only when someone is about to buy, so
+  // visitors who don't (and its analytics script) never load it.
   const PADDLE = window.FILESCAPE || {};
-  // Prices shown come from /config.js too, so ending the launch price is one edit there.
-  if (PADDLE.priceLabel) document.querySelectorAll(".js-price").forEach(e => { e.textContent = PADDLE.priceLabel; });
-  if (PADDLE.priceLabel && !PADDLE.listPriceLabel) document.querySelectorAll(".js-list, .js-launch").forEach(e => e.remove());
-  else if (PADDLE.listPriceLabel) document.querySelectorAll(".js-list").forEach(e => { e.textContent = PADDLE.listPriceLabel; });
-  let paddleReady = false;
-  try {
-    if (window.Paddle && PADDLE.paddleClientToken) {
-      if (PADDLE.paddleEnvironment === "sandbox") window.Paddle.Environment.set("sandbox");
-      window.Paddle.Initialize({ token: PADDLE.paddleClientToken });
-      paddleReady = true;
-    }
-  } catch (e) { /* shown on click */ }
-  document.getElementById("buy").addEventListener("click", () => {
+  let paddle = null;
+  const loadPaddle = () => paddle ||= new Promise((ok, fail) => {
+    if (!PADDLE.paddleClientToken || !PADDLE.priceId) return fail(new Error("checkout not set up"));
+    const s = document.createElement("script");
+    s.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
+    s.onload = () => {
+      try {
+        if (PADDLE.paddleEnvironment === "sandbox") window.Paddle.Environment.set("sandbox");
+        window.Paddle.Initialize({ token: PADDLE.paddleClientToken });
+        ok(window.Paddle);
+      } catch (err) { fail(err); }
+    };
+    s.onerror = () => fail(new Error("Paddle.js didn't load"));
+    document.head.append(s);
+  }).catch(err => { paddle = null; throw err; }); // a later click tries again
+  const buy = document.getElementById("buy");
+  const warm = () => loadPaddle().catch(() => {});
+  buy.addEventListener("pointerenter", warm, { once: true });
+  buy.addEventListener("focus", warm, { once: true });
+  buy.addEventListener("click", async () => {
+    document.getElementById("checkout-note").hidden = true;
+    buy.setAttribute("aria-busy", "true");
     try {
-      if (!paddleReady || !PADDLE.priceId) throw new Error("checkout unavailable");
-      window.Paddle.Checkout.open({ items: [{ priceId: PADDLE.priceId, quantity: 1 }], settings: { successUrl: PADDLE.successUrl } });
+      const P = await loadPaddle();
+      P.Checkout.open({ items: [{ priceId: PADDLE.priceId, quantity: 1 }], settings: { successUrl: PADDLE.successUrl } });
     } catch (e) {
       document.getElementById("checkout-note").hidden = false;
+    } finally {
+      buy.removeAttribute("aria-busy");
     }
   });
 
@@ -1622,19 +1808,52 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   if (document.fonts) document.fonts.ready.then(() => { mono = getComputedStyle(document.body).getPropertyValue("--mono") || mono; draw(); });
 })();
 </script>
+
 <footer>
-  <div class="wrap foot">
-    <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
-    <a href="/formats">Supported formats</a>
-    <a href="/ai-models">AI models</a>
-    <a href="/vfx">VFX and 3D</a>
-    <a href="https://account.filescape.app/">Your licence</a>
-    <a href="/terms">Terms</a>
-    <a href="/privacy">Privacy</a>
-    <a href="/refunds">Refunds</a>
-    <a href="/contact">Contact</a>
-    <span class="ver">© 2026 Filescape</span>
+  <div class="wrap">
+    <div class="foot-cols">
+      <div class="foot-brand">
+        <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+        <p>See your files differently. Free for Windows, macOS and Linux.</p>
+      </div>
+      <nav class="foot-col" aria-label="Product">
+        <h2>Product</h2>
+        <a href="/#features">Features</a>
+        <a href="/formats">File previews</a>
+        <a href="/ai-models">AI models</a>
+        <a href="/#pricing">Pricing</a>
+      </nav>
+      <nav class="foot-col" aria-label="Solutions">
+        <h2>Solutions</h2>
+        <a href="/vfx">VFX, 3D and creative</a>
+      </nav>
+      <nav class="foot-col" aria-label="Resources">
+        <h2>Resources</h2>
+        <a href="/#download">Downloads</a>
+        <a href="/formats">Supported formats</a>
+        <a href="/mac">Opening it on a Mac</a>
+      </nav>
+      <nav class="foot-col" aria-label="Company">
+        <h2>Company</h2>
+        <a href="/contact">Contact and support</a>
+        <a href="https://account.filescape.app/">Your licence</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/refunds">Refunds</a>
+      </nav>
+    </div>
+    <p class="ver">© 2026 Filescape</p>
   </div>
 </footer>
+<script>
+// Prices come from /config.js on every page, so ending the launch price is one edit there.
+(() => {
+  const c = window.FILESCAPE || {};
+  if (!c.priceLabel) return;
+  document.querySelectorAll(".js-price").forEach(e => { e.textContent = c.priceLabel; });
+  if (!c.listPriceLabel) document.querySelectorAll(".js-list, .js-launch").forEach(e => e.remove());
+  else document.querySelectorAll(".js-list").forEach(e => { e.textContent = c.listPriceLabel; });
+})();
+</script>
 </body>
 </html>

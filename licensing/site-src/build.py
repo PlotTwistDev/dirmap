@@ -2,9 +2,8 @@
 
     python3 build.py [preview-output.html]
 
-Writes ../site/index.html, the feature pages in PAGES (formats, ai-models, vfx), ../site/img/,
-sitemap.xml and robots.txt for Cloudflare Pages. The buy, contact, Mac and legal pages in ../site
-are hand-written and share /style.css. With an argument it also writes a single-file preview of
+Writes ../site/index.html, every page in PAGES (feature, buy, contact, Mac and legal pages),
+404.html, ../site/img/, sitemap.xml and robots.txt for Cloudflare Pages. With an argument it also writes a single-file preview of
 the homepage with the images inlined as data: URIs (no <html>/<head> wrapper).
 
 Every page shares head.html (styles and search tags), nav.html and foot.html. The Supported
@@ -23,22 +22,24 @@ head = (SRC / "head.html").read_text()
 nav = (SRC / "nav.html").read_text()
 foot = (SRC / "foot.html").read_text()
 
-# Live site only: the Paddle settings (token, price, success page) in ../site/config.js, then Paddle.js.
-PADDLE_TAG = '<script src="/config.js"></script>\n<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>\n'
+# Live site only: the shown prices and Paddle settings (token, price, success page) in ../site/config.js.
+# Paddle.js itself is loaded by the homepage only when someone is about to buy.
+CONFIG_TAG = '<script src="/config.js"></script>\n'
 # The Pro price search engines show comes from the price the checkout uses (../site/config.js).
 PRICE = re.search(r'priceLabel:\s*"\$([\d.]+)"', (DIST / "config.js").read_text()).group(1)
 
 # The version shown on the homepage is the app's own, from Cargo.toml, so the two always match.
 VERSION = re.search(r'^version\s*=\s*"([^"]+)"', (REPO / "Cargo.toml").read_text(), re.M).group(1)
 
-HOME_DESCRIPTION = ("See where your disk space went: a zoomable map of every file, previews of 300+ "
-                    "file types and a full file manager. Windows, macOS and Linux.")
+HOME_DESCRIPTION = ("Explore your storage, manage your files, preview hundreds of formats and work "
+                    "with local AI models, all in one desktop app for Windows, macOS and Linux. Free, "
+                    "with a 15-day trial of Pro.")
 
 # (path, output file, body source, title, link-preview title, description, nav key, sitemap priority)
 PAGES = [
     ("/", "index.html", "body.html",
-     "Filescape: disk space analyzer and file manager",
-     "Filescape: see where your disk space went", HOME_DESCRIPTION, "", "1.0"),
+     "Filescape: file manager, disk space analyzer, file previews and local AI",
+     "Filescape: see your files differently", HOME_DESCRIPTION, "", "1.0"),
     ("/formats", "formats.html", "pages/formats.html",
      "Supported file formats: preview 300+ file types · Filescape",
      "Preview 300+ file types with Filescape",
@@ -55,15 +56,25 @@ PAGES = [
      "Frame sequences as one row with missing frames marked, an EXR and DPX player, 3D, CAD and "
      "Gaussian splat previews, and the media every project uses.", "vfx", "0.7"),
 ]
-# Hand-written pages, for the sitemap: (path, file, priority).
-STATIC = [
-    ("/buy", "buy.html", "0.6"),
-    ("/mac", "mac.html", "0.5"),
-    ("/contact", "contact.html", "0.4"),
-    ("/terms", "terms.html", "0.2"),
-    ("/privacy", "privacy.html", "0.2"),
-    ("/refunds", "refunds.html", "0.2"),
+PAGES += [
+    ("/buy", "buy.html", "pages/buy.html", "Buy Filescape Pro", "Buy Filescape Pro",
+     "Buy Filescape Pro: one payment, no subscription, active on 3 of your computers at once, with "
+     "every update for a year and a 14-day refund.", "", "0.6"),
+    ("/mac", "mac.html", "pages/mac.html", "Opening Filescape on a Mac · Filescape",
+     "Opening Filescape on a Mac",
+     "How to open Filescape the first time on macOS, when it says it can't verify the app, and how "
+     "to give it Full Disk Access.", "", "0.5"),
+    ("/contact", "contact.html", "pages/contact.html", "Contact and support · Filescape",
+     "Contact Filescape", "Send a question, bug report or licence request to Filescape.", "", "0.4"),
+    ("/terms", "terms.html", "pages/terms.html", "Terms of sale · Filescape", "Terms of sale",
+     "Filescape terms of sale and licence.", "", "0.2"),
+    ("/privacy", "privacy.html", "pages/privacy.html", "Privacy policy · Filescape", "Privacy policy",
+     "What Filescape collects and why.", "", "0.2"),
+    ("/refunds", "refunds.html", "pages/refunds.html", "Refund policy · Filescape", "Refund policy",
+     "Filescape refund policy: a full refund within 14 days of purchase.", "", "0.2"),
 ]
+# Pages served but kept out of the sitemap: (output file, body source, title).
+UNLISTED = [("404.html", "pages/404.html", "Page not found · Filescape")]
 
 JSONLD = {
     "@context": "https://schema.org", "@type": "SoftwareApplication", "name": "Filescape",
@@ -119,15 +130,27 @@ DIST.mkdir(exist_ok=True)
 (DIST / "img").mkdir(exist_ok=True)
 for f in [f for ext in ("webp", "png", "mp4", "webm") for f in (SRC / "img").glob("*." + ext)]:
     shutil.copy(f, DIST / "img" / f.name)
+(DIST / "fonts").mkdir(exist_ok=True)
+for f in (SRC / "fonts").glob("*.woff2"):
+    shutil.copy(f, DIST / "fonts" / f.name)
 
 table, n_formats, n_exts = formats_table()
 urls = []
-for path, out, src, title, og_title, desc, key, priority in PAGES:
+# Download checksums: published only when ../site/SHA256SUMS.txt exists (licensing/SETUP.md step 9
+# says how to make it), so the site never shows sums for files it can't vouch for.
+CHECKSUMS = ('<p class="small" style="margin-top:16px">Check your download: '
+             '<a href="/SHA256SUMS.txt">SHA-256 checksums</a> for every file above, for the version '
+             'listed in the file.</p>\n      ') if (DIST / "SHA256SUMS.txt").exists() else ""
+
+
+def render(path, out, src, title, og_title, desc, key, extra_head=""):
+    """Write one page: head.html, nav.html, the page's body and foot.html."""
     body = (SRC / src).read_text()
     body = (body.replace("{{formats_table}}", table)
                 .replace("{{formats_count}}", str(n_formats))
                 .replace("{{extensions_count}}", str(n_exts))
-                .replace("{{version}}", VERSION))
+                .replace("{{version}}", VERSION)
+                .replace("{{checksums}}", CHECKSUMS))
     page_head = (head.replace("{{title}}", html.escape(title))
                      .replace("{{og_title}}", html.escape(og_title))
                      .replace("{{description}}", html.escape(desc))
@@ -139,7 +162,7 @@ for path, out, src, title, og_title, desc, key, priority in PAGES:
     page = (
         '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
-        + page_head + (PADDLE_TAG if path == "/" else "") + "</head>\n<body>\n"
+        + extra_head + page_head + CONFIG_TAG + "</head>\n<body>\n"
         + page_nav + IMG.sub(lambda m: f"/img/{m.group(1)}.webp", body) + foot
         + "</body>\n</html>\n"
     )
@@ -147,18 +170,26 @@ for path, out, src, title, og_title, desc, key, priority in PAGES:
         sys.exit(f"{src}: {leftover} isn't filled in by build.py")
     for img in re.findall(r'src="/img/([\w-]+\.webp)"', page):
         assert (DIST / "img" / img).exists(), f"{src} uses img/{img}, which isn't in site-src/img"
+    for href in re.findall(r'href="(/[\w-]*)(?:#[\w-]*)?"', page):
+        assert href == "/" or href.strip("/") + ".html" in KNOWN, f"{src} links to {href}, which isn't a page"
     (DIST / out).write_text(page)
     print("wrote", DIST / out)
+
+
+# Every page a link may point to: generated ones, and files already in ../site.
+KNOWN = {out for _, out, *_ in PAGES} | {p.name for p in DIST.glob("*.html")}
+for path, out, src, title, og_title, desc, key, priority in PAGES:
+    render(path, out, src, title, og_title, desc, key)
     sources = [SRC / "head.html", SRC / "nav.html", SRC / "foot.html", SRC / src]
     if out == "formats.html":
         sources.append(REPO / "docs/src/reference/formats.md")
     urls.append((path, lastmod(*sources), priority))
+for out, src, title in UNLISTED:
+    render("/" + out.removesuffix(".html"), out, src, title, title, "This page doesn't exist.", "",
+           '<meta name="robots" content="noindex">\n')
 
 # Search engines: robots.txt and sitemap.xml. The account and admin sites are on their own hosts
 # and say noindex themselves.
-for path, file, priority in STATIC:
-    assert (DIST / file).exists(), f"the sitemap names {file}, which isn't in {DIST}"
-    urls.append((path, lastmod(DIST / file), priority))
 (DIST / "sitemap.xml").write_text(
     '<?xml version="1.0" encoding="UTF-8"?>\n'
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
