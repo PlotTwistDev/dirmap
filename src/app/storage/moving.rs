@@ -20,6 +20,8 @@ pub(in crate::app) struct Moving {
     checking: Option<mpsc::Receiver<Result<Plan, String>>>,
     checked: Option<Result<Plan, String>>,
     running: Option<(Arc<Ctl>, mpsc::Receiver<Result<Moved, String>>)>,
+    /// Moving back from where an earlier move put them, to `from` (the link).
+    back: bool,
 }
 
 impl App {
@@ -33,6 +35,7 @@ impl App {
         ui.strong("Where they're kept");
         let busy = self.models.storage.removing.is_some() || self.models.storage.moving.is_some();
         let mut start = None;
+        let mut back = None;
         egui::Grid::new("storage-places").num_columns(3).spacing([12.0, 4.0]).show(ui, |ui| {
             for (app, p) in &places {
                 ui.label(*app);
@@ -40,7 +43,15 @@ impl App {
                 match std::fs::read_link(p).ok().filter(|_| relocate::is_link(p)) {
                     Some(to) => {
                         ui.add(egui::Label::new(egui::RichText::new(format!("{}  →  {}", p.shown(), to.shown())).small().monospace()));
-                        ui.weak("Moved: a link leads to the new place");
+                        ui.horizontal(|ui| {
+                            ui.weak("Moved: a link leads to the new place");
+                            let r = ui.add_enabled(!busy, egui::Button::new("Move back…")).on_hover_text(format!(
+                                "Copy {app}'s models back here, in place of the link, and remove them from the other drive. Professional."
+                            ));
+                            if r.clicked() {
+                                back = Some((*app, p.clone()));
+                            }
+                        });
                     }
                     None => {
                         ui.add(egui::Label::new(egui::RichText::new(format!("{} · {}", p.shown(), scan::human(bytes))).small().monospace()));
@@ -58,7 +69,13 @@ impl App {
         if let Some((app, from)) = start
             && self.premium(crate::licence::Feature::ModelAutomation)
         {
-            self.models.storage.moving = Some(Moving { app, from, dest: String::new(), checking: None, checked: None, running: None });
+            self.models.storage.moving = Some(Moving { app, from, dest: String::new(), checking: None, checked: None, running: None, back: false });
+        }
+        if let Some((app, from)) = back
+            && self.premium(crate::licence::Feature::ModelAutomation)
+        {
+            self.models.storage.moving = Some(Moving { app, from, dest: String::new(), checking: None, checked: None, running: None, back: true });
+            self.storage_move_check();
         }
     }
 
@@ -77,9 +94,14 @@ impl App {
         if let Some((_, rx)) = &m.running {
             match rx.try_recv() {
                 Ok(r) => {
-                    let (app, to) = (m.app, m.checked.as_ref().and_then(|c| c.as_ref().ok()).map(|p| p.to.clone()).unwrap_or_default());
+                    let (app, to, back) = (m.app, m.checked.as_ref().and_then(|c| c.as_ref().ok()).map(|p| p.to.clone()).unwrap_or_default(), m.back);
                     self.models.storage.moving = None;
                     self.models.storage.outcome = Some(match r {
+                        Ok(Moved { left: None }) if back => (Tone::Success, format!("Done: {app}'s models are back in {}, and gone from the other drive.", to.shown())),
+                        Ok(Moved { left: Some((old, why)) }) if back => (
+                            Tone::Warn,
+                            format!("{app}'s models are back in {}. The folder on the other drive couldn't be deleted ({why}); it's at {} and can go.", to.shown(), old.shown()),
+                        ),
                         Ok(Moved { left: None }) => (Tone::Success, format!("Done: {app}'s models are now in {}, with a link where they were.", to.shown())),
                         Ok(Moved { left: Some((old, why)) }) => (
                             Tone::Warn,
@@ -105,7 +127,7 @@ impl App {
         egui::Modal::new(egui::Id::new("storage-move")).show(ctx, |ui| {
             ui.set_max_width(560.0);
             let app = m.app;
-            ui.heading(format!("Move {app}'s models to another drive"));
+            ui.heading(if m.back { format!("Move {app}'s models back") } else { format!("Move {app}'s models to another drive") });
             ui.add_space(4.0);
             if let Some((ctl, _)) = &m.running {
                 let (done, total) = (ctl.bytes_done.load(Ordering::Relaxed), ctl.bytes_total.load(Ordering::Relaxed).max(1));
@@ -113,32 +135,47 @@ impl App {
                 let text = if frac >= 1.0 { "Checking the copy and making the link…".to_string() } else { format!("Copying… {} of {}", scan::human(done), scan::human(total)) };
                 ui.add(egui::ProgressBar::new(frac.min(1.0)).desired_width(520.0).text(text));
                 ui.add_space(4.0);
-                ui.weak("The originals stay until the copy has been checked. Stopping puts everything back.");
+                ui.weak(if m.back {
+                    "The models on the other drive stay until the copy here has been checked. Stopping leaves the link as it was."
+                } else {
+                    "The originals stay until the copy has been checked. Stopping puts everything back."
+                });
                 ui.add_space(8.0);
                 if ui.button("■ Stop").clicked() {
                     ctl.stop.store(true, Ordering::Relaxed);
                 }
                 return;
             }
-            ui.label(format!("{app} keeps them in {}. They're copied to a new folder on the drive you choose, checked, and a link is left here so {app} finds them as before. The originals are deleted only after that.", m.from.shown()));
+            if m.back {
+                ui.label(format!(
+                    "{} is a link to where they were moved. They're copied back here, checked, and put in place of the link; {app} finds them as before. The folder on the other drive is deleted only after that.",
+                    m.from.shown()
+                ));
+            } else {
+                ui.label(format!("{app} keeps them in {}. They're copied to a new folder on the drive you choose, checked, and a link is left here so {app} finds them as before. The originals are deleted only after that.", m.from.shown()));
+            }
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label("Into");
-                let r = ui.add(egui::TextEdit::singleline(&mut m.dest).desired_width(360.0).hint_text("A folder on another drive"));
-                if r.changed() {
-                    m.checked = None;
+            let back = m.back;
+            if !back {
+                ui.horizontal(|ui| {
+                    ui.label("Into");
+                    let r = ui.add(egui::TextEdit::singleline(&mut m.dest).desired_width(360.0).hint_text("A folder on another drive"));
+                    if r.changed() {
+                        m.checked = None;
+                    }
+                    check |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    pick = ui.button("Choose…").clicked();
+                });
+                let dest = m.dest.trim();
+                if !dest.is_empty() {
+                    ui.weak(format!("New folder: {}", Path::new(dest).join(relocate::folder_name(app)).shown()));
                 }
-                check |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                pick = ui.button("Choose…").clicked();
-            });
-            let dest = m.dest.trim();
-            if !dest.is_empty() {
-                ui.weak(format!("New folder: {}", Path::new(dest).join(relocate::folder_name(app)).shown()));
             }
             ui.add_space(6.0);
             match &m.checked {
                 Some(Ok(p)) => {
-                    kit::callout(ui, Tone::Neutral, format!("{} will be copied to {}.", scan::human(p.bytes), p.to.shown()));
+                    let what = if back { format!("{} will be copied back from {} to {}.", scan::human(p.bytes), p.from.shown(), p.to.shown()) } else { format!("{} will be copied to {}.", scan::human(p.bytes), p.to.shown()) };
+                    kit::callout(ui, Tone::Neutral, what);
                     match app {
                         "Ollama" => {}
                         "LM Studio" => {
@@ -161,8 +198,8 @@ impl App {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 match &m.checked {
-                    Some(Ok(_)) => go = kit::button(ui, kit::Kind::Primary, None, "Move").clicked(),
-                    _ => check |= ui.add_enabled(!dest.is_empty() && m.checking.is_none(), egui::Button::new("Check")).clicked(),
+                    Some(Ok(_)) => go = kit::button(ui, kit::Kind::Primary, None, if back { "Move back" } else { "Move" }).clicked(),
+                    _ => check |= ui.add_enabled((back || !m.dest.trim().is_empty()) && m.checking.is_none(), egui::Button::new("Check")).clicked(),
                 }
                 close = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
             });
@@ -188,8 +225,9 @@ impl App {
             let ctl = Arc::new(Ctl::default());
             let (tx, rx) = mpsc::channel();
             let c = ctl.clone();
+            let back = m.back;
             std::thread::spawn(move || {
-                let _ = tx.send(relocate::run(&plan, &c));
+                let _ = tx.send(if back { relocate::run_back(&plan, &c) } else { relocate::run(&plan, &c) });
             });
             m.running = Some((ctl, rx));
         }
@@ -197,10 +235,10 @@ impl App {
 
     fn storage_move_check(&mut self) {
         let Some(m) = &mut self.models.storage.moving else { return };
-        let (app, from, dest) = (m.app, m.from.clone(), PathBuf::from(m.dest.trim()));
+        let (app, from, dest, back) = (m.app, m.from.clone(), PathBuf::from(m.dest.trim()), m.back);
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(relocate::check(app, &from, &dest));
+            let _ = tx.send(if back { relocate::check_back(app, &from) } else { relocate::check(app, &from, &dest) });
         });
         m.checking = Some(rx);
         m.checked = None;
