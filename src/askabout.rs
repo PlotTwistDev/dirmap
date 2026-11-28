@@ -253,6 +253,10 @@ pub fn contents(files: &[PathBuf], budget: usize) -> String {
             out.push_str(&format!("\n{name} is in the cloud only, so it wasn't read.\n"));
             continue;
         }
+        if let Some(t) = extract(f, share.max(200)) {
+            out.push_str(&format!("\nText of {name}{}:\n```\n{}\n```\n", if t.1 { " (the start only)" } else { "" }, t.0));
+            continue;
+        }
         let Some(t) = read_text(f, share.max(200)) else {
             out.push_str(&format!("\n{name} isn't a text file, so its contents weren't read.\n"));
             continue;
@@ -261,6 +265,45 @@ pub fn contents(files: &[PathBuf], budget: usize) -> String {
         out.push_str(&format!("\nContents of {name}{}:\n```\n{t}\n```\n", if cut { " (the start only)" } else { "" }));
     }
     out
+}
+
+/// Whether Filescape can give the model the text of `p`: a text file, or a document or
+/// spreadsheet it reads itself. Online-only cloud files can't be read without downloading them.
+pub fn can_read(p: &Path) -> bool {
+    let Ok(md) = std::fs::metadata(p) else { return false };
+    if !md.is_file() || scan::on_disk(&md, || p.to_path_buf(), 4096).1 & store::ONLINE_ONLY != 0 {
+        return false;
+    }
+    let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    crate::officedoc::kind_of(&name).is_some() || is_workbook(&name) || md.len() == 0 || read_text(p, 512).is_some()
+}
+
+fn is_workbook(name: &str) -> bool {
+    matches!(crate::scan::ext_of(name).to_ascii_lowercase().as_str(), "xlsx" | "xlsm" | "xls" | "xlsb" | "ods")
+}
+
+/// The text of a document or spreadsheet Filescape reads itself (Word, PowerPoint, OpenDocument,
+/// Excel), at most `chars` characters, and whether it was cut short. `None` for other files.
+fn extract(p: &Path, chars: usize) -> Option<(String, bool)> {
+    let name = p.file_name()?.to_string_lossy().into_owned();
+    let text = if let Some(k) = crate::officedoc::kind_of(&name) {
+        crate::officedoc::plain_text(&crate::officedoc::read(p, k).ok()?)
+    } else if is_workbook(&name) {
+        let book = crate::sheets::read(p, 200, 40).ok()?;
+        let mut t = String::new();
+        for sh in &book.sheets {
+            t.push_str(&format!("Sheet {} ({} rows, {} columns):\n", sh.name, sh.size.0, sh.size.1));
+            for r in &sh.rows {
+                t.push_str(&r.iter().map(|c| c.replace(['\n', '\t'], " ")).collect::<Vec<_>>().join("\t"));
+                t.push('\n');
+            }
+        }
+        t
+    } else {
+        return None;
+    };
+    let cut = text.chars().count() > chars;
+    Some((text.chars().take(chars).collect(), cut))
 }
 
 /// Up to `chars` characters of a file, if it looks like text.

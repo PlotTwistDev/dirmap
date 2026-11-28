@@ -68,6 +68,8 @@ pub struct Settings {
     pub app_double_click: bool,
     /// Double-click and Enter go inside applications, as for any folder.
     pub app_as_folders: bool,
+    /// Ask AI in the Files workspace: the preview pane's tab, its buttons and the menu items.
+    pub ask_in_files: bool,
 
     // General
     pub theme: Theme,
@@ -209,6 +211,7 @@ impl Default for Settings {
             app_hide_ext: true,
             app_double_click: true,
             app_as_folders: false,
+            ask_in_files: true,
             col_percent: true,
             col_files: true,
             col_modified: true,
@@ -292,8 +295,8 @@ impl Settings {
                     (def.theme, def.units, def.stripes, def.live_tree, def.watch_changes, def.check_updates, def.ui_scale, def.system_notes, def.backup_reminder);
             }
             Tab::Files => {
-                (self.app_recognise, self.app_icons, self.app_hide_ext, self.app_double_click, self.app_as_folders) =
-                    (def.app_recognise, def.app_icons, def.app_hide_ext, def.app_double_click, def.app_as_folders);
+                (self.app_recognise, self.app_icons, self.app_hide_ext, self.app_double_click, self.app_as_folders, self.ask_in_files) =
+                    (def.app_recognise, def.app_icons, def.app_hide_ext, def.app_double_click, def.app_as_folders, def.ask_in_files);
             }
             Tab::Filtering => {
                 self.exclude_folders = def.exclude_folders;

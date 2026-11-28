@@ -2,6 +2,18 @@
 
 ## Next version
 
+### Ask AI in Files
+
+- The Files preview pane has an **Ask AI** tab beside **Preview** and **Details**, and **Ask AI**
+  buttons under the preview and in Quick Look. The selected file or folder is what you're asking
+  about, with suggested questions for what it is: a licence, a log, code, a spreadsheet, a folder.
+  It shares the loaded model with the AI Models workspace and has its own conversation, which
+  **Open in AI Models** carries over. Picking something else mid-conversation asks before changing
+  what the chat is about. See [Ask AI in Files](../views/ask-ai.md#ask-ai-in-files).
+- Ask AI can now read Word, PowerPoint, OpenDocument and Excel files, as well as plain text.
+- Every Ask AI conversation ends with the same note: **Private · Local processing · Read-only**,
+  "Local AI models can make mistakes…", and an **ⓘ** that explains the limits.
+
 ### Numbered data files aren't treated as frames
 
 - Numbered files that aren't pictures, such as NumPy `.npz` archives, still group into one row in

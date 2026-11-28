@@ -255,11 +255,16 @@ impl App {
         });
     }
 
-    /// The AI Models workspace below the toolbar.
-    pub(super) fn models_workspace(&mut self, ui: &mut egui::Ui) {
+    /// Looks for models, the first time they're needed.
+    pub(super) fn ensure_models(&mut self) {
         if self.models.list.is_none() && self.models.job.is_none() && self.models.places.is_empty() {
             self.start_models();
         }
+    }
+
+    /// The AI Models workspace below the toolbar.
+    pub(super) fn models_workspace(&mut self, ui: &mut egui::Ui) {
+        self.ensure_models();
         self.storage_confirm(ui.ctx());
         self.storage_moving(ui.ctx());
         self.storage_shrink(ui.ctx());
