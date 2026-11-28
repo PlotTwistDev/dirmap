@@ -3,7 +3,7 @@
 //! is refused with the reason.
 
 use super::desktop;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Start a program on its own, so it outlives Filescape and doesn't share its terminal.
@@ -33,6 +33,12 @@ fn terminal(args: &[String]) -> Option<Command> {
 
 /// Launch a `.desktop` launcher, as the desktop's own menu would.
 pub fn launch_entry(file: &Path) -> Result<(), String> {
+    open_with_entry(file, &[])
+}
+
+/// Launch a launcher with files to open (none: just start it). Each file is passed as its own
+/// argument, never through a shell.
+pub fn open_with_entry(file: &Path, files: &[PathBuf]) -> Result<(), String> {
     let text = std::fs::read_to_string(file).map_err(|e| format!("Couldn't read the launcher: {e}"))?;
     let e = desktop::entry(&text).ok_or("This launcher is damaged: it has no [Desktop Entry] section.")?;
     if let Some(why) = super::launcher_problem(file, &e) {
@@ -41,19 +47,22 @@ pub fn launch_entry(file: &Path) -> Result<(), String> {
     if e.kind == "Link" {
         return crate::actions::open(Path::new(e.url.as_deref().unwrap_or_default()));
     }
-    let cmd = e.exec.as_deref().and_then(|x| desktop::command(x, &e, file)).ok_or("It doesn't say which program to run.")?;
-    let mut c = if e.terminal {
-        terminal(&cmd).ok_or("It runs in a terminal, and no terminal app was found.")?
-    } else {
-        let mut c = Command::new(&cmd[0]);
-        c.args(&cmd[1..]);
-        c
-    };
-    // Its own folder, else the home folder, as the desktop's menu starts programs.
-    if let Some(dir) = e.path.clone().filter(|d| Path::new(d).is_dir()).or_else(|| std::env::var("HOME").ok()) {
-        c.current_dir(dir);
+    let cmds = e.exec.as_deref().and_then(|x| desktop::commands(x, &e, file, files)).ok_or("It doesn't say which program to run.")?;
+    for cmd in cmds {
+        let mut c = if e.terminal {
+            terminal(&cmd).ok_or("It runs in a terminal, and no terminal app was found.")?
+        } else {
+            let mut c = Command::new(&cmd[0]);
+            c.args(&cmd[1..]);
+            c
+        };
+        // Its own folder, else the home folder, as the desktop's menu starts programs.
+        if let Some(dir) = e.path.clone().filter(|d| Path::new(d).is_dir()).or_else(|| std::env::var("HOME").ok()) {
+            c.current_dir(dir);
+        }
+        start(c)?;
     }
-    start(c)
+    Ok(())
 }
 
 /// Run an AppImage, when the user has allowed it to run.

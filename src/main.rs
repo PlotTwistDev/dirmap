@@ -71,6 +71,7 @@ mod model3d;
 mod splat;
 mod netdrives;
 mod officedoc;
+mod openapps;
 mod packages;
 mod paintfile;
 mod pdfview;

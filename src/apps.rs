@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 #[cfg(target_os = "macos")]
 mod mac;
 pub mod desktop;
-mod linux;
+pub mod linux;
 pub mod lnk;
 pub mod pe;
 

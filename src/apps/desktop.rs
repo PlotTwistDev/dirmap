@@ -31,6 +31,8 @@ pub struct Entry {
     pub categories: Vec<String>,
     /// The application's version, where its packager wrote one (AppImages do).
     pub version: Option<String>,
+    /// The file types (MIME types) it opens.
+    pub mime_types: Vec<String>,
 }
 
 /// The user's languages, most specific first ("en_GB", "en"), from the environment.
@@ -135,6 +137,7 @@ fn entry_for(text: &str, langs: &[String]) -> Option<Entry> {
         hidden: yes("NoDisplay") || yes("Hidden"),
         categories: get("Categories").map(|c| c.split(';').map(str::trim).filter(|c| !c.is_empty()).map(String::from).collect()).unwrap_or_default(),
         version: get("X-AppImage-Version"),
+        mime_types: get("MimeType").map(|c| c.split(';').map(str::trim).filter(|c| !c.is_empty()).map(String::from).collect()).unwrap_or_default(),
     })
 }
 
@@ -142,6 +145,14 @@ fn entry_for(text: &str, langs: &[String]) -> Option<Entry> {
 /// files given: `%f` `%F` `%u` `%U` (and the old codes) are dropped, `%i` becomes the icon,
 /// `%c` the name and `%k` the launcher's own path. None when it's empty or badly quoted.
 pub fn command(exec: &str, e: &Entry, file: &Path) -> Option<Vec<String>> {
+    commands(exec, e, file, &[])?.into_iter().next()
+}
+
+/// The command lines that open `files` with a launcher: one for all of them when it takes
+/// several (`%F`, `%U`), one per file when it takes one (`%f`, `%u`), and the plain command
+/// (files left out, as the specification says) when it takes none. Each file is one argument,
+/// never parsed by a shell.
+pub fn commands(exec: &str, e: &Entry, file: &Path, files: &[PathBuf]) -> Option<Vec<Vec<String>>> {
     // Split by the spec's quoting: "..." with \" \` \$ \\ escaped inside.
     let mut words: Vec<(String, bool)> = Vec::new();
     let mut cur = String::new();
@@ -177,39 +188,63 @@ pub fn command(exec: &str, e: &Entry, file: &Path) -> Option<Vec<String>> {
     if had || !cur.is_empty() {
         words.push((cur, had));
     }
-    let mut out = Vec::new();
-    for (w, was_quoted) in words {
-        if !was_quoted {
-            match w.as_str() {
-                "%f" | "%F" | "%u" | "%U" | "%d" | "%D" | "%n" | "%N" | "%v" | "%m" => continue,
-                "%i" => {
-                    if let Some(i) = &e.icon {
-                        out.push("--icon".into());
-                        out.push(i.clone());
+    let many = words.iter().any(|(w, q)| !q && (w == "%F" || w == "%U"));
+    let one = !many && words.iter().any(|(w, q)| !q && (w == "%f" || w == "%u"));
+    let runs: Vec<Option<&PathBuf>> = if one && !files.is_empty() { files.iter().map(Some).collect() } else { vec![None] };
+    let mut all = Vec::new();
+    for run in runs {
+        let mut out = Vec::new();
+        for (w, was_quoted) in &words {
+            if !was_quoted {
+                match w.as_str() {
+                    "%F" | "%U" => {
+                        out.extend(files.iter().map(|f| f.to_string_lossy().into_owned()));
+                        continue;
                     }
-                    continue;
+                    "%f" | "%u" => {
+                        out.extend(run.map(|f| f.to_string_lossy().into_owned()));
+                        continue;
+                    }
+                    _ => {}
                 }
-                _ => {}
+            }
+            if let Some(w) = expand_word(w, *was_quoted, e, file) {
+                out.extend(w);
             }
         }
-        // Codes inside a longer word.
-        let mut s = String::new();
-        let mut it = w.chars();
-        while let Some(c) = it.next() {
-            if c != '%' {
-                s.push(c);
-                continue;
-            }
-            match it.next() {
-                Some('%') => s.push('%'),
-                Some('c') => s.push_str(e.name.as_deref().unwrap_or("")),
-                Some('k') => s.push_str(&file.to_string_lossy()),
-                _ => {}
-            }
+        if out.is_empty() || out[0].is_empty() {
+            return None;
         }
-        out.push(s);
+        all.push(out);
     }
-    (!out.is_empty() && !out[0].is_empty()).then_some(out)
+    Some(all)
+}
+
+/// One word of an Exec line with its codes filled in (no file codes): None to drop it.
+fn expand_word(w: &str, was_quoted: bool, e: &Entry, file: &Path) -> Option<Vec<String>> {
+    if !was_quoted {
+        match w {
+            "%d" | "%D" | "%n" | "%N" | "%v" | "%m" => return None,
+            "%i" => return Some(e.icon.iter().flat_map(|i| ["--icon".to_string(), i.clone()]).collect()),
+            _ => {}
+        }
+    }
+    // Codes inside a longer word.
+    let mut s = String::new();
+    let mut it = w.chars();
+    while let Some(c) = it.next() {
+        if c != '%' {
+            s.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('%') => s.push('%'),
+            Some('c') => s.push_str(e.name.as_deref().unwrap_or("")),
+            Some('k') => s.push_str(&file.to_string_lossy()),
+            _ => {}
+        }
+    }
+    Some(vec![s])
 }
 
 /// Where a program named on a command line is: itself when it's a path, else found on PATH.
@@ -427,6 +462,10 @@ Exec=paint --new
         assert_eq!(command(r#""""#, &e, f), None);
         assert_eq!(command("open \"unclosed", &e, f), None);
         assert_eq!(command("   ", &e, f), None);
+        let files = [PathBuf::from("/a b/one.txt"), PathBuf::from("/x;y/two.txt")];
+        assert_eq!(commands("edit %F", &e, f, &files).unwrap(), [vec!["edit", "/a b/one.txt", "/x;y/two.txt"]]);
+        assert_eq!(commands("edit --new %u", &e, f, &files).unwrap(), [vec!["edit", "--new", "/a b/one.txt"], vec!["edit", "--new", "/x;y/two.txt"]]);
+        assert_eq!(commands("edit", &e, f, &files).unwrap(), [vec!["edit"]]);
     }
 
     #[test]
