@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 const T0: i64 = 1_795_392_000; // 23 Nov 2026
-const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql"), include_str!("../migrations/0004_maintenance.sql"), include_str!("../migrations/0005_renewals.sql"), include_str!("../migrations/0006_account_dashboard.sql"), include_str!("../migrations/0007_release_catalogue.sql")];
+const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql"), include_str!("../migrations/0004_maintenance.sql"), include_str!("../migrations/0005_renewals.sql"), include_str!("../migrations/0006_account_dashboard.sql"), include_str!("../migrations/0007_release_catalogue.sql"), include_str!("../migrations/0008_reminders.sql")];
 
 /// Gives way once, so two requests run with `join` interleave like concurrent Workers.
 struct YieldOnce(bool);
@@ -1419,4 +1419,49 @@ fn every_version_is_listed_and_lapsed_licences_get_the_newest_one_they_unlock() 
     let i = home.body.find("newest version your licence unlocks").expect("unlocked line");
     assert!(home.body[i..].contains("Filescape 2.5.0"), "{}", &home.body[i..i + 400]);
     assert!(home.body.contains("Earlier versions"));
+}
+
+
+#[test]
+fn maintenance_reminders_go_out_once_per_stage_and_can_be_turned_off() {
+    use filescape_licence::maintenance::add_months;
+    let w = world();
+    let (_, id) = bought(&w, "txn_buy1");
+    let until = add_months(T0, 12);
+    assert_eq!(until_of(&w, &id), until);
+    let run = |w: &World| pollster::block_on(w.cx().send_reminders()).unwrap();
+    // Months before: nothing.
+    w.now.set(until - 60 * DAY);
+    assert_eq!(run(&w), 0);
+    // 30 days before: one email, and only once.
+    w.now.set(until - 30 * DAY);
+    let before = w.net.emails().len();
+    assert_eq!(run(&w), 1);
+    assert_eq!(run(&w), 0);
+    let m = w.net.emails().last().unwrap().clone();
+    assert!(m.contains("ends in 30 days") && m.contains("ada@example.com") && m.contains("/reminders/off?e="), "{m}");
+    assert_eq!(w.net.emails().len(), before + 1);
+    // 7 days before, then the day it ends.
+    w.now.set(until - 7 * DAY);
+    assert_eq!(run(&w), 1);
+    w.now.set(until + DAY);
+    assert_eq!(run(&w), 1);
+    assert!(w.net.emails().last().unwrap().contains("has ended"));
+    assert_eq!(run(&w), 0);
+    // A renewal moves the end date: the reminders start again for the new one.
+    w.admin(&format!("/licence/{id}/extend"), "months=12&days=0&reason=test");
+    let new_until = until_of(&w, &id);
+    w.now.set(new_until - 29 * DAY);
+    assert_eq!(run(&w), 1);
+    // The link in the email turns them off, without signing in; a tampered one doesn't.
+    let m: serde_json::Value = serde_json::from_str(w.net.emails().last().unwrap()).unwrap();
+    let text = m["text"].as_str().unwrap();
+    let i = text.find("/reminders/off?").unwrap();
+    let link: String = text[i..].chars().take_while(|c| !c.is_whitespace()).collect();
+    assert!(w.call("GET", "account.filescape.app", &link, &[], "").body.contains("Turn reminders off"));
+    let q = link.split_once('?').unwrap().1;
+    assert!(w.call("POST", "account.filescape.app", "/reminders/off", &[("origin", "https://account.filescape.app")], &q.replace("ada%40", "bob%40")).body.contains("isn't valid"));
+    assert!(w.call("POST", "account.filescape.app", "/reminders/off", &[("origin", "https://account.filescape.app")], q).body.contains("no more maintenance reminders"));
+    w.now.set(new_until - 6 * DAY);
+    assert_eq!(run(&w), 0, "turned off");
 }

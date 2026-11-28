@@ -51,3 +51,8 @@ ACCESS_TEAM_DOMAIN = "late-river-d752.cloudflareaccess.com"
 
 [observability]
 enabled = true
+
+# Daily at 09:00 UTC: maintenance reminder emails (30 and 7 days before maintenance ends, and on
+# the day). See src/reminders.rs.
+[triggers]
+crons = ["0 9 * * *"]

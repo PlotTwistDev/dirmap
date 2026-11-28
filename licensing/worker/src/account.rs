@@ -103,6 +103,32 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
             }
         }
         ("GET", "/versions") => versions_page(cx, base).await,
+        // The link in a reminder email: works without signing in, signed per address.
+        ("GET" | "POST", "/reminders/off") => {
+            let (e, sig) = if req.method == "GET" {
+                (req.query_param("e").unwrap_or_default(), req.query_param("s").unwrap_or_default())
+            } else {
+                let f = Form::parse(&req.text());
+                (f.get("e"), f.get("s"))
+            };
+            if !crate::reminders::unsubscribe_ok(&cx.cfg.serial_key, &e, &sig) {
+                return Ok(show(base, "Reminders", "<h1>Maintenance reminders</h1><div class=\"card\">This link isn't valid. You can turn reminders off on your account page after signing in.</div>"));
+            }
+            if req.method == "GET" {
+                return Ok(show(
+                    base,
+                    "Reminders",
+                    &format!(
+                        "<h1>Maintenance reminders</h1><div class=\"card\"><p>Stop emailing <b>{}</b> before Filescape software maintenance ends?</p><form method=\"post\" action=\"{base}/reminders/off\"><input type=\"hidden\" name=\"e\" value=\"{}\"><input type=\"hidden\" name=\"s\" value=\"{}\"><button class=\"primary\">Turn reminders off</button></form></div>",
+                        esc(&e),
+                        esc(&e),
+                        esc(&sig)
+                    ),
+                ));
+            }
+            cx.set_prefs(&e, Prefs { reminders: false }).await?;
+            Ok(show(base, "Reminders", &format!("<h1>Maintenance reminders</h1><div class=\"card\">Done: no more maintenance reminders to {}. Emails about purchases and renewals still arrive. To turn reminders back on, <a href=\"{base}/\">sign in</a>.</div>", esc(&e))))
+        }
         ("GET", "/activate") => Ok(offline_page(base, None)),
         ("POST", "/activate") => offline(cx, base, req).await,
         ("GET", "/thanks") => Ok(show(

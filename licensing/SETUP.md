@@ -372,6 +372,23 @@ newest version their licence unlocks.
 3. Upload the current release's files again under its version number (step 9), so the version
    links work.
 
+## Updating a server for maintenance reminders
+
+Stage 6 (28 Nov 2026) emails customers 30 and 7 days before software maintenance ends, and on the
+day it ends, once a day from a Cron trigger (09:00 UTC, in `wrangler.toml`). Each email has a link
+that turns reminders off without signing in; customers can also turn them off on the account
+page. Renewals already send their own confirmation.
+
+1. `npx wrangler@4 d1 migrations apply filescape-licences --remote` (applies
+   `0008_reminders.sql`).
+2. Deploy the Worker (step 6). Deploying sets up the Cron trigger; check it under **Workers &
+   Pages > filescape-licence > Settings > Trigger events**.
+3. To try a run without waiting: `npx wrangler@4 dev --test-scheduled`, then open
+   `http://localhost:8787/__scheduled` (uses the local database).
+
+Each reminder is noted in the licence's event log in admin. Licences ending in the next 30 days
+get their first reminder on the first run after deploying.
+
 ## Local development
 
 ```
