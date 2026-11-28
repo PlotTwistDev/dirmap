@@ -51,6 +51,27 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
             Ok(Resp::redirect(&format!("{base}/?msg={}", crate::web::encode(msg))))
         }
         ("POST", "/find") => find(cx, base, &Form::parse(&req.text())).await,
+        // Extend maintenance: signed in (the licence must be registered to this email), then the
+        // checkout page; the app's "Extend maintenance" goes straight to the checkout page.
+        ("POST", "/renew") => {
+            let Some(email) = cx.session_email(req).await? else { return Ok(Resp::redirect(&format!("{base}/?msg=Sign%20in%20again"))) };
+            let id = Form::parse(&req.text()).get("licence");
+            let owned = cx.licence(&id).await?.is_some_and(|r| r.lic.email.as_deref() == Some(email.as_str()));
+            if !owned {
+                return Ok(Resp::redirect(&format!("{base}/?msg=That%20licence%20isn%27t%20registered%20to%20you.")));
+            }
+            match cx.start_renewal(&id, "account", None).await? {
+                Ok(t) => Ok(Resp::redirect(&format!("{base}/renew?t={t}"))),
+                Err(e) => Ok(Resp::redirect(&format!("{base}/?msg={}", crate::web::encode(e.message())))),
+            }
+        }
+        ("GET", "/renew") => renew_page(cx, base, &req.query_param("t").unwrap_or_default()).await,
+        ("GET", "/renewed") => Ok(show(
+            base,
+            "Thank you",
+            "<h1>Thank you for renewing</h1><div class=\"card\"><p>Your maintenance is extended as soon as Paddle confirms the payment, usually within a minute, and a confirmation email is on its way. Your serial number and your computers stay as they are.</p>\
+             <p>Filescape picks up the new date at its next weekly licence check. To see it now, choose <b>Help &gt; Licence</b> and press <b>Check now</b>.</p></div>",
+        )),
         ("GET", "/activate") => Ok(offline_page(base, None)),
         ("POST", "/activate") => offline(cx, base, req).await,
         ("GET", "/thanks") => Ok(show(
@@ -182,10 +203,10 @@ fn os_label(os: Option<&str>) -> &str {
     os.unwrap_or("Computer")
 }
 
-fn licence_card(base: &str, o: &Owned, now: filescape_licence::Ts) -> String {
+fn licence_card(base: &str, o: &Owned, now: filescape_licence::Ts, offer: Option<&str>) -> String {
     let l = &o.row.lic;
     let what = match l.validity {
-        Validity::Perpetual { updates_until } => format!("Perpetual licence · updates until {}", date(updates_until).split(',').next().unwrap_or_default()),
+        Validity::Perpetual { .. } => "Perpetual licence · never expires".to_string(),
         _ => match l.expires_at {
             Some(e) if e <= now => format!("Temporary licence · ended {}", date(e)),
             Some(e) => format!("Temporary licence · until {}", date(e)),
@@ -193,6 +214,29 @@ fn licence_card(base: &str, o: &Owned, now: filescape_licence::Ts) -> String {
         },
     };
     let state = if l.revoked_at.is_some() { " <span class=\"pill bad\">Revoked</span>" } else { "" };
+    let maint = match l.validity {
+        Validity::Perpetual { updates_until } => {
+            let day = date(updates_until).split(',').next().unwrap_or_default().to_string();
+            let status = match filescape_licence::maintenance::status(updates_until, now) {
+                filescape_licence::maintenance::MaintenanceStatus::Active { days_left, .. } => {
+                    format!("<b>Software maintenance:</b> <span class=\"good\">active</span>, {days_left} day{} left (until {day}). Every release published until then is included.", if days_left == 1 { "" } else { "s" })
+                }
+                filescape_licence::maintenance::MaintenanceStatus::Ended { .. } => format!(
+                    "<b>Software maintenance:</b> ended {day}. Your licence is still valid: every release published until then keeps its Pro features for good. Extend maintenance to get the latest version and another year of updates."
+                ),
+            };
+            let button = match (offer, l.revoked_at) {
+                (Some(label), None) => format!(
+                    "<form method=\"post\" action=\"{base}/renew\" style=\"margin-top:8px\"><input type=\"hidden\" name=\"licence\" value=\"{}\"><button class=\"primary\">Extend maintenance by 12 months · {}</button></form>",
+                    esc(&l.id),
+                    esc(label)
+                ),
+                _ => String::new(),
+            };
+            format!("<div class=\"card\" style=\"background:var(--bg)\">{status}{button}</div>")
+        }
+        _ => String::new(),
+    };
     let count = if l.kind() == LicenceKind::Perpetual {
         format!("{} of {} computers active", o.seats, l.max_activations)
     } else {
@@ -225,13 +269,15 @@ fn licence_card(base: &str, o: &Owned, now: filescape_licence::Ts) -> String {
     } else {
         format!("<div class=\"scroll\"><table><tr><th>Computer</th><th>Version</th><th>Activated</th><th>Last check</th><th></th></tr>{rows}</table></div>")
     };
-    format!("<div class=\"card\"><h2 style=\"margin-top:0\">Serial ending {}{state}</h2><p>{}<br>{}</p>{table}</div>", esc(&l.serial_hint), esc(&what), esc(&count))
+    format!("<div class=\"card\"><h2 style=\"margin-top:0\">Serial ending {}{state}</h2><p>{}<br>{}</p>{maint}{table}</div>", esc(&l.serial_hint), esc(&what), esc(&count))
 }
 
 async fn signed_in<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, email: &str, msg: Option<&str>) -> Result<Resp, String> {
     let m = msg.map(|m| format!("<div class=\"card\">{}</div>", esc(m))).unwrap_or_default();
     let owned = cx.owned(email).await?;
-    let cards: String = owned.iter().map(|o| licence_card(base, o, cx.now)).collect();
+    let settings = cx.renewal_settings().await?;
+    let offer = if cx.cfg.paddle.as_ref().is_some_and(|p| p.client_token.is_some()) { settings.offered().map(|p| p.label.clone()) } else { None };
+    let cards: String = owned.iter().map(|o| licence_card(base, o, cx.now, offer.as_deref())).collect();
     let cards = if cards.is_empty() { "<div class=\"card\">No licences are registered to this address.</div>".into() } else { cards };
     Ok(show(
         base,
@@ -242,4 +288,58 @@ async fn signed_in<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, email: &str, m
             esc(email)
         ),
     ))
+}
+
+/// The renewal checkout: what the renewal gives, then Paddle's overlay checkout with the renewal
+/// token as custom data. This page alone allows Paddle's scripts and frames.
+async fn renew_page<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, t: &str) -> Result<Resp, String> {
+    let settings = cx.renewal_settings().await?;
+    let (Some(price), Some(pc)) = (settings.offered(), cx.cfg.paddle.as_ref()) else { return Ok(show(base, "Extend maintenance", "<h1>Extend maintenance</h1><div class=\"card\">Maintenance renewals aren't available yet.</div>")) };
+    let Some(token_client) = pc.client_token.as_deref() else { return Ok(show(base, "Extend maintenance", "<h1>Extend maintenance</h1><div class=\"card\">Maintenance renewals aren't available yet.</div>")) };
+    let Some(p) = cx.renewal_token(t, false).await? else {
+        return Ok(show(
+            base,
+            "Extend maintenance",
+            &format!("<h1>Extend maintenance</h1><div class=\"card\"><p>This renewal link has expired or isn't valid. Start again from <b>Help &gt; Licence</b> in Filescape, or <a href=\"{base}/\">sign in to your account</a>.</p></div>"),
+        ));
+    };
+    let day = |t: filescape_licence::Ts| date(t).split(',').next().unwrap_or_default().to_string();
+    let after = crate::renewal::preview(p.until, cx.now, settings.months());
+    let now_line = if p.until > cx.now {
+        format!("Maintenance now runs until <b>{}</b>. Renewing adds 12 months to that date.", day(p.until))
+    } else {
+        format!("Maintenance ended on <b>{}</b>. Renewing starts a new 12 months today: nothing is charged for the time in between, and you get the latest version.", day(p.until))
+    };
+    let success = if cx.cfg.dev { format!("http://localhost:8787{base}/renewed") } else { format!("https://{}/renewed", cx.cfg.hosts.account) };
+    let cfg = serde_json::json!({
+        "sandbox": pc.sandbox,
+        "token": token_client,
+        "priceId": price.price_id,
+        "renewal": t,
+        "email": p.email,
+        "successUrl": success,
+    })
+    .to_string()
+    .replace('<', "\\u003c");
+    let body = format!(
+        "<h1>Extend software maintenance</h1><div class=\"card\"><p>Licence with serial ending <b>{}</b></p><p>{now_line}</p><p>After renewing: updates included until <b>{}</b>.</p>\
+         <p>Your serial number, your computers and every version your licence already covers stay as they are. This is a one-time payment, not a subscription. Renewals are non-refundable.</p>\
+         <p><button class=\"primary\" id=\"pay\">Extend maintenance · {}</button></p><p class=\"mute\" id=\"err\" hidden>The checkout couldn't open. Check that nothing is blocking cdn.paddle.com, or try again later.</p>\
+         <p class=\"mute\">Checkout by Paddle, our reseller, who also sends the receipt. The price above is before any sales tax, which the checkout adds.</p></div>\
+         <script type=\"application/json\" id=\"cfg\">{cfg}</script>\
+         <script src=\"https://cdn.paddle.com/paddle/v2/paddle.js\"></script>\
+         <script>(function(){{var c=JSON.parse(document.getElementById('cfg').textContent);var err=document.getElementById('err');\
+         try{{if(c.sandbox)Paddle.Environment.set('sandbox');Paddle.Initialize({{token:c.token}});}}catch(e){{err.hidden=false}}\
+         document.getElementById('pay').onclick=function(){{try{{var o={{items:[{{priceId:c.priceId,quantity:1}}],customData:{{renewal:c.renewal}},settings:{{successUrl:c.successUrl,allowQuantity:false}}}};if(c.email)o.customer={{email:c.email}};Paddle.Checkout.open(o)}}catch(e){{err.hidden=false}}}};}})();</script>",
+        esc(&p.serial_hint),
+        day(after),
+        esc(&price.label),
+    );
+    let mut r = show(base, "Extend maintenance", &body);
+    r.headers.retain(|(k, _)| k != "content-security-policy");
+    r.headers.push((
+        "content-security-policy".into(),
+        "default-src 'self'; script-src 'unsafe-inline' https://cdn.paddle.com; style-src 'unsafe-inline' https://cdn.paddle.com; frame-src https://buy.paddle.com https://sandbox-buy.paddle.com; connect-src 'self' https://*.paddle.com; img-src 'self' data: https://*.paddle.com; frame-ancestors 'none'".into(),
+    ));
+    Ok(r)
 }

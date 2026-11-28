@@ -291,6 +291,33 @@ that's already running:
    Purchase row with the same date as before. **Maintenance** in the top bar extends several
    licences at once.
 
+## Turning on maintenance renewals
+
+Stage 2 (28 Nov 2026) lets customers extend maintenance for 12 months through Paddle, from the
+account page or from the app. Renewals are off until you switch them on in admin.
+
+1. In Paddle (live account): **Catalog > Products > New product**, name "Filescape Pro maintenance
+   renewal", tax category Standard digital goods. Add prices, each **One-time** (not recurring),
+   quantity fixed at 1:
+   - Launch: $2.99 (in use while Pro sells at $4.99)
+   - Standard: $5.99 (for when Pro is $9.99)
+
+   Copy each price ID (`pri_…`). Don't add them to `PADDLE_PRICE_IDS`: that list issues new
+   licences.
+2. If Paddle asks for website approval of account.filescape.app, add it under **Checkout > Website
+   approval** (the checkout opens there).
+3. `npx wrangler@4 d1 migrations apply filescape-licences --remote` (applies `0005_renewals.sql`).
+4. Deploy the Worker (step 6). `PADDLE_CLIENT_TOKEN` is already in `wrangler.toml`.
+5. On https://admin.filescape.app/renewals: put the launch price ID under **Standard**, shown as
+   `$2.99`, tick **Offer renewals**, Save. For a promotion, add a promotional price and tick
+   **Offer the promotional price**; Paddle discount codes also work at checkout.
+6. Test: sign in at https://account.filescape.app, press **Extend maintenance**, pay (a 100%
+   discount code works), and check the licence's Maintenance card in admin shows the renewal.
+
+Paid renewals that couldn't be applied (a revoked licence, a checkout without a valid renewal
+link) are listed under **Payments that need attention** on the Renewals page; refund those in
+Paddle.
+
 ## Local development
 
 ```

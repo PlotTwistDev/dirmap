@@ -68,6 +68,8 @@ fn config(env: &Env) -> std::result::Result<Config, String> {
         api_base: if sandbox { "https://sandbox-api.paddle.com".into() } else { "https://api.paddle.com".into() },
         price_ids: opt(env, "PADDLE_PRICE_IDS").map(|s| s.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect()).unwrap_or_default(),
         update_months: opt(env, "UPDATE_MONTHS").and_then(|m| m.parse().ok()).unwrap_or(filescape_licence::DEFAULT_UPDATE_MONTHS),
+        client_token: opt(env, "PADDLE_CLIENT_TOKEN"),
+        sandbox,
     });
     let mail = match (opt(env, "RESEND_API_KEY"), opt(env, "MAIL_FROM")) {
         (Some(resend_key), Some(from)) => Some(MailConfig { resend_key, from, reply_to: opt(env, "MAIL_REPLY_TO") }),

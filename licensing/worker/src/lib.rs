@@ -24,6 +24,7 @@ pub mod mail;
 pub mod maintenance;
 pub mod paddle;
 pub mod portal;
+pub mod renewal;
 pub mod secret;
 pub mod store;
 pub mod web;
@@ -77,6 +78,11 @@ pub struct PaddleConfig {
     /// Only purchases of these price IDs issue licences (empty: any).
     pub price_ids: Vec<String>,
     pub update_months: u32,
+    /// Paddle.js client-side token (`PADDLE_CLIENT_TOKEN`, public: it's in every buyer's browser),
+    /// for the renewal checkout on account.filescape.app. `None`: renewals can't be bought.
+    pub client_token: Option<String>,
+    /// A Paddle sandbox account (`PADDLE_ENV = "sandbox"`).
+    pub sandbox: bool,
 }
 
 pub struct MailConfig {

@@ -269,6 +269,22 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
         Ok(Some((licence_id, o)))
     }
 
+    /// A reversed chargeback: the renewal paid by `txn` counts again, if a chargeback took it away.
+    pub async fn unreverse_txn(&self, txn: &str, actor: &str, reason: &str) -> Result<Option<String>, String> {
+        let Some((licence_id, g)) = self.grant_by_txn(txn).await? else { return Ok(None) };
+        if g.reversed_at.is_none() || !g.reverse_reason.as_deref().is_some_and(|r| r.starts_with("Paddle chargeback")) {
+            return Ok(Some(licence_id));
+        }
+        self.db
+            .batch(vec![
+                ("UPDATE maintenance_grants SET reversed_at = NULL, reversed_by = NULL, reverse_reason = NULL WHERE id = ?1", vec![g.id.into()]),
+                ("INSERT INTO events (licence_id, at, what, detail, actor) VALUES (?1, ?2, 'maintenance', ?3, ?4)", vec![(&licence_id).into(), self.now.into(), format!("Renewal restored ({reason})").into(), actor.into()]),
+            ])
+            .await?;
+        self.resync(&licence_id).await?;
+        Ok(Some(licence_id))
+    }
+
     /// Writes the licence's date from its ledger again (after a race, or as a repair).
     pub async fn resync(&self, licence_id: &str) -> Result<(), String> {
         let Some(row) = self.licence(licence_id).await? else { return Ok(()) };
