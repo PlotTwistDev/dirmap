@@ -70,7 +70,7 @@ pub fn from_disk(paths: &[PathBuf], budget: usize) -> Facts {
     for p in paths {
         let Ok(md) = std::fs::symlink_metadata(p) else { continue };
         let it = item_from(p, &md);
-        if !it.is_dir && !it.online_only && md.is_file() {
+        if !it.is_dir && !it.online_only && md.is_file() && !is_picture(p) {
             readable.push(p.clone());
         }
         let (inside, unlisted) = if it.is_dir { let (v, more) = listing(p); (Some(v), more) } else { (None, false) };
@@ -89,7 +89,7 @@ pub fn from_tree(nodes: &[(PathBuf, &Node)], budget: usize) -> Facts {
     let mut readable = Vec::new();
     for (p, n) in nodes {
         let it = item_of(n);
-        if !n.is_dir && !it.online_only {
+        if !n.is_dir && !it.online_only && !is_picture(p) {
             readable.push(p.clone());
         }
         let (inside, types) = if n.is_dir {
@@ -539,6 +539,24 @@ pub fn documents_in(dir: &Path) -> Vec<PathBuf> {
     v.into_iter().map(|(_, p)| p).filter(|p| can_read(p)).take(200).collect()
 }
 
+/// A picture, by its name: it has no text to read, but a model that can see may be shown it.
+fn is_picture(p: &Path) -> bool {
+    let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    crate::asksuggest::sort_of(&name, false) == crate::asksuggest::Sort::Image
+}
+
+/// A picture a vision model can be shown: a format Filescape decodes itself (see
+/// [`crate::llm::picture`]). HEIC and camera raw files aren't, nor online-only cloud files, which
+/// would have to be downloaded.
+pub fn can_show(p: &Path) -> bool {
+    let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tif" | "tiff" | "tga" | "qoi" | "jxl" | "ppm" | "pgm" | "pnm" | "ico") {
+        return false;
+    }
+    let Ok(md) = std::fs::metadata(p) else { return false };
+    md.is_file() && md.len() > 0 && scan::on_disk(&md, || p.to_path_buf(), 4096).1 & store::ONLINE_ONLY == 0
+}
+
 /// Whether Filescape can give the model the text of `p`: a text file, or a document or
 /// spreadsheet it reads itself. Online-only cloud files can't be read without downloading them.
 pub fn can_read(p: &Path) -> bool {
@@ -662,6 +680,19 @@ fn read_text(p: &Path, chars: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A picture has no text to read: it's never offered for reading, only (with a model that
+    /// can see) for showing.
+    #[test]
+    fn pictures_are_shown_not_read() {
+        let d = tmp("pictures");
+        let png = d.join("photo.png");
+        image::RgbImage::new(4, 4).save(&png).unwrap();
+        let f = from_disk(std::slice::from_ref(&png), 4000);
+        assert!(f.readable.is_empty());
+        assert!(can_show(&png));
+        assert!(!can_show(&d.join("photo.heic")));
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("filescape-askabout-{name}-{}", std::process::id()));

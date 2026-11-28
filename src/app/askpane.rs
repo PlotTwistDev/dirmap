@@ -372,7 +372,14 @@ impl App {
                         ui.add_space(4.0);
                     }
                     if ctx.len() == 1 && asksuggest::sort_of(&name_of(p), is_dir) == asksuggest::Sort::Image {
-                        ui.add(egui::Label::new(egui::RichText::new("Describing what's in a picture needs a model that can see images, which Filescape can't run yet. Questions use its name and details.").size(11.5).color(t.weak)).wrap());
+                        let note = match (self.ask.vision, crate::askabout::can_show(p)) {
+                            (true, true) => None,
+                            (true, false) => Some("The model can see pictures, but Filescape can't show it this kind of file. Questions use its name and details."),
+                            (false, _) => Some("To ask about what's in a picture, load a model that can see images: one with a vision projector (mmproj) file beside it. Until then, questions use its name and details."),
+                        };
+                        if let Some(note) = note {
+                            ui.add(egui::Label::new(egui::RichText::new(note).size(11.5).color(t.weak)).wrap());
+                        }
                     }
                 } else {
                     ui.add_space(20.0);
@@ -413,12 +420,18 @@ impl App {
                 ui.weak("The model is answering in AI Models…");
             });
         }
-        let about = self.ask.side.about.as_ref().and_then(|a| a.facts.as_ref().map(|f| (f.readable.len(), a.read)));
-        if let Some((n, mut read)) = about
-            && n > 0
+        let vision = self.ask.vision;
+        let about = self.ask.side.about.as_ref().and_then(|a| a.facts.as_ref().map(|f| (f.readable.len(), if vision { f.paths.iter().filter(|p| crate::askabout::can_show(p)).count() } else { 0 }, a.read)));
+        if let Some((n, pics, mut read)) = about
+            && n + pics > 0
         {
-            let what = if n == 1 { "Include the file's contents" } else { "Include the files' contents" };
-            if ui.checkbox(&mut read, egui::RichText::new(what).size(12.0)).on_hover_text("Off: the model sees only names, sizes and dates.\nOn: Filescape reads the file's text for this question. Files only in the cloud aren't read.").changed()
+            let (what, tip) = match (n, pics) {
+                (0, 1) => ("Show the picture to the model", "Off: the model sees only its name, size and dates.\nOn: the model looks at the picture for this question, on this computer."),
+                (0, _) => ("Show the pictures to the model", "Off: the model sees only names, sizes and dates.\nOn: the model looks at the pictures for this question, on this computer."),
+                (1, 0) => ("Include the file's contents", "Off: the model sees only names, sizes and dates.\nOn: Filescape reads the file's text for this question. Files only in the cloud aren't read."),
+                _ => ("Include the files' contents", "Off: the model sees only names, sizes and dates.\nOn: Filescape reads the files' text (and shows pictures to a model that can see) for this question. Files only in the cloud aren't read."),
+            };
+            if ui.checkbox(&mut read, egui::RichText::new(what).size(12.0)).on_hover_text(tip).changed()
                 && let Some(a) = &mut self.ask.side.about
             {
                 a.read = read;
@@ -478,7 +491,7 @@ impl App {
         if let Some((q, read)) = ask_now {
             self.ask.side.draft = q;
             if let Some(a) = &mut self.ask.side.about {
-                a.read = read && a.facts.as_ref().is_some_and(|f| !f.readable.is_empty());
+                a.read = read && a.facts.as_ref().is_some_and(|f| !f.readable.is_empty() || (vision && f.paths.iter().any(|p| crate::askabout::can_show(p))));
             }
             send = true;
         }

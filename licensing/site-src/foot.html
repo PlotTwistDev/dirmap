@@ -1,14 +1,50 @@
+
 <footer>
-  <div class="wrap foot">
-    <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
-    <a href="/formats">Supported formats</a>
-    <a href="/ai-models">AI models</a>
-    <a href="/vfx">VFX and 3D</a>
-    <a href="https://account.filescape.app/">Your licence</a>
-    <a href="/terms">Terms</a>
-    <a href="/privacy">Privacy</a>
-    <a href="/refunds">Refunds</a>
-    <a href="/contact">Contact</a>
-    <span class="ver">© 2026 Filescape</span>
+  <div class="wrap">
+    <div class="foot-cols">
+      <div class="foot-brand">
+        <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+        <p>See your files differently. Free for Windows, macOS and Linux.</p>
+      </div>
+      <nav class="foot-col" aria-label="Product">
+        <h2>Product</h2>
+        <a href="/#features">Features</a>
+        <a href="/formats">File previews</a>
+        <a href="/ai-models">AI models</a>
+        <a href="/#pricing">Pricing</a>
+      </nav>
+      <nav class="foot-col" aria-label="Solutions">
+        <h2>Solutions</h2>
+        <a href="/vfx">VFX, 3D and creative</a>
+      </nav>
+      <nav class="foot-col" aria-label="Resources">
+        <h2>Resources</h2>
+        <a href="/whats-new">What's new</a>
+        <a href="/#download">Downloads</a>
+        <a href="/formats">Supported formats</a>
+        <a href="/mac">Opening it on a Mac</a>
+      </nav>
+      <nav class="foot-col" aria-label="Company">
+        <h2>Company</h2>
+        <a href="/about">About</a>
+        <a href="/security">Security</a>
+        <a href="/contact">Contact and support</a>
+        <a href="https://account.filescape.app/">Your licence</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/refunds">Refunds</a>
+      </nav>
+    </div>
+    <p class="ver">© 2026 Filescape</p>
   </div>
 </footer>
+<script>
+// Prices come from /config.js on every page, so ending the launch price is one edit there.
+(() => {
+  const c = window.FILESCAPE || {};
+  if (!c.priceLabel) return;
+  document.querySelectorAll(".js-price").forEach(e => { e.textContent = c.priceLabel; });
+  if (!c.listPriceLabel) document.querySelectorAll(".js-list, .js-launch").forEach(e => e.remove());
+  else document.querySelectorAll(".js-list").forEach(e => { e.textContent = c.listPriceLabel; });
+})();
+</script>

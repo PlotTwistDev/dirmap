@@ -57,6 +57,8 @@ pub(super) struct AskState {
     pub gpu_layers: (u32, u32),
     /// The context the loaded model has: the one asked for, or less when the model is shorter.
     pub(super) actual_context: u32,
+    /// The loaded model can look at pictures: its vision projector loaded with it.
+    pub(super) vision: bool,
     /// The last thing that went wrong.
     pub(super) problem: Option<String>,
     /// "Get a small model" is on screen.
@@ -128,7 +130,12 @@ pub(super) struct Attached {
     pub(super) notes: Vec<String>,
     /// Files sent with numbered lines, and how many, to check references against.
     pub(super) lines: Vec<(PathBuf, usize)>,
+    /// Pictures shown to the model with the question (a model that can see).
+    pub(super) pictures: Vec<PathBuf>,
 }
+
+/// The most pictures shown with one question: each takes hundreds of tokens of context.
+const PICTURES_MAX: usize = 4;
 
 /// Files or folders the next question is about.
 pub(super) struct About {
@@ -199,6 +206,7 @@ impl App {
 
     pub(super) fn poll_ask(&mut self, ctx: &egui::Context) {
         self.poll_fetch(ctx);
+        let vision = self.ask.vision;
         for w in [Which::Main, Which::Side] {
             let c = self.ask.chat(w);
             if let Some(a) = &mut c.about
@@ -206,6 +214,10 @@ impl App {
             {
                 match rx.try_recv() {
                     Ok(f) => {
+                        // A model that can see is shown the pictures unless the user unticks it.
+                        if vision && f.readable.is_empty() && f.paths.iter().any(|p| askabout::can_show(p)) {
+                            a.read = true;
+                        }
                         a.facts = Some(f);
                         a.rx = None;
                     }
@@ -261,7 +273,9 @@ impl App {
             got = true;
             match ev {
                 Event::Loading => self.ask.phase = Phase::Loading,
-                Event::Loaded { context, seconds, layers, gpu_layers } => {
+                Event::Loaded { context, seconds, layers, gpu_layers, vision } => {
+                    self.ask.vision = vision;
+                    crate::asksuggest::set_vision(vision);
                     self.ask.lab_state.loaded_layers(layers as usize);
                     self.ask.gpu_layers = (gpu_layers, layers);
                     self.ask.phase = Phase::Idle;
@@ -308,6 +322,8 @@ impl App {
                 }
                 Event::Unloaded => {
                     self.ask.loaded = None;
+                    self.ask.vision = false;
+                    crate::asksuggest::set_vision(false);
                     self.ask.phase = Phase::Idle;
                 }
                 Event::Error(err) => {
@@ -317,6 +333,8 @@ impl App {
                     // A failed load leaves nothing loaded; a failed answer keeps what was written.
                     if self.ask.phase == Phase::Loading {
                         self.ask.loaded = None;
+                        self.ask.vision = false;
+                        crate::asksuggest::set_vision(false);
                     }
                     let c = self.ask.chat(self.ask.asker);
                     if let Some(t) = c.answering.take().filter(|t| !t.is_empty()) {
@@ -540,10 +558,15 @@ impl App {
         c.answering = Some(String::new());
         // What the question is about goes with it, once; the files' contents only when ticked.
         let mut reading = None;
+        let vision = self.ask.vision;
+        let c = self.ask.chat(w);
         if let Some(About { facts: Some(f), read, .. }) = c.about.take() {
             let i = c.conversation.len() - 1;
             let reads = read && !f.readable.is_empty();
-            c.attached.insert(i, Attached { label: f.label.clone(), text: f.text.clone(), paths: f.paths.clone(), read: reads, measured: f.text.len(), notes: f.notes.clone(), lines: Vec::new() });
+            // The pictures chosen themselves (not ones inside a folder), when the model can see.
+            let pictures: Vec<PathBuf> = if vision && read { f.paths.iter().filter(|p| askabout::can_show(p)).take(PICTURES_MAX).cloned().collect() } else { Vec::new() };
+            let read = reads || !pictures.is_empty();
+            c.attached.insert(i, Attached { label: f.label.clone(), text: f.text.clone(), paths: f.paths.clone(), read, measured: f.text.len(), notes: f.notes.clone(), lines: Vec::new(), pictures });
             if reads {
                 reading = Some(f.readable);
             }
@@ -566,6 +589,7 @@ impl App {
     /// Sends `w`'s conversation to the model.
     fn dispatch(&mut self, w: Which) {
         let mut conv = vec![Message { role: Role::System, text: SYSTEM.into() }];
+        let vision = self.ask.vision;
         let c = self.ask.chat(w);
         conv.extend(c.conversation.iter().cloned().enumerate().map(|(i, mut m)| {
             // Earlier thinking isn't sent back: models are trained without it.
@@ -577,9 +601,12 @@ impl App {
             }
             m
         }));
+        // Pictures go with their questions, in order; `conv` starts with the system message.
+        let mut pictures: Vec<(usize, PathBuf)> = if vision { c.attached.iter().flat_map(|(i, a)| a.pictures.iter().map(move |p| (i + 1, p.clone()))).collect() } else { Vec::new() };
+        pictures.sort_by_key(|(i, _)| *i);
         let sampling = llm::Sampling { temperature: self.ask.temperature(), ..Default::default() };
         if let Some(e) = &self.ask.engine {
-            e.send(Request::Ask { conversation: conv, sampling });
+            e.send(Request::Ask { conversation: conv, sampling, pictures });
         }
     }
 
@@ -851,6 +878,7 @@ impl App {
         });
         ui.add_space(4.0);
         let mut drop_about = false;
+        let vision = self.ask.vision;
         if let Some(a) = &mut self.ask.main.about {
             ui.horizontal(|ui| {
                 match &a.facts {
@@ -861,7 +889,11 @@ impl App {
                     Some(f) => {
                         ui.label(format!("📎 About {}", f.label)).on_hover_text("Sent with your next question: names, sizes and dates, not what's inside the files");
                         ui.weak(&f.summary);
-                        if !f.readable.is_empty() {
+                        let pics = if vision { f.paths.iter().filter(|p| askabout::can_show(p)).count() } else { 0 };
+                        if f.readable.is_empty() && pics > 0 {
+                            ui.checkbox(&mut a.read, if pics == 1 { "Show the picture to the model" } else { "Show the pictures to the model" })
+                                .on_hover_text("Off: the model sees only names, sizes and dates.\nOn: the model looks at the pictures for this question, on this computer.");
+                        } else if !f.readable.is_empty() {
                             let what = if f.readable.len() == 1 { "Include the file's contents" } else { "Include the files' contents" };
                             ui.checkbox(&mut a.read, what).on_hover_text(
                                 "Off: the model sees only names, sizes and dates.\nOn: Filescape reads the start of the chosen text files, for this question only. Files that are only in the cloud aren't read.",
@@ -1258,5 +1290,5 @@ fn check_fit(m: &Model, context: u32, gpu: bool) -> Result<llm::LoadRequest, Str
             _ => 0,
         };
     }
-    Ok(llm::LoadRequest { path: f.path.clone(), context, gpu_layers })
+    Ok(llm::LoadRequest { path: f.path.clone(), context, gpu_layers, projector: crate::models::projector(m) })
 }

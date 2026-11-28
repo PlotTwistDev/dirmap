@@ -1,0 +1,73 @@
+<main id="top" class="doc">
+<div class="wrap doc-wrap">
+<section class="doc-hero"><h1>Contact us</h1><p>Questions, bug reports, licence problems, refunds or privacy requests: write here and we'll reply by email, usually within a day or two.</p></section>
+<div class="card"><h2>Before you write</h2><ul><li>Lost your serial number, or need to free up a computer? <a href="https://account.filescape.app/">account.filescape.app</a> does both straight away.</li><li>Refunds within 14 days can also be asked for from the link in your Paddle receipt (see the <a href="/refunds">refund policy</a>).</li></ul></div>
+<p class="note" id="done" hidden role="status">Thanks, your message has been sent. We'll reply to the email address you gave.</p>
+<p class="note" id="err" hidden role="alert"></p>
+<form id="contact" class="form" method="post" action="https://api.filescape.app/v1/contact">
+<label><span>Your name <span class="mute">(optional)</span></span><input name="name" autocomplete="name" maxlength="100"></label>
+<label><span>Email address <span class="mute">(we reply here)</span></span><input name="email" type="email" required autocomplete="email" maxlength="200"></label>
+<label>Topic<select name="topic" id="topic"><option>Question</option><option>Licence or purchase</option><option>Bug report</option><option>Feature request</option><option>Refund</option><option>Privacy request</option><option>Other</option></select></label>
+<label><span>Message <span class="mute">(for a licence, include your serial number or the email you bought with; for a bug, your Filescape version and operating system)</span></span><textarea name="message" required minlength="10" maxlength="5000" rows="9"></textarea></label>
+<label class="hp" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+<input type="hidden" name="elapsed" id="elapsed">
+<div id="turnstile"></div>
+<div><button class="btn btn-key" id="send">Send message</button></div>
+<p class="mute">We use what you send only to answer you. See the <a href="/privacy">privacy policy</a>.</p>
+</form>
+</div>
+</main>
+<script>
+(() => {
+  "use strict";
+  const c = window.FILESCAPE || {};
+  const f = document.getElementById("contact"), done = document.getElementById("done"), err = document.getElementById("err"), send = document.getElementById("send");
+  const url = c.contactUrl || f.action;
+  f.action = url;
+  const t0 = Date.now();
+  const messages = {
+    email: "Please enter the email address we should reply to.",
+    message: "Please write a message (between 10 and 5,000 characters).",
+    challenge: "The spam check didn't pass. Please try again.",
+    too_many: "You've sent several messages in the last hour. Please wait a while before sending another.",
+    busy: "The contact form is very busy right now. Please try again tomorrow.",
+  };
+  const fail = (m) => { err.textContent = m; err.hidden = false; done.hidden = true; };
+  const q = new URLSearchParams(location.search);
+  const topics = { licence: "Licence or purchase", refund: "Refund", privacy: "Privacy request", bug: "Bug report", feature: "Feature request" };
+  if (topics[q.get("topic")]) document.getElementById("topic").value = topics[q.get("topic")];
+  if (q.get("sent")) { done.hidden = false; f.hidden = true; }
+  if (q.get("error")) fail(messages[q.get("error")] || "Your message couldn't be sent. Please try again.");
+  if (c.turnstileSiteKey) {
+    const box = document.getElementById("turnstile");
+    box.className = "cf-turnstile";
+    box.dataset.sitekey = c.turnstileSiteKey;
+    box.dataset.theme = "dark";
+    const s = document.createElement("script");
+    s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+    s.async = true;
+    document.head.appendChild(s);
+  }
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    document.getElementById("elapsed").value = String(Date.now() - t0);
+    send.disabled = true;
+    send.textContent = "Sending…";
+    try {
+      const r = await fetch(url, { method: "POST", headers: { accept: "application/json" }, body: new URLSearchParams(new FormData(f)) });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.ok) {
+        f.hidden = true; err.hidden = true; done.hidden = false;
+        done.scrollIntoView({ block: "center" });
+      } else {
+        fail(j.message || messages[j.error] || "Your message couldn't be sent. Please try again in a few minutes.");
+        if (window.turnstile) window.turnstile.reset();
+      }
+    } catch (_) {
+      fail("Your message couldn't be sent (no connection?). Please try again in a few minutes.");
+    }
+    send.disabled = false;
+    send.textContent = "Send message";
+  });
+})();
+</script>

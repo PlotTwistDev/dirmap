@@ -99,8 +99,9 @@ From the top, the tab shows:
   **Find the errors**; code gets **Explain this code** and **Find possible issues**; a spreadsheet
   gets **Explain the columns**; a folder gets **What is this folder?** and **What's using the
   space?**. Questions that need a file's text are only offered when Filescape can read it: plain
-  text, code, PDF, EPUB, Word, PowerPoint, OpenDocument and Excel files. Describing what's in a picture needs a
-  model that can see images, which Filescape can't run yet.
+  text, code, PDF, EPUB, Word, PowerPoint, OpenDocument and Excel files. A picture gets
+  **Describe this picture** and **What text is in it?** when the loaded model can see images
+  (see [Asking about pictures](#asking-about-pictures)).
 - **The conversation**, with **Copy** and **Based on** under each answer, as below.
 - **The question box**. **Enter** sends; follow-up questions keep what the chat is about. **…**
   has **New chat** and **Open in AI Models**, which carries the conversation on in the AI Models
@@ -116,6 +117,27 @@ about the new item from now on), **Add** (ask about it too) or **Keep this chat*
 
 The Files chat and the AI Models chat are separate conversations sharing one model. The model
 answers one question at a time; if it's busy in the other one, the tab says so.
+
+### Asking about pictures
+
+Some models can look at pictures as well as read: Gemma 3, Qwen2.5-VL, LLaVA, SmolVLM and others.
+A model like this comes as two files: the model, and a smaller *vision projector* (often named
+`mmproj-….gguf`) that turns a picture into something the model understands. Filescape loads the
+projector with the model when it finds one in the same folder (how LM Studio and Hugging Face
+downloads keep them), or among an Ollama model's own files. Several projectors in one folder: the
+one whose name is closest to the model's.
+
+With such a model loaded, selecting a picture offers **Describe this picture**, **What text is in
+it?** and **What could this be?**, and **Show the picture to the model** is ticked. Untick it and
+the model gets only the picture's name, size and dates. Pictures are shrunk to 1,024 pixels on
+their longest side before the model sees them, and up to four go with one question. PNG, JPEG,
+GIF, WebP, BMP, TIFF, TGA, QOI, JPEG XL and ICO pictures can be shown; HEIC and camera raw files,
+and pictures only in the cloud, can't, so questions about them use their names and details.
+
+Without a projector, a model can't see: the tab says so under the suggestions, and questions
+about a picture use its name and details. Each picture takes several hundred tokens of the
+model's context; if the pictures and the question don't fit, Ask AI says so and suggests a longer
+context or fewer pictures. As with files, the picture never leaves this computer.
 
 ### Several items at once
 
