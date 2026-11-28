@@ -60,6 +60,29 @@ impl Sequence {
         self.suffix.rsplit_once('.').map_or("", |(_, e)| e)
     }
 
+    /// Made of pictures (renders, scans, stills), so it's a run of frames: a gap is a missing
+    /// frame. Numbered data files (`.npz`, `.json`, simulation caches…) still group, but as a
+    /// plain numbered set.
+    pub fn is_pictures(&self) -> bool {
+        is_picture_ext(self.extension())
+    }
+
+    /// The frame player can show it: pictures in a format it decodes.
+    pub fn playable(&self) -> bool {
+        self.is_pictures() && crate::player::can_play(self.extension())
+    }
+
+    /// "frames" for pictures, "files" for a numbered set.
+    pub fn unit(&self) -> &'static str {
+        if self.is_pictures() { "frames" } else { "files" }
+    }
+
+    /// The note for the numbers missing between first and last: "1,233 missing" for frames,
+    /// "1,233 numbers skipped" for a numbered set, where gaps are often expected.
+    pub fn missing_text(&self, count: &str) -> String {
+        if self.is_pictures() { format!("{count} missing") } else { format!("{count} numbers skipped") }
+    }
+
     pub fn average(&self) -> u64 {
         self.bytes / self.frames.max(1)
     }
@@ -82,6 +105,19 @@ impl Sequence {
 }
 
 const MAX_GAPS: usize = 20;
+
+/// Picture formats render, scan and photo sequences come in, playable or not.
+const PICTURE_EXTS: &[&str] = &[
+    "exr", "sxr", "dpx", "cin", "png", "jpg", "jpeg", "jpe", "tif", "tiff", "tx", "tga", "bmp", "gif", "webp", "hdr",
+    "rgbe", "pic", "sgi", "rgb", "rgba", "bw", "iff", "jp2", "j2k", "j2c", "jpx", "psd", "heic", "heif", "avif", "jxl",
+    "dng", "cr2", "cr3", "nef", "arw", "orf", "raf", "rw2", "ppm", "pgm", "pbm", "pnm", "pfm", "qoi", "ari", "r3d",
+    "dcm", "fits", "fit", "ktx", "dds",
+];
+
+/// Whether an extension (without the dot, any case) is a picture format.
+pub fn is_picture_ext(ext: &str) -> bool {
+    PICTURE_EXTS.iter().any(|e| e.eq_ignore_ascii_case(ext))
+}
 
 /// Make a literal name part safe to use in a pattern.
 pub fn escape(s: &str) -> String {
@@ -267,6 +303,25 @@ mod tests {
         assert!(f.matches("shot010_comp.1002.exr"));
         assert!(!f.matches("shot010_comp.10002.exr"));
         assert!(!f.matches("shot011_comp.1002.exr"));
+    }
+
+    #[test]
+    fn pictures_and_numbered_data() {
+        let names = |ext: &str| (1..=4).map(|i| (format!("a.{i:04}.{ext}"), 1u64)).collect::<Vec<_>>();
+        let kind = |ext: &str| {
+            let n = names(ext);
+            let r: Vec<(&str, u64)> = n.iter().map(|(a, b)| (a.as_str(), *b)).collect();
+            let s = in_names(&r, 3).remove(0).0;
+            (s.is_pictures(), s.playable(), s.unit())
+        };
+        assert_eq!(kind("exr"), (true, true, "frames"));
+        assert_eq!(kind("DPX"), (true, true, "frames"));
+        assert_eq!(kind("png"), (true, true, "frames"));
+        // A picture format the player can't decode: frames, but no player.
+        assert_eq!(kind("cin"), (true, false, "frames"));
+        assert_eq!(kind("npz"), (false, false, "files"));
+        assert_eq!(kind("json"), (false, false, "files"));
+        assert_eq!(kind("bgeo"), (false, false, "files"));
     }
 
     #[test]
