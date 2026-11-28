@@ -201,11 +201,13 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
             None => ("DELETE FROM settings WHERE key = 'latest_release'", vec![]),
         };
         let what = m.map_or("latest release: none".to_string(), |m| format!("latest release: {} ({})", m.version, crate::web::date(m.released_at)));
+        let mut stmts = vec![set, ("INSERT INTO events (licence_id, at, what, detail, actor) VALUES (NULL, ?1, 'setting', ?2, ?3)", vec![self.now.into(), what.into(), actor.into()])];
+        // An announced release joins the download lists too.
+        if let Some(m) = m {
+            stmts.push(crate::catalogue::upsert_stmt(m, self.now, actor));
+        }
         self.db
-            .batch(vec![
-                set,
-                ("INSERT INTO events (licence_id, at, what, detail, actor) VALUES (NULL, ?1, 'setting', ?2, ?3)", vec![self.now.into(), what.into(), actor.into()]),
-            ])
+            .batch(stmts)
             .await
             .map(|_| ())
     }

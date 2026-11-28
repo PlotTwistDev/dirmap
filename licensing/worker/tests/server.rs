@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 const T0: i64 = 1_795_392_000; // 23 Nov 2026
-const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql"), include_str!("../migrations/0004_maintenance.sql"), include_str!("../migrations/0005_renewals.sql"), include_str!("../migrations/0006_account_dashboard.sql")];
+const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql"), include_str!("../migrations/0004_maintenance.sql"), include_str!("../migrations/0005_renewals.sql"), include_str!("../migrations/0006_account_dashboard.sql"), include_str!("../migrations/0007_release_catalogue.sql")];
 
 /// Gives way once, so two requests run with `join` interleave like concurrent Workers.
 struct YieldOnce(bool);
@@ -1389,4 +1389,34 @@ fn sign_in_and_serial_requests_are_limited_per_network() {
     assert!(post("198.51.100.1", "/login", "ada").body.contains("is on its way"), "other networks aren't affected");
     w.now.set(T0 + 3601);
     assert!(post("203.0.113.9", "/login", "ada").body.contains("is on its way"));
+}
+
+
+#[test]
+fn every_version_is_listed_and_lapsed_licences_get_the_newest_one_they_unlock() {
+    let w = world();
+    bought(&w, "txn_buy1");
+    // An older version added without announcing it, then the current one announced.
+    let r = w.admin("/releases", &format!("version=2.4.0&released_at={}&list_only=1", T0 - 30 * DAY));
+    assert!(r.header("location").unwrap().contains("download%20lists"), "{:?}", r.header("location"));
+    assert!(pollster::block_on(w.cx().latest_release()).unwrap().is_none(), "list only doesn't announce");
+    w.admin("/releases", &format!("version=2.5.0&released_at={}&macos=https%3A%2F%2Fdownloads.filescape.app%2Fspecial.dmg", T0));
+    // Anyone can see the list; each version's own files, or the link the release gave.
+    let page = w.call("GET", "account.filescape.app", "/versions", &[], "");
+    assert!(page.body.contains("2.4.0") && page.body.contains("2.5.0"), "{}", page.body);
+    assert!(page.body.contains("https://downloads.filescape.app/2.4.0/windows") && page.body.contains("https://downloads.filescape.app/special.dmg"));
+    assert!(page.body.contains("https://downloads.filescape.app/2.4.0/linux-deb"));
+    // Hidden versions drop off the lists but stay on the admin page.
+    w.admin("/releases", "hide=2.4.0");
+    assert!(!w.call("GET", "account.filescape.app", "/versions", &[], "").body.contains("2.4.0"));
+    assert!(w.call("GET", "localhost", "/admin/releases", &[], "").body.contains("Hidden"));
+    w.admin("/releases", "show=2.4.0");
+    // A year and more later, maintenance has ended and 2.6.0 is out: the dashboard points at 2.5.0.
+    w.now.set(T0 + 400 * DAY);
+    w.admin("/releases", &format!("version=2.6.0&released_at={}", T0 + 399 * DAY));
+    let cookie = sign_in(&w);
+    let home = w.call("GET", "account.filescape.app", "/", &[("cookie", &cookie)], "");
+    let i = home.body.find("newest version your licence unlocks").expect("unlocked line");
+    assert!(home.body[i..].contains("Filescape 2.5.0"), "{}", &home.body[i..i + 400]);
+    assert!(home.body.contains("Earlier versions"));
 }
