@@ -40,6 +40,9 @@ pub(super) struct AskState {
     pub(super) asker: Which,
     /// What the Files chat is about: the files and folders given to it so far.
     pub(super) side_ctx: Vec<PathBuf>,
+    /// Send the Files chat's draft as soon as what it's about has been gathered (a question
+    /// picked from the right-click menu).
+    pub(super) side_send: bool,
     /// One line on the Files chat's context ("file, 6.9 KB"), kept after the question has gone.
     pub(super) side_line: String,
     /// A selection the user chose to keep out of the Files chat ("Keep this chat").

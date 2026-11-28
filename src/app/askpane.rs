@@ -7,10 +7,9 @@
 use super::ask::{self, Phase, Which};
 use super::*;
 use crate::askabout;
-use crate::asksuggest::{self, Mark};
+use crate::asksuggest::{self, Mark, Needs, Preset};
 use crate::kit::{self, Icon, Tone};
 use crate::llm::Role;
-use crate::fsys::listing::Entry;
 use std::path::Path;
 
 /// The standard disclaimer, under every Ask AI conversation.
@@ -88,13 +87,77 @@ impl App {
         }
     }
 
+    /// From the right-click menu's Ask AI submenu: a conversation about `paths` in the preview
+    /// pane, asking `preset`'s question as soon as the model has what it needs. Choosing it from
+    /// the menu starts a new chat when the current one is about something else.
+    pub(super) fn files_ask_preset(&mut self, paths: Vec<PathBuf>, preset: Preset) {
+        if paths.is_empty() {
+            return;
+        }
+        self.files.prefs.preview = true;
+        self.files.prefs.ask_tab = true;
+        let same = self.ask.side_ctx == paths;
+        if !same && !(self.ask.phase == Phase::Answering && self.ask.asker == Which::Side) {
+            self.ask.side.clear();
+        }
+        self.side_gather(paths, preset.needs());
+        match preset.question() {
+            Some(q) => {
+                self.ask.side.draft = q.to_string();
+                self.ask.side_send = true;
+            }
+            None => self.ask.side_send = false,
+        }
+    }
+
     /// Makes `paths` what the Files chat's next question is about, and remembers them as its
-    /// context. A single file Filescape can read is read; folders only by names and sizes.
+    /// context. Files Filescape can read are read; folders only by names and sizes.
     fn side_about(&mut self, paths: Vec<PathBuf>) {
-        let read = paths.len() == 1 && askabout::can_read(&paths[0]);
+        self.side_gather(paths, Needs::Facts);
+    }
+
+    /// Gathers what the model is told about `paths` off the UI thread: from the Storage Analysis
+    /// scan when it covers them all (sizes include everything inside folders), otherwise from
+    /// the folder listings. `needs` says what else goes with it.
+    fn side_gather(&mut self, paths: Vec<PathBuf>, needs: Needs) {
+        let all_files_readable = paths.iter().all(|p| !p.is_dir()) && paths.iter().any(|p| askabout::can_read(p));
+        let read = match needs {
+            Needs::Facts => all_files_readable,
+            Needs::Contents => paths.iter().any(|p| !p.is_dir()),
+            Needs::FolderDocuments => true,
+            Needs::Siblings => false,
+        };
         let budget = self.ask.context() as usize * 3 / 4;
-        let p = paths.clone();
-        self.gather_about(Which::Side, move || askabout::from_disk(&p, budget));
+        let tree = self.tree.clone().filter(|_| self.job.is_none()).map(|t| (t, self.scanned_path.clone()));
+        let mut asked = paths.clone();
+        if needs == Needs::Siblings
+            && let Some(parent) = paths.first().and_then(|p| p.parent())
+        {
+            asked.push(parent.to_path_buf());
+        }
+        self.gather_about(Which::Side, move || {
+            let mut f = match &tree {
+                Some((t, root)) => {
+                    let found: Option<Vec<(PathBuf, Vec<u32>)>> = asked.iter().map(|p| askabout::tree_index(t, root, p).map(|i| (p.clone(), i))).collect();
+                    match found {
+                        Some(v) => {
+                            let nodes: Vec<(PathBuf, &crate::scan::Node)> = v.iter().filter_map(|(p, i)| t.at(i).map(|n| (p.clone(), n))).collect();
+                            askabout::from_tree(&nodes, budget)
+                        }
+                        None => askabout::from_disk(&asked, budget),
+                    }
+                }
+                None => askabout::from_disk(&asked, budget),
+            };
+            if needs == Needs::FolderDocuments
+                && let Some(d) = asked.first()
+            {
+                f.readable = askabout::documents_in(d);
+                // The documents read are sources of the answer too.
+                f.paths.extend(f.readable.iter().cloned());
+            }
+            f
+        });
         if let Some(a) = &mut self.ask.side.about {
             a.read = read;
         }
@@ -103,23 +166,22 @@ impl App {
         self.ask.side_ctx = paths;
     }
 
-    /// The Ask AI tab of the Files preview pane. `target` is the item under the cursor.
-    pub(super) fn files_ask_pane(&mut self, ui: &mut egui::Ui, target: Option<(PathBuf, Entry)>) {
+    /// The Ask AI tab of the Files preview pane. `selection` is what's selected in the list (or
+    /// the item under the cursor).
+    pub(super) fn files_ask_pane(&mut self, ui: &mut egui::Ui, selection: Vec<PathBuf>) {
         let t = kit::tokens(ui);
         let pal = style::pal(ui);
         self.ensure_models();
         // Before the first question the context follows the selection; after it, a change is
         // offered, never made silently.
-        let selected = target.as_ref().map(|(p, _)| p.clone());
         let fresh = self.ask.side.conversation.is_empty() && self.ask.side.answering.is_none();
-        let mut changed: Option<PathBuf> = None;
-        if let Some(p) = &selected
-            && !self.ask.side_ctx.contains(p)
-        {
+        let mut changed: Vec<PathBuf> = Vec::new();
+        let differs = !selection.is_empty() && selection != self.ask.side_ctx && !(fresh && self.ask.side_send);
+        if differs {
             if fresh {
-                self.side_about(vec![p.clone()]);
-            } else if self.ask.side_skip.as_ref() != Some(p) {
-                changed = Some(p.clone());
+                self.side_about(selection.clone());
+            } else if self.ask.side_skip.as_ref() != selection.first() && !selection.iter().all(|p| self.ask.side_ctx.contains(p)) {
+                changed = selection.clone();
             }
         }
         if self.ask.offering() {
@@ -130,7 +192,7 @@ impl App {
         // The context: what the conversation is about.
         let ctx = self.ask.side_ctx.clone();
         if let Some(f) = self.ask.side.about.as_ref().and_then(|a| a.facts.as_ref())
-            && ctx.len() == 1
+            && f.paths.starts_with(&ctx)
         {
             self.ask.side_line = f.summary.clone();
         }
@@ -150,9 +212,9 @@ impl App {
                 let n = ctx.len();
                 let sub = match (&facts, n) {
                     (_, 0) => "Select a file or folder to ask about it".to_string(),
-                    (Some(f), 1) => f.clone(),
-                    (_, 1) => String::new(),
-                    (_, n) => format!("{n} items in context"),
+                    (Some(f), _) => f.clone(),
+                    (None, 1) => String::new(),
+                    (None, n) => format!("{n} items in context"),
                 };
                 ui.label(egui::RichText::new(sub).size(11.5).color(t.weak)).on_hover_text(ctx.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"));
             });
@@ -162,13 +224,33 @@ impl App {
                 }
             });
         });
+        if ctx.len() > 1 {
+            // Exactly what the conversation covers.
+            egui::CollapsingHeader::new(egui::RichText::new(format!("Included ({})", ctx.len())).size(12.0)).id_salt("files-ask-included").show(ui, |ui| {
+                for p in ctx.iter().take(40) {
+                    let dir = p.is_dir();
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::hover());
+                        crate::kit::icons::paint(ui.painter(), r, if dir { Icon::Folder } else { Icon::File }, t.weak);
+                        ui.add(egui::Label::new(egui::RichText::new(name_of(p)).size(12.0)).truncate()).on_hover_text(p.display().to_string());
+                    });
+                }
+                if ctx.len() > 40 {
+                    ui.label(egui::RichText::new(format!("and {} more", ctx.len() - 40)).size(12.0).color(t.weak));
+                }
+            });
+        }
         ui.add_space(4.0);
 
         // A different item selected during a conversation.
         let mut choice = None;
-        if let Some(p) = &changed {
+        if !changed.is_empty() {
+            let what = match changed.as_slice() {
+                [one] => name_of(one),
+                many => format!("{} items", many.len()),
+            };
             egui::Frame::new().fill(t.accent_soft).corner_radius(6.0).inner_margin(egui::Margin::symmetric(8, 6)).show(ui, |ui| {
-                ui.add(egui::Label::new(format!("Now selected: {}", name_of(p))).truncate());
+                ui.add(egui::Label::new(format!("Now selected: {what}")).truncate());
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     if ui.small_button("New chat").on_hover_text("Start again, about this item").clicked() {
@@ -248,6 +330,11 @@ impl App {
 
         // The conversation, then the question box and the disclaimer at the bottom.
         let ready = loaded.is_some();
+        // A question picked from the right-click menu goes as soon as the model has what it needs.
+        if self.ask.side_send && ready && self.ask.phase == Phase::Idle && self.ask.side.about.as_ref().is_some_and(|a| a.facts.is_some()) {
+            self.ask.side_send = false;
+            self.send_question(Which::Side);
+        }
         let here = self.ask.asker == Which::Side;
         let busy_elsewhere = self.ask.phase == Phase::Answering && !here;
         let answering = self.ask.phase == Phase::Answering && here;
@@ -262,9 +349,13 @@ impl App {
             if c.conversation.is_empty() && c.answering.is_none() {
                 if let Some(p) = ctx.first() {
                     let is_dir = ctx.len() == 1 && p.is_dir();
-                    ui.label(if is_dir { "What would you like to know about this folder?" } else { "What would you like to know about this file?" });
+                    ui.label(match (ctx.len(), is_dir) {
+                        (1, true) => "What would you like to know about this folder?",
+                        (1, false) => "What would you like to know about this file?",
+                        _ => "What would you like to know about these?",
+                    });
                     ui.add_space(4.0);
-                    let sugg = if ctx.len() == 1 { asksuggest::for_path(p, is_dir) } else { Vec::new() };
+                    let sugg = if ctx.len() == 1 { asksuggest::for_path(p, is_dir) } else { asksuggest::for_many(ctx.iter().all(|p| !p.is_dir())) };
                     for s in sugg {
                         let w = ui.available_width();
                         let (rect, r) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
@@ -340,6 +431,7 @@ impl App {
         egui::Frame::new().fill(pal.chrome).corner_radius(8.0).stroke(egui::Stroke::new(1.0, t.card_border)).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
             let hint = match (ready, sort) {
                 (false, _) => "Load a model to ask a question",
+                (true, Some(_)) if ctx.len() > 1 => "Ask anything about these items…",
                 (true, Some(s)) => asksuggest::hint(s),
                 (true, None) => "Ask a question…",
             };
@@ -403,30 +495,27 @@ impl App {
         match choice {
             Some(0) => {
                 self.ask.side.clear();
-                self.side_about(changed.clone().into_iter().collect());
+                self.side_about(changed);
             }
-            Some(1) => self.side_about(changed.clone().into_iter().collect()),
+            Some(1) => self.side_about(changed),
             Some(2) => {
-                if let Some(p) = changed.clone() {
-                    let budget = self.ask.context() as usize * 3 / 4;
-                    let q = vec![p.clone()];
-                    let read = askabout::can_read(&p);
-                    self.gather_about(Which::Side, move || askabout::from_disk(&q, budget));
-                    if let Some(a) = &mut self.ask.side.about {
-                        a.read = read;
-                    }
-                    self.ask.side_ctx.push(p);
-                }
+                // The new items go with the next question; the chat is about all of them.
+                let mut all = self.ask.side_ctx.clone();
+                let new: Vec<PathBuf> = changed.into_iter().filter(|p| !all.contains(p)).collect();
+                self.side_about(new.clone());
+                all.extend(new);
+                self.ask.side_ctx = all;
             }
-            Some(_) => self.ask.side_skip = changed.clone(),
+            Some(_) => self.ask.side_skip = changed.first().cloned(),
             None => {}
         }
         if new_chat && !answering {
             self.ask.side.clear();
             self.ask.side.about = None;
             self.ask.side_ctx.clear();
-            if let Some(p) = selected {
-                self.side_about(vec![p]);
+            self.ask.side_send = false;
+            if !selection.is_empty() {
+                self.side_about(selection);
             }
         }
         if expand {

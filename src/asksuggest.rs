@@ -154,6 +154,128 @@ pub fn for_path(path: &Path, is_dir: bool) -> Vec<Suggestion> {
     v
 }
 
+/// Ask AI is shown in the Files workspace (Settings › Files › Ask AI). Set from the settings,
+/// read by the right-click menus, which don't see the settings themselves.
+static SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_shown(on: bool) {
+    SHOWN.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn shown() -> bool {
+    SHOWN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// What the right-click menu's Ask AI submenu asks. `Ask` opens the conversation with nothing
+/// asked yet; the others ask straight away.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Preset {
+    Ask,
+    Summarise,
+    Explain,
+    FolderContents,
+    FolderDocuments,
+    FolderStructure,
+    FolderUnneeded,
+    FolderPurpose,
+    FolderStorage,
+    FolderRelated,
+    ManySummarise,
+    ManyCompare,
+    ManyCommon,
+}
+
+/// What to give the model for a preset, beyond names, sizes and dates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Needs {
+    /// Names, sizes and dates only.
+    Facts,
+    /// The text of the chosen files.
+    Contents,
+    /// The text of the documents directly inside the folder.
+    FolderDocuments,
+    /// The folder, and what sits beside it in its parent folder.
+    Siblings,
+}
+
+impl Preset {
+    /// The menu item, for one file, one folder or several items.
+    pub fn label(self) -> &'static str {
+        match self {
+            Preset::Ask => "Ask About It…",
+            Preset::Summarise => "Summarise",
+            Preset::Explain => "Explain Its Contents",
+            Preset::FolderContents => "Explain Its Contents",
+            Preset::FolderDocuments => "Summarise Documents",
+            Preset::FolderStructure => "Understand the Folder Structure",
+            Preset::FolderUnneeded => "Identify Possibly Unnecessary Files",
+            Preset::FolderPurpose => "Explain What This Project Is For",
+            Preset::FolderStorage => "Analyse Storage Use",
+            Preset::FolderRelated => "Find Related Files",
+            Preset::ManySummarise => "Summarise These",
+            Preset::ManyCompare => "Compare These",
+            Preset::ManyCommon => "What Do These Have in Common?",
+        }
+    }
+
+    pub fn question(self) -> Option<&'static str> {
+        Some(match self {
+            Preset::Ask => return None,
+            Preset::Summarise => "Summarise this file.",
+            Preset::Explain => "Explain what this file contains, in plain English.",
+            Preset::FolderContents => "Explain what the items in this folder are.",
+            Preset::FolderDocuments => "Summarise each of the documents in this folder in a line or two, naming each one.",
+            Preset::FolderStructure => "Explain how this folder is organised: what each part is for and how they fit together.",
+            Preset::FolderUnneeded => "Which items here might be unnecessary (caches, old builds, downloads, duplicates)? These are only guesses from names and sizes; say how sure you are.",
+            Preset::FolderPurpose => "What is this project or folder for, judging by what's in it?",
+            Preset::FolderStorage => "What is using the most space in this folder, and what could I look at to free some?",
+            Preset::FolderRelated => "Which of the other items beside this folder look related to it, and why?",
+            Preset::ManySummarise => "Summarise each of these, naming each one.",
+            Preset::ManyCompare => "Compare these: what are the main differences and similarities?",
+            Preset::ManyCommon => "What do these have in common, and how are they related?",
+        })
+    }
+
+    pub fn needs(self) -> Needs {
+        match self {
+            Preset::Summarise | Preset::Explain | Preset::ManySummarise | Preset::ManyCompare | Preset::ManyCommon => Needs::Contents,
+            Preset::FolderDocuments => Needs::FolderDocuments,
+            Preset::FolderRelated => Needs::Siblings,
+            _ => Needs::Facts,
+        }
+    }
+
+    /// The submenu for one file.
+    pub const FILE: [Preset; 3] = [Preset::Ask, Preset::Summarise, Preset::Explain];
+    /// The submenu for one folder.
+    pub const FOLDER: [Preset; 8] = [
+        Preset::Ask,
+        Preset::FolderContents,
+        Preset::FolderDocuments,
+        Preset::FolderStructure,
+        Preset::FolderUnneeded,
+        Preset::FolderPurpose,
+        Preset::FolderStorage,
+        Preset::FolderRelated,
+    ];
+    /// The submenu for several items.
+    pub const MANY: [Preset; 4] = [Preset::Ask, Preset::ManySummarise, Preset::ManyCompare, Preset::ManyCommon];
+}
+
+/// The suggestions for several items at once. Reading contents is offered only when they're
+/// all files: folders are described by names and sizes.
+pub fn for_many(all_files: bool) -> Vec<Suggestion> {
+    let mut v = vec![
+        s("Summarise each of these", "Summarise each of these, naming each one.", all_files, Mark::Summary),
+        s("Compare them", "Compare these: what are the main differences and similarities?", all_files, Mark::Search),
+        s("How are they related?", "What do these have in common, and how are they related?", all_files, Mark::Chat),
+    ];
+    if !all_files {
+        v.push(s("What's using the space?", "Which of these use the most space, and what is in them?", false, Mark::Storage));
+    }
+    v
+}
+
 /// The question box's hint for `sort`.
 pub fn hint(sort: Sort) -> &'static str {
     match sort {
@@ -165,6 +287,18 @@ pub fn hint(sort: Sort) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presets_ask_something() {
+        for p in Preset::FILE.iter().chain(&Preset::FOLDER).chain(&Preset::MANY) {
+            assert_eq!(p.question().is_none(), *p == Preset::Ask, "{p:?}");
+            assert!(!p.label().is_empty());
+        }
+        // Folders are described from names and sizes, except where reading is the point.
+        assert_eq!(Preset::FolderUnneeded.needs(), Needs::Facts);
+        assert_eq!(Preset::FolderDocuments.needs(), Needs::FolderDocuments);
+        assert_eq!(Preset::ManyCompare.needs(), Needs::Contents);
+    }
 
     #[test]
     fn sorts() {

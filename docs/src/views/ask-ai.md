@@ -117,12 +117,48 @@ about the new item from now on), **Add** (ask about it too) or **Keep this chat*
 The Files chat and the AI Models chat are separate conversations sharing one model. The model
 answers one question at a time; if it's busy in the other one, the tab says so.
 
-To hide Ask AI in Files, turn off **Show Ask AI in Files** in Settings › Files.
+### Several items at once
+
+Select several files or folders and the tab is about all of them: the header says how many and
+their total size, and **Included** lists exactly which. The suggestions become **Summarise each of
+these**, **Compare them** and **How are they related?**. When they're all files Filescape can read,
+their text goes with the question; folders are described by names, sizes and dates. There's no
+limit on how many you select: what doesn't fit in the model's context is summed up or left out,
+and the answer's **Based on** says what the model was given.
+
+### From the right-click menu
+
+Right-click a file or folder in Files and open **💬 Ask AI**:
+
+| For | Items |
+|---|---|
+| A file | **Ask About This File…**, **Summarise**, **Explain Its Contents** |
+| A folder | **Ask About This Folder…**, **Explain Its Contents**, **Summarise Documents**, **Understand the Folder Structure**, **Identify Possibly Unnecessary Files**, **Explain What This Project Is For**, **Analyse Storage Use**, **Find Related Files** |
+| Several items | **Ask About These…**, **Summarise These**, **Compare These**, **What Do These Have in Common?** |
+
+Each opens the Ask AI tab about what you right-clicked. **Ask About…** leaves the question to you;
+the others ask straight away (once a model is loaded). Choosing one starts a new chat if the
+current one is about something else. **Open in Ask AI** at the bottom opens the AI Models
+workspace instead, as before.
+
+What goes with each:
+
+- Folder questions use the folder's names, sizes and dates, never the files' contents, except
+  **Summarise Documents**, which reads the text files and documents directly in the folder (not in
+  folders inside it), smallest first, as many as fit. **Based on** lists them.
+- **Find Related Files** also lists what sits beside the folder in its parent folder.
+- When Storage Analysis has scanned the folder, its sizes count everything inside, with a
+  breakdown by file type. Otherwise only what the folder holds directly is listed.
+- **Identify Possibly Unnecessary Files** gives guesses from names and sizes. Filescape never
+  deletes or moves anything because of the answer.
+
+To hide Ask AI in Files, turn off **Show Ask AI in Files** in Settings › Files. The right-click
+menu then has the single **Ask AI About This…** item, which opens the AI Models workspace.
 
 ## Asking about files and folders
 
-Right-click a file or folder in [Files](file-manager.md) or in Storage Analysis and choose **💬 Ask AI
-About This…** (**Ask AI About These…** for several items in Files). Ask AI opens with them
+Right-click a file or folder in Storage Analysis and choose **💬 Ask AI About This…**, or in
+[Files](file-manager.md) choose **💬 Ask AI › Open in Ask AI**. Ask AI opens with them
 attached to your next question, shown above the question box as **📎 About …**. Ask something like
 "What is this folder for?" or "What could I delete here?".
 
