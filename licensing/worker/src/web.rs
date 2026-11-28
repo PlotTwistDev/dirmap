@@ -134,7 +134,11 @@ button.primary{background:var(--acc);border-color:var(--acc);color:#fff}button.d
 .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;border:1px solid var(--line)}
 code,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.stats div{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px}.stats b{display:block;font-size:22px}
-.scroll{overflow-x:auto}
+.scroll{overflow-x:auto}h3{font-size:15px;margin:20px 0 6px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:12px 0}.tiles>div{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+.tiles>div>span{display:block;font-size:13px;color:var(--mute)}.tiles b{display:block;font-size:20px;margin:2px 0}.tiles small{color:var(--mute);font-size:13px}
+.bar{height:6px;border-radius:3px;background:var(--line);margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--good)}
+.pill.good{color:var(--good)}.pill.bad{color:var(--bad)}
 @media (max-width:640px){main{padding:14px 16px}th,td{padding:6px 4px}}
 "#;
 

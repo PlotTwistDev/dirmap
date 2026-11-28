@@ -74,6 +74,15 @@ impl<D: Db, N: Net> Ctx<'_, D, N> {
         Ok((changes.get(1) == Some(&1)).then_some(s))
     }
 
+    /// A new session for `email` (after it proved it gets mail, e.g. confirming an email change).
+    pub async fn new_session(&self, email: &str) -> Result<String, String> {
+        let s = token(&self.rng);
+        self.db
+            .run("INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)", vec![token_hash(&s).into(), email.into(), self.now.into(), (self.now + SESSION_LIFE).into()])
+            .await?;
+        Ok(s)
+    }
+
     /// The email a session cookie belongs to.
     pub async fn session_email(&self, req: &Req) -> Result<Option<String>, String> {
         let Some(t) = cookie(req) else { return Ok(None) };

@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 const T0: i64 = 1_795_392_000; // 23 Nov 2026
-const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql"), include_str!("../migrations/0004_maintenance.sql"), include_str!("../migrations/0005_renewals.sql")];
+const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql"), include_str!("../migrations/0004_maintenance.sql"), include_str!("../migrations/0005_renewals.sql"), include_str!("../migrations/0006_account_dashboard.sql")];
 
 /// Gives way once, so two requests run with `join` interleave like concurrent Workers.
 struct YieldOnce(bool);
@@ -103,6 +103,9 @@ impl Net for FakeNet {
                 return Ok((401, "expired key".into()));
             }
             return Ok((200, r#"{"data":{"id":"ctm_1","name":"Ada Buyer","email":"Ada@Example.com"}}"#.into()));
+        }
+        if url.ends_with("/invoice") {
+            return Ok((200, r#"{"data":{"url":"https://invoices.paddle.example/inv_1.pdf"}}"#.into()));
         }
         if url.ends_with("/cdn-cgi/access/certs") {
             return Ok((200, self.access_keys.borrow().clone()));
@@ -705,7 +708,7 @@ fn customers_sign_in_with_an_emailed_link_and_release_computers() {
     assert!(acc("POST", "/signin", "", &format!("t={t}")).body.contains("expired or was already used"));
     // Signed in: the licence, its computers, 3 of 3 active. Unknown OS names aren't shown.
     let home = acc("GET", "/", &cookie, "");
-    assert!(home.body.contains("3 of 3 computers active"), "{}", home.body);
+    assert!(home.body.contains("<b>3 of 3</b>") && home.body.contains("Active now"), "{}", home.body);
     assert!(home.body.contains("macOS") && home.body.contains("Windows") && !home.body.contains("Plan 9"));
     assert!(!home.body.contains(&serial), "the full serial isn't shown");
     // Another site can't post the form.
@@ -721,7 +724,7 @@ fn customers_sign_in_with_an_emailed_link_and_release_computers() {
     // Release the Mac: the seat frees and the Mac's next check finds it ended.
     let r = acc("POST", "/release", &cookie, "activation=act-mac-0001");
     assert_eq!(r.status, 303);
-    assert!(acc("GET", "/", &cookie, "").body.contains("2 of 3 computers active"));
+    assert!(acc("GET", "/", &cookie, "").body.contains("<b>2 of 3</b>"));
     assert_eq!(rejection(&w.api("/v1/validate", &serde_json::json!({ "activation_id": "act-mac-0001", "device_hash": device_hash("mac") }))), Rejection::Deactivated);
     ok(&act("new", "act-new-0001", "Linux"));
     // Without the cookie (or after signing out) nothing can be released.
@@ -1154,7 +1157,7 @@ fn a_customer_renews_from_the_account_page_and_paddle_extends_the_same_licence()
     let acc = |method: &str, path: &str, body: &str| w.call(method, "account.filescape.app", path, &[("cookie", &cookie), ("origin", "https://account.filescape.app")], body);
     // Not offered yet: no button, and asking anyway says so.
     let home = acc("GET", "/", "");
-    assert!(home.body.contains("Software maintenance:") && !home.body.contains("Extend maintenance by"), "{}", home.body);
+    assert!(home.body.contains("Software maintenance") && !home.body.contains("Extend maintenance by"), "{}", home.body);
     assert!(acc("POST", "/renew", &format!("licence={id}")).header("location").unwrap().contains("aren%27t%20available"));
     offer_renewals(&w);
     assert!(acc("GET", "/", "").body.contains("Extend maintenance by 12 months · $2.99"));
@@ -1271,4 +1274,119 @@ fn a_refunded_or_charged_back_renewal_gives_its_months_back_and_a_reversal_resto
     assert_eq!(until_of(&w, &id), add_months(end, 12));
     // A refund of the purchase still revokes the licence, as before.
     assert!(adj("ec1", "refund", "approved", "txn_buy5").body.contains("revoked"));
+}
+
+
+fn link_in_last_email(w: &World, marker: &str) -> String {
+    let m: serde_json::Value = serde_json::from_str(w.net.emails().last().unwrap()).unwrap();
+    let body = m["text"].as_str().unwrap();
+    let i = body.find(marker).unwrap_or_else(|| panic!("{marker} not in {body}")) + marker.len();
+    body[i..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect()
+}
+
+#[test]
+fn the_account_dashboard_shows_maintenance_history_downloads_and_receipts() {
+    let w = world();
+    let (_, id) = bought(&w, "txn_buy1");
+    offer_renewals(&w);
+    w.admin("/releases", "version=2.5.0&released_at=2026-11-23&notes_url=https%3A%2F%2Ffilescape.app%2Fnotes");
+    let cookie = sign_in(&w);
+    let acc = |method: &str, path: &str, body: &str| w.call(method, "account.filescape.app", path, &[("cookie", &cookie), ("origin", "https://account.filescape.app")], body);
+    let home = acc("GET", "/", "");
+    if let Ok(p) = std::env::var("DASHBOARD_HTML") {
+        std::fs::write(p, &home.body).unwrap();
+    }
+    for want in ["Perpetual", "Never expires", "Software maintenance", "days left", "Filescape 2.5.0", "Included", "Purchase · perpetual licence", "Receipt", "Remind me before software maintenance ends", "Change email address"] {
+        assert!(home.body.contains(want), "{want} missing: {}", home.body);
+    }
+    // Receipts come from Paddle, only for this customer's own transactions.
+    let r = acc("GET", &format!("/receipt?licence={id}&txn=txn_buy1"), "");
+    assert_eq!(r.header("location"), Some("https://invoices.paddle.example/inv_1.pdf"));
+    let r = acc("GET", &format!("/receipt?licence={id}&txn=txn_someone_else"), "");
+    assert!(r.header("location").unwrap().contains("isn%27t%20for"));
+    assert!(w.call("GET", "account.filescape.app", &format!("/receipt?licence={id}&txn=txn_buy1"), &[], "").header("location").unwrap().contains("Sign%20in"));
+    // After maintenance ends, the newest release isn't included and the licence still is valid.
+    w.now.set(T0 + 400 * DAY);
+    w.admin("/releases", &format!("version=2.6.0&released_at={}", T0 + 399 * DAY));
+    let cookie2 = sign_in(&w);
+    let home = w.call("GET", "account.filescape.app", "/", &[("cookie", &cookie2)], "");
+    assert!(home.body.contains("Ended") && home.body.contains("Not included") && home.body.contains("still valid"), "{}", home.body);
+    // Preferences save.
+    let r = w.call("POST", "account.filescape.app", "/prefs", &[("cookie", &cookie2), ("origin", "https://account.filescape.app")], "");
+    assert_eq!(r.status, 303);
+    assert!(!pollster::block_on(w.cx().prefs("ada@example.com")).unwrap().reminders);
+    let home = w.call("GET", "account.filescape.app", "/", &[("cookie", &cookie2)], "");
+    assert!(!home.body.contains("name=\"reminders\" value=\"1\" checked"));
+}
+
+#[test]
+fn customers_change_their_email_with_confirmation_and_an_undo_link() {
+    let w = world();
+    let (_, id) = bought(&w, "txn_buy1");
+    let (_, id2) = bought(&w, "txn_buy2");
+    let cookie = sign_in(&w);
+    let post = |cookie: &str, path: &str, body: &str| w.call("POST", "account.filescape.app", path, &[("cookie", cookie), ("origin", "https://account.filescape.app")], body);
+    let email_of = |id: &str| pollster::block_on(w.cx().licence(id)).unwrap().unwrap().lic.email.unwrap();
+    // Bad and same addresses are refused.
+    assert!(post(&cookie, "/email/change", "email=nope").header("location").unwrap().contains("valid%20email"));
+    // A real one: a confirmation goes to the new address; nothing moves yet.
+    let r = post(&cookie, "/email/change", "email=Ada.New%40Example.org");
+    assert!(r.header("location").unwrap().contains("Almost%20done"), "{:?}", r.header("location"));
+    assert!(w.net.emails().last().unwrap().contains("ada.new@example.org"));
+    let t = link_in_last_email(&w, "/email/confirm?t=");
+    assert_eq!(email_of(&id), "ada@example.com");
+    // Opening the link doesn't spend it; pressing Confirm moves both licences and signs the new address in.
+    assert!(w.call("GET", "account.filescape.app", &format!("/email/confirm?t={t}"), &[], "").body.contains("Confirm"));
+    let r = post("", "/email/confirm", &format!("t={t}"));
+    assert_eq!(r.status, 303);
+    let new_cookie = session_cookie(&r);
+    assert_eq!((email_of(&id), email_of(&id2)), ("ada.new@example.org".into(), "ada.new@example.org".into()));
+    assert!(w.call("GET", "account.filescape.app", "/", &[("cookie", &new_cookie)], "").body.contains("ada.new@example.org"));
+    // The old address is signed out and gets an undo link; the link can't be used twice.
+    assert!(!w.call("GET", "account.filescape.app", "/", &[("cookie", &cookie)], "").body.contains("Signed in as"));
+    assert!(w.net.emails().last().unwrap().contains("\"to\":\"ada@example.com\"") || w.net.emails().last().unwrap().contains("ada@example.com"));
+    let undo = link_in_last_email(&w, "/email/confirm?t=");
+    assert!(post("", "/email/confirm", &format!("t={t}")).body.contains("expired"));
+    // While the undo link works, the new address can't move the licences again.
+    let r = post(&new_cookie, "/email/change", "email=thief%40example.net");
+    assert!(r.header("location").unwrap().contains("changed%20recently"), "{:?}", r.header("location"));
+    // Undo: back to the old address, and the new address is signed out.
+    w.now.set(T0 + 3 * DAY);
+    let r = post("", "/email/confirm", &format!("t={undo}"));
+    assert!(r.body.contains("registered to <b>ada@example.com</b> again"), "{}", r.body);
+    assert_eq!((email_of(&id), email_of(&id2)), ("ada@example.com".into(), "ada@example.com".into()));
+    assert!(!w.call("GET", "account.filescape.app", "/", &[("cookie", &new_cookie)], "").body.contains("Signed in as"));
+    // The undo is in each licence's history.
+    let ev = pollster::block_on(w.cx().events_of(&id)).unwrap();
+    assert!(ev.iter().any(|e| e.detail.contains("undone")));
+}
+
+#[test]
+fn an_email_change_to_an_address_with_licences_and_expired_links_are_refused() {
+    let w = world();
+    bought(&w, "txn_buy1");
+    let (_, other) = bought(&w, "txn_buy2");
+    pollster::block_on(w.cx().set_owner(&other, "Bob", "bob@example.com", "dev")).unwrap();
+    let cookie = sign_in(&w);
+    let post = |path: &str, body: &str| w.call("POST", "account.filescape.app", path, &[("cookie", &cookie), ("origin", "https://account.filescape.app")], body);
+    assert!(post("/email/change", "email=bob%40example.com").header("location").unwrap().contains("already%20has"));
+    w.now.set(T0 + 300);
+    post("/email/change", "email=new%40example.org");
+    let t = link_in_last_email(&w, "/email/confirm?t=");
+    w.now.set(T0 + 300 + 2 * DAY);
+    assert!(w.call("POST", "account.filescape.app", "/email/confirm", &[("origin", "https://account.filescape.app")], &format!("t={t}")).body.contains("expired"));
+}
+
+#[test]
+fn sign_in_and_serial_requests_are_limited_per_network() {
+    let w = world();
+    bought(&w, "txn_buy1");
+    let post = |ip: &str, path: &str, email: &str| w.call("POST", "account.filescape.app", path, &[("origin", "https://account.filescape.app"), ("cf-connecting-ip", ip)], &format!("email={email}%40example.com"));
+    for i in 0..10 {
+        assert!(post("203.0.113.9", "/login", &format!("u{i}")).body.contains("is on its way"));
+    }
+    assert!(post("203.0.113.9", "/login", "ada").body.contains("Too many"));
+    assert!(post("198.51.100.1", "/login", "ada").body.contains("is on its way"), "other networks aren't affected");
+    w.now.set(T0 + 3601);
+    assert!(post("203.0.113.9", "/login", "ada").body.contains("is on its way"));
 }

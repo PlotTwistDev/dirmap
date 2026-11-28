@@ -115,3 +115,28 @@ pub fn renewal_message(row: &LicenceRow, until: filescape_licence::Ts, to: &str)
         reply_to: None,
     }
 }
+
+/// Sent to the new address: confirm the move.
+pub fn email_confirm_message(link: &str, old: &str, to: &str) -> Message {
+    Message {
+        to: to.into(),
+        subject: "Confirm your new Filescape email address".into(),
+        text: format!(
+            "Hello,\n\nSomeone signed in to the Filescape account for {old} asked to register its licences to this address instead. To confirm, open this link and press Confirm. It works once, for 24 hours:\n\n{link}\n\nYour serial numbers and activated computers stay as they are. {old} gets a link to undo the change for 14 days.\n\nIf you didn't ask for this, ignore this email: nothing changes without the link.\n\nQuestions? Write to us at https://filescape.app/contact (replies to this email aren't read).\n\nFilescape (filescape.app)"
+        ),
+        reply_to: None,
+    }
+}
+
+/// Sent to the old address once the licences have moved, with the undo link.
+pub fn email_changed_message(undo_link: &str, new: &str, count: usize, to: &str) -> Message {
+    let what = if count == 1 { "Your Filescape licence is".to_string() } else { format!("Your {count} Filescape licences are") };
+    Message {
+        to: to.into(),
+        subject: "Your Filescape email address was changed".into(),
+        text: format!(
+            "Hello,\n\n{what} now registered to {new}, as asked from your account at account.filescape.app. Serial numbers and activated computers haven't changed, and future emails about your licence go to {new}.\n\nIf you didn't make this change, undo it with this link. It works for 14 days, and until then the address can't be changed again:\n\n{undo_link}\n\nQuestions? Write to us at https://filescape.app/contact (replies to this email aren't read).\n\nFilescape (filescape.app)"
+        ),
+        reply_to: None,
+    }
+}
