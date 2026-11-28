@@ -3145,8 +3145,10 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
     let cancelling = p.cancel.load(Ordering::Relaxed);
     let finishing = p.finishing.load(Ordering::Relaxed);
 
+    // Without an estimate there's no fraction to show: egui's animated bar would then draw its
+    // spinner and a dot of fill on top of the text, so that case is a spinner beside the size.
     let bar = if finishing {
-        egui::ProgressBar::new(1.0).text("Sorting and building the map…").animate(true)
+        ScanBar::Bar(egui::ProgressBar::new(1.0).text("Sorting and building the map…"))
     } else {
         match job.expected {
             // Used space on the drive is compared with space on disk found so far; the two
@@ -3154,9 +3156,9 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
             Some(total) => {
                 let frac = (alloc as f32 / total as f32).min(0.99);
                 let text = format!("about {:.0}%  ({} of {})", frac * 100.0, scan::human(alloc), scan::human(total));
-                egui::ProgressBar::new(frac).text(text)
+                ScanBar::Bar(egui::ProgressBar::new(frac).text(text))
             }
-            None => egui::ProgressBar::new(0.0).animate(true).text(scan::human(job.metric.live().pick(bytes, alloc, 0))),
+            None => ScanBar::Busy(format!("{} so far", scan::human(job.metric.live().pick(bytes, alloc, 0)))),
         }
     };
     let rate = if secs > 0.5 { files as f32 / secs } else { 0.0 };
@@ -3184,7 +3186,7 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
                 }
             });
         });
-        ui.add(bar.desired_height(18.0));
+        bar.show(ui, 18.0);
         ui.horizontal(|ui| {
             ui.strong(stats);
             ui.add(egui::Label::new(egui::RichText::new(current).weak().monospace()).truncate());
@@ -3197,7 +3199,7 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
         ui.set_max_width(640.0);
         ui.heading(format!("Scanning {}", job.root.display()));
         ui.add_space(12.0);
-        ui.add(bar.desired_height(22.0));
+        bar.show(ui, 22.0);
         ui.add_space(10.0);
         ui.strong(stats);
         ui.add_space(8.0);
@@ -3209,6 +3211,40 @@ fn scan_progress(ui: &mut egui::Ui, job: &Job, compact: bool) {
             p.cancel.store(true, Ordering::Relaxed);
         }
     });
+}
+
+/// The bar under "Scanning …": a real progress bar when there's a fraction to show, otherwise
+/// a track of the same size with a spinner and the size found so far, side by side.
+enum ScanBar {
+    Bar(egui::ProgressBar),
+    Busy(String),
+}
+
+impl ScanBar {
+    fn show(self, ui: &mut egui::Ui, height: f32) {
+        let text = match self {
+            ScanBar::Bar(bar) => {
+                ui.add(bar.desired_height(height));
+                return;
+            }
+            ScanBar::Busy(text) => text,
+        };
+        let w = ui.available_size_before_wrap().x.max(96.0);
+        let (r, _) = ui.allocate_exact_size(vec2(w, height), Sense::hover());
+        if !ui.is_rect_visible(r) {
+            return;
+        }
+        let vis = ui.visuals();
+        ui.painter().rect_filled(r, height / 2.0, vis.extreme_bg_color);
+        let pad = ui.spacing().item_spacing.x;
+        let spin = height - 6.0;
+        let sr = Rect::from_center_size(pos2(r.left() + pad + spin / 2.0, r.center().y), vec2(spin, spin));
+        egui::Spinner::new().size(spin).paint_at(ui, sr);
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        ui.painter()
+            .with_clip_rect(r)
+            .text(pos2(sr.right() + pad, r.center().y), Align2::LEFT_CENTER, text, font, vis.text_color());
+    }
 }
 
 /// Mouse wheel over a map: up zooms into `child` (the top-level entry under the pointer, if it's
