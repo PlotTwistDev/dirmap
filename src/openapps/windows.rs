@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree, IBindCtx, IDataObject};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    ASSOC_FILTER_RECOMMENDED, ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_EXECUTABLE, AssocQueryStringW, BHID_DataObject, IAssocHandler, ILFree, IShellItemArray, SHAssocEnumHandlers,
+    ASSOC_FILTER, ASSOC_FILTER_NONE, ASSOC_FILTER_RECOMMENDED, ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_EXECUTABLE, AssocQueryStringW, BHID_DataObject, IAssocHandler, ILFree, IShellItemArray, OAIF_ALLOW_REGISTRATION, OAIF_EXEC, OAIF_REGISTER_EXT, OPENASINFO, SHAssocEnumHandlers, SHOpenWithDialog,
     SHCreateShellItemArrayFromIDLists, SHParseDisplayName,
 };
 use windows::core::{PCWSTR, PWSTR};
@@ -39,13 +39,13 @@ fn ext_of(t: &Type) -> Option<String> {
     }
 }
 
-/// The handlers for an extension, as the shell gives them.
-fn each(ext: &str, mut f: impl FnMut(IAssocHandler) -> bool) {
+/// The handlers for an extension, as the shell gives them: those it recommends, or all.
+fn each(ext: &str, filter: ASSOC_FILTER, mut f: impl FnMut(IAssocHandler) -> bool) {
     let w = wide(ext.as_ref());
     // SAFETY: shell calls with a valid string; each handler is released when dropped.
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        let Ok(en) = SHAssocEnumHandlers(PCWSTR(w.as_ptr()), ASSOC_FILTER_RECOMMENDED) else { return };
+        let Ok(en) = SHAssocEnumHandlers(PCWSTR(w.as_ptr()), filter) else { return };
         loop {
             let mut one = [None];
             let mut n = 0u32;
@@ -75,10 +75,19 @@ fn default_exe(ext: &str) -> Option<String> {
 }
 
 pub fn handlers(t: &Type) -> Vec<Handler> {
+    listed(t, ASSOC_FILTER_RECOMMENDED)
+}
+
+/// Every program registered for the extension, recommended or not.
+pub fn all_apps(t: &Type) -> Vec<Handler> {
+    listed(t, ASSOC_FILTER_NONE)
+}
+
+fn listed(t: &Type, filter: ASSOC_FILTER) -> Vec<Handler> {
     let Some(ext) = ext_of(t) else { return Vec::new() };
     let def = default_exe(&ext).map(|d| d.to_lowercase());
     let mut out = Vec::new();
-    each(&ext, |h| {
+    each(&ext, filter, |h| {
         // SAFETY: calls on a live handler.
         let (id, name) = unsafe { (h.GetName().ok().and_then(take), h.GetUIName().ok().and_then(take)) };
         if let (Some(id), Some(name)) = (id, name) {
@@ -103,7 +112,7 @@ impl Drop for Pidls {
 pub fn open(h: &Handler, files: &[PathBuf]) -> Result<(), String> {
     let ext = files.first().and_then(|f| f.extension()).map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_else(|| ".txt".into());
     let mut found = None;
-    each(&ext, |x| {
+    each(&ext, ASSOC_FILTER_NONE, |x| {
         // SAFETY: a call on a live handler.
         let id = unsafe { x.GetName().ok().and_then(take) };
         if id.as_deref() == Some(h.id.as_str()) {
@@ -129,4 +138,13 @@ pub fn open(h: &Handler, files: &[PathBuf]) -> Result<(), String> {
         let data: IDataObject = items.BindToHandler(None::<&IBindCtx>, &BHID_DataObject).map_err(fail)?;
         handler.Invoke(&data).map_err(fail)
     }
+}
+
+/// Windows keeps the default app to itself: show its own Open with box for the file, where the
+/// person picks the app and ticks "Always use this app".
+pub fn set_default(sample: &std::path::Path) -> Result<(), String> {
+    let w = wide(sample.as_os_str());
+    let info = OPENASINFO { pcszFile: PCWSTR(w.as_ptr()), pcszClass: PCWSTR::null(), oaifInFlags: OAIF_ALLOW_REGISTRATION | OAIF_REGISTER_EXT | OAIF_EXEC };
+    // SAFETY: the info and its string live through the call.
+    unsafe { SHOpenWithDialog(None, &info) }.map_err(|e| format!("Windows couldn't show its Open with box: {}", e.message()))
 }

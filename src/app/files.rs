@@ -623,6 +623,8 @@ pub(super) struct Files {
     pub(super) mark_edit: Option<marksui::MarkEdit>,
     /// Open With's Manage Apps box, while it's open.
     pub(super) apps_box: Option<openwith::AppsBox>,
+    /// Open With's Choose Another Application box, while it's open.
+    pub(super) picker: Option<openwith::Picker>,
     /// Folders shown beside the current one in the Columns view.
     pub(super) side: views::SideLists,
     /// Notices of changes other programs make to the folders on screen.
@@ -688,6 +690,7 @@ impl Files {
             marks: crate::fsys::marks::Marks::load(),
             mark_edit: None,
             apps_box: None,
+            picker: None,
             side: Default::default(),
             watcher: Default::default(),
             rws: Default::default(),
@@ -1666,6 +1669,7 @@ impl App {
         self.scene_compare_window(&ctx);
         self.mark_edit_window(&ctx);
         self.apps_window(&ctx);
+        self.picker_window(&ctx);
         let pal = style::pal(ui);
 
         let status = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::symmetric(10, 3));
@@ -3192,7 +3196,7 @@ impl App {
     fn files_keys(&mut self, ctx: &egui::Context, pointer_in: bool, picks: &mut FPicks) {
         use egui::{Key, Modifiers as M};
         // Not while a box is open over the list (Connect to Server, a server's question).
-        if self.blocked() || self.files.connect.is_some() || self.files.asking.is_some() || self.files.player.is_some() || self.files.compare.is_some() || self.files.mark_edit.is_some() || self.files.apps_box.is_some() {
+        if self.blocked() || self.files.connect.is_some() || self.files.asking.is_some() || self.files.player.is_some() || self.files.compare.is_some() || self.files.mark_edit.is_some() || self.files.apps_box.is_some() || self.files.picker.is_some() {
             return;
         }
         // The mouse's side buttons go to the file manager when the pointer is over it.
@@ -3689,6 +3693,12 @@ impl App {
         let code = p.file_name().map_or(0, |n| crate::apps::file_code(&n.to_string_lossy()));
         if let Some(why) = crate::apps::foreign_note(code) {
             self.ops.notice = Some((why, true));
+            return;
+        }
+        // Filescape's own default app for the type comes before the system's.
+        let is_dir = !archive::inside(&p) && !remote::is_remote(&p) && p.is_dir();
+        if !is_dir && self.files.prefs.open.own_default(&openwith::type_of(&p, false)).is_some() {
+            self.open_default(p, false, None);
             return;
         }
         self.files.spawn(move || {

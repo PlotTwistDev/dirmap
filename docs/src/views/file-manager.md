@@ -428,12 +428,34 @@ apps are Filescape's own: your system's settings are not changed.
 
 Below the system's apps come the apps you've added yourself, then:
 
-- **Choose Another Application…**, which picks a program, opens the item in it and adds it to
-  the list for that type;
+- **Choose Another Application…**, which opens a box listing the apps suggested for the item and
+  every other app on your computer (on Windows, every program registered for its extension).
+  Type to search; double-click an app, or select it and click **Open**. Underneath, choose what
+  happens with it:
+  - **Open once**;
+  - **Open, and list it for .ext files from now on**, which adds it to Open With for that type;
+  - **Always open .ext files with it in Filescape**, which makes it Filescape's default for
+    the type;
+  - **Always open all documents with it in Filescape** (or images, videos, code and so on),
+    which makes it the default for the whole kind of file.
+
+  **Browse…** picks a program file instead, and adds it to the list for that type.
+  **Change System Default…** makes the app the default for every app on your computer, not just
+  Filescape, after asking you first. On Windows it shows Windows' own Open with box, where you
+  choose the app and tick **Always use this app**.
+- **Change Default Application…**, the same box set to make the app Filescape's default;
+- **Use the System's Default Again**, shown when Filescape has its own default for the item,
+  which forgets it;
 - **Manage Applications…**, which lists your apps. Each has a name, the program, its arguments, and the
   types it's offered for: extensions such as `exr, dpx`, `folder` for folders, or nothing for
   everything. `{file}` in the arguments is where the item's path goes (it's added at the end if
   you leave it out), for example `--view {file}`. On a Mac, choose the app itself (`Nuke.app`).
+
+Opening an item (double-click, **Enter**, **Open in** *app*) uses, in this order: Filescape's
+default for its type, then Filescape's default for its kind of file, then the system's default.
+With none, Filescape asks which app to use. Filescape's defaults never change your system's: in
+the list, the app it opens in is marked **Default** and the system's own choice, when that's
+different, **System default**.
 
 Files on a server, or in an archive, are copied to a temporary folder first, as **Open** does.
 

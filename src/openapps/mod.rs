@@ -18,7 +18,8 @@ mod mac;
 mod windows;
 
 /// An app that can open a type of file.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Handler {
     /// What the system knows it by: an app bundle's or program's path, a desktop entry's id.
     pub id: String,
@@ -52,6 +53,18 @@ impl Type {
             Type::Folder => "folders".into(),
             Type::Unknown => "this file".into(),
         }
+    }
+
+    /// The kind of file it is (Documents, Images…), for a default that covers the whole kind.
+    /// None for folders, unknown files and kinds too mixed to share an app (Other, Programs…).
+    pub fn category(&self) -> Option<crate::categories::Category> {
+        use crate::categories::Category as C;
+        let c = match self {
+            Type::Ext(e) => crate::categories::of(&format!("x.{e}")),
+            Type::Text => C::Documents,
+            Type::Folder | Type::Unknown => return None,
+        };
+        matches!(c, C::Audio | C::Video | C::Images | C::Documents | C::Code | C::Archives | C::Models).then_some(c)
     }
 
     /// How it's kept in settings: "txt", or "(text)" and "(folder)", which no extension is.
@@ -155,6 +168,61 @@ pub fn apps_for(t: &Type, done: impl FnOnce() + Send + 'static) -> Apps {
     });
     Apps::Looking
 }
+
+/// Every app that can be asked to open a file of this type, not only those that say they can
+/// (for Choose Another Application): every installed app on a Mac and Linux, and on Windows
+/// every program registered for the extension. Worked out on a worker thread, as `apps_for`.
+pub fn all_apps(t: &Type, done: impl FnOnce() + Send + 'static) -> Apps {
+    static ALL: OnceLock<Cache> = OnceLock::new();
+    let all = ALL.get_or_init(Default::default);
+    // The list is the same for every type except on Windows.
+    let key = if cfg!(windows) { t.clone() } else { Type::Unknown };
+    let mut c = all.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(found) = c.get(&key) {
+        return found.clone().map_or(Apps::Looking, Apps::Found);
+    }
+    c.insert(key.clone(), None);
+    drop(c);
+    let t = t.clone();
+    let _ = std::thread::Builder::new().name("open-with-all".into()).spawn(move || {
+        #[cfg(target_os = "linux")]
+        let mut found = linux::all_apps();
+        #[cfg(target_os = "macos")]
+        let mut found = mac::all_apps();
+        #[cfg(windows)]
+        let mut found = windows::all_apps(&t);
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+        let mut found: Vec<Handler> = Vec::new();
+        let _ = &t;
+        for h in &mut found {
+            h.default = false;
+        }
+        tidy(&mut found);
+        all.lock().unwrap_or_else(|e| e.into_inner()).insert(key, Some(Arc::new(found)));
+        done();
+    });
+    Apps::Looking
+}
+
+/// Make an app the system's default for a type: for every app on this computer, not just
+/// Filescape. Only ever done when the person asks for it and confirms. On Windows the system
+/// keeps that choice to itself, so its own Open with box is shown for `sample` instead.
+pub fn set_system_default(h: &Handler, t: &Type, sample: &Path) -> Result<(), String> {
+    let _ = (h, t, sample);
+    #[cfg(target_os = "linux")]
+    let r = linux::set_default(h, t);
+    #[cfg(target_os = "macos")]
+    let r = mac::set_default(h, t);
+    #[cfg(windows)]
+    let r = windows::set_default(sample);
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    let r = Err("Changing the system's default app isn't supported here.".to_string());
+    forget();
+    r
+}
+
+/// The system lets Filescape set its default itself (elsewhere, its own box is shown).
+pub const SETS_SYSTEM_DEFAULT: bool = cfg!(any(target_os = "linux", target_os = "macos"));
 
 /// Forget what was found, so apps installed or removed since show up (asked again next time).
 pub fn forget() {

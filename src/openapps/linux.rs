@@ -98,6 +98,8 @@ struct App {
     file: PathBuf,
     name: String,
     mimes: Vec<String>,
+    /// Shown under All applications: it runs, isn't hidden, and takes files.
+    listed: bool,
 }
 
 #[derive(Default)]
@@ -153,7 +155,9 @@ fn scan_apps(dirs: &[PathBuf]) -> HashMap<String, App> {
                 && entry.exec.as_deref().and_then(|x| desktop::command(x, &entry, &p)).is_some_and(|c| desktop::which(&c[0]).is_some())
                 && entry.try_exec.as_deref().is_none_or(|t| desktop::which(t).is_some());
             // A Hidden entry is one the user deleted: it hides the system's copy too.
-            let app = App { file: p.clone(), name: entry.name.clone().unwrap_or_default(), mimes: if runs && !hidden_file { entry.mime_types } else { Vec::new() } };
+            let takes_files = entry.exec.as_deref().is_some_and(|x| ["%f", "%F", "%u", "%U"].iter().any(|c| x.contains(c)));
+            let listed = runs && !hidden_file && !entry.hidden && takes_files;
+            let app = App { file: p.clone(), name: entry.name.clone().unwrap_or_default(), mimes: if runs && !hidden_file { entry.mime_types } else { Vec::new() }, listed };
             apps.insert(id, app);
         }
     }
@@ -235,9 +239,88 @@ pub fn open(h: &Handler, files: &[PathBuf]) -> Result<(), String> {
     crate::apps::linux::open_with_entry(&h.app, files)
 }
 
+/// Every app that takes files, whatever types it says it opens.
+pub fn all_apps() -> Vec<Handler> {
+    let ix = current();
+    ix.apps
+        .iter()
+        .filter(|(_, a)| a.listed && !a.name.is_empty())
+        .map(|(id, a)| Handler { id: id.clone(), name: a.name.clone(), app: a.file.clone(), default: false })
+        .collect()
+}
+
+/// Make it the default for the type's MIME type, as the desktop's own settings do: through
+/// `xdg-mime` where it's installed, else by writing the user's `mimeapps.list` directly.
+pub fn set_default(h: &Handler, t: &Type) -> Result<(), String> {
+    let mime = mime_of(&current(), t).ok_or("The system doesn't know what kind of file this is.")?;
+    if desktop::which("xdg-mime").is_some() {
+        let out = std::process::Command::new("xdg-mime")
+            .args(["default", &h.id, &mime])
+            .output()
+            .map_err(|e| format!("Couldn't run xdg-mime, which changes the desktop's default apps: {e}"))?;
+        return if out.status.success() { Ok(()) } else { Err(format!("xdg-mime couldn't change it: {}", String::from_utf8_lossy(&out.stderr).trim())) };
+    }
+    let file = config_dirs().into_iter().next().ok_or("There's no settings folder to write to.")?.join("mimeapps.list");
+    let old = std::fs::read_to_string(&file).unwrap_or_default();
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't make {}: {e}", dir.display()))?;
+    }
+    std::fs::write(&file, with_default(&old, &mime, &h.id)).map_err(|e| format!("Couldn't write {}: {e}", file.display()))
+}
+
+/// A `mimeapps.list` with `mime` opening in `id` by default, everything else kept as it was.
+fn with_default(text: &str, mime: &str, id: &str) -> String {
+    let mut out = Vec::new();
+    let mut in_defaults = false;
+    let mut done = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            if in_defaults && !done {
+                out.push(format!("{mime}={id};"));
+                done = true;
+            }
+            in_defaults = t == "[Default Applications]";
+        } else if in_defaults && t.split_once('=').is_some_and(|(m, _)| m.trim() == mime) {
+            if !done {
+                out.push(format!("{mime}={id};"));
+                done = true;
+            }
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    if !done {
+        if !in_defaults {
+            if out.last().is_some_and(|l| !l.trim().is_empty()) {
+                out.push(String::new());
+            }
+            out.push("[Default Applications]".into());
+        }
+        out.push(format!("{mime}={id};"));
+    }
+    out.join("\n") + "\n"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_a_default() {
+        assert_eq!(with_default("", "text/plain", "kate.desktop"), "[Default Applications]\ntext/plain=kate.desktop;\n");
+        let had = "[Added Associations]\nimage/png=gimp.desktop;\n[Default Applications]\ntext/plain=vim.desktop;\nimage/png=eog.desktop;\n";
+        assert_eq!(
+            with_default(had, "text/plain", "kate.desktop"),
+            "[Added Associations]\nimage/png=gimp.desktop;\n[Default Applications]\ntext/plain=kate.desktop;\nimage/png=eog.desktop;\n"
+        );
+        let other = "[Default Applications]\nimage/png=eog.desktop;\n[Added Associations]\nimage/png=gimp.desktop;\n";
+        assert_eq!(
+            with_default(other, "text/plain", "kate.desktop"),
+            "[Default Applications]\nimage/png=eog.desktop;\ntext/plain=kate.desktop;\n[Added Associations]\nimage/png=gimp.desktop;\n"
+        );
+        assert_eq!(with_default("[Added Associations]\nx=y;\n", "a/b", "c.desktop"), "[Added Associations]\nx=y;\n\n[Default Applications]\na/b=c.desktop;\n");
+    }
 
     #[test]
     fn finds_apps_for_types() {
