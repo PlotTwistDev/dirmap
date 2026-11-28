@@ -418,8 +418,11 @@ type: Launch Services on a Mac, the apps registered for the extension on Windows
 Explorer's Open with), and the desktop's application launchers and `mimeapps.list` on Linux.
 Files without an extension are recognised too. LICENSE, README, Makefile, Dockerfile and similar
 names, and any file whose contents are plain text, offer text editors, while files whose contents
-are unknown don't get a guess. Several items open in one go, in a single copy of the app where it
-takes several.
+are unknown don't get a guess. With several items selected, Open With lists only the apps that
+open every one of them (the default is marked only when it's the same for all), and they open in
+one go, in a single copy of the app where it takes several. **Open** on several files sends those
+with the same Filescape default to that app together. Folders get the apps that open folders on
+a Mac and on Linux; on Windows, add one yourself with `folder` as its type.
 
 Hover over an app and click its pin to keep it near the top of every list (pinned apps come
 straight after the default, in the order you pinned them); click the pin again to unpin it. After
