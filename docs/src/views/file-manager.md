@@ -822,9 +822,17 @@ you try. Password-protected archives and RAR aren't supported yet.
 Numbered frames, such as `shot010_comp.1001.exr`, `shot010_comp.1002.exr` and so on, are shown as
 one row: `shot010_comp.####.exr 1001–1240`. The row gives the frame range, the total size, the
 number of frames and the newest frame's date. If frames are missing it says how many, with a ⚠.
+
+Numbered files that aren't pictures, such as NumPy archives (`sample_0739.npz`), JSON or simulation
+caches, are grouped the same way but shown as a plain **numbered set**: the Type column says
+`NPZ numbered set, 1,000 files`, and numbers missing from the range are noted as
+`1,233 numbers skipped` without the ⚠ or the warning colour, since data sets often skip numbers on
+purpose. A numbered set has no **Play**: Enter or a double-click says so instead. Picture formats
+are EXR, DPX, Cineon, PNG, JPEG, TIFF, TGA, BMP, GIF, WebP, HDR, SGI, JPEG 2000, PSD, HEIC, AVIF,
+camera RAW and similar.
 Three or more frames make a sequence. The frame number is the last run of digits before the
 extension, and everything before it must match, so `v1` and `v2` renders stay apart. The status bar
-says how many frames are in sequences.
+says how many files are in sequences.
 
 A sequence row works as one item: **Copy**, **Cut**, **Delete**, drag and drop, and **Copy to
 Other Pane** take every frame, and **F2** opens [Rename Frames](#renaming-many-items) for all of
@@ -832,7 +840,9 @@ them. To work on single frames, turn off **View > Group Image Sequences**.
 
 ### Playing a sequence
 
-Double-click a sequence, or select it and press **Enter**, to play it over the whole window. To
+Double-click a sequence, or select it and press **Enter**, to play it over the whole window. The
+player reads EXR, DPX, PNG, JPEG, TIFF, TGA, BMP, GIF, WebP, HDR, QOI and PNM frames. Other picture
+sequences (Cineon, JPEG 2000, camera RAW…) still count missing frames, but don't offer **Play** yet. To
 compare two sequences, select both and press **Enter** (or right-click and choose **Play and
 Compare (A/B)**). The first is **A** and the second **B**, with a line between them that you can
 drag. **A**, **Wipe** and **B** at the bottom choose what's shown.

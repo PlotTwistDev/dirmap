@@ -1116,7 +1116,7 @@ impl App {
             }
             // A sequence row stands for all its frames.
             let (kind, size) = match t.seqs.get(&i) {
-                Some(s) => (format!("{} sequence", s.seq.extension().to_uppercase()), s.seq.bytes),
+                Some(s) => (format!("{} {}", s.seq.extension().to_uppercase(), if s.seq.is_pictures() { "sequence" } else { "numbered set" }), s.seq.bytes),
                 // A folder's size is known only from an analysis that covers it.
                 None if e.is_dir => (browser::entry_kind(e), t.sizes.as_ref().and_then(|s| s.1.get(&e.name)).map_or(0, |s| s.0)),
                 None => (browser::kind_for(&e.name, false), e.size),
