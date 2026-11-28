@@ -496,6 +496,12 @@ fn admin_needs_cloudflare_access_and_same_site_posts() {
     // Posts from elsewhere are refused even in development.
     let r = w.call("POST", "localhost", "/admin/settings", &[("origin", "https://evil.example")], "perpetual_limit=1");
     assert_eq!(r.status, 403);
+    let r = w.call("POST", "localhost", "/admin/settings", &[("origin", "http://localhost:8787"), ("sec-fetch-site", "cross-site")], "perpetual_limit=1");
+    assert_eq!(r.status, 403);
+    let r = w.call("POST", "localhost", "/admin/settings", &[("origin", "null")], "perpetual_limit=1");
+    assert_eq!(r.status, 403);
+    let r = w.call("POST", "localhost", "/admin/settings", &[("origin", "null"), ("sec-fetch-site", "same-origin")], "perpetual_limit=1");
+    assert_ne!(r.status, 403, "{}", r.body);
     // Production: no token, no entry.
     w.cfg.dev = false;
     assert_eq!(w.call("GET", "admin.filescape.app", "/", &[], "").status, 403);
@@ -705,6 +711,13 @@ fn customers_sign_in_with_an_emailed_link_and_release_computers() {
     // Another site can't post the form.
     let evil = w.call("POST", "account.filescape.app", "/release", &[("cookie", &cookie), ("origin", "https://evil.example")], "activation=act-mac-0001");
     assert_eq!(evil.status, 403);
+    // Browsers that hide the origin send "null": allowed only when Sec-Fetch-Site vouches for it.
+    let hidden = w.call("POST", "account.filescape.app", "/release", &[("cookie", &cookie), ("origin", "null")], "activation=act-none");
+    assert_eq!(hidden.status, 403);
+    let cross = w.call("POST", "account.filescape.app", "/release", &[("cookie", &cookie), ("origin", "null"), ("sec-fetch-site", "cross-site")], "activation=act-none");
+    assert_eq!(cross.status, 403);
+    let same = w.call("POST", "account.filescape.app", "/release", &[("cookie", &cookie), ("origin", "null"), ("sec-fetch-site", "same-origin")], "activation=act-none");
+    assert_ne!(same.status, 403, "{}", same.body);
     // Release the Mac: the seat frees and the Mac's next check finds it ended.
     let r = acc("POST", "/release", &cookie, "activation=act-mac-0001");
     assert_eq!(r.status, 303);

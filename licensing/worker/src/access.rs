@@ -14,12 +14,7 @@ fn b64(s: &str) -> Result<Vec<u8>, &'static str> {
 /// The signed-in admin's email, or why not.
 pub async fn check<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req) -> Result<String, String> {
     if req.method != "GET" && req.method != "HEAD" {
-        let origin_ok = req.header("origin").is_none_or(|o| {
-            let o = o.trim_end_matches('/');
-            o == format!("https://{}", cx.cfg.hosts.admin) || (cx.cfg.dev && (o.starts_with("http://localhost") || o.starts_with("http://127.0.0.1")))
-        });
-        let site_ok = req.header("sec-fetch-site").is_none_or(|s| s == "same-origin" || s == "none");
-        if !origin_ok || !site_ok {
+        if !crate::web::same_origin_post(req, &cx.cfg.hosts.admin, cx.cfg.dev) {
             return Err("form posted from another site".into());
         }
     }

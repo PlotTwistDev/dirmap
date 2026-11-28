@@ -163,7 +163,8 @@ impl Resp {
         let mut r = Resp::new(status, "text/html; charset=utf-8", body);
         r.headers.push(("content-security-policy".into(), "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none'".into()));
         r.headers.push(("x-content-type-options".into(), "nosniff".into()));
-        r.headers.push(("referrer-policy".into(), "no-referrer".into()));
+        // same-origin, not no-referrer: with no-referrer browsers post forms with `Origin: null`.
+        r.headers.push(("referrer-policy".into(), "same-origin".into()));
         r
     }
 
