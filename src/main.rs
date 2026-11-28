@@ -31,6 +31,7 @@ mod cloudops;
 mod craftfile;
 mod daw;
 mod drives;
+mod dragout;
 mod dupes;
 mod eject;
 mod epub;
