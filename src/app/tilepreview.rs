@@ -334,7 +334,13 @@ impl App {
             flags: n.flags,
             modified: n.modified,
             // An application gets its icon, details and Launch button, as in Files.
-            bundle: if crate::apps::node_is_app(n) { crate::apps::Bundle::App.code() } else { 0 },
+            bundle: if crate::apps::node_is_app(n) {
+                crate::apps::Bundle::App.code()
+            } else if n.is_dir {
+                0
+            } else {
+                crate::apps::file_code(&n.name)
+            },
         };
         Some((self.full_path(sel), e))
     }
@@ -373,7 +379,7 @@ impl App {
         let Some(n) = tree.at(&sel) else { return };
         let Some((path, e)) = self.map_target() else { return };
         let w = ui.available_width();
-        let is_app = crate::apps::is_app(e.bundle) && !crate::fsys::remote::is_remote(&path);
+        let is_app = crate::apps::own_icon(e.bundle) && !crate::fsys::remote::is_remote(&path);
         let app_info = if is_app { self.files.app_info.get(ui.ctx(), &path, e.modified) } else { None };
         if details {
             // The Details tab: no big preview, everything known about it.

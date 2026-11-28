@@ -923,7 +923,7 @@ impl App {
         if !pro {
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("🔒 Filtering by type, place, size or age is part of Filescape Professional. Filters already on can always be cleared.").size(kit::DESC).color(t.weak));
+                ui.label(RichText::new("🔒 Filtering by type, place, size or age is part of Filescape Professional (Applications is free). Filters already on can always be cleared.").size(kit::DESC).color(t.weak));
             });
         }
 
@@ -949,7 +949,7 @@ impl App {
             for c in Category::ALL {
                 let on = self.filter.kinds & c.bit() != 0;
                 // Applications are free, like everything else about them.
-                if choice(ui, on, plain(c.label()), c.tooltip()).clicked() && (c == Category::Applications || gate(self, on)) {
+                if choice(ui, on, plain(c.label()), c.tooltip()).clicked() && (!crate::categories::adds_pro_kind(self.filter.kinds, self.filter.kinds ^ c.bit()) || gate(self, on)) {
                     self.filter.kinds ^= c.bit();
                 }
             }

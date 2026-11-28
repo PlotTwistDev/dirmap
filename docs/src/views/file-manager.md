@@ -746,6 +746,43 @@ Other kinds of bundle are named in the Kind column but open like folders: framew
 (`.plugin`, Audio Units, VST and VST3), app extensions, System Settings panes, kernel extensions,
 screen savers, Quick Look plug-ins and Spotlight importers.
 
+### Windows programs and shortcuts
+
+A Windows program (`.exe`) shows its own icon, as Explorer does, and **Application** in the Kind
+column; a shortcut (`.lnk`) shows the icon of what it opens, with a small arrow, and **Shortcut**.
+Double-click either, or press **Enter**, to run it: Windows runs it exactly as Explorer would, so
+SmartScreen and User Account Control still ask where they should.
+
+With the preview pane open, a program's **Details** tab shows its name and description, publisher,
+version, what it runs on (64-bit, 32-bit or ARM64, and whether it opens in a command window), its
+size, whether it carries a digital signature, and whether it was downloaded from the internet.
+A shortcut's shows where it points, its arguments, **Start in** folder and comment, then the
+details of the program it opens; **Show Original** selects that program in its folder, and a
+shortcut whose program has been moved or uninstalled says so. All of this is read from the files
+as data, never by running them, so it works on a Windows drive looked at from a Mac or Linux
+computer too (there the **Launch Application** button is off, since Windows programs only run on
+Windows).
+
+### Linux launchers and AppImages
+
+An application launcher (`.desktop`) shows the icon and name it gives, looked up in the icon
+theme as the desktop's menu does, with **Application launcher** in the Kind column. An AppImage
+shows as an **Application**. On Linux, double-click either, or press **Enter**, to launch it.
+
+Filescape only launches what you've allowed to run, the same rule as GNOME and KDE: a launcher
+must be installed (in an `applications` folder) or allowed to run as a program, and an AppImage
+must be allowed to run as a program. Anything else shows why under **Problem** in the preview
+pane's **Details** tab, which says how to allow it in the item's Properties. Filescape never
+changes that permission itself, and never runs anything with more rights than you have.
+
+The **Details** tab shows a launcher's name, description, the command it runs (and whether in a
+terminal), its **Start in** folder and categories, or the address a web link launcher opens. For an
+AppImage it shows what it runs on (x86-64, ARM64 and so on) and its AppImage type.
+
+Applications made for another system are labelled but never run: opening a Windows program or
+shortcut on a Mac or Linux, or a Linux launcher or AppImage on Windows or a Mac, says where it can
+be opened instead.
+
 Icons are read from the system (or from the app's icon file) in the background and kept while
 Filescape is open, so a folder of hundreds of apps opens as fast as any other. Nothing inside an
 app is ever run to find its icon or name, and apps in cloud folders keep a plain icon so nothing

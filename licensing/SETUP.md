@@ -277,6 +277,20 @@ The contact form (24 Nov 2026) replaces the support@ address. On a server that's
 4. Send a test message at https://filescape.app/contact and answer it at
    https://admin.filescape.app/messages.
 
+## Updating a server for software maintenance
+
+Maintenance stage 1 (28 Nov 2026) keeps a ledger behind each perpetual licence's "updates
+included until" date. Nothing customers see changes, and no licence's date moves. On a server
+that's already running:
+
+1. `npx wrangler@4 d1 migrations apply filescape-licences --remote` (applies
+   `0004_maintenance.sql`: the `maintenance_grants` ledger, a purchase grant for every existing
+   perpetual licence with the date it already has, and two licence columns).
+2. Deploy the Worker (step 6).
+3. Open any perpetual licence in the admin site: its new **Maintenance** card should show one
+   Purchase row with the same date as before. **Maintenance** in the top bar extends several
+   licences at once.
+
 ## Local development
 
 ```
