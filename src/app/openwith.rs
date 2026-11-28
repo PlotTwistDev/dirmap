@@ -199,6 +199,37 @@ pub(super) struct OpenPrefs {
     pub pinned: Vec<String>,
     /// For each type ([`crate::openapps::Type::key`]), apps used last, newest first.
     pub recent: std::collections::HashMap<String, Vec<String>>,
+    /// Filescape's own default app for a type, used before the system's.
+    pub defaults: std::collections::HashMap<String, Handler>,
+    /// Filescape's own default app for a whole kind of file (by [`kind_key`]), used when the
+    /// type has none of its own.
+    pub kind_defaults: std::collections::HashMap<String, Handler>,
+    /// Apps added to a type's list from Choose Another Application ("Remember in Open With").
+    pub remembered: std::collections::HashMap<String, Vec<Handler>>,
+}
+
+use crate::openapps::Handler;
+
+/// Where the app an item opens in comes from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Source {
+    /// Filescape's default for this type.
+    Type,
+    /// Filescape's default for this kind of file.
+    Kind,
+    /// The system's default.
+    System,
+}
+
+/// How a kind of file is kept in settings ("Documents").
+pub(super) fn kind_key(c: crate::categories::Category) -> String {
+    format!("{c:?}")
+}
+
+/// A kind's name for people ("documents").
+pub(super) fn kind_name(c: crate::categories::Category) -> String {
+    let l = c.label();
+    l.split_once(' ').map_or(l, |(_, n)| n).to_lowercase()
 }
 
 impl OpenPrefs {
@@ -211,6 +242,50 @@ impl OpenPrefs {
             self.pinned.retain(|p| p != id);
         } else {
             self.pinned.push(id.to_string());
+        }
+    }
+
+    /// Filescape's own default for a type: the type's, else its kind's.
+    pub fn own_default(&self, t: &crate::openapps::Type) -> Option<(Handler, Source)> {
+        if let Some(h) = t.key().and_then(|k| self.defaults.get(&k)) {
+            return Some((h.clone(), Source::Type));
+        }
+        let h = t.category().and_then(|c| self.kind_defaults.get(&kind_key(c)))?;
+        Some((h.clone(), Source::Kind))
+    }
+
+    /// The app an item opens in: Filescape's default for its type, then for its kind, then the
+    /// system's (None while the system's list isn't known, or it has no default).
+    pub fn default_for(&self, t: &crate::openapps::Type, found: Option<&[Handler]>) -> Option<(Handler, Source)> {
+        self.own_default(t).or_else(|| found?.iter().find(|h| h.default).map(|h| (h.clone(), Source::System)))
+    }
+
+    /// The apps listed for a type: the system's, those remembered for it, and Filescape's
+    /// default; `default` marks the one it opens in. Also the system default's id.
+    pub fn listing(&self, t: &crate::openapps::Type, found: &[Handler]) -> (Vec<Handler>, Option<String>) {
+        let system = found.iter().find(|h| h.default).map(|h| h.id.clone());
+        let mut list: Vec<Handler> = found.to_vec();
+        let extra = t.key().and_then(|k| self.remembered.get(&k)).into_iter().flatten();
+        for h in extra.chain(self.own_default(t).as_ref().map(|(h, _)| h)) {
+            if !list.iter().any(|x| x.id == h.id) {
+                list.push(h.clone());
+            }
+        }
+        let chosen = self.default_for(t, Some(found)).map(|(h, _)| h.id);
+        for h in &mut list {
+            h.default = chosen.as_ref() == Some(&h.id);
+        }
+        (list, system)
+    }
+
+    /// Add an app to a type's list.
+    pub fn remember(&mut self, t: &crate::openapps::Type, h: &Handler) {
+        let Some(k) = t.key() else { return };
+        let r = self.remembered.entry(k).or_default();
+        if !r.iter().any(|x| x.id == h.id) {
+            let mut h = h.clone();
+            h.default = false;
+            r.push(h);
         }
     }
 
@@ -238,7 +313,7 @@ pub(super) enum Place {
 pub(super) fn ordered<'a>(list: &'a [crate::openapps::Handler], prefs: &OpenPrefs, t: &crate::openapps::Type) -> Vec<(&'a crate::openapps::Handler, Place)> {
     let recent = t.key().and_then(|k| prefs.recent.get(&k)).cloned().unwrap_or_default();
     let mut out: Vec<(&crate::openapps::Handler, Place)> = list.iter().filter(|h| h.default).map(|h| (h, Place::Default)).collect();
-    let mut add = |h: &'a crate::openapps::Handler, p: Place, out: &mut Vec<(&'a crate::openapps::Handler, Place)>| {
+    let add = |h: &'a crate::openapps::Handler, p: Place, out: &mut Vec<(&'a crate::openapps::Handler, Place)>| {
         if !out.iter().any(|(x, _)| x.id == h.id) {
             out.push((h, p));
         }
@@ -290,14 +365,18 @@ fn found_for(ctx: &egui::Context, t: &crate::openapps::Type) -> Option<std::sync
 
 /// One app's row in a menu: its icon and name, "Default" for the system's choice, and a pin
 /// (shown while pinned, or on hover) that keeps it near the top of every list.
-fn app_row(ui: &mut egui::Ui, h: &crate::openapps::Handler, place: Place, prefs: &OpenPrefs) -> Option<Pick> {
+fn app_row(ui: &mut egui::Ui, h: &crate::openapps::Handler, place: Place, system: bool, prefs: &OpenPrefs) -> Option<Pick> {
     let icon = icons::get(ui.ctx(), &h.app);
     let mut b = match icon {
         Some(t) => egui::Button::image_and_text(egui::Image::new(&t).fit_to_exact_size(egui::vec2(16.0, 16.0)), h.name.as_str()),
         None => egui::Button::new(crate::app::style::mi(&h.name)),
     };
     // Room for the tick or the pin at the end.
-    b = b.shortcut_text(if place == Place::Default { "Default\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" } else { "\u{a0}\u{a0}\u{a0}\u{a0}" });
+    b = b.shortcut_text(match place {
+        Place::Default => "Default\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}",
+        _ if system => "System default\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}",
+        _ => "\u{a0}\u{a0}\u{a0}\u{a0}",
+    });
     let row = ui.add(b).on_hover_text(h.app.display().to_string());
     let mut out = None;
     if row.clicked() {
@@ -335,9 +414,11 @@ pub(super) fn app_list(ui: &mut egui::Ui, apps: &[UserApp], prefs: &OpenPrefs, p
         None => {
             ui.weak("Looking for apps…");
         }
-        Some(list) => {
-            for (h, place) in ordered(list, prefs, &t).into_iter().take(MENU_APPS) {
-                if let Some(p) = app_row(ui, h, place, prefs) {
+        Some(found) => {
+            let (list, system) = prefs.listing(&t, found);
+            for (h, place) in ordered(&list, prefs, &t).into_iter().take(MENU_APPS) {
+                let sys = place != Place::Default && system.as_deref() == Some(h.id.as_str());
+                if let Some(p) = app_row(ui, h, place, sys, prefs) {
                     out = Some(p);
                 }
             }
@@ -357,8 +438,20 @@ pub(super) fn app_list(ui: &mut egui::Ui, apps: &[UserApp], prefs: &OpenPrefs, p
     }
     ui.separator();
     let what = if t == crate::openapps::Type::Unknown && !ext.is_empty() { format!(".{ext} files") } else { t.label() };
-    if ui.add(egui::Button::new(crate::app::style::mi("Choose Another Application…"))).on_hover_text(format!("Pick any app for {what}")).clicked() {
+    if ui.add(egui::Button::new(crate::app::style::mi("Choose Another Application…"))).on_hover_text(format!("Search all your apps for one to open {what} with")).clicked() {
         out = Some(Pick::Choose);
+    }
+    if t != crate::openapps::Type::Unknown && ui.add(egui::Button::new(crate::app::style::mi("Change Default Application…"))).on_hover_text(format!("Choose the app Filescape opens {what} in")).clicked() {
+        out = Some(Pick::ChangeDefault);
+    }
+    if let Some((h, src)) = prefs.own_default(&t) {
+        let whose = match src {
+            Source::Kind => t.category().map(kind_name).unwrap_or_default(),
+            _ => what.clone(),
+        };
+        if ui.add(egui::Button::new(crate::app::style::mi("Use the System's Default Again"))).on_hover_text(format!("Stop opening {whose} in {} and use the system's usual app", h.name)).clicked() {
+            out = Some(Pick::ResetDefault);
+        }
     }
     if ui.add(egui::Button::new(crate::app::style::mi("Manage Applications…"))).clicked() {
         out = Some(Pick::Manage);
@@ -378,6 +471,12 @@ pub(super) enum Pick {
     System,
     /// Pin or unpin the app in [`PICKED`].
     Pin,
+    /// Pick a program file to open it with.
+    Browse,
+    /// The searchable picker, set to make the app Filescape's default for the type.
+    ChangeDefault,
+    /// Forget Filescape's own default for the item's type (or kind).
+    ResetDefault,
     Choose,
     Manage,
 }
@@ -399,6 +498,59 @@ fn local_copies(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
         .collect()
 }
 
+/// What Choose Another Application does with the app once it's picked.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum How {
+    /// Just open it this time.
+    Once,
+    /// Open it, and list the app for this type from now on.
+    Remember,
+    /// Make it Filescape's default for this type.
+    TypeDefault,
+    /// Make it Filescape's default for this whole kind of file.
+    KindDefault,
+}
+
+/// The Choose Another Application box, while it's open.
+pub(super) struct Picker {
+    paths: Vec<PathBuf>,
+    t: crate::openapps::Type,
+    search: String,
+    chosen: Option<Handler>,
+    how: How,
+    /// Asking whether to change the system's default.
+    confirm: bool,
+    /// Put the cursor in the search box (the first frame).
+    focus: bool,
+    /// Change Default: save the choice without opening the item.
+    just_set: bool,
+}
+
+/// A row in the picker: its icon and name, selected when it's the chosen one.
+fn picker_row(ui: &mut egui::Ui, h: &Handler, chosen: bool) -> egui::Response {
+    ui.horizontal(|ui| {
+        let r = ui.allocate_response(egui::vec2(ui.available_width(), 24.0), egui::Sense::click());
+        let v = ui.visuals();
+        if chosen {
+            ui.painter().rect_filled(r.rect, 4.0, v.selection.bg_fill);
+        } else if r.hovered() {
+            ui.painter().rect_filled(r.rect, 4.0, v.widgets.hovered.weak_bg_fill);
+        }
+        let mut x = r.rect.left() + 6.0;
+        if let Some(t) = icons::get(ui.ctx(), &h.app) {
+            egui::Image::new(&t).paint_at(ui, egui::Rect::from_min_size(egui::pos2(x, r.rect.center().y - 8.0), egui::vec2(16.0, 16.0)));
+        }
+        x += 24.0;
+        let colour = if chosen { v.selection.stroke.color } else { v.text_color() };
+        ui.painter().text(egui::pos2(x, r.rect.center().y), egui::Align2::LEFT_CENTER, &h.name, egui::FontId::proportional(13.5), colour);
+        if h.default {
+            ui.painter().text(egui::pos2(r.rect.right() - 8.0, r.rect.center().y), egui::Align2::RIGHT_CENTER, "Default", egui::FontId::proportional(12.0), v.weak_text_color());
+        }
+        r.on_hover_text(h.app.display().to_string())
+    })
+    .inner
+}
+
 impl App {
     /// A preview pane's Open button: "Open in <the usual app>" (just "Open" when the pane is
     /// narrow or no usual app is known), with an arrow for the same list as Open With.
@@ -406,7 +558,7 @@ impl App {
         use crate::kit::{self, Icon};
         let t = type_of(path, is_dir);
         let found = found_for(ui.ctx(), &t);
-        let def = found.as_ref().and_then(|f| f.iter().find(|h| h.default).cloned());
+        let def = self.files.prefs.open.default_for(&t, found.as_deref().map(|v| v.as_slice())).map(|(h, _)| h);
         let full = def.as_ref().map(|h| format!("Open in {}", h.name));
         let width = |s: &str| ui.painter().layout_no_wrap(s.to_string(), egui::FontId::proportional(kit::LABEL), egui::Color32::WHITE).size().x;
         let label = match &full {
@@ -419,8 +571,7 @@ impl App {
         };
         let (main, arrow) = kit::split_button(ui, Some(Icon::External), label, "Open with another app");
         if main.on_hover_text(tip).clicked() {
-            let p = path.to_path_buf();
-            self.files.spawn(move || crate::actions::open(&p));
+            self.open_default(path.to_path_buf(), is_dir, found.as_deref().map(|v| v.as_slice()));
         }
         let ext = if is_dir { String::new() } else { path.file_name().map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_lowercase()).unwrap_or_default() };
         let mut chosen = None;
@@ -430,6 +581,201 @@ impl App {
         });
         if let Some(p) = chosen {
             self.open_with(p, vec![path.to_path_buf()]);
+        }
+    }
+
+    /// Open an item in its usual app: Filescape's default for its type or kind, else the
+    /// system's; with neither, ask which app (Choose Another Application).
+    pub(super) fn open_default(&mut self, path: PathBuf, is_dir: bool, found: Option<&[Handler]>) {
+        let t = type_of(&path, is_dir);
+        match self.files.prefs.open.default_for(&t, found) {
+            Some((h, Source::Type | Source::Kind)) => {
+                let _ = pick(&h, Pick::System);
+                self.open_with(Pick::System, vec![path]);
+            }
+            None if found.is_some() || t == crate::openapps::Type::Unknown => self.open_with(Pick::Choose, vec![path]),
+            _ => self.files.spawn(move || crate::actions::open(&path)),
+        }
+    }
+
+    /// The Choose Another Application box: a search over the apps suggested for the type and
+    /// every other app, what to do with the choice, and Open.
+    pub(super) fn picker_window(&mut self, ctx: &egui::Context) {
+        use crate::kit::{self, Icon, Kind};
+        let Some(pk) = &mut self.files.picker else { return };
+        let prefs = &self.files.prefs.open;
+        let mut close = false;
+        let mut go = false;
+        let mut browse = false;
+        let mut system = false;
+        let what = pk.t.label();
+        let kind = pk.t.category();
+        let name = pk.paths.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let c1 = ctx.clone();
+        let found = match crate::openapps::apps_for(&pk.t, move || c1.request_repaint()) {
+            crate::openapps::Apps::Found(f) => Some(f),
+            crate::openapps::Apps::Looking => None,
+        };
+        let c2 = ctx.clone();
+        let all = match crate::openapps::all_apps(&pk.t, move || c2.request_repaint()) {
+            crate::openapps::Apps::Found(f) => Some(f),
+            crate::openapps::Apps::Looking => None,
+        };
+        let modal = egui::Modal::new(egui::Id::new("open-with-picker")).show(ctx, |ui| {
+            ui.set_width(540.0);
+            ui.heading("Choose an Application");
+            let many = pk.paths.len() > 1;
+            ui.weak(if many { format!("Open {} items with:", pk.paths.len()) } else { format!("Open \u{201c}{name}\u{201d} with:") });
+            ui.add_space(4.0);
+            let search = ui.add(egui::TextEdit::singleline(&mut pk.search).hint_text("Search applications").desired_width(f32::INFINITY));
+            if pk.focus {
+                search.request_focus();
+                pk.focus = !search.has_focus();
+            }
+            let q = pk.search.trim().to_lowercase();
+            let fits = |h: &Handler| q.is_empty() || h.name.to_lowercase().contains(&q);
+            ui.add_space(4.0);
+            let mut first = None;
+            egui::ScrollArea::vertical().max_height(300.0).auto_shrink([false, false]).show(ui, |ui| {
+                let (suggested, _) = match &found {
+                    Some(f) => prefs.listing(&pk.t, f),
+                    None => (Vec::new(), None),
+                };
+                let suggested: Vec<Handler> = ordered(&suggested, prefs, &pk.t).into_iter().map(|(h, _)| h.clone()).filter(|h| fits(h)).collect();
+                if found.is_none() {
+                    ui.weak("Looking for apps…");
+                } else if !suggested.is_empty() {
+                    ui.label(egui::RichText::new("Suggested").small().strong());
+                    for h in &suggested {
+                        first.get_or_insert_with(|| h.clone());
+                        let r = picker_row(ui, h, pk.chosen.as_ref().is_some_and(|c| c.id == h.id));
+                        if r.clicked() {
+                            pk.chosen = Some(h.clone());
+                        }
+                        if r.double_clicked() {
+                            go = true;
+                        }
+                    }
+                }
+                let others: Vec<Handler> = all.iter().flat_map(|a| a.iter()).filter(|h| fits(h) && !suggested.iter().any(|s| s.id == h.id)).cloned().collect();
+                if !others.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(if suggested.is_empty() { "Applications" } else { "Other applications" }).small().strong());
+                    for h in &others {
+                        first.get_or_insert_with(|| h.clone());
+                        let r = picker_row(ui, h, pk.chosen.as_ref().is_some_and(|c| c.id == h.id));
+                        if r.clicked() {
+                            pk.chosen = Some(h.clone());
+                        }
+                        if r.double_clicked() {
+                            go = true;
+                        }
+                    }
+                } else if all.is_none() {
+                    ui.weak("Looking for other apps…");
+                }
+                if found.is_some() && all.is_some() && suggested.is_empty() && others.is_empty() {
+                    ui.weak(if q.is_empty() { "No apps found. Use Browse to pick a program." } else { "No apps match." });
+                }
+            });
+            // Enter in the search box takes the first match.
+            if search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && let Some(h) = first {
+                pk.chosen = Some(h);
+                go = true;
+            }
+            ui.add_space(6.0);
+            if pk.t != crate::openapps::Type::Unknown {
+                ui.radio_value(&mut pk.how, How::Once, "Open once");
+                ui.radio_value(&mut pk.how, How::Remember, format!("Open, and list it for {what} from now on"));
+                ui.radio_value(&mut pk.how, How::TypeDefault, format!("Always open {what} with it in Filescape"));
+                if let Some(c) = kind {
+                    ui.radio_value(&mut pk.how, How::KindDefault, format!("Always open all {} with it in Filescape", kind_name(c)));
+                }
+                ui.weak("Filescape's choices don't change your system's default apps.");
+            }
+            ui.add_space(6.0);
+            if pk.confirm {
+                let app = pk.chosen.as_ref().map(|h| h.name.clone()).unwrap_or_default();
+                ui.separator();
+                ui.label(format!("Make {app} the default for {what} on this computer? Every app, not just Filescape, will open them with it."));
+                ui.horizontal(|ui| {
+                    if kit::button(ui, Kind::Primary, None, "Change System Default").clicked() {
+                        system = true;
+                    }
+                    if kit::button(ui, Kind::Secondary, None, "Cancel").clicked() {
+                        pk.confirm = false;
+                    }
+                });
+                return;
+            }
+            ui.horizontal(|ui| {
+                if kit::button(ui, Kind::Secondary, Some(Icon::Folder), "Browse…").on_hover_text("Pick a program file instead").clicked() {
+                    browse = true;
+                }
+                let can_system = pk.chosen.is_some() && pk.t != crate::openapps::Type::Unknown && pk.paths.len() == 1;
+                let label = if crate::openapps::SETS_SYSTEM_DEFAULT { "Change System Default…" } else { "Change System Default (Windows)…" };
+                let r = ui.add_enabled_ui(can_system, |ui| kit::button(ui, Kind::Secondary, None, label)).inner;
+                if r.on_hover_text("Make it the default for every app on this computer, not just Filescape").clicked() {
+                    if crate::openapps::SETS_SYSTEM_DEFAULT {
+                        pk.confirm = true;
+                    } else {
+                        system = true;
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let done = if pk.just_set && matches!(pk.how, How::TypeDefault | How::KindDefault) { "Use as Default" } else { "Open" };
+                    let r = ui.add_enabled_ui(pk.chosen.is_some(), |ui| kit::button(ui, Kind::Primary, None, done)).inner;
+                    if r.clicked() {
+                        go = true;
+                    }
+                    if kit::button(ui, Kind::Secondary, None, "Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        });
+        if modal.should_close() {
+            close = true;
+        }
+        if system {
+            let (Some(h), Some(sample)) = (pk.chosen.clone(), pk.paths.first().cloned()) else { return };
+            let t = pk.t.clone();
+            pk.confirm = false;
+            self.files.spawn(move || crate::openapps::set_system_default(&h, &t, &sample));
+            self.files.picker = None;
+            return;
+        }
+        if browse {
+            let p = self.files.picker.take().map(|p| p.paths).unwrap_or_default();
+            self.open_with(Pick::Browse, p);
+            return;
+        }
+        if go && let Some(pk) = self.files.picker.take() {
+            let Some(h) = pk.chosen.clone() else { return };
+            let o = &mut self.files.prefs.open;
+            match pk.how {
+                How::Once => {}
+                How::Remember => o.remember(&pk.t, &h),
+                How::TypeDefault => {
+                    if let Some(k) = pk.t.key() {
+                        o.defaults.insert(k, Handler { default: false, ..h.clone() });
+                    }
+                }
+                How::KindDefault => {
+                    if let Some(c) = pk.t.category() {
+                        o.kind_defaults.insert(kind_key(c), Handler { default: false, ..h.clone() });
+                    }
+                }
+            }
+            if pk.just_set && matches!(pk.how, How::TypeDefault | How::KindDefault) {
+                return;
+            }
+            let _ = pick(&h, Pick::System);
+            self.open_with(Pick::System, pk.paths);
+            return;
+        }
+        if close {
+            self.files.picker = None;
         }
     }
 
@@ -460,7 +806,28 @@ impl App {
                     r
                 });
             }
-            Pick::Choose => {
+            Pick::Choose | Pick::ChangeDefault => {
+                let is_dir = paths.len() == 1 && first.is_dir();
+                let t = type_of(&first, is_dir);
+                let how = if pick == Pick::ChangeDefault { How::TypeDefault } else { How::Once };
+                let chosen = (pick == Pick::ChangeDefault).then(|| self.files.prefs.open.own_default(&t).map(|(h, _)| h)).flatten();
+                self.files.picker = Some(Picker { paths, t, search: String::new(), chosen, how, confirm: false, focus: true, just_set: pick == Pick::ChangeDefault });
+            }
+            Pick::ResetDefault => {
+                let is_dir = paths.len() == 1 && first.is_dir();
+                let t = type_of(&first, is_dir);
+                let o = &mut self.files.prefs.open;
+                match o.own_default(&t) {
+                    Some((_, Source::Type)) => {
+                        o.defaults.remove(&t.key().unwrap_or_default());
+                    }
+                    Some((_, Source::Kind)) => {
+                        o.kind_defaults.remove(&t.category().map(kind_key).unwrap_or_default());
+                    }
+                    _ => {}
+                }
+            }
+            Pick::Browse => {
                 let is_dir = self
                     .files
                     .cur()
@@ -665,6 +1032,32 @@ pub(super) fn split_args(s: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filescape_defaults_come_before_the_systems() {
+        use crate::openapps::{Handler, Type};
+        let h = |id: &str, default: bool| Handler { id: id.into(), name: id.into(), app: PathBuf::new(), default };
+        let found = vec![h("vim", true), h("kate", false)];
+        let txt = Type::Ext("txt".into());
+        let md = Type::Ext("md".into());
+        let mut prefs = OpenPrefs::default();
+        assert_eq!(prefs.default_for(&txt, Some(&found)).map(|(h, s)| (h.id, s)), Some(("vim".into(), Source::System)));
+        assert_eq!(prefs.default_for(&txt, None), None);
+        prefs.kind_defaults.insert(kind_key(crate::categories::Category::Documents), h("writer", false));
+        assert_eq!(prefs.default_for(&md, Some(&found)).map(|(h, s)| (h.id, s)), Some(("writer".into(), Source::Kind)));
+        prefs.defaults.insert("txt".into(), h("kate", false));
+        assert_eq!(prefs.default_for(&txt, None).map(|(h, s)| (h.id, s)), Some(("kate".into(), Source::Type)));
+        // The list marks Filescape's choice, adds apps it wouldn't have, and names the system's.
+        prefs.remember(&txt, &h("zed", false));
+        let (list, system) = prefs.listing(&txt, &found);
+        let marked: Vec<_> = list.iter().map(|h| (h.id.as_str(), h.default)).collect();
+        assert_eq!(marked, [("vim", false), ("kate", true), ("zed", false)]);
+        assert_eq!(system.as_deref(), Some("vim"));
+        let (list, _) = prefs.listing(&md, &found);
+        assert!(list.iter().any(|h| h.id == "writer" && h.default));
+        assert_eq!(Type::Folder.category(), None);
+        assert_eq!(kind_name(crate::categories::Category::Images), "images");
+    }
 
     #[test]
     fn lists_default_pinned_recent_then_the_rest() {

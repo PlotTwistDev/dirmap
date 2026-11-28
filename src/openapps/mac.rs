@@ -30,6 +30,7 @@ unsafe extern "C" {
     fn LSCopyApplicationURLsForBundleIdentifier(id: CFRef, err: *mut CFRef) -> CFRef;
     fn UTTypeCreatePreferredIdentifierForTag(class: CFRef, tag: CFRef, conforming: CFRef) -> CFRef;
     fn LSOpenFromURLSpec(spec: *const LSLaunchURLSpec, launched: *mut CFRef) -> i32;
+    fn LSSetDefaultRoleHandlerForContentType(uti: CFRef, roles: u32, bundle: CFRef) -> i32;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -173,4 +174,33 @@ pub fn open(h: &Handler, files: &[PathBuf]) -> Result<(), String> {
         LSOpenFromURLSpec(&spec, std::ptr::null_mut())
     };
     if status == 0 { Ok(()) } else { Err(format!("macOS couldn't open it with {} (error {status}).", h.name)) }
+}
+
+/// Every app in the usual Applications folders.
+pub fn all_apps() -> Vec<Handler> {
+    let mut dirs = vec![PathBuf::from("/Applications"), PathBuf::from("/Applications/Utilities"), PathBuf::from("/System/Applications"), PathBuf::from("/System/Applications/Utilities")];
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(home).join("Applications"));
+    }
+    let mut out = Vec::new();
+    for d in dirs {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().is_some_and(|x| x == "app") {
+                out.push(handler(p, None));
+            }
+        }
+    }
+    out
+}
+
+/// Make it the default for the type, as Finder's Get Info "Change All…" does.
+pub fn set_default(h: &Handler, t: &Type) -> Result<(), String> {
+    let id = crate::apps::info(&h.app).and_then(|i| i.id).ok_or_else(|| format!("{} doesn't say what it's called to macOS, so it can't be made the default.", h.name))?;
+    let u = uti(t).ok_or("macOS doesn't know what kind of file this is.")?;
+    let b = cfstr(&id);
+    // SAFETY: valid strings, kept alive through the call.
+    let status = unsafe { LSSetDefaultRoleHandlerForContentType(u.0, ALL_ROLES, b.0) };
+    if status == 0 { Ok(()) } else { Err(format!("macOS didn't change it (error {status}).")) }
 }
