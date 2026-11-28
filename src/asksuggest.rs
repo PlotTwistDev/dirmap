@@ -84,8 +84,16 @@ pub fn sort_of(name: &str, is_dir: bool) -> Sort {
 }
 
 /// The questions to offer for `sort`, best first. `readable`: Filescape can read its text.
-pub fn for_sort(sort: Sort, readable: bool) -> Vec<Suggestion> {
+/// `vision`: the loaded model can look at it (a picture).
+fn for_sort(sort: Sort, readable: bool, vision: bool) -> Vec<Suggestion> {
     use Mark as M;
+    if sort == Sort::Image && vision {
+        return vec![
+            s("Describe this picture", "Describe this picture: what it shows, and anything that stands out.", true, M::Explain),
+            s("What text is in it?", "Write out any text you can see in this picture. Say if some of it is hard to read.", true, M::Search),
+            s("What could this be?", "What is this picture likely to be, judging by what it shows, its name and its details?", true, M::Chat),
+        ];
+    }
     let all: &[Suggestion] = match sort {
         Sort::Licence => &[
             s("Summarise this licence", "Summarise this licence in plain English.", true, M::Summary),
@@ -146,7 +154,8 @@ pub fn for_path(path: &Path, is_dir: bool) -> Vec<Suggestion> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let sort = sort_of(&name, is_dir);
     let readable = !is_dir && crate::askabout::can_read(path);
-    let mut v = for_sort(sort, readable);
+    let seeing = sort == Sort::Image && vision() && crate::askabout::can_show(path);
+    let mut v = for_sort(sort, readable, seeing);
     if v.is_empty() {
         // Nothing Filescape can read in it: what it is, from its name and details.
         v.push(s("What is this file?", "What is this file likely to be, and what opens it?", false, Mark::Explain));
@@ -164,6 +173,17 @@ pub fn set_shown(on: bool) {
 
 pub fn shown() -> bool {
     SHOWN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The loaded model can look at pictures (it has a vision projector). Set when a model loads.
+static VISION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_vision(on: bool) {
+    VISION.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn vision() -> bool {
+    VISION.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// What the right-click menu's Ask AI submenu asks. `Ask` opens the conversation with nothing
@@ -321,23 +341,30 @@ mod tests {
 
     #[test]
     fn licence_questions_need_the_text() {
-        let v = for_sort(Sort::Licence, true);
+        let v = for_sort(Sort::Licence, true, false);
         assert_eq!(v[0].label, "Summarise this licence");
         assert!(v.iter().any(|x| x.label == "Can I use this commercially?"));
         assert!(v.iter().all(|x| x.read));
         // Unreadable: nothing that needs the text is offered.
-        assert!(for_sort(Sort::Licence, false).is_empty());
+        assert!(for_sort(Sort::Licence, false, false).is_empty());
     }
 
     #[test]
     fn folders_never_read_contents() {
-        assert!(for_sort(Sort::Folder, false).iter().all(|x| !x.read));
-        assert_eq!(for_sort(Sort::Folder, false).len(), 4);
+        assert!(for_sort(Sort::Folder, false, false).iter().all(|x| !x.read));
+        assert_eq!(for_sort(Sort::Folder, false, false).len(), 4);
     }
 
     #[test]
     fn pictures_are_not_described_without_vision() {
-        assert!(for_sort(Sort::Image, true).iter().all(|x| !x.label.contains("Describe") && !x.read));
+        assert!(for_sort(Sort::Image, true, false).iter().all(|x| !x.label.contains("Describe") && !x.read));
+    }
+
+    #[test]
+    fn pictures_are_described_with_vision() {
+        let v = for_sort(Sort::Image, false, true);
+        assert_eq!(v[0].label, "Describe this picture");
+        assert!(v.iter().all(|x| x.read));
     }
 
     #[test]

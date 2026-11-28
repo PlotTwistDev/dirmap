@@ -8,7 +8,7 @@
 #
 #   packaging/linux/package.sh target/release/filescape dist engine
 #
-# `engine` is a folder of the AI engine's libraries (libllama, libggml, a processor build for
+# `engine` is a folder of the AI engine's libraries (libllama, libmtmd for pictures, libggml, a processor build for
 # each kind of x86 processor and Vulkan for graphics cards). They go in /usr/lib/filescape, or
 # beside the program in the .tar.gz; the program looks in both. Vulkan itself (libvulkan.so.1)
 # is not bundled: it comes with the graphics drivers, and without it models run on the processor.
@@ -111,7 +111,7 @@ Recommends: libvulkan.so.1()(64bit)
 # The engine's libraries are private to Filescape: not offered to other packages, and Vulkan is
 # optional (models run on the processor without it).
 %global __provides_exclude_from ^/usr/lib/filescape/.*$
-%global __requires_exclude ^(libggml.*|libllama.*|libvulkan\\.so.*)$
+%global __requires_exclude ^(libggml.*|libllama.*|libmtmd.*|libvulkan\\.so.*)$
 
 %description
 Filescape scans a drive or folder and draws everything on it as a map, where each file is a

@@ -104,8 +104,8 @@ fn rel(root: &Path, p: &Path) -> String {
     r.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
 }
 
-/// Copies the AI engine's libraries (llama.cpp, ggml and its backends: a processor build for
-/// each kind of x86 processor, and Vulkan) from where llama-cpp-sys-2 built them to beside the
+/// Copies the AI engine's libraries (llama.cpp, its multimodal part mtmd for pictures, ggml and
+/// its backends: a processor build for each kind of x86 processor, and Vulkan) from where llama-cpp-sys-2 built them to beside the
 /// program and its tests, so `target/release/filescape` runs as it is and packaging finds them in
 /// one place. Only on Windows and Linux; the Mac build has the engine built in.
 fn engine_beside_program() {
@@ -121,7 +121,7 @@ fn engine_beside_program() {
         (root.join("bin"), |n| n.ends_with(".dll"))
     } else {
         // The names the program asks for (libllama.so.0); the files they point to are copied.
-        (root.join("lib"), |n| (n.starts_with("libllama") || n.starts_with("libggml")) && n.ends_with(".so.0"))
+        (root.join("lib"), |n| (n.starts_with("libllama") || n.starts_with("libggml") || n.starts_with("libmtmd")) && n.ends_with(".so.0"))
     };
     for dir in [libs, root.join("backends")] {
         for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {

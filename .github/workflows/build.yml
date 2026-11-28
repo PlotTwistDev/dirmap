@@ -94,6 +94,7 @@ jobs:
           # processor plus Vulkan, which Filescape loads when it starts.
           Copy-Item target/release/*.dll dist/Filescape/
           if (-not (Test-Path dist/Filescape/ggml-vulkan.dll)) { throw "no Vulkan engine" }
+          if (-not (Test-Path dist/Filescape/mtmd.dll)) { throw "no picture engine (mtmd)" }
           Get-ChildItem dist/Filescape | Format-Table Name, Length
           Compress-Archive -Path dist/Filescape -DestinationPath dist/Filescape-${{ matrix.name }}.zip
           Remove-Item -Recurse dist/Filescape
@@ -104,13 +105,13 @@ jobs:
           cargo build --release
           # The build for sale must never contain the test-serial mode.
           if grep -q FILESCAPE_LICENCE_DEV target/release/filescape; then echo "test mode in release build" >&2; exit 1; fi
-          # The AI engine's libraries: llama.cpp, a processor build for each kind of x86 processor,
-          # and Vulkan. Debug information stripped: crash.log only needs the program's own.
+          # The AI engine's libraries: llama.cpp, its multimodal part (mtmd, for pictures), a
+          # processor build for each kind of x86 processor, and Vulkan. Debug information stripped: crash.log only needs the program's own.
           # (build.rs put them beside the program.)
           mkdir engine
-          find target/release -maxdepth 1 -type f \( -name 'libllama.so.0' -o -name 'libggml*.so.0' -o -name 'libggml-*.so' \) -exec cp {} engine/ \;
+          find target/release -maxdepth 1 -type f \( -name 'libllama.so.0' -o -name 'libmtmd.so.0' -o -name 'libggml*.so.0' -o -name 'libggml-*.so' \) -exec cp {} engine/ \;
           strip --strip-unneeded engine/*
-          test -f engine/libggml-vulkan.so && ls -l engine
+          test -f engine/libggml-vulkan.so && test -f engine/libmtmd.so.0 && ls -l engine
           # AppImage, .deb, .rpm and the plain .tar.gz. Built on 22.04 so they run on glibc 2.35+.
           sudo apt-get update -qq && sudo apt-get install -y -qq rpm desktop-file-utils
           packaging/linux/package.sh target/release/filescape dist engine
@@ -118,6 +119,7 @@ jobs:
           sudo apt-get install -y -qq ./dist/Filescape-linux.deb
           filescape --help
           ldd /usr/bin/filescape | tee /dev/stderr | grep -q 'lib/filescape/libllama.so'
+          ldd /usr/bin/filescape | grep -q 'lib/filescape/libmtmd.so'
           rpm -qpl dist/Filescape-linux.rpm | grep -qx /usr/bin/filescape
           ./dist/Filescape-linux.AppImage --appimage-extract-and-run --help
 
