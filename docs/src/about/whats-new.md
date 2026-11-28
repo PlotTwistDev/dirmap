@@ -25,6 +25,8 @@
   each one against what the model was given: real ones link to the file and show the line,
   made-up ones are crossed out. See
   [Asking about files and folders](../views/ask-ai.md#asking-about-files-and-folders).
+- Asking about an AI model file gives the model what Filescape reads from it (family, size,
+  precision, context) and whether this computer could run it, instead of a guess from its name.
 - Large folders: Ask AI describes a folder's shape first, the folders inside it up to three
   levels down, then its largest items, and never reads more files than fit in the model's
   context.
