@@ -491,7 +491,7 @@ pub fn contents(files: &[PathBuf], budget: usize) -> Read {
             continue;
         };
         // Lines are numbered so the model can point at them; the numbers take some of the room.
-        let (t, fitted) = fit(&t, room - room / 8);
+        let (t, fitted) = fit(&t, room - room / 16);
         let cut = fitted || t.len() as u64 + 4 < md.len();
         if cut {
             note("read the start only".into());
@@ -870,7 +870,7 @@ mod tests {
         let d = tmp("scripts");
         std::fs::write(d.join("zh.txt"), "文".repeat(1000)).unwrap();
         let r = contents(&[d.join("zh.txt")], 400);
-        assert_eq!(r.text.matches('文').count(), 87, "{}", r.text);
+        assert_eq!(r.text.matches('文').count(), 93, "{}", r.text);
         assert_eq!(r.notes, vec!["zh.txt: read the start only".to_string()]);
         let _ = std::fs::remove_dir_all(&d);
     }

@@ -179,79 +179,196 @@ mod icons {
 /// The app chosen from a menu (menus pass plain values; this holds the rest).
 static PICKED: std::sync::Mutex<Option<crate::openapps::Handler>> = std::sync::Mutex::new(None);
 
+fn pick(h: &crate::openapps::Handler, p: Pick) -> Option<Pick> {
+    *PICKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(h.clone());
+    Some(p)
+}
+
 /// At most this many apps are listed; the rest are a click away under Choose.
 const MENU_APPS: usize = 12;
 
-/// One app's row in a menu: its icon and name, and "Default" for the system's choice.
-pub(super) fn app_row(ui: &mut egui::Ui, h: &crate::openapps::Handler) -> egui::Response {
-    let icon = icons::get(ui.ctx(), &h.app);
-    let text = crate::app::style::mi(&h.name);
-    let mut b = match icon {
-        Some(t) => egui::Button::image_and_text(egui::Image::new(&t).fit_to_exact_size(egui::vec2(16.0, 16.0)), h.name.as_str()),
-        None => egui::Button::new(text),
-    };
-    if h.default {
-        b = b.shortcut_text("Default");
-    }
-    ui.add(b).on_hover_text(h.app.display().to_string())
+/// Apps used last for each type, at most this many.
+const RECENTS: usize = 5;
+
+/// Open With's own memory: apps pinned to the top of every list, and the ones used last for
+/// each type of file. Kept by Filescape only: the system's own settings are never touched.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct OpenPrefs {
+    /// Apps (by their system id) listed first after the default, in the order pinned.
+    pub pinned: Vec<String>,
+    /// For each type ([`crate::openapps::Type::key`]), apps used last, newest first.
+    pub recent: std::collections::HashMap<String, Vec<String>>,
 }
 
-/// The Open With submenu: the apps the system knows can open this kind of item (the default
-/// first), the apps added by hand, then Choose and Manage.
-pub(super) fn menu(ui: &mut egui::Ui, apps: &[UserApp], path: &Path, ext: &str, is_dir: bool) -> Option<Pick> {
-    let mut out = None;
-    ui.menu_button(crate::app::style::mi("Open With"), |ui| {
+impl OpenPrefs {
+    pub fn is_pinned(&self, id: &str) -> bool {
+        self.pinned.iter().any(|p| p == id)
+    }
+
+    pub fn toggle_pin(&mut self, id: &str) {
+        if self.is_pinned(id) {
+            self.pinned.retain(|p| p != id);
+        } else {
+            self.pinned.push(id.to_string());
+        }
+    }
+
+    /// Remember an app was used for a type.
+    pub fn used(&mut self, t: &crate::openapps::Type, id: &str) {
+        let Some(k) = t.key() else { return };
+        let r = self.recent.entry(k).or_default();
+        r.retain(|x| x != id);
+        r.insert(0, id.to_string());
+        r.truncate(RECENTS);
+    }
+}
+
+/// Why an app is where it is in the list.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Place {
+    Default,
+    Pinned,
+    Recent,
+    Other,
+}
+
+/// The list as shown: the system's default first, then pinned apps (in the order pinned), then
+/// the ones used last for this type, then the rest by name.
+pub(super) fn ordered<'a>(list: &'a [crate::openapps::Handler], prefs: &OpenPrefs, t: &crate::openapps::Type) -> Vec<(&'a crate::openapps::Handler, Place)> {
+    let recent = t.key().and_then(|k| prefs.recent.get(&k)).cloned().unwrap_or_default();
+    let mut out: Vec<(&crate::openapps::Handler, Place)> = list.iter().filter(|h| h.default).map(|h| (h, Place::Default)).collect();
+    let mut add = |h: &'a crate::openapps::Handler, p: Place, out: &mut Vec<(&'a crate::openapps::Handler, Place)>| {
+        if !out.iter().any(|(x, _)| x.id == h.id) {
+            out.push((h, p));
+        }
+    };
+    for id in &prefs.pinned {
+        if let Some(h) = list.iter().find(|h| &h.id == id) {
+            add(h, Place::Pinned, &mut out);
+        }
+    }
+    for id in &recent {
+        if let Some(h) = list.iter().find(|h| &h.id == id) {
+            add(h, Place::Recent, &mut out);
+        }
+    }
+    for h in list {
+        add(h, Place::Other, &mut out);
+    }
+    out
+}
+
+/// What a file is, worked out once for the item being shown (reading the start of a file with
+/// no extension every frame would be wasteful).
+pub(super) fn type_of(path: &Path, is_dir: bool) -> crate::openapps::Type {
+    thread_local! {
+        static LAST: std::cell::RefCell<Option<(PathBuf, bool, crate::openapps::Type)>> = const { std::cell::RefCell::new(None) };
+    }
+    LAST.with(|l| {
+        let mut l = l.borrow_mut();
+        if let Some((p, d, t)) = l.as_ref()
+            && p == path
+            && *d == is_dir
+        {
+            return t.clone();
+        }
         let t = crate::openapps::identify(path, is_dir);
-        let ctx = ui.ctx().clone();
-        let found = crate::openapps::apps_for(&t, move || ctx.request_repaint());
-        // Apps on another system (a Windows program on a Mac drive) are never offered.
-        let on_system = match &found {
-            crate::openapps::Apps::Found(f) => Some(f.clone()),
-            crate::openapps::Apps::Looking => None,
-        };
-        match &on_system {
-            None => {
-                ui.weak("Looking for apps…");
-            }
-            Some(list) => {
-                for h in list.iter().take(MENU_APPS) {
-                    if app_row(ui, h).clicked() {
-                        *PICKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(h.clone());
-                        out = Some(Pick::System);
-                    }
+        *l = Some((path.to_path_buf(), is_dir, t.clone()));
+        t
+    })
+}
+
+/// The apps for an item: the system's list, or None while it's still being looked up.
+fn found_for(ctx: &egui::Context, t: &crate::openapps::Type) -> Option<std::sync::Arc<Vec<crate::openapps::Handler>>> {
+    let ctx = ctx.clone();
+    match crate::openapps::apps_for(t, move || ctx.request_repaint()) {
+        crate::openapps::Apps::Found(f) => Some(f),
+        crate::openapps::Apps::Looking => None,
+    }
+}
+
+/// One app's row in a menu: its icon and name, "Default" for the system's choice, and a pin
+/// (shown while pinned, or on hover) that keeps it near the top of every list.
+fn app_row(ui: &mut egui::Ui, h: &crate::openapps::Handler, place: Place, prefs: &OpenPrefs) -> Option<Pick> {
+    let icon = icons::get(ui.ctx(), &h.app);
+    let mut b = match icon {
+        Some(t) => egui::Button::image_and_text(egui::Image::new(&t).fit_to_exact_size(egui::vec2(16.0, 16.0)), h.name.as_str()),
+        None => egui::Button::new(crate::app::style::mi(&h.name)),
+    };
+    // Room for the tick or the pin at the end.
+    b = b.shortcut_text(if place == Place::Default { "Default\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" } else { "\u{a0}\u{a0}\u{a0}\u{a0}" });
+    let row = ui.add(b).on_hover_text(h.app.display().to_string());
+    let mut out = None;
+    if row.clicked() {
+        out = pick(h, Pick::System);
+    }
+    let end = egui::Rect::from_center_size(egui::pos2(row.rect.right() - 11.0, row.rect.center().y), egui::vec2(18.0, 18.0));
+    if place == Place::Default {
+        crate::kit::icons::paint(ui.painter(), end.shrink(3.0), crate::kit::Icon::Check, ui.visuals().text_color());
+    } else {
+        let pinned = prefs.is_pinned(&h.id);
+        let r = end;
+        let pin = ui.interact(r, row.id.with("pin"), egui::Sense::click());
+        let tip = if pinned { "Unpin: stop keeping it near the top" } else { "Pin: keep it near the top of every Open With list" };
+        let show = pinned || ui.rect_contains_pointer(row.rect);
+        if show {
+            let v = ui.visuals();
+            let c = if pin.hovered() || pinned { v.strong_text_color() } else { v.weak_text_color() };
+            crate::kit::icons::paint(ui.painter(), r.shrink(3.0), crate::kit::Icon::Pin, c);
+        }
+        if pin.on_hover_text(tip).clicked() {
+            out = pick(h, Pick::Pin);
+        }
+    }
+    out
+}
+
+/// The list shared by the right-click Open With menu and the Open button's arrow: the apps,
+/// then the ones added by hand, then Choose and Manage.
+pub(super) fn app_list(ui: &mut egui::Ui, apps: &[UserApp], prefs: &OpenPrefs, path: &Path, ext: &str, is_dir: bool) -> Option<Pick> {
+    let mut out = None;
+    let t = type_of(path, is_dir);
+    // Apps on another system (a Windows program on a Mac drive) are never offered.
+    let on_system = found_for(ui.ctx(), &t);
+    match &on_system {
+        None => {
+            ui.weak("Looking for apps…");
+        }
+        Some(list) => {
+            for (h, place) in ordered(list, prefs, &t).into_iter().take(MENU_APPS) {
+                if let Some(p) = app_row(ui, h, place, prefs) {
+                    out = Some(p);
                 }
             }
         }
-        let fit: Vec<(usize, &UserApp)> = apps
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| a.fits(ext, is_dir))
-            .collect();
-        if !fit.is_empty() && on_system.as_ref().is_some_and(|l| !l.is_empty()) {
-            ui.separator();
-        }
-        for (i, a) in &fit {
-            if ui
-                .button(&a.name)
-                .on_hover_text(format!("Added by you: {}", a.exe.display()))
-                .clicked()
-            {
-                out = Some(Pick::Run(*i));
-            }
-        }
-        if fit.is_empty() && on_system.as_ref().is_some_and(|l| l.is_empty()) {
-            ui.weak("No apps found for this type");
-        }
+    }
+    let fit: Vec<(usize, &UserApp)> = apps.iter().enumerate().filter(|(_, a)| a.fits(ext, is_dir)).collect();
+    if !fit.is_empty() && on_system.as_ref().is_some_and(|l| !l.is_empty()) {
         ui.separator();
-        let what = if t == crate::openapps::Type::Unknown && !ext.is_empty() { format!(".{ext} files") } else { t.label() };
-        if ui.add(egui::Button::new(crate::app::style::mi(format!("Choose an App for {what}…")))).clicked() {
-            out = Some(Pick::Choose);
+    }
+    for (i, a) in &fit {
+        if ui.button(&a.name).on_hover_text(format!("Added by you: {}", a.exe.display())).clicked() {
+            out = Some(Pick::Run(*i));
         }
-        if ui.add(egui::Button::new(crate::app::style::mi("Manage Apps…"))).clicked() {
-            out = Some(Pick::Manage);
-        }
-    });
+    }
+    if fit.is_empty() && on_system.as_ref().is_some_and(|l| l.is_empty()) {
+        ui.weak("No apps found for this type");
+    }
+    ui.separator();
+    let what = if t == crate::openapps::Type::Unknown && !ext.is_empty() { format!(".{ext} files") } else { t.label() };
+    if ui.add(egui::Button::new(crate::app::style::mi("Choose Another Application…"))).on_hover_text(format!("Pick any app for {what}")).clicked() {
+        out = Some(Pick::Choose);
+    }
+    if ui.add(egui::Button::new(crate::app::style::mi("Manage Applications…"))).clicked() {
+        out = Some(Pick::Manage);
+    }
     out
+}
+
+/// The Open With submenu of the right-click menu.
+pub(super) fn menu(ui: &mut egui::Ui, apps: &[UserApp], prefs: &OpenPrefs, path: &Path, ext: &str, is_dir: bool) -> Option<Pick> {
+    ui.menu_button(crate::app::style::mi("Open With"), |ui| app_list(ui, apps, prefs, path, ext, is_dir)).inner.flatten()
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -259,6 +376,8 @@ pub(super) enum Pick {
     Run(usize),
     /// An app the system found (the one in [`PICKED`]).
     System,
+    /// Pin or unpin the app in [`PICKED`].
+    Pin,
     Choose,
     Manage,
 }
@@ -281,6 +400,39 @@ fn local_copies(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
 }
 
 impl App {
+    /// A preview pane's Open button: "Open in <the usual app>" (just "Open" when the pane is
+    /// narrow or no usual app is known), with an arrow for the same list as Open With.
+    pub(super) fn open_button(&mut self, ui: &mut egui::Ui, path: &Path, is_dir: bool) {
+        use crate::kit::{self, Icon};
+        let t = type_of(path, is_dir);
+        let found = found_for(ui.ctx(), &t);
+        let def = found.as_ref().and_then(|f| f.iter().find(|h| h.default).cloned());
+        let full = def.as_ref().map(|h| format!("Open in {}", h.name));
+        let width = |s: &str| ui.painter().layout_no_wrap(s.to_string(), egui::FontId::proportional(kit::LABEL), egui::Color32::WHITE).size().x;
+        let label = match &full {
+            Some(f) if width(f) + 76.0 <= ui.available_width() * 0.6 => f.as_str(),
+            _ => "Open",
+        };
+        let tip = match &def {
+            Some(h) => format!("Open it in {}, its usual app", h.name),
+            None => "Open it with its usual app".to_string(),
+        };
+        let (main, arrow) = kit::split_button(ui, Some(Icon::External), label, "Open with another app");
+        if main.on_hover_text(tip).clicked() {
+            let p = path.to_path_buf();
+            self.files.spawn(move || crate::actions::open(&p));
+        }
+        let ext = if is_dir { String::new() } else { path.file_name().map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_lowercase()).unwrap_or_default() };
+        let mut chosen = None;
+        egui::Popup::menu(&arrow).show(|ui| {
+            ui.set_min_width(220.0);
+            chosen = app_list(ui, &self.files.prefs.apps, &self.files.prefs.open, path, &ext, is_dir);
+        });
+        if let Some(p) = chosen {
+            self.open_with(p, vec![path.to_path_buf()]);
+        }
+    }
+
     pub(super) fn open_with(&mut self, pick: Pick, paths: Vec<PathBuf>) {
         let Some(first) = paths.first().cloned() else {
             return;
@@ -297,6 +449,8 @@ impl App {
                 let Some(h) = PICKED.lock().unwrap_or_else(|e| e.into_inner()).take() else {
                     return;
                 };
+                let is_dir = paths.len() == 1 && first.is_dir();
+                self.files.prefs.open.used(&type_of(&first, is_dir), &h.id);
                 self.files.spawn(move || {
                     let r = crate::openapps::open(&h, &local_copies(&paths)?);
                     // An app that's gone: look again next time.
@@ -364,6 +518,11 @@ impl App {
                     };
                     this.open_with(Pick::Run(i), paths);
                 });
+            }
+            Pick::Pin => {
+                if let Some(h) = PICKED.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    self.files.prefs.open.toggle_pin(&h.id);
+                }
             }
             Pick::Manage => self.files.apps_box = Some(AppsBox::new(&self.files.prefs.apps)),
         }
@@ -506,6 +665,31 @@ pub(super) fn split_args(s: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lists_default_pinned_recent_then_the_rest() {
+        use crate::openapps::{Handler, Type};
+        let h = |id: &str, default: bool| Handler { id: id.into(), name: id.into(), app: PathBuf::new(), default };
+        let list = vec![h("vim", true), h("atom", false), h("kate", false), h("zed", false)];
+        let t = Type::Ext("txt".into());
+        let mut prefs = OpenPrefs::default();
+        prefs.toggle_pin("zed");
+        prefs.toggle_pin("vim");
+        prefs.used(&t, "kate");
+        prefs.used(&Type::Ext("md".into()), "atom");
+        let got: Vec<_> = ordered(&list, &prefs, &t).into_iter().map(|(h, p)| (h.id.as_str(), p)).collect();
+        assert_eq!(got, [("vim", Place::Default), ("zed", Place::Pinned), ("kate", Place::Recent), ("atom", Place::Other)]);
+        prefs.toggle_pin("zed");
+        assert!(!prefs.is_pinned("zed"));
+        for i in 0..9 {
+            prefs.used(&t, &format!("app{i}"));
+        }
+        prefs.used(&t, "app3");
+        let r = &prefs.recent["txt"];
+        assert_eq!((r.len(), r[0].as_str(), r[1].as_str()), (RECENTS, "app3", "app8"));
+        prefs.used(&Type::Unknown, "x");
+        assert_eq!(prefs.recent.len(), 2);
+    }
 
     #[test]
     fn commands_keep_the_path_whole() {
