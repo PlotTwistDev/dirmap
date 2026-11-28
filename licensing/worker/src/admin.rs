@@ -5,6 +5,7 @@
 
 use crate::db::LicenceRow;
 use crate::maintenance::{GrantRow, NewGrant, Outcome, length};
+use crate::renewal::{PriceChoice, RenewalSettings};
 use crate::store::{ListFilter, describe};
 use crate::web::{Form, date, encode, esc, iso_day, opt_date, page, parse_day};
 use crate::{Ctx, Db, Net, Req, Resp, mail};
@@ -23,7 +24,7 @@ impl A<'_> {
     fn nav(&self) -> String {
         let b = self.base;
         format!(
-            "<b>Filescape admin</b><a href=\"{b}/\">Licences</a><a href=\"{b}/issue\">Create temporary licence</a><a href=\"{b}/activations\">Activations</a><a href=\"{b}/maintenance\">Maintenance</a><a href=\"{b}/messages\">Messages</a><a href=\"{b}/releases\">Releases</a><a href=\"{b}/settings\">Settings</a><span class=\"mute\" style=\"margin-left:auto\">{}</span>",
+            "<b>Filescape admin</b><a href=\"{b}/\">Licences</a><a href=\"{b}/issue\">Create temporary licence</a><a href=\"{b}/activations\">Activations</a><a href=\"{b}/maintenance\">Maintenance</a><a href=\"{b}/renewals\">Renewals</a><a href=\"{b}/messages\">Messages</a><a href=\"{b}/releases\">Releases</a><a href=\"{b}/settings\">Settings</a><span class=\"mute\" style=\"margin-left:auto\">{}</span>",
             esc(self.actor)
         )
     }
@@ -44,6 +45,17 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
         ("GET", ["issue"]) => Ok(issue_form(&a, None)),
         ("POST", ["issue"]) => issue(cx, &a, &form).await,
         ("GET", ["activations"]) => activations(cx, &a).await,
+        ("GET", ["renewals"]) => renewals(cx, &a, req.query_param("msg").as_deref()).await,
+        ("POST", ["renewals"]) => {
+            let msg = match renewal_from_form(cx, &form) {
+                Ok(s) => {
+                    cx.set_renewal_settings(s, actor).await?;
+                    "Renewal settings saved.".to_string()
+                }
+                Err(e) => e,
+            };
+            Ok(Resp::redirect(&format!("{base}/renewals?msg={}", encode(&msg))))
+        }
         ("GET", ["maintenance"]) => Ok(bulk_form(&a, req.query_param("msg").as_deref())),
         ("POST", ["maintenance"]) => bulk_extend(cx, &a, &form).await,
         ("GET", ["messages"]) => messages(cx, &a, req.query_param("f").as_deref() == Some("all")).await,
@@ -819,4 +831,107 @@ async fn bulk_extend<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, form: &Form) 
         m
     };
     Ok(Resp::redirect(&format!("{}/maintenance?msg={}", a.base, encode(&msg))))
+}
+
+fn renewal_from_form<D: Db, N: Net>(cx: &Ctx<'_, D, N>, form: &Form) -> Result<RenewalSettings, String> {
+    let purchase = cx.cfg.paddle.as_ref().map(|p| p.price_ids.clone()).unwrap_or_default();
+    let choice = |key: &str| -> Result<Option<PriceChoice>, String> {
+        let id = form.get(&format!("{key}_id"));
+        let label = form.get(&format!("{key}_label"));
+        if id.is_empty() {
+            return Ok(None);
+        }
+        if !id.starts_with("pri_") || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(format!("{id} isn't a Paddle price ID (pri_…)."));
+        }
+        if purchase.contains(&id) {
+            return Err(format!("{id} is a licence purchase price (PADDLE_PRICE_IDS). A renewal needs its own price, or renewals would issue new licences."));
+        }
+        if label.is_empty() || label.len() > 40 {
+            return Err(format!("Give {id} a short label, such as $2.99."));
+        }
+        Ok(Some(PriceChoice { price_id: id, label }))
+    };
+    let s = RenewalSettings {
+        enabled: form.has("enabled"),
+        standard: choice("standard")?,
+        promo: choice("promo")?,
+        use_promo: form.has("use_promo"),
+        enterprise: choice("enterprise")?,
+        retired: Vec::new(),
+        months: 12,
+    };
+    if s.enabled && s.offered().is_none() {
+        return Err("To offer renewals, set the standard price (or the promotional one with \"Offer the promotional price\" ticked).".into());
+    }
+    Ok(s)
+}
+
+async fn renewals<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, msg: Option<&str>) -> Result<Resp, String> {
+    let s = cx.renewal_settings().await?;
+    let client = cx.cfg.paddle.as_ref().is_some_and(|p| p.client_token.is_some());
+    let m = msg.map(|m| format!("<div class=\"card\">{}</div>", esc(m))).unwrap_or_default();
+    let field = |key: &str, title: &str, c: &Option<PriceChoice>| {
+        let (id, label) = c.as_ref().map_or((String::new(), String::new()), |c| (c.price_id.clone(), c.label.clone()));
+        format!(
+            "<div class=\"row\" style=\"margin:8px 0\"><label>{title} price ID<input name=\"{key}_id\" value=\"{}\" size=\"34\" placeholder=\"pri_…\"></label><label>Shown as<input name=\"{key}_label\" value=\"{}\" size=\"8\" placeholder=\"$2.99\"></label></div>",
+            esc(&id),
+            esc(&label)
+        )
+    };
+    let offered = match s.offered() {
+        Some(p) => format!("<span class=\"pill good\">Offered</span> at {} ({})", esc(&p.label), esc(&p.price_id)),
+        None => "<span class=\"pill\">Not offered</span>".into(),
+    };
+    let warn = if client { "" } else { "<p class=\"warn\">PADDLE_CLIENT_TOKEN isn't set on the Worker, so the checkout can't open even when renewals are on.</p>" };
+    let mut body = format!(
+        "<h1>Maintenance renewals</h1>{m}<div class=\"card\"><p>{offered}</p>{warn}<form method=\"post\" action=\"{b}/renewals\">\
+         <label style=\"flex-direction:row;align-items:center;gap:8px\"><input type=\"checkbox\" name=\"enabled\" value=\"1\"{}>Offer renewals on the account page and in the app</label>\
+         {}{}<label style=\"flex-direction:row;align-items:center;gap:8px\"><input type=\"checkbox\" name=\"use_promo\" value=\"1\"{}>Offer the promotional price instead of the standard one</label>{}\
+         <p><button class=\"primary\">Save</button></p></form>\
+         <p class=\"mute\">Create each price in Paddle as a one-time price (not recurring) on the renewal product; the amount, tax and currencies come from Paddle. \"Shown as\" is only the label before checkout. Discount codes set up in Paddle work at checkout. Each renewal adds 12 months: to the end date if maintenance is running (or ends that day), otherwise from the payment. Renewals are non-refundable; a refund made in Paddle anyway, or a chargeback, takes the 12 months back. Price IDs you replace stay accepted for checkouts already open{}.</p></div>",
+        if s.enabled { " checked" } else { "" },
+        field("standard", "Standard", &s.standard),
+        field("promo", "Promotional", &s.promo),
+        if s.use_promo { " checked" } else { "" },
+        field("enterprise", "Enterprise", &s.enterprise),
+        if s.retired.is_empty() { String::new() } else { format!(" (now: {})", esc(&s.retired.join(", "))) },
+        b = a.base
+    );
+    let problems = cx.renewal_problems(50).await?;
+    if !problems.is_empty() {
+        body.push_str("<h2>Payments that need attention</h2><div class=\"scroll\"><table><tr><th>When</th><th>What happened</th></tr>");
+        for r in &problems {
+            body.push_str(&format!("<tr><td>{}</td><td>{}</td></tr>", date(crate::db::int(r, "received_at").unwrap_or(0)), esc(&crate::db::text(r, "outcome").unwrap_or_default())));
+        }
+        body.push_str("</table></div>");
+    }
+    let rows = cx.recent_renewals(100).await?;
+    body.push_str("<h2>Recent renewals</h2>");
+    if rows.is_empty() {
+        body.push_str("<p class=\"mute\">None yet.</p>");
+    } else {
+        body.push_str("<div class=\"scroll\"><table><tr><th>When</th><th>Licence</th><th>Paid</th><th>Until before → after</th><th>Transaction</th><th></th></tr>");
+        for r in &rows {
+            let t = |k: &str| crate::db::text(r, k).unwrap_or_default();
+            let i = |k: &str| crate::db::int(r, k);
+            let paid = if t("amount").is_empty() { "—".into() } else { format!("{} {}", esc(&t("amount")), esc(&t("currency"))) };
+            let span = match (i("before_until"), i("after_until")) {
+                (Some(x), Some(y)) => format!("{} → {}", day(x), day(y)),
+                _ => "—".into(),
+            };
+            let state = if i("reversed_at").is_some() { format!("<span class=\"bad\">reversed</span> <span class=\"mute\">{}</span>", esc(&t("reverse_reason"))) } else { String::new() };
+            body.push_str(&format!(
+                "<tr><td>{}</td><td><a href=\"{}/licence/{}\">…{}</a><div class=\"mute\">{}</div></td><td>{paid}</td><td>{span}</td><td class=\"mono\">{}</td><td>{state}</td></tr>",
+                date(i("at").unwrap_or(0)),
+                a.base,
+                encode(&t("licence_id")),
+                esc(&t("serial_hint")),
+                esc(&t("email")),
+                esc(&t("txn")),
+            ));
+        }
+        body.push_str("</table></div>");
+    }
+    Ok(a.page("Renewals", &body))
 }

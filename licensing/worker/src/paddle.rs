@@ -6,6 +6,8 @@
 //!   and the email is retried (the licence already exists and isn't issued twice).
 //! - `adjustment.created` / `adjustment.updated`: a refund or chargeback flags the licence for the
 //!   admin, who decides whether to revoke it.
+//! - A completed transaction for a maintenance renewal price extends the licence its renewal token
+//!   names ([`crate::renewal`]); a refund or chargeback of it takes the months back.
 //!
 //! Every notification's `Paddle-Signature` is checked against the webhook secret first.
 
@@ -126,12 +128,18 @@ async fn completed<D: Db, N: Net>(cx: &Ctx<'_, D, N>, data: &Value) -> Result<Re
     if txn.is_empty() {
         return Ok(Ok("no transaction id".into()));
     }
-    if pc.price_ids.is_empty() {
-        return Ok(Ok(format!("ignored {txn}: PADDLE_PRICE_IDS isn't set")));
+    // Maintenance renewals (prices chosen on the admin Renewals page). They never count as new
+    // licences: the admin page refuses a renewal price that's also in PADDLE_PRICE_IDS.
+    let renewal_prices = cx.renewal_settings().await?.accepted();
+    let renewals = units(data, &renewal_prices);
+    let renewed = if renewals > 0 { Some(cx.paid_renewal(data, renewals).await?) } else { None };
+    let purchase_prices: Vec<String> = pc.price_ids.iter().filter(|p| !renewal_prices.contains(p)).cloned().collect();
+    if purchase_prices.is_empty() {
+        return Ok(Ok(renewed.unwrap_or_else(|| format!("ignored {txn}: PADDLE_PRICE_IDS isn't set"))));
     }
-    let n = units(data, &pc.price_ids).min(50);
+    let n = units(data, &purchase_prices).min(50);
     if n == 0 {
-        return Ok(Ok(format!("ignored {txn}: not a Filescape purchase")));
+        return Ok(Ok(renewed.unwrap_or_else(|| format!("ignored {txn}: not a Filescape purchase"))));
     }
     let mut issued = Vec::new();
     for i in 0..n {
@@ -180,9 +188,29 @@ async fn adjustment<D: Db, N: Net>(cx: &Ctx<'_, D, N>, data: &Value) -> Result<S
         return Ok(format!("ignored adjustment {action}"));
     }
     let full = data["type"].as_str().is_none_or(|t| t == "full");
+    // A maintenance renewal. Renewals are non-refundable, but a refund Paddle approves anyway or a
+    // chargeback takes the renewal's months back (the licence and everything else stay); a reversed
+    // chargeback restores them. Partial or pending ones only go in the history.
+    let mut renewal_note = None;
+    if let Some((licence_id, _)) = cx.grant_by_txn(txn).await? {
+        let what = format!("Paddle {} {status}{} ({adj})", action.replace('_', " "), if full { "" } else { ", partial" });
+        if full && status == "approved" && matches!(action, "refund" | "chargeback") {
+            cx.reverse_txn(txn, "paddle", &format!("Paddle {} {adj}", action.replace('_', " "))).await?;
+            renewal_note = Some(format!("renewal reversed on {licence_id} ({what})"));
+        } else if status == "approved" && action == "chargeback_reverse" {
+            cx.unreverse_txn(txn, "paddle", &what).await?;
+            renewal_note = Some(format!("renewal restored on {licence_id} ({what})"));
+        } else {
+            cx.db.batch(vec![event_stmt(&licence_id, cx.now, "paddle", &format!("renewal: {what}"), "paddle")]).await?;
+            renewal_note = Some(format!("renewal on {licence_id} flagged: {what}"));
+        }
+    }
     let flag = format!("{action} {status}{}", if full { "" } else { " (partial)" }).replace('_', " ");
     let rows = cx.db.all("SELECT id, revoke_reason FROM licences WHERE order_ref = ?1 OR order_ref LIKE ?2 ESCAPE '\\'", vec![txn.into(), format!("{}#%", txn.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")).into()]).await?;
     if rows.is_empty() {
+        if let Some(n) = renewal_note {
+            return Ok(format!("{txn}: {n}"));
+        }
         // A refund of another product sold through the same Paddle account.
         return Ok(format!("ignored {action} on {txn}: not a Filescape purchase"));
     }
@@ -205,5 +233,5 @@ async fn adjustment<D: Db, N: Net>(cx: &Ctx<'_, D, N>, data: &Value) -> Result<S
     }
     cx.db.batch(stmts).await?;
     let what = if revoke { "revoked" } else if reinstate { "reinstated" } else { "flagged" };
-    Ok(format!("{txn}: {what} {} licence(s): {flag}", rows.len()))
+    Ok(format!("{txn}: {what} {} licence(s): {flag}{}", rows.len(), renewal_note.map(|n| format!("; {n}")).unwrap_or_default()))
 }

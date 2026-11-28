@@ -28,6 +28,9 @@ migrations_dir = "migrations"
 PADDLE_ENV = "live"
 # Comma-separated Paddle price IDs that issue a Filescape licence (pri_...).
 PADDLE_PRICE_IDS = "pri_01m86kecyaqrsp7d702v4hc679,pri_01m86kf4h9r8tj5p6rtgez78v6,pri_01m84qwgg1a8858drzqk2rvzpz"
+# Paddle.js client-side token for the maintenance renewal checkout on account.filescape.app. Public
+# (it's in every buyer's browser): the same "Filescape production web" token as site/config.js.
+PADDLE_CLIENT_TOKEN = "live_21eecce2369a6cde3fe1226399d"
 MAIL_FROM = "Filescape <licences@filescape.app>"
 # No Reply-To: there's no mailbox behind filescape.app. Emails point people at the contact form
 # (filescape.app/contact) instead. Kept here, empty, so deploys clear any older value.
