@@ -207,10 +207,14 @@ What the model is told:
 - Nothing is opened to describe a folder, and Filescape looks no deeper than three levels, so a
   question about a large folder is answered quickly.
 - **Not** what's inside the files, unless you tick **Include the file's contents**. That box
-  appears when you ask about files, and applies to that one question: Filescape then reads the
-  start of each chosen text file, or the text of a PDF, EPUB book, Word, PowerPoint, OpenDocument
-  or Excel file, as much as fits in the model's context. A PDF is read page by page from the
-  first. Other files, and files that are only in the cloud, aren't read, so asking never
+  appears when you ask about files, and applies to that one question: Filescape then reads each
+  chosen text file, or the text of a PDF, EPUB book, Word, PowerPoint, OpenDocument or Excel
+  file. A document that fits in the model's context goes in whole. One that doesn't is cut to
+  the parts that matter for the question: the start, then the passages that match it. **Can I
+  use this commercially?** finds the clauses about commercial use, sale and permissions; a
+  question that names nothing in particular, such as **Summarise**, gets passages from all
+  through the document. The model is told which lines it was given and that the rest was left
+  out, and **⚠ Partly included** tells you. A PDF is read page by page from the first. Other files, and files that are only in the cloud, aren't read, so asking never
   downloads anything. PDFs over 256 MB, password-protected PDFs and scanned pages (pictures of
   text, with no text in them) can't be read either.
 
@@ -222,8 +226,9 @@ Under the answer, **Based on** lists the files and folders it was given, and whe
 only their names, sizes and dates or the text of the files too. Click one to show it in Files.
 
 When the model wasn't given everything, a **⚠ Partly included** line under **Based on** says
-what was left out: a file read only in part ("report.pdf: read the start only, pages 1 to 6 of
-40"), a file not read, files left unread for lack of room, or a large folder whose items were
+what was left out: a file read only in part ("LICENSE: included only the parts most related to
+the question: lines 1–40, 120–160 and 300 of 900", or "report.pdf: read the start only, pages 1
+to 6 of 40"), a file not read, files left unread for lack of room, or a large folder whose items were
 only partly listed ("Samples: listed 40 of 1,250 items by name, the rest only counted"). The
 answer covers only what the model was given. Hover the line to see everything; ask about fewer
 items, or one on its own, to give it more room.

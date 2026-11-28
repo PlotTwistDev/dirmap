@@ -31,6 +31,13 @@
   [Asking about pictures](../views/ask-ai.md#asking-about-pictures).
 - Asking about an AI model file gives the model what Filescape reads from it (family, size,
   precision, context) and whether this computer could run it, instead of a guess from its name.
+- A document too long for the model's context is no longer cut to its start: Ask AI includes the
+  passages that match the question (for a licence, the clauses about commercial use or
+  warranties), or passages from all through it for a general question, and says which lines
+  went in. Small documents go in whole, and Ask AI works out the room from the context left after
+  the conversation and the answer.
+- Gemma 4 and gpt-oss thinking is shown under **Thought about it** instead of in the answer, and
+  line references like `[12]` are checked when the question is about one file.
 - Large folders: Ask AI describes a folder's shape first, the folders inside it up to three
   levels down, then its largest items, and never reads more files than fit in the model's
   context.

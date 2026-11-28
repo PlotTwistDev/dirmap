@@ -30,9 +30,9 @@ pub struct Item {
 pub struct Read {
     pub text: String,
     pub notes: Vec<String>,
-    /// Text files sent with their lines numbered, and how many lines were sent: what a
-    /// reference such as "notes.txt:12" in the answer can be checked against.
-    pub lines: Vec<(PathBuf, usize)>,
+    /// Text files sent with their lines numbered, and which lines were sent (first and last of
+    /// each run): what a reference such as "notes.txt:12" in the answer can be checked against.
+    pub lines: Vec<(PathBuf, Vec<(usize, usize)>)>,
 }
 
 /// What the model is told, ready to send.
@@ -215,6 +215,10 @@ pub fn model_facts(p: &Path) -> Option<String> {
 
 /// The least room worth giving one file's contents, in characters.
 const MIN_READ: usize = 300;
+/// How much of a document is read to choose passages from, in characters: several times its
+/// share of the model's context, within these limits.
+const SCAN_MIN: usize = 64 * 1024;
+const SCAN_MAX: usize = 2 << 20;
 
 /// Items looked at in one folder on disk.
 const LISTING_MAX: usize = 5000;
@@ -425,10 +429,12 @@ fn render(parts: Vec<Part>, readable: Vec<PathBuf>, budget: usize, whole: bool) 
     Facts { label, summary, text, readable, paths, notes }
 }
 
-/// The text of `files`, at most `budget` characters in all (see [`fit`]), for a question the user ticked
+/// The text of `files`, at most `budget` characters in all (characters outside ASCII count as four), for a question the user ticked
 /// "Include file contents" on. Files that aren't text, or are only in the cloud, are named
 /// but not read.
-pub fn contents(files: &[PathBuf], budget: usize) -> Read {
+/// A document too long for its share is cut to the passages that best fit `question` (see
+/// [`crate::askpick`]), and both the model and the user are told which parts went in.
+pub fn contents(files: &[PathBuf], budget: usize, question: &str) -> Read {
     let mut out = Read::default();
     let mut skipped = Vec::new();
     for (k, f) in files.iter().enumerate() {
@@ -451,11 +457,13 @@ pub fn contents(files: &[PathBuf], budget: usize) -> Read {
             continue;
         }
         let room = share.max(MIN_READ);
-        match extract(f, room) {
+        match extract(f, (room * 8).clamp(SCAN_MIN, SCAN_MAX)) {
             Some(Ok(mut t)) => {
-                let (fitted, cut) = fit(&t.text, room);
-                if cut {
-                    t.text = fitted;
+                // More is read than fits, so the passages that matter can be chosen.
+                let picked = crate::askpick::pick(&t.text, room, question, false);
+                let chosen = !picked.whole() && !picked.start_only();
+                if !picked.whole() {
+                    t.text = picked.text.clone();
                     t.cut = true;
                 }
                 if t.text.trim().is_empty() {
@@ -465,6 +473,16 @@ pub fn contents(files: &[PathBuf], budget: usize) -> Read {
                     continue;
                 }
                 let (part, n) = match t.pages {
+                    _ if chosen => {
+                        let of = match t.pages {
+                            Some((r, n)) if r < n => format!(" of the first {r} of {n} pages"),
+                            _ => String::new(),
+                        };
+                        (
+                            format!(" (only the parts most related to the question{of}; […] marks what was left out)"),
+                            format!("included only the parts most related to the question{of}"),
+                        )
+                    }
                     Some((r, n)) if r < n || t.cut => {
                         let pages = if r <= 1 { format!("page 1 of {n}") } else { format!("pages 1 to {r} of {n}") };
                         (format!(" (the start only: {pages})"), format!("read the start only, {pages}"))
@@ -485,20 +503,28 @@ pub fn contents(files: &[PathBuf], budget: usize) -> Read {
             }
             None => {}
         }
-        let Some(t) = read_text(f, room) else {
+        let Some(t) = read_text(f, (room * 8).clamp(SCAN_MIN, SCAN_MAX)) else {
             out.text.push_str(&format!("\n{name} isn't a text file, so its contents weren't read.\n"));
             note("not a text file, so it wasn't read".into());
             continue;
         };
-        // Lines are numbered so the model can point at them; the numbers take some of the room.
-        let (t, fitted) = fit(&t, room - room / 16);
-        let cut = fitted || t.len() as u64 + 4 < md.len();
-        if cut {
-            note("read the start only".into());
-        }
-        let (t, n) = numbered(&t, cut);
-        out.lines.push((f.clone(), n));
-        out.text.push_str(&format!("\nContents of {name}{}, lines numbered:\n```\n{t}\n```\n", if cut { " (the start only)" } else { "" }));
+        // Past what was read, the file wasn't looked at: its last line read may be partial.
+        let unread = t.len() as u64 + 4 < md.len();
+        let t = if unread { t.rsplit_once('\n').map_or(t.as_str(), |(a, _)| a).to_string() } else { t };
+        // Lines are numbered with their real numbers so the model can point at them.
+        let p = crate::askpick::pick(&t, room, question, true);
+        let part = if p.whole() && !unread {
+            String::new()
+        } else if p.start_only() {
+            note(if p.cut { "read the start only".to_string() } else { format!("read the start only ({})", p.describe()) });
+            " (the start only)".to_string()
+        } else {
+            let of = if unread { " of the part of the file looked at" } else { "" };
+            note(format!("included only the parts most related to the question{of}: {}", p.describe()));
+            format!(" (only the parts most related to the question, {}{of}; […] marks lines left out)", p.describe())
+        };
+        out.lines.push((f.clone(), p.ranges.clone()));
+        out.text.push_str(&format!("\nContents of {name}{part}, lines numbered:\n```\n{}\n```\n", p.text));
     }
     if !skipped.is_empty() {
         let names = skipped.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
@@ -635,32 +661,6 @@ fn extract(p: &Path, chars: usize) -> Option<Result<Extracted, String>> {
     Some(Ok(Extracted { text: text.chars().take(chars).collect(), cut, pages: None }))
 }
 
-/// `text` with each line numbered from 1 ("12: …"), and how many lines there are. When the
-/// text was cut short, its last line may be partial, so it's left out.
-fn numbered(text: &str, cut: bool) -> (String, usize) {
-    let mut lines: Vec<&str> = text.lines().collect();
-    if cut && lines.len() > 1 && !text.ends_with('\n') {
-        lines.pop();
-    }
-    let out = lines.iter().enumerate().map(|(i, l)| format!("{}: {l}", i + 1)).collect::<Vec<_>>().join("\n");
-    (out, lines.len())
-}
-
-/// The start of `text` that fits in `room`, counting each character outside ASCII as four:
-/// a model's tokens hold about four English letters but often only one character of Chinese,
-/// Japanese, Korean or other scripts, so non-English text would otherwise overrun the model's
-/// context. Also whether it was cut.
-fn fit(text: &str, room: usize) -> (String, bool) {
-    let mut used = 0;
-    for (i, c) in text.char_indices() {
-        used += if c.is_ascii() { 1 } else { 4 };
-        if used > room {
-            return (text[..i].to_string(), true);
-        }
-    }
-    (text.to_string(), false)
-}
-
 /// Up to `chars` characters of a file, if it looks like text.
 fn read_text(p: &Path, chars: usize) -> Option<String> {
     let mut buf = Vec::new();
@@ -774,10 +774,10 @@ mod tests {
         std::fs::write(d.join("a.txt"), "héllo world").unwrap();
         std::fs::write(d.join("b.bin"), [0u8, 1, 2, 3]).unwrap();
         std::fs::write(d.join("long.txt"), "y".repeat(10_000)).unwrap();
-        let r = contents(&[d.join("a.txt"), d.join("b.bin"), d.join("long.txt")], 3000);
+        let r = contents(&[d.join("a.txt"), d.join("b.bin"), d.join("long.txt")], 3000, "");
         let c = &r.text;
         assert!(c.contains("Contents of a.txt, lines numbered:\n```\n1: héllo world\n```"), "{c}");
-        assert_eq!(r.lines.iter().map(|(p, n)| (p.file_name().unwrap().to_str().unwrap(), *n)).collect::<Vec<_>>(), vec![("a.txt", 1), ("long.txt", 1)]);
+        assert_eq!(r.lines.iter().map(|(p, n)| (p.file_name().unwrap().to_str().unwrap(), n.clone())).collect::<Vec<_>>(), vec![("a.txt", vec![(1, 1)]), ("long.txt", vec![(1, 1)])]);
         assert!(c.contains("b.bin isn't a text file"), "{c}");
         assert!(c.contains("Contents of long.txt (the start only)"), "{c}");
         assert!(c.len() < 3300, "{}", c.len());
@@ -793,12 +793,12 @@ mod tests {
         let pages = [long.as_str(), "Second page words", "Third page words"];
         std::fs::write(d.join("r.pdf"), crate::pdfview::tests::with_text(&pages)).unwrap();
         assert!(can_read(&d.join("r.pdf")));
-        let all = contents(&[d.join("r.pdf")], 3000);
+        let all = contents(&[d.join("r.pdf")], 3000, "");
         assert!(all.text.contains("[Page 1]\nQuarterly report"), "{}", all.text);
         assert!(all.text.contains("Third page words"), "{}", all.text);
         assert!(all.notes.is_empty(), "{:?}", all.notes);
         // A small budget reads the first page only, and says so.
-        let some = contents(&[d.join("r.pdf")], 20);
+        let some = contents(&[d.join("r.pdf")], 20, "");
         assert!(!some.text.contains("Third"), "{}", some.text);
         assert!(some.text.contains("(the start only: page"), "{}", some.text);
         assert_eq!(some.notes.len(), 1);
@@ -815,7 +815,7 @@ mod tests {
             std::fs::write(&p, format!("note {i} ").repeat(30)).unwrap();
             files.push(p);
         }
-        let r = contents(&files, 3000);
+        let r = contents(&files, 3000, "");
         // Never past the room (plus one file's headings), however many files there are.
         assert!(r.text.len() < 3000 + 400, "{}", r.text.len());
         assert!(r.text.contains("Contents of n00.txt"), "{}", r.text);
@@ -863,14 +863,11 @@ mod tests {
 
     #[test]
     fn other_scripts_take_more_room() {
-        assert_eq!(fit("abcdef", 4), ("abcd".to_string(), true));
-        assert_eq!(fit("abc", 4), ("abc".to_string(), false));
-        // Each of these counts as four.
-        assert_eq!(fit("文件管理器", 9), ("文件".to_string(), true));
+        // Each character outside ASCII counts as four.
         let d = tmp("scripts");
         std::fs::write(d.join("zh.txt"), "文".repeat(1000)).unwrap();
-        let r = contents(&[d.join("zh.txt")], 400);
-        assert_eq!(r.text.matches('文').count(), 93, "{}", r.text);
+        let r = contents(&[d.join("zh.txt")], 400, "");
+        assert_eq!(r.text.matches('文').count(), 97, "{}", r.text);
         assert_eq!(r.notes, vec!["zh.txt: read the start only".to_string()]);
         let _ = std::fs::remove_dir_all(&d);
     }
