@@ -2219,8 +2219,11 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
     // The same scene can be on screen twice (Quick Look over the preview pane), sharing one
     // picture. Only the bigger view draws; the other shows its picture stretched, so the two
     // don't take turns asking for their own size for ever.
+    // Quick Look in a window of its own is a separate viewport with its own pass count, drawn
+    // inside the main window's pass: both views go by the main window's count, or each takes
+    // the other's claim for an old one and they both draw, fighting over the picture.
     let claim_id = egui::Id::new(("splat-claim", path));
-    let pass = ui.ctx().cumulative_pass_nr();
+    let pass = ui.ctx().cumulative_pass_nr_for(egui::ViewportId::ROOT);
     let claim: Option<(u64, usize)> = ui.data(|d| d.get_temp(claim_id));
     let follower = claim.is_some_and(|(p, area)| p + 1 >= pass && area > px[0] * px[1]);
     if !follower {
