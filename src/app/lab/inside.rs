@@ -94,7 +94,7 @@ impl App {
             ui.strong("How much each layer changed each token");
             ui.weak(format!("· {} tokens, {} layers, read in {:.2} s", inside.tokens.len(), inside.change.len(), inside.seconds));
         });
-        ui.weak("Brighter: the layer changed the token's meaning more. Click a token to see what each layer would predict after it.");
+        ui.weak("Brighter: the layer changed the numbers that represent the token more. Click a token to see what each layer's output would predict after it.");
         ui.add_space(4.0);
         let map_h = (ui.available_height() * 0.45).clamp(120.0, 420.0);
         egui::ScrollArea::horizontal().id_salt("inside-map").show(ui, |ui| {
@@ -102,6 +102,8 @@ impl App {
                 pick = Some(t);
             }
         });
+        ui.add_space(10.0);
+        heat_legend(ui);
         ui.add_space(8.0);
         match &self.ask.lab_state.lensed {
             Some((t, layers)) => lens_table(ui, inside.tokens.get(*t).map_or("", |s| s.as_str()), layers),
@@ -127,9 +129,11 @@ fn change_map(ui: &mut egui::Ui, inside: &crate::lens::Inside, picked: Option<us
     }
     let label_w = 34.0;
     let head_h = 18.0;
-    let cell_w = ((ui.available_width() - label_w) / n as f32).clamp(14.0, 56.0);
+    // A column on the right: each layer's average change over the tokens.
+    let stats_w = 70.0;
+    let cell_w = ((ui.available_width() - label_w - stats_w - 20.0) / n as f32).clamp(14.0, 56.0);
     let cell_h = ((height - head_h) / layers as f32).clamp(3.0, 14.0);
-    let size = egui::vec2(label_w + cell_w * n as f32, head_h + cell_h * layers as f32);
+    let size = egui::vec2(label_w + cell_w * n as f32 + 8.0 + stats_w, head_h + cell_h * layers as f32);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let p = ui.painter_at(rect);
     let base = ui.visuals().extreme_bg_color;
@@ -146,12 +150,18 @@ fn change_map(ui: &mut egui::Ui, inside: &crate::lens::Inside, picked: Option<us
         let colour = if Some(t) == picked { text } else { weak };
         p.text(egui::pos2(x + cell_w / 2.0, rect.top() + head_h / 2.0), egui::Align2::CENTER_CENTER, short, font.clone(), colour);
     }
+    p.text(egui::pos2(x0 + cell_w * n as f32 + 8.0, rect.top() + head_h / 2.0), egui::Align2::LEFT_CENTER, "average", font.clone(), weak);
     for l in 0..layers {
         let y = y0 + l as f32 * cell_h;
         // Label every few layers, so they stay readable.
         let every = (12.0 / cell_h).ceil().max(1.0) as usize;
         if l % every == 0 || l + 1 == layers {
             p.text(egui::pos2(rect.left() + label_w - 4.0, y + cell_h / 2.0), egui::Align2::RIGHT_CENTER, format!("{}", l + 1), font.clone(), weak);
+        }
+        if let Some(avg) = layer_mean(&inside.change[l]) {
+            let sx = x0 + cell_w * n as f32 + 8.0;
+            let bar = egui::Rect::from_min_size(egui::pos2(sx, y), egui::vec2(stats_w * heat(avg), (cell_h - 1.0).max(2.0)));
+            p.rect_filled(bar, 1.0, heat_colour(base, 0.35 + 0.65 * heat(avg)));
         }
         for t in 0..n {
             let c = inside.change[l].get(t).copied().unwrap_or(f32::NAN);
@@ -169,7 +179,19 @@ fn change_map(ui: &mut egui::Ui, inside: &crate::lens::Inside, picked: Option<us
         (t >= 0.0 && (t as usize) < n).then_some((t as usize, (l >= 0.0 && (l as usize) < layers).then_some(l as usize)))
     };
     let hover = resp.hover_pos().and_then(at);
+    let stats_x = x0 + cell_w * n as f32;
+    let hover_layer = resp.hover_pos().filter(|p| p.x > stats_x).and_then(|p| {
+        let l = ((p.y - y0) / cell_h).floor();
+        (l >= 0.0 && (l as usize) < layers).then_some(l as usize)
+    });
     let resp = resp.on_hover_ui(|ui| {
+        if let Some(l) = hover_layer {
+            match layer_mean(&inside.change[l]) {
+                Some(avg) => ui.label(format!("Layer {}: changes the tokens by {:.0}% of their length on average", l + 1, avg * 100.0)),
+                None => ui.label(format!("Layer {}: the first layer, which makes each token's vector", l + 1)),
+            };
+            return;
+        }
         if let Some((t, l)) = hover {
             ui.label(format!("Token {}: {}", t + 1, visible(&inside.tokens[t])));
             if let Some(l) = l {
@@ -187,6 +209,33 @@ fn change_map(ui: &mut egui::Ui, inside: &crate::lens::Inside, picked: Option<us
         return None;
     }
     if resp.clicked() { resp.interact_pointer_pos().and_then(at).map(|(t, _)| t) } else { None }
+}
+
+/// A layer's average change over the tokens it changed (the first layer has none).
+fn layer_mean(row: &[f32]) -> Option<f32> {
+    let v: Vec<f32> = row.iter().copied().filter(|c| c.is_finite()).collect();
+    (!v.is_empty()).then(|| v.iter().sum::<f32>() / v.len() as f32)
+}
+
+/// The map's colour scale, with what the ends mean.
+pub(super) fn heat_legend(ui: &mut egui::Ui) {
+    let base = ui.visuals().extreme_bg_color;
+    let weak = ui.visuals().weak_text_color();
+    ui.horizontal(|ui| {
+        ui.weak("How much a layer changed a token:");
+        let (r, _) = ui.allocate_exact_size(egui::vec2(160.0, 10.0), Sense::hover());
+        let steps = 32;
+        for i in 0..steps {
+            let x = r.left() + r.width() * i as f32 / steps as f32;
+            let c = egui::Rect::from_min_max(egui::pos2(x, r.top()), egui::pos2(x + r.width() / steps as f32 + 0.5, r.bottom()));
+            ui.painter().rect_filled(c, 0.0, heat_colour(base, i as f32 / (steps - 1) as f32));
+        }
+        ui.painter().rect_stroke(r, 2.0, egui::Stroke::new(1.0, weak.gamma_multiply(0.5)), egui::StrokeKind::Outside);
+        ui.weak("2% or less … 200%, rewritten").on_hover_text(
+            "The size of the change each layer adds to a token's vector, as a share of the vector's length, on a log scale. \
+             A big change means the layer did a lot of work on that token; it doesn't say what the work was.",
+        );
+    });
 }
 
 /// What each layer would predict after the token, with where the final answer settles.
@@ -236,6 +285,8 @@ mod tests {
 
     #[test]
     fn heat_scale() {
+        assert_eq!(layer_mean(&[f32::NAN, 0.5, 1.5]), Some(1.0));
+        assert_eq!(layer_mean(&[f32::NAN]), None);
         assert_eq!(heat(f32::NAN), 0.0);
         assert_eq!(heat(0.0), 0.0);
         assert_eq!(heat(5.0), 1.0);

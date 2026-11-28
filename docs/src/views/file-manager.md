@@ -216,10 +216,10 @@ items keep the sort order. **None** turns grouping off.
 ## Showing only some kinds of file
 
 **Show** beside the filter keeps only some kinds of file: **Audio**, **Video**, **Images**, **AI
-models**, **Archives**, **Documents**, **Code**, **Programs**, **Disk images** or **Other** (the
-same kinds as Storage Analysis's [Show row](../filtering/categories.md)). Pick several to see them
-all; **All** shows everything again. While it's on, the button is lit and says what it shows, and
-folders are hidden.
+models**, **Archives**, **Documents**, **Code**, **Applications**, **Programs**, **Disk images**
+or **Other** (the same kinds as Storage Analysis's [Show row](../filtering/categories.md)). Pick
+several to see them all; **All** shows everything again. While it's on, the button is lit and says
+what it shows, and folders are hidden, except applications when **Applications** is picked.
 
 With **🗐** on as well, it gathers those files from every subfolder too, so **Show > Video** with
 **🗐** lists every video under the folder. It works together with the filter text: **Images** and
@@ -307,7 +307,7 @@ read shows its type's icon instead.
 | Command | What it does |
 |---|---|
 | **Open** / **Open in New Tab** / **Open in Other Pane** | Opens folders here, in a new tab or in the other pane, and files in their apps. |
-| **Open Application** / **Show Package Contents** | On an [application](#applications): launches it, or goes inside it. |
+| **Open Application** / **Show Package Contents** / **Get Application Info** | On an [application](#applications): launches it, goes inside it, or shows its details in the preview pane. |
 | **Open With** | Opens the item in one of [your apps](#open-with), or lets you choose one. |
 | **Quick Look** (**Space**) | A [large preview](#quick-look-and-the-preview-pane) of the file. |
 | **Copy** / **Cut** / **Paste** (**Ctrl+C**, **Ctrl+X**, **Ctrl+V**) | See [Copying, moving and deleting](#copying-moving-and-deleting). |
@@ -651,6 +651,12 @@ workspace opens with the item selected in its folder.
   Finder. Hold **Ctrl** or **Alt** while you let go to copy, or **Shift** to move (on a Mac,
   **⌥** copies and **⌘** moves). The label by the pointer always says which will happen, and a
   folder can't be dropped inside itself.
+- **Drag out of Filescape** (macOS and Windows). Drag items past the edge of the window and drop
+  them on Finder or Explorer, the Desktop, another app (Mail, a chat, an editor) or the Trash in
+  the Dock (the Recycle Bin on Windows). The other app treats them exactly as if they came from
+  Finder or Explorer: Finder moves them on the same drive and copies them to another, and the
+  Trash keeps **Put Back**. Items on servers or inside archives can't be dragged out. On Linux,
+  dragging stops at the window's edge for now.
 - **Rename** with **F2**, and **Delete** to send items to the Recycle Bin or Trash. Filescape asks
   first. **Ctrl+Z** undoes any of these.
 
@@ -725,12 +731,37 @@ in /Applications, ~/Applications, on other drives or anywhere else are all recog
   it needs a newer version of macOS, you don't have permission, and so on.
 - **Show Package Contents** on the right-click menu goes inside the application, to look at its
   resources, programs, libraries and settings files. Everything works there as in any folder.
+- **Get Application Info** (or select the app with the preview pane open, on its **Details**
+  tab) shows its name, publisher, version and build, bundle identifier, whether it runs on Apple
+  silicon, Intel or both (**Universal**), the macOS version it needs, its size, where it is, who
+  signed it and whether Gatekeeper allows it (notarised by Apple, from the Mac App Store, part of
+  macOS). An app downloaded from the internet and not opened yet is marked as such. The pane's
+  **Launch Application** button opens it. These details come from the app's `Info.plist`, its
+  program's header (read, never run) and macOS's own `codesign` and `spctl` checks, worked out in
+  the background.
 - **Analyse Application Storage** shows what takes up the app's space in the
   [analysis dock](#the-analysis-dock).
 
 Other kinds of bundle are named in the Kind column but open like folders: frameworks, plug-ins
 (`.plugin`, Audio Units, VST and VST3), app extensions, System Settings panes, kernel extensions,
 screen savers, Quick Look plug-ins and Spotlight importers.
+
+### Windows programs and shortcuts
+
+A Windows program (`.exe`) shows its own icon, as Explorer does, and **Application** in the Kind
+column; a shortcut (`.lnk`) shows the icon of what it opens, with a small arrow, and **Shortcut**.
+Double-click either, or press **Enter**, to run it: Windows runs it exactly as Explorer would, so
+SmartScreen and User Account Control still ask where they should.
+
+With the preview pane open, a program's **Details** tab shows its name and description, publisher,
+version, what it runs on (64-bit, 32-bit or ARM64, and whether it opens in a command window), its
+size, whether it carries a digital signature, and whether it was downloaded from the internet.
+A shortcut's shows where it points, its arguments, **Start in** folder and comment, then the
+details of the program it opens; **Show Original** selects that program in its folder, and a
+shortcut whose program has been moved or uninstalled says so. All of this is read from the files
+as data, never by running them, so it works on a Windows drive looked at from a Mac or Linux
+computer too (there the **Launch Application** button is off, since Windows programs only run on
+Windows).
 
 Icons are read from the system (or from the app's icon file) in the background and kept while
 Filescape is open, so a folder of hundreds of apps opens as fast as any other. Nothing inside an
@@ -846,6 +877,39 @@ Phones don't mount as drives on macOS or Windows, so they can't be browsed like 
 Filescape still lists one that's plugged in, with how it connects (Apple, MTP or PTP). Click it
 to open **Image Capture** on a Mac, or **This PC** in File Explorer on Windows. On Linux, phones
 the desktop has mounted (GVFS) open in Filescape like any folder.
+
+### Ejecting drives
+
+External drives, USB sticks, SD cards, discs and disk images have an **⏏** button at the right of
+their row in the sidebar and on their card in **Computer**, and **Eject** at the end of their
+right-click menu. Ejecting unmounts the drive so it can be unplugged safely. A disk image is
+closed, and its host drive stays.
+
+Before asking the system, Filescape lets go of the drive itself: tabs showing it move to
+**Computer**, and folder watching and live updates of an analysis of it stop. Some things are
+said first, and you choose **Eject** or **Cancel**:
+
+- **Disk images stored on it** are ejected first, or the drive would stay busy. Ejecting
+  *DataHerdA* with the *MixDev* sparse bundle open from it closes *MixDev*, then ejects
+  *DataHerdA*.
+- **Other volumes on the same disk** go too, since the whole disk is ejected.
+- **A scan of it** that's running is stopped.
+
+A copy or move to or from the drive in **Transfers** has to finish, or be stopped, first.
+
+When an app has files open on the drive, Filescape tries once more a moment later (indexers and
+thumbnail readers often let go), then says the drive is in use. On macOS and Linux it names the
+apps holding it, so you can close them and choose **Try Again**. **Force Eject…** unmounts it
+anyway, after a second click that warns that unsaved work in those apps can be lost.
+
+Internal drives, system volumes and network shares have no Eject (network shares have
+**Disconnect**, under [Network & Remote](#network--remote)). Eject is also refused for the
+drive holding the operating system, your home folder, or Filescape itself.
+
+How it's done: `diskutil` and `hdiutil` on macOS; Windows' own Safely Remove Hardware, with disk
+images dismounted through PowerShell's Storage module; GVFS (`gio`) on Linux, or `udisksctl`
+where GVFS isn't installed. A drive mounted by the system rather than the desktop (in `fstab`)
+needs an administrator to unmount it on Linux.
 
 ## Slow and unreachable drives
 

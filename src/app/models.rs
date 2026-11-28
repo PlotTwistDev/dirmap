@@ -13,6 +13,8 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
+mod library;
+
 /// The model list, and the search that fills it.
 #[derive(Default)]
 pub(super) struct ModelsState {
@@ -26,6 +28,14 @@ pub(super) struct ModelsState {
     page: Option<ModelPage>,
     /// The Storage view: space by app, and what can be freed.
     pub storage: super::storage::StorageState,
+    /// The library's search, filters and layout.
+    lib: library::Library,
+    /// The space the models take, worked out with the list.
+    pub footprint: models::Footprint,
+    /// A file to show in Files once the details panel is drawn.
+    reveal_later: Option<PathBuf>,
+    /// Two model files to open side by side once the list has been read again: (original, new).
+    pub compare_later: Option<(PathBuf, PathBuf)>,
 }
 
 /// A model's own page: what's inside it.
@@ -48,6 +58,8 @@ struct ModelPage {
     context: u64,
     cache_q8: bool,
     vram_typed: f32,
+    /// The newest Lab speed test of this model on this computer, read once.
+    measured: Option<Option<crate::lab::BenchResult>>,
     /// The tensor picked in Tensors, and its weight statistics (being read, or read).
     picked: Option<usize>,
     stats_job: Option<(usize, mpsc::Receiver<Result<crate::weights::Stats, String>>)>,
@@ -147,10 +159,8 @@ struct ModelsJob {
     scan: Arc<Mutex<Option<Arc<scan::Progress>>>>,
     /// What's happening, for the status line.
     status: Arc<Mutex<String>>,
-    rx: mpsc::Receiver<Option<Vec<Model>>>,
+    rx: mpsc::Receiver<Option<(Vec<Model>, models::Footprint)>>,
 }
-
-const ROW: f32 = 2.0 * ROW_H + 6.0;
 
 impl App {
     /// Looks for models again: the known places, the user's folders and the analysis scan.
@@ -172,19 +182,29 @@ impl App {
         };
         let (progress, slot, status) = (job.progress.clone(), job.scan.clone(), job.status.clone());
         std::thread::spawn(move || {
-            let _ = tx.send(search(roots, analysis, &progress, &slot, &status));
+            let _ = tx.send(search(roots, analysis, &progress, &slot, &status).map(|list| {
+                let fp = models::footprint(&list);
+                (list, fp)
+            }));
         });
         let mut storage = std::mem::take(&mut self.models.storage);
         storage.forget();
-        self.models = ModelsState { job: Some(job), list: None, chosen: None, places, page: None, storage };
+        let lib = std::mem::take(&mut self.models.lib);
+        let compare_later = self.models.compare_later.take();
+        self.models = ModelsState { job: Some(job), list: None, chosen: None, places, page: None, storage, lib, footprint: Default::default(), reveal_later: None, compare_later };
     }
 
     pub(super) fn poll_models(&mut self, ctx: &egui::Context) {
         if let Some(j) = &self.models.job {
             match j.rx.try_recv() {
-                Ok(list) => {
+                Ok(found) => {
+                    let (list, fp) = found.unzip();
                     self.models.list = list;
+                    self.models.footprint = fp.unwrap_or_default();
                     self.models.job = None;
+                    if let Some((a, b)) = self.models.compare_later.take() {
+                        self.compare_files(&a, &b);
+                    }
                 }
                 Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
                 Err(mpsc::TryRecvError::Disconnected) => self.models.job = None,
@@ -220,13 +240,14 @@ impl App {
             if ui.add_enabled(!busy, egui::Button::new("⟳ Look again")).on_hover_text("Look for models again in every place on the left").clicked() {
                 self.start_models();
             }
-            if ui.button("✚ Add folder…").on_hover_text("Also look in a folder of your choice, such as a ComfyUI or Stable Diffusion folder").clicked()
-                && let Some(dir) = rfd::FileDialog::new().pick_folder()
-            {
-                if !self.files.prefs.model_folders.contains(&dir) {
-                    self.files.prefs.model_folders.push(dir);
-                }
-                self.start_models();
+            if ui.button("✚ Add folder…").on_hover_text("Also look in a folder of your choice, such as a ComfyUI or Stable Diffusion folder").clicked() {
+                // Not the blocking picker: on macOS it can abort the app (see asking.rs).
+                self.ask_path(super::dialogs::Dialog::new().set_title("Look for AI models in"), super::dialogs::Pick::Folder, |app, dir| {
+                    if !app.files.prefs.model_folders.contains(&dir) {
+                        app.files.prefs.model_folders.push(dir);
+                    }
+                    app.start_models();
+                });
             }
             if help::link_button(ui, "Help for the AI Models workspace") {
                 self.help.show_topic(topics::AI_MODELS);
@@ -254,14 +275,24 @@ impl App {
             return;
         }
         let side = egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 8, right: 6, top: 8, bottom: 6 });
-        let r = egui::Panel::left("model-places").default_size(230.0).min_size(160.0).resizable(true).frame(side).show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.models_places(ui));
-        });
-        self.help_regions.push((r.response.rect, topics::AI_MODELS));
+        if self.models.lib.side_hidden {
+            // Folded to a rail with one button to bring the locations back.
+            let rail = egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 4, right: 4, top: 8, bottom: 6 });
+            egui::Panel::left("model-places-rail").exact_size(34.0).resizable(false).frame(rail).show(ui, |ui| {
+                if kit::icon_button(ui, kit::Icon::FoldRight, "Show the locations models were looked for in").clicked() {
+                    self.models.lib.side_hidden = false;
+                }
+            });
+        } else {
+            let r = egui::Panel::left("model-places").default_size(230.0).min_size(170.0).resizable(true).frame(side).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.models_places(ui));
+            });
+            self.help_regions.push((r.response.rect, topics::AI_MODELS));
+        }
         let chosen = self.models.chosen.filter(|&i| self.models.list.as_ref().is_some_and(|l| i < l.len()));
         if chosen.is_some() && self.models.page.is_none() {
             let frame = egui::Frame::new().fill(pal.chrome).inner_margin(egui::Margin::same(10));
-            let r = egui::Panel::right("model-details").default_size(340.0).min_size(240.0).resizable(true).frame(frame).show(ui, |ui| {
+            let r = egui::Panel::right("model-details").default_size(350.0).min_size(260.0).resizable(true).frame(frame).show(ui, |ui| {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.model_details(ui));
             });
             self.help_regions.push((r.response.rect, topics::AI_MODELS));
@@ -277,305 +308,46 @@ impl App {
         self.help_regions.push((r.response.rect, topics::AI_MODELS));
     }
 
-    /// Left: where models were looked for.
-    fn models_places(&mut self, ui: &mut egui::Ui) {
-        ui.strong("Looked in");
-        ui.add_space(4.0);
-        let mut remove = None;
-        for (label, p) in &self.models.places {
-            ui.horizontal(|ui| {
-                ui.label(label.as_str());
-                if label == "Added"
-                    && let Some(i) = self.files.prefs.model_folders.iter().position(|f| f == p)
-                    && ui.small_button("✖").on_hover_text("Stop looking here").clicked()
-                {
-                    remove = Some(i);
-                }
-            });
-            ui.add(egui::Label::new(egui::RichText::new(p.shown()).small().weak()).wrap());
-            ui.add_space(4.0);
-        }
-        if self.tree.is_some() && self.job.is_none() {
-            ui.label("Storage Analysis scan");
-            ui.add(egui::Label::new(egui::RichText::new(self.scanned_path.shown()).small().weak()).wrap());
-        }
-        if self.models.places.is_empty() && self.tree.is_none() {
-            ui.weak("No Ollama, LM Studio or Hugging Face folders on this computer.");
-        }
-        ui.add_space(8.0);
-        ui.weak("Models elsewhere? Use Add folder, or scan a drive in Storage Analysis and look again.");
-        if let Some(i) = remove {
-            self.files.prefs.model_folders.remove(i);
-            self.start_models();
-        }
-    }
-
-    /// Middle: the summary and the list.
-    fn models_main(&mut self, ui: &mut egui::Ui) {
-        if let Some(j) = &self.models.job {
-            let (read, total) = (j.progress.read.load(Ordering::Relaxed), j.progress.to_read.load(Ordering::Relaxed));
-            let status = if total > 0 {
-                format!("Checking copies… {} of {}", scan::human(read), scan::human(total))
-            } else {
-                j.status.lock().unwrap().clone()
-            };
-            let mut cancel = false;
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(status);
-                cancel = ui.small_button("Cancel").clicked();
-            });
-            if cancel {
-                self.cancel_models();
-            }
-            return;
-        }
-        let Some(list) = self.models.list.take() else {
-            ui.label("The search was cancelled.");
-            if ui.button("Look again").clicked() {
-                self.start_models();
-            }
-            return;
-        };
-        self.models_list(ui, &list);
-        self.models.list = Some(list);
-    }
-
-    fn models_list(&mut self, ui: &mut egui::Ui, list: &[Model]) {
-        if list.is_empty() {
-            ui.add_space(6.0);
-            ui.heading("No AI models found");
-            ui.label(
-                "Filescape looks where Ollama, LM Studio and Hugging Face keep their models, in Downloads, \
-                 in folders you add and in the Storage Analysis scan, for model files (.gguf, .safetensors, \
-                 .ckpt, .pt, .onnx …) of 16 MB or more.",
-            );
-            return;
-        }
-        let total: u64 = list.iter().map(|m| m.size).sum();
-        let extra: u64 = list.iter().map(|m| m.extra).sum();
-        let unused: u64 = list.iter().filter(|m| m.orphan).map(|m| m.size).sum();
-        let count = list.iter().filter(|m| !m.orphan).count() as u64;
-        ui.horizontal_wrapped(|ui| {
-            ui.heading(format!("{} model{} · {}", group(count), if count == 1 { "" } else { "s" }, scan::human(total)));
-            if extra > 0 {
-                ui.colored_label(ui.visuals().warn_fg_color, format!("  {} in extra copies", scan::human(extra)))
-                    .on_hover_text("Models marked \"copy\" are byte-for-byte the same as another model higher in the list.");
-            }
-            if unused > 0 {
-                ui.colored_label(ui.visuals().warn_fg_color, format!("  {} in Ollama downloads no model uses", scan::human(unused)))
-                    .on_hover_text("Left behind by removed models or stopped downloads. Ollama doesn't need them.");
-            }
-        });
-        if let Some((tone, text)) = self.models.storage.outcome.clone() {
-            kit::callout(ui, tone, text);
-            if ui.small_button("Hide").clicked() {
-                self.models.storage.outcome = None;
-            }
-        }
-        ui.add_space(6.0);
-
-        let mut chosen = None;
-        let mut open = None;
-        let mut inspect = None;
-        let mut remove = None;
-        let mut shrink = None;
-        ui.spacing_mut().item_spacing.y = 0.0;
-        egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, ROW, list.len(), |ui, range| {
-            for (k, m) in list[range.clone()].iter().enumerate() {
-                let i = range.start + k;
-                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
-                let vis = ui.visuals().clone();
-                let selected = self.models.chosen == Some(i);
-                if selected {
-                    ui.painter().rect_filled(rect, 4.0, vis.selection.bg_fill);
-                } else if resp.hovered() {
-                    ui.painter().rect_filled(rect, 4.0, vis.widgets.hovered.weak_bg_fill);
-                } else if i % 2 == 1 {
-                    ui.painter().rect_filled(rect, 0.0, vis.faint_bg_color);
-                }
-                let font = FontId::proportional(13.5);
-                let small = FontId::proportional(12.5);
-                let top = rect.top() + ROW_H / 2.0 + 3.0;
-                let bottom = top + ROW_H;
-                let clip = Rect::from_min_max(rect.left_top(), pos2(rect.right() - 90.0, rect.bottom()));
-                let p = ui.painter().with_clip_rect(clip.intersect(ui.clip_rect()));
-                let name_color = if selected { vis.selection.stroke.color } else { vis.strong_text_color() };
-                p.text(pos2(rect.left() + 8.0, top), Align2::LEFT_CENTER, &m.name, font.clone(), name_color);
-                ui.painter().text(pos2(rect.right() - 8.0, top), Align2::RIGHT_CENTER, scan::human(m.size), font.clone(), vis.text_color());
-                ui.painter().text(pos2(rect.right() - 8.0, bottom), Align2::RIGHT_CENTER, m.source.label(), small.clone(), vis.weak_text_color());
-                let mut job = egui::text::LayoutJob::default();
-                let weak = egui::TextFormat { font_id: small.clone(), color: vis.weak_text_color(), ..Default::default() };
-                let warn = egui::TextFormat { font_id: small.clone(), color: vis.warn_fg_color, ..Default::default() };
-                job.append(&m.details(), 0.0, weak);
-                if let Some(note) = note(m) {
-                    job.append(&format!("   {note}"), 0.0, warn);
-                }
-                let galley = ui.painter().layout_job(job);
-                p.galley(pos2(rect.left() + 8.0, bottom - galley.size().y / 2.0), galley, vis.text_color());
-                let resp = resp.on_hover_text(m.files.first().map(|f| f.path.shown()).unwrap_or_default());
-                if resp.clicked() {
-                    chosen = Some(i);
-                }
-                if resp.double_clicked() {
-                    inspect = Some(i);
-                }
-                resp.context_menu(|ui| {
-                    if ui.button("Inspect").clicked() {
-                        inspect = Some(i);
-                        ui.close();
-                    }
-                    if ui.button("Show in Files").clicked() {
-                        open = Some(i);
-                        ui.close();
-                    }
-                    if ui.button("Copy path").clicked() {
-                        if let Some(f) = m.files.first() {
-                            ui.ctx().copy_text(f.path.shown());
-                        }
-                        ui.close();
-                    }
-                    if m.runnable() && ui.button("Shrink (quantise)…").on_hover_text("Make a smaller copy of this model. The original is kept. Professional.").clicked() {
-                        shrink = Some(i);
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.button(if cfg!(windows) { "Move to Recycle Bin…" } else { "Move to Trash…" }).on_hover_text("Remove this model. You see everything it removes first.").clicked() {
-                        remove = Some(i);
-                        ui.close();
-                    }
-                });
-            }
-        });
-        if let Some(i) = chosen {
-            self.models.chosen = Some(i);
-        }
-        if let Some(m) = remove.and_then(|i| list.get(i)) {
-            self.ask_remove_model(m);
-        }
-        if let Some(m) = shrink.and_then(|i| list.get(i)) {
-            self.ask_shrink(m);
-        }
-        if let Some(i) = inspect
-            && let Some(m) = list.get(i)
-        {
-            self.models.chosen = Some(i);
-            self.inspect_model(i, m);
-        }
-        if let Some(i) = open
-            && let Some(f) = list.get(i).and_then(|m| m.files.first())
-        {
-            self.show_model_file(&f.path.clone());
-        }
-    }
-
     /// Opens the Files workspace at a model file, selected.
-    fn show_model_file(&mut self, path: &Path) {
+    pub(super) fn show_model_file(&mut self, path: &Path) {
         let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return };
         self.set_workspace(Workspace::Files);
         self.files.reveal(dir.to_path_buf(), vec![name.to_string_lossy().into()]);
     }
+}
 
-    /// Right: everything known about the chosen model.
-    fn model_details(&mut self, ui: &mut egui::Ui) {
-        let Some(list) = self.models.list.take() else { return };
-        let Some(m) = self.models.chosen.and_then(|i| list.get(i)) else {
-            self.models.list = Some(list);
-            return;
-        };
-        let mut open = None;
-        let mut pick = None;
-        ui.horizontal(|ui| {
-            ui.add(egui::Label::new(egui::RichText::new(&m.name).heading()).wrap());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                if ui.small_button("✖").on_hover_text("Close").clicked() {
-                    self.models.chosen = None;
-                }
-            });
-        });
-        if let Some(n) = note(m) {
-            ui.colored_label(ui.visuals().warn_fg_color, n);
-        }
-        ui.add_space(6.0);
-        let i = &m.info;
-        let precision = i.quant.as_deref().map(|q| format!("{q} ({})", precision_words(q)));
-        let rows: Vec<(&str, Option<String>)> = vec![
-            ("Format", Some(m.format.label().to_string())),
-            ("Family", i.arch.clone()),
-            ("Parameters", i.params.clone()),
-            ("Precision", precision),
-            ("Context", i.context.map(|c| format!("{} tokens", group(c)))),
-            ("Kind", i.companion.then(|| "Add-on, used with a model".to_string())),
-            ("From", Some(m.source.label().to_string())),
-            ("Size", Some(scan::human(m.size))),
-        ];
-        egui::Grid::new("model-facts").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
-            for (k, v) in rows {
-                if let Some(v) = v {
-                    ui.weak(k);
-                    ui.label(v);
-                    ui.end_row();
-                }
-            }
-        });
-        ui.add_space(8.0);
-        ui.strong(if m.files.len() == 1 { "File" } else { "Files" });
-        for f in &m.files {
-            let r = ui.add(egui::Label::new(egui::RichText::new(f.path.shown())).wrap().sense(Sense::click())).on_hover_text("Click to show it in Files");
-            if r.clicked() {
-                open = Some(f.path.clone());
-            }
-            ui.weak(format!("{}{}", scan::human(f.size), if f.not_local { " · ☁ in the cloud, not read" } else { "" }));
-            ui.add_space(2.0);
-        }
-        if !m.copies.is_empty() {
-            ui.add_space(8.0);
-            ui.strong("The same files are also in");
-            for &c in &m.copies {
-                if let Some(o) = list.get(c) {
-                    let r = ui.add(egui::Label::new(format!("{} ({})", o.name, o.source.label())).sense(Sense::click()));
-                    if r.on_hover_text(o.files.first().map(|f| f.path.shown()).unwrap_or_default()).clicked() {
-                        pick = Some(c);
-                    }
-                }
-            }
-        }
-        if m.orphan {
-            ui.add_space(8.0);
-            ui.label(
-                "No installed Ollama model uses this file. It's usually left behind by a removed model or a \
-                 stopped download, and Ollama doesn't need it.",
-            );
-        }
-        ui.add_space(10.0);
-        let mut look = false;
-        let mut ask = false;
-        ui.horizontal(|ui| {
-            look = ui.button("🔍 Inspect").on_hover_text("See what's inside this model: its architecture, tensors and metadata").clicked();
-            if m.runnable() && ui.button("💬 Ask AI").on_hover_text("Chat with this model, run by Filescape on this computer").clicked() {
-                ask = true;
-            }
-            if ui.button("Show in Files").clicked() {
-                open = m.files.first().map(|f| f.path.clone());
-            }
-        });
-        if look && let Some(i) = self.models.chosen {
-            self.inspect_model(i, m);
-        }
-        if ask {
-            self.ask_about_model(m);
-        }
-        self.models.list = Some(list);
-        if pick.is_some() {
-            self.models.chosen = pick;
-        }
-        if let Some(p) = open {
-            self.show_model_file(&p);
-        }
-    }
+/// Starts reading another model to compare the page's model with.
+fn start_compare(page: &mut ModelPage, i: usize, other: &Model) {
+    let (tx, rx) = mpsc::channel();
+    let o = other.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(inspect::inspect(&o));
+    });
+    page.compare_with = Some(i);
+    page.compare_rx = Some(rx);
+    page.comparison = None;
+    page.tab = PageTab::Compare;
 }
 
 impl App {
+    /// Opens the model holding file `a` and compares it with the one holding `b`, if both are in
+    /// the list.
+    pub(super) fn compare_files(&mut self, a: &Path, b: &Path) {
+        let Some(list) = &self.models.list else { return };
+        let find = |p: &Path| list.iter().position(|m| m.files.iter().any(|f| f.path == p));
+        let (Some(i), Some(j)) = (find(a), find(b)) else {
+            self.models.storage.outcome = Some((Tone::Neutral, "The new file isn't in the list (it may be too small to count as a model), so it can't be compared here.".into()));
+            return;
+        };
+        let (ma, mb) = (list[i].clone(), list[j].clone());
+        self.models.storage.open = false;
+        self.ask.open = false;
+        self.inspect_model(i, &ma);
+        if let Some(page) = &mut self.models.page {
+            start_compare(page, j, &mb);
+        }
+    }
+
     /// Opens a model's page and starts reading what's inside it.
     fn inspect_model(&mut self, i: usize, m: &Model) {
         let (tx, rx) = mpsc::channel();
@@ -603,6 +375,7 @@ impl App {
             scan_all: None,
             scanned: None,
             vram_typed: 0.0,
+            measured: None,
             verify: None,
             verified: Vec::new(),
             zoom: None,
@@ -659,51 +432,108 @@ impl App {
         }
         let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input();
         let mut open = None;
+        let mut act = None;
+        let t = kit::tokens(ui);
+        let (kind, sure) = crate::modelkind::of(m);
+        // The heading: back, the kind's tile, the name and what it is; actions on the right.
         ui.horizontal(|ui| {
-            close |= ui.button("⏴ All models").on_hover_text("Back to the list (Esc)").clicked();
-            ui.add_space(8.0);
+            if kit::icon_button(ui, kit::Icon::ArrowLeft, "Back to all models (Esc)").clicked() {
+                close = true;
+            }
+            ui.add_space(4.0);
+            let (tile, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+            library::kind_tile(ui.painter(), tile, kind, sure, t.dark);
+            ui.add_space(4.0);
+            ui.vertical(|ui| {
+                ui.set_max_width((ui.available_width() - 420.0).max(200.0));
+                ui.add(egui::Label::new(egui::RichText::new(&m.name).size(18.0).color(t.strong)).truncate());
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.label(egui::RichText::new(library::kind_words(kind, sure)).size(12.5).color(library::kind_colour(kind, t.dark)));
+                    let mut rest = vec![m.format.label().to_string()];
+                    rest.extend(m.info.arch.clone());
+                    rest.push(m.source.label().to_string());
+                    ui.label(egui::RichText::new(format!("  ·  {}", rest.join(" · "))).size(12.5).color(t.weak));
+                    if let Some(n) = note(m) {
+                        ui.label(egui::RichText::new(format!("   {n}")).size(12.5).color(t.warn));
+                    }
+                });
+            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
                 if page.data.is_some() && list.len() > 1 {
                     let mut pick = None;
-                    egui::ComboBox::from_id_salt("compare-with")
-                        .selected_text(page.compare_with.and_then(|c| list.get(c)).map_or("Compare with…".to_string(), |o| format!("Compared with {}", o.name)))
-                        .width(220.0)
-                        .show_ui(ui, |ui| {
+                    let r = kit::button(
+                        ui,
+                        kit::Kind::Secondary,
+                        Some(kit::Icon::Columns),
+                        &page.compare_with.and_then(|c| list.get(c)).map_or("Compare…".to_string(), |o| format!("Compared with {}", o.name)),
+                    )
+                    .on_hover_text("Compare this model with another: their facts, layers, tensors and metadata side by side");
+                    egui::Popup::menu(&r).show(|ui| {
+                        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
                             for (i, o) in list.iter().enumerate() {
                                 if i == page.model || o.info.companion || o.files.iter().all(|f| f.not_local) {
                                     continue;
                                 }
                                 if ui.selectable_label(page.compare_with == Some(i), format!("{}  ·  {}", o.name, o.details())).clicked() {
                                     pick = Some(i);
+                                    ui.close();
                                 }
                             }
-                        })
-                        .response
-                        .on_hover_text("Compare this model with another: their facts, layers, tensors and metadata side by side");
-                    if let Some(i) = pick {
-                        let (tx, rx) = mpsc::channel();
-                        let o = list[i].clone();
-                        std::thread::spawn(move || {
-                            let _ = tx.send(inspect::inspect(&o));
                         });
-                        page.compare_with = Some(i);
-                        page.compare_rx = Some(rx);
-                        page.comparison = None;
-                        page.tab = PageTab::Compare;
+                    });
+                    if let Some(i) = pick {
+                        start_compare(&mut page, i, &list[i]);
                     }
                 }
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(egui::Label::new(egui::RichText::new(&m.name).heading()).truncate());
-                });
+                if kit::icon_button(ui, kit::Icon::Folder, "Show in Files").clicked() {
+                    act = Some(library::Act::ShowFiles);
+                }
+                if m.runnable() && crate::modelkind::chats(m) {
+                    if kit::button(ui, kit::Kind::Secondary, Some(kit::Icon::Flask), "Open in Lab").clicked() {
+                        act = Some(library::Act::Lab);
+                    }
+                    if kit::button(ui, kit::Kind::Secondary, Some(kit::Icon::Chat), "Ask AI").clicked() {
+                        act = Some(library::Act::Ask);
+                    }
+                }
             });
         });
+        ui.add_space(8.0);
+
+        // The summary: the facts most people want, before any detail.
+        let d0 = page.data.clone();
+        let layers = d0.as_ref().and_then(|d| d.shape.layers);
+        let context = m.info.context.filter(|&c| c > 0).or(d0.as_ref().and_then(|d| d.shape.context));
+        let precision = m.info.quant.clone();
+        let tiles: Vec<(&str, String, String)> = vec![
+            ("Parameters", m.info.params.clone().unwrap_or_else(|| "Unknown".into()), crate::kit::glossary("Parameters").to_string()),
+            ("Size", scan::human(m.size), format!("The model's files added up{}.", if m.files.len() > 1 { format!(" ({} files)", m.files.len()) } else { String::new() })),
+            (
+                "Precision",
+                precision.clone().unwrap_or_else(|| "Unknown".into()),
+                precision.as_deref().map_or_else(|| crate::kit::glossary("Precision").to_string(), |q| format!("{}: {}", precision_words(q), crate::kit::glossary("Precision"))),
+            ),
+            ("Context", context.map(|c| format!("{} tokens", crate::fit::tokens(c))).unwrap_or_else(|| "Unknown".into()), crate::kit::glossary("Context").to_string()),
+            ("Layers", layers.map(|l| l.to_string()).unwrap_or_else(|| if d0.is_some() { "Unknown".into() } else { "…".into() }), crate::kit::glossary("Layers").to_string()),
+            (
+                "Runs in Filescape",
+                if m.runnable() { "Yes".into() } else { "No".into() },
+                if m.runnable() { "Ask AI and the Lab can load it.".into() } else { "Filescape runs whole GGUF models; this one can be inspected here.".into() },
+            ),
+        ];
+        let n = tiles.len() as f32;
+        let w = ((ui.available_width() - 8.0 * (n - 1.0)) / n).clamp(96.0, 180.0);
         ui.horizontal_wrapped(|ui| {
-            ui.weak(format!("{} · {} · {}", m.details(), scan::human(m.size), m.source.label()));
-            if let Some(n) = note(m) {
-                ui.colored_label(ui.visuals().warn_fg_color, n);
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            for (label, value, tip) in &tiles {
+                library::fact_tile(ui, w, label, value, tip);
             }
         });
-        ui.add_space(6.0);
+        ui.add_space(10.0);
+
+        // Tabs: the main ones, then the detail for experienced users.
         let tensors = page.data.as_ref().map_or(0, |d| d.tensors.len());
         let metas = page.data.as_ref().map_or(0, |d| d.meta.len());
         let tensors_label = format!("Tensors ({})", group(tensors as u64));
@@ -711,6 +541,7 @@ impl App {
         let problems = page.health.iter().filter(|c| c.level == crate::health::Level::Problem).count();
         let health_label = if problems > 0 { format!("Health ({problems} ⚠)") } else { "Health".to_string() };
         let mut tabs = vec![(PageTab::Overview, "Overview")];
+        let mut advanced = Vec::new();
         if page.data.is_some() {
             tabs.push((PageTab::Health, health_label.as_str()));
         }
@@ -719,19 +550,31 @@ impl App {
         }
         if tensors > 0 {
             tabs.push((PageTab::Structure, "Structure"));
-            tabs.push((PageTab::Tensors, tensors_label.as_str()));
+            advanced.push((PageTab::Tensors, tensors_label.as_str()));
         }
         if page.has_vocab {
-            tabs.push((PageTab::Tokens, "Tokens"));
+            advanced.push((PageTab::Tokens, "Tokens"));
         }
         if metas > 0 {
-            tabs.push((PageTab::Metadata, meta_label.as_str()));
+            advanced.push((PageTab::Metadata, meta_label.as_str()));
         }
         if page.compare_with.is_some() {
             tabs.push((PageTab::Compare, "Compare"));
         }
-        if tabs.len() > 1 {
-            kit::segmented(ui, &mut page.tab, &tabs, false);
+        // A tab asked for before the model was read (Will it run? from the library) may not apply.
+        if page.data.is_some() && !tabs.iter().chain(&advanced).any(|(t, _)| *t == page.tab) {
+            page.tab = PageTab::Overview;
+        }
+        if tabs.len() + advanced.len() > 1 {
+            ui.horizontal(|ui| {
+                kit::segmented(ui, &mut page.tab, &tabs, false);
+                if !advanced.is_empty() {
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("ADVANCED").size(10.0).color(t.weak).strong())
+                        .on_hover_text("The model's raw parts: every tensor, its vocabulary and the metadata stored in the file");
+                    kit::segmented(ui, &mut page.tab, &advanced, false);
+                }
+            });
             ui.add_space(8.0);
         }
         match (&page.data, page.tab) {
@@ -786,10 +629,14 @@ impl App {
                 page_metadata(ui, &mut page.filter, &d);
             }
         }
-        self.models.list = Some(list);
+        let model = page.model;
         if !close {
             self.models.page = Some(page);
         }
+        if let Some(a) = act {
+            self.model_act(&list, model, a);
+        }
+        self.models.list = Some(list);
         if let Some(p) = open {
             self.show_model_file(&p);
         }
@@ -809,25 +656,75 @@ fn page_overview(ui: &mut egui::Ui, m: &Model, d: &Inspection) -> Option<PathBuf
         ui.add_space(4.0);
     }
     if !d.facts.is_empty() {
-        egui::Grid::new("inspect-facts").num_columns(3).spacing([14.0, 5.0]).striped(true).show(ui, |ui| {
-            for f in &d.facts {
-                ui.weak(f.label);
-                let tone = match f.how {
-                    How::Verified => Tone::Success,
-                    How::Calculated => Tone::Accent,
-                    How::Documented => Tone::Neutral,
-                };
-                kit::badge(ui, f.how.label(), tone).on_hover_text(f.how.explain());
-                ui.add(egui::Label::new(&f.value).wrap());
-                ui.end_row();
+        // The facts in four groups, side by side when there's room.
+        const GROUPS: [(&str, &[&str]); 3] = [
+            ("About", &["Name", "Made by", "Fine-tuned as", "Architecture", "Size label", "Parameters", "Licence"]),
+            ("Shape", &["Layers", "Hidden size", "Attention heads", "Key/value heads", "Experts", "Feed-forward size", "Context"]),
+            ("Text", &["Vocabulary", "Tokenizer", "Chat template"]),
+        ];
+        let mut groups: Vec<(&str, Vec<&inspect::Fact>)> = GROUPS.iter().map(|(g, _)| (*g, Vec::new())).collect();
+        groups.push(("File", Vec::new()));
+        for f in &d.facts {
+            let g = GROUPS.iter().position(|(_, labels)| labels.contains(&f.label)).unwrap_or(GROUPS.len());
+            groups[g].1.push(f);
+        }
+        groups.retain(|(_, v)| !v.is_empty());
+        let card = |ui: &mut egui::Ui, (title, facts): &(&str, Vec<&inspect::Fact>)| {
+            let t = kit::tokens(ui);
+            kit::card_frame(&t).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(title.to_uppercase()).size(10.5).color(t.weak).strong());
+                ui.add_space(2.0);
+                egui::Grid::new(("inspect-facts", *title)).num_columns(3).spacing([12.0, 6.0]).min_col_width(60.0).show(ui, |ui| {
+                    for f in facts {
+                        let tip = kit::glossary(f.label);
+                        let l = ui.label(egui::RichText::new(f.label).color(t.weak));
+                        if !tip.is_empty() {
+                            l.on_hover_text(tip);
+                        }
+                        let tone = match f.how {
+                            How::Verified => Tone::Success,
+                            How::Calculated => Tone::Accent,
+                            How::Documented => Tone::Neutral,
+                        };
+                        kit::badge(ui, f.how.label(), tone).on_hover_text(f.how.explain());
+                        ui.add(egui::Label::new(egui::RichText::new(&f.value).color(t.strong)).wrap());
+                        ui.end_row();
+                    }
+                });
+                ui.add_space(4.0);
+            });
+        };
+        if ui.available_width() > 760.0 && groups.len() > 1 {
+            let half = groups.len().div_ceil(2);
+            ui.columns(2, |cols| {
+                for (k, g) in groups.iter().enumerate() {
+                    let c = &mut cols[if k < half { 0 } else { 1 }];
+                    card(c, g);
+                    c.add_space(8.0);
+                }
+            });
+        } else {
+            for g in &groups {
+                card(ui, g);
+                ui.add_space(8.0);
             }
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            kit::badge(ui, How::Verified.label(), Tone::Success);
+            ui.weak("read from the model file  ");
+            kit::badge(ui, How::Calculated.label(), Tone::Accent);
+            ui.weak("worked out from it  ");
+            kit::badge(ui, How::Documented.label(), Tone::Neutral);
+            ui.weak("stated by the publisher beside it, not checked");
         });
-        ui.add_space(4.0);
-        ui.weak("file: read from the model file · calculated: worked out from it · publisher: stated beside it, not checked");
     }
     if d.kinds.len() > 1 {
         ui.add_space(12.0);
-        ui.strong("How the numbers are stored");
+        ui.label(egui::RichText::new("HOW THE NUMBERS ARE STORED").size(10.5).color(kit::tokens(ui).weak).strong())
+            .on_hover_text(kit::glossary("Precision"));
         ui.add_space(4.0);
         let total: u64 = d.kinds.iter().map(|k| k.bytes).sum::<u64>().max(1);
         egui::Grid::new("inspect-kinds").num_columns(4).spacing([14.0, 4.0]).show(ui, |ui| {
@@ -846,7 +743,8 @@ fn page_overview(ui: &mut egui::Ui, m: &Model, d: &Inspection) -> Option<PathBuf
         });
     }
     ui.add_space(12.0);
-    ui.strong(if m.files.len() == 1 { "File" } else { "Files" });
+    let t = kit::tokens(ui);
+    ui.label(egui::RichText::new(if m.files.len() == 1 { "FILE" } else { "FILES" }).size(10.5).color(t.weak).strong());
     for f in &m.files {
         let r = ui.add(egui::Label::new(egui::RichText::new(f.path.shown())).wrap().sense(Sense::click())).on_hover_text("Click to show it in Files");
         if r.clicked() {
@@ -990,6 +888,70 @@ fn hardware(ctx: &egui::Context) -> Option<&'static crate::fit::Hardware> {
     HW.get()
 }
 
+/// A small uppercase heading, as on the Overview.
+fn heading_small(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text).size(10.5).strong().color(kit::tokens(ui).weak));
+    ui.add_space(2.0);
+}
+
+/// What this computer has, and where Filescape's own runtime runs a model on it.
+fn this_computer(ui: &mut egui::Ui, hw: &crate::fit::Hardware, detected: u64, vram_typed: &mut f32) {
+    let t = kit::tokens(ui);
+    heading_small(ui, "THIS COMPUTER");
+    kit::card_frame(&t).show(ui, |ui| {
+        ui.set_width(ui.available_width().min(760.0));
+        egui::Grid::new("fit-hw").num_columns(2).spacing([14.0, 5.0]).show(ui, |ui| {
+            ui.weak("Processor");
+            let mut cpu = if hw.cpu.is_empty() { "Not known".to_string() } else { hw.cpu.clone() };
+            cpu += &format!(" · {} threads", hw.threads);
+            if !hw.cpu_features.is_empty() {
+                cpu += &format!(" · {}", hw.cpu_features.join(", "));
+            }
+            ui.label(cpu).on_hover_text("Instruction sets listed are ones Filescape's AI runtime uses to run models faster.");
+            ui.end_row();
+            ui.weak("Memory");
+            ui.label(match hw.ram_free {
+                Some(f) => format!("{} · {} free now", scan::human(hw.ram), scan::human(f)),
+                None => scan::human(hw.ram),
+            });
+            ui.end_row();
+            ui.weak("Graphics");
+            if hw.unified {
+                ui.label(format!("Shares main memory; about {} of it can hold a model", scan::human(detected)));
+            } else if hw.gpus.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label("Not found. Graphics memory:");
+                    ui.add(egui::DragValue::new(vram_typed).range(0.0..=256.0).speed(0.5).suffix(" GB"));
+                })
+                .response
+                .on_hover_text("Filescape reads NVIDIA cards through their driver and AMD cards on Linux. Type the card's memory to see what other apps could do (0 if none, or if it shares main memory).");
+            } else {
+                let gpus = hw
+                    .gpus
+                    .iter()
+                    .map(|g| match g.vram_free {
+                        Some(f) => format!("{} ({}, {} free)", g.name, scan::human(g.vram), scan::human(f)),
+                        None => format!("{} ({})", g.name, scan::human(g.vram)),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                ui.label(gpus);
+            }
+            ui.end_row();
+            ui.weak("Filescape runs models on");
+            let gpu = hw.runtime.iter().find(|d| d.gpu);
+            match (crate::fit::filescape_gpu(), gpu) {
+                (true, Some(g)) => ui.label(format!("The graphics chip ({}, {})", g.backend, g.description)),
+                (true, None) => ui.label("The graphics chip (Metal)"),
+                _ if crate::llm::processor_problem().is_some() => ui.label("Nothing: this processor lacks AVX2, which Filescape's AI runtime needs on an Intel Mac"),
+                _ if cfg!(target_os = "macos") => ui.label("The processor. On an Intel Mac, Filescape's AI runtime doesn't use the graphics chip; Ollama and LM Studio may."),
+                _ => ui.label("The processor: no graphics card was found through Vulkan. Updating the graphics drivers can add it."),
+            };
+            ui.end_row();
+        });
+    });
+}
+
 /// Will it run? Memory needed at a chosen context length, against this computer.
 fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) {
     use crate::fit::{self, Verdict};
@@ -1016,28 +978,9 @@ fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) 
     } else {
         // As for a card found: less what the screen and other apps keep.
         let v = (page.vram_typed.max(0.0) as f64 * (1u64 << 30) as f64) as u64;
-        crate::fit::Hardware { ram: 0, gpus: vec![crate::fit::Gpu { name: String::new(), vram: v }], unified: false }.usable_vram()
+        crate::fit::Hardware { gpus: vec![crate::fit::Gpu { vram: v, ..Default::default() }], ..Default::default() }.usable_vram()
     };
-    ui.strong("This computer");
-    if hw.unified {
-        ui.label(format!(
-            "{} of memory, shared with the graphics chip. About {} of it can hold a model.",
-            scan::human(hw.ram),
-            scan::human(detected)
-        ));
-    } else {
-        let gpus = hw.gpus.iter().map(|g| format!("{} ({})", g.name, scan::human(g.vram))).collect::<Vec<_>>().join(", ");
-        if gpus.is_empty() {
-            ui.label(format!("{} of memory. Filescape couldn't find how much memory the graphics card has.", scan::human(hw.ram)));
-            ui.horizontal(|ui| {
-                ui.label("Graphics memory:");
-                ui.add(egui::DragValue::new(&mut page.vram_typed).range(0.0..=256.0).speed(0.5).suffix(" GB"));
-                ui.weak("(0 if none, or if it shares main memory)");
-            });
-        } else {
-            ui.label(format!("{} of memory, and {gpus}.", scan::human(hw.ram)));
-        }
-    }
+    this_computer(ui, hw, detected, &mut page.vram_typed);
     ui.add_space(10.0);
 
     // The choices.
@@ -1062,17 +1005,74 @@ fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) 
 
     let cache_bytes = if page.cache_q8 { 1.0625 } else { 2.0 };
     let Some(n) = fit::need(d, weights, page.context, cache_bytes) else { return };
-    let verdict = fit::verdict(&n, hw, vram);
-    let (tone, text) = match verdict {
-        Verdict::Gpu => (Tone::Success, format!("Runs fully on the graphics chip: fast. It needs about {}.", scan::human(n.total()))),
-        Verdict::Split(f) => (
-            Tone::Warn,
-            format!("Runs, split between the graphics card and main memory (about {:.0}% on the card): slower than all on the card. It needs about {}.", f * 100.0, scan::human(n.total())),
-        ),
-        Verdict::Cpu => (Tone::Warn, format!("Runs in main memory on the processor: it works, but slowly. It needs about {}.", scan::human(n.total()))),
-        Verdict::TooBig => (Tone::Danger, format!("Too big for this computer: it needs about {}. Try a shorter context, a compact cache, or a smaller version of the model.", scan::human(n.total()))),
-    };
-    kit::callout(ui, tone, text);
+    let here = fit::verdict_here(&n, hw);
+    let other = fit::verdict(&n, hw, vram);
+    let total = scan::human(n.total());
+    let runs_here = m.runnable();
+    heading_small(ui, if runs_here { "IN FILESCAPE (ASK AI AND THE LAB)" } else { "IN FILESCAPE" });
+    if !runs_here {
+        kit::callout(ui, Tone::Neutral, "Filescape runs whole GGUF models only, so it can't run this one itself. Below is what an app that runs it would need.");
+    } else {
+        let (tone, text) = match here {
+            Verdict::Gpu => (Tone::Success, format!("Runs on the graphics chip: fast. It needs about {total}.")),
+            Verdict::Split(_) | Verdict::Cpu => (Tone::Warn, format!("Runs on the processor, in main memory: it works, more slowly than on a graphics chip. It needs about {total}.")),
+            Verdict::TooBig => (Tone::Danger, format!("Too big for this computer: it needs about {total}. Try a shorter context, a compact cache, or a smaller version of the model.")),
+        };
+        kit::callout(ui, tone, text);
+        if here != Verdict::TooBig
+            && let Some(free) = hw.ram_free
+            && n.total() > free
+        {
+            ui.add_space(4.0);
+            kit::note(ui, format!("Only {} of memory is free right now. Close other apps before loading it, or the computer will slow down while it makes room.", scan::human(free)));
+        }
+    }
+    if !fit::filescape_gpu() {
+        ui.add_space(8.0);
+        heading_small(ui, "IN APPS THAT USE THE GRAPHICS CARD (OLLAMA, LM STUDIO)");
+        let (tone, text) = match other {
+            Verdict::Gpu => (Tone::Success, format!("Runs fully on the graphics card: fast. It needs about {total}.")),
+            Verdict::Split(f) => (Tone::Warn, format!("Runs split between the graphics card and main memory (about {:.0}% on the card): slower than all on the card.", f * 100.0)),
+            Verdict::Cpu => (Tone::Warn, if vram == 0 { "No graphics memory found, so these apps run it on the processor too.".to_string() } else { "Too big for the graphics card, so it runs on the processor.".to_string() }),
+            Verdict::TooBig => (Tone::Danger, "Too big for this computer.".to_string()),
+        };
+        kit::callout(ui, tone, text);
+    }
+
+    // What the Lab measured, when it has.
+    if runs_here {
+        let path = m.files.first().map(|f| f.path.clone());
+        let measured = page.measured.get_or_insert_with(|| {
+            let file = crate::lab::results_file()?;
+            crate::lab::load_results(&file).into_iter().find(|r| Some(&r.path) == path.as_ref())
+        });
+        ui.add_space(8.0);
+        match measured {
+            Some(r) => {
+                let when = chrono::DateTime::from_timestamp(r.when, 0).map(|d| d.with_timezone(&chrono::Local).format("%-d %b %Y").to_string()).unwrap_or_default();
+                kit::note(
+                    ui,
+                    format!(
+                        "Measured in the Lab on {when}: it writes {:.1} tokens a second and reads {:.0}, and starts answering after {:.1} s. That was at a {}-token context, on the {}, with {} threads.",
+                        r.write_speed,
+                        r.read_speed,
+                        r.first_token,
+                        group(r.context as u64),
+                        match (r.gpu, r.device.is_empty()) {
+                            (true, true) => "graphics chip".to_string(),
+                            (false, true) => "processor".to_string(),
+                            (true, false) => format!("graphics chip ({})", r.device),
+                            (false, false) => format!("processor ({})", r.device),
+                        },
+                        r.threads
+                    ),
+                );
+            }
+            None => {
+                ui.weak("Its speed here hasn't been measured. The Lab's Speed tab measures it on this computer.");
+            }
+        }
+    }
     ui.add_space(8.0);
 
     // The need as a bar, with what fits marked.
@@ -1117,23 +1117,30 @@ fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) 
 
     // At other context lengths.
     ui.strong("At other context lengths");
-    egui::Grid::new("fit-table").num_columns(3).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
+    let two = !fit::filescape_gpu();
+    let words = |v: Verdict| match v {
+        Verdict::Gpu => "On the graphics chip",
+        Verdict::Split(_) => "Split",
+        Verdict::Cpu => "On the processor",
+        Verdict::TooBig => "Too big",
+    };
+    egui::Grid::new("fit-table").num_columns(if two { 4 } else { 3 }).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
         ui.weak("Context");
         ui.weak("Needs");
-        ui.weak("On this computer");
+        ui.weak("In Filescape");
+        if two {
+            ui.weak("In Ollama, LM Studio");
+        }
         ui.end_row();
         for &c in contexts.iter().filter(|&&c| c >= 2048 || contexts.len() < 4) {
             let Some(n) = fit::need(d, weights, c, cache_bytes) else { continue };
-            let v = match fit::verdict(&n, hw, vram) {
-                Verdict::Gpu => "On the graphics chip",
-                Verdict::Split(_) => "Split",
-                Verdict::Cpu => "On the processor",
-                Verdict::TooBig => "Too big",
-            };
             let row = if c == page.context { egui::RichText::new(fit::tokens(c)).strong() } else { egui::RichText::new(fit::tokens(c)) };
             ui.label(row);
             ui.label(scan::human(n.total()));
-            ui.label(v);
+            ui.label(if runs_here { words(fit::verdict_here(&n, hw)) } else { "Can't run it" });
+            if two {
+                ui.label(words(fit::verdict(&n, hw, vram)));
+            }
             ui.end_row();
         }
     });
@@ -1151,18 +1158,24 @@ fn page_fit(ui: &mut egui::Ui, page: &mut ModelPage, m: &Model, d: &Inspection) 
             }
             let wq = (elements as f64 * bpw / 8.0) as u64;
             if let Some(n) = fit::need(d, wq, page.context, cache_bytes) {
-                let v = match fit::verdict(&n, hw, vram) {
+                let v = |v: Verdict| match v {
                     Verdict::Gpu => "on the graphics chip",
                     Verdict::Split(_) => "split",
                     Verdict::Cpu => "on the processor",
                     Verdict::TooBig => "too big",
                 };
-                ui.label(format!("{q} ({}): about {}, {v}", precision_words(q), scan::human(n.total())));
+                let mut line = format!("{q} ({}): about {}", precision_words(q), scan::human(n.total()));
+                if fit::filescape_gpu() {
+                    line += &format!(", {}", v(fit::verdict(&n, hw, vram)));
+                } else {
+                    line += &format!(", in Filescape {}; in Ollama or LM Studio {}", v(fit::verdict_here(&n, hw)), v(fit::verdict(&n, hw, vram)));
+                }
+                ui.label(line);
             }
         }
     }
     ui.add_space(8.0);
-    ui.weak("These are estimates for llama.cpp-based apps such as Ollama and LM Studio; each app adds a little of its own.");
+    ui.weak("These are estimates in the way llama.cpp lays a model out, which Filescape, Ollama and LM Studio all use. Each app adds a little of its own, and the system and other open apps need memory too.");
 }
 
 /// The picked tensor: its facts, and a sample of its numbers as statistics and a histogram.

@@ -46,6 +46,9 @@ pub struct Step {
     pub kept: usize,
     /// The model chose to end here (an end-of-text token).
     pub end: bool,
+    /// How spread out the model's own probabilities were over every token, in bits (Shannon
+    /// entropy): 0 when it was certain; n bits is as uncertain as a fair choice among 2^n tokens.
+    pub entropy: f32,
 }
 
 /// What a Lab run produced.
@@ -101,6 +104,11 @@ pub fn adjust(logits: &[f32], s: &Settings) -> Vec<(usize, f32)> {
     let kept: Vec<f32> = order.iter().map(|&i| logits[i]).collect();
     let p = softmax(&kept, s.temperature);
     order.into_iter().zip(p).collect()
+}
+
+/// The Shannon entropy, in bits, of the probabilities from `logits` (before any setting).
+pub fn entropy_bits(logits: &[f32]) -> f32 {
+    softmax(logits, 1.0).into_iter().filter(|&p| p > 0.0).map(|p| -p * p.log2()).sum()
 }
 
 /// Picks from `adjusted` with a uniform number in [0, 1).
@@ -190,6 +198,34 @@ pub struct BenchResult {
     pub write_speed: f32,
     /// Seconds before the first token of an answer: reading the text, then one token.
     pub first_token: f32,
+    /// The processor or graphics chip it ran on, as llama.cpp names it ("" in older results).
+    #[serde(default)]
+    pub device: String,
+}
+
+/// The results as CSV, newest first, with everything each test ran with.
+pub fn results_csv(results: &[BenchResult]) -> String {
+    let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+    let mut out = String::from("when,model,file,device,on_graphics_chip,threads,context,read_tokens,write_tokens,runs,read_per_sec,write_per_sec,first_token_sec\n");
+    for r in results {
+        let when = chrono::DateTime::from_timestamp(r.when, 0).map(|d| d.to_rfc3339()).unwrap_or_default();
+        out.push_str(&format!(
+            "{when},{},{},{},{},{},{},{},{},{},{:.2},{:.2},{:.3}\n",
+            q(&r.model),
+            q(&r.path.display().to_string()),
+            q(&r.device),
+            r.gpu,
+            r.threads,
+            r.context,
+            r.read,
+            r.write,
+            r.runs,
+            r.read_speed,
+            r.write_speed,
+            r.first_token
+        ));
+    }
+    out
 }
 
 /// The middle value (the mean of the two middle ones for an even count).
@@ -229,6 +265,12 @@ pub fn save_result(file: &std::path::Path, r: BenchResult) -> Result<Vec<BenchRe
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn entropy_counts_equally_likely_choices() {
+        assert!((entropy_bits(&[0.0, 0.0, 0.0, 0.0]) - 2.0).abs() < 1e-5);
+        assert!(entropy_bits(&[100.0, 0.0, 0.0]) < 1e-3);
+    }
+
     use super::*;
 
     const L: [f32; 5] = [2.0, 1.0, 0.5, 0.0, -3.0];
@@ -313,11 +355,15 @@ mod tests {
             read_speed: 100.0,
             write_speed: 10.0,
             first_token: 5.2,
+            device: String::new(),
         };
         save_result(&f, r(1)).unwrap();
         let all = save_result(&f, r(2)).unwrap();
         assert_eq!(all.iter().map(|r| r.when).collect::<Vec<_>>(), [2, 1]);
         assert_eq!(load_results(&f), all);
+        let csv = results_csv(&all);
+        assert_eq!(csv.lines().count(), 3);
+        assert!(csv.lines().nth(1).unwrap().contains(",\"M\",\"/m.gguf\",\"\",false,4,4096,512,128,3,100.00,10.00,5.200"), "{csv}");
         std::fs::write(&f, "not json").unwrap();
         assert!(load_results(&f).is_empty());
         let _ = std::fs::remove_dir_all(&d);

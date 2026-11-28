@@ -5,8 +5,10 @@
 
 use super::*;
 
+mod compare;
 mod inside;
 mod steer;
+mod suite;
 use crate::kit::{self, Tone};
 use crate::lab::{BenchResult, BenchSettings, Run, Settings, Step};
 use crate::llm::Request;
@@ -19,6 +21,8 @@ pub(super) struct LabState {
     pub settings: Settings,
     /// Tokens chosen after the text so far (by "Use this" or "Keep"), as text.
     continuation: String,
+    /// Where each token of `continuation` starts, so "Step back" can take off the last one.
+    marks: Vec<usize>,
     /// How many tokens "Write" asks for.
     steps: u32,
     pub run: Option<Run>,
@@ -36,6 +40,11 @@ pub(super) struct LabState {
     layers: usize,
     steer: steer::Steering,
     pub steered: Option<(Run, Run, f32)>,
+    /// A strength sweep under way or done, and the strength of the run being written.
+    sweep: Option<steer::Sweep>,
+    sweep_strength: f32,
+    /// Two sets of settings (or two models) side by side.
+    pub compare: compare::Compare,
     bench: BenchSettings,
     /// The speed test running: (run, of runs).
     pub bench_progress: Option<(u32, u32)>,
@@ -43,6 +52,8 @@ pub(super) struct LabState {
     bench_asked: BenchSettings,
     /// Speed test results kept so far, read on first use.
     results: Option<Vec<BenchResult>>,
+    /// Testing several models in one go.
+    pub suites: suite::Suites,
 }
 
 impl Default for LabState {
@@ -52,6 +63,7 @@ impl Default for LabState {
             chat: false,
             settings: Settings::default(),
             continuation: String::new(),
+            marks: Vec::new(),
             steps: 30,
             run: None,
             asked: None,
@@ -62,10 +74,14 @@ impl Default for LabState {
             layers: 0,
             steer: steer::Steering::default(),
             steered: None,
+            sweep: None,
+            sweep_strength: 0.0,
+            compare: compare::Compare::default(),
             bench: BenchSettings::default(),
             bench_progress: None,
             bench_asked: BenchSettings::default(),
             results: None,
+            suites: suite::Suites::default(),
         }
     }
 }
@@ -75,10 +91,22 @@ enum Page {
     Next,
     Inside,
     Steer,
+    Compare,
     Speed,
 }
 
 impl LabState {
+    /// Adds a chosen token to the text the model carries on from.
+    fn push_token(&mut self, t: &str) {
+        self.marks.push(self.continuation.len());
+        self.continuation.push_str(t);
+    }
+
+    fn clear_tokens(&mut self) {
+        self.continuation.clear();
+        self.marks.clear();
+    }
+
     /// A model was loaded: forget what was found inside the last one.
     pub fn loaded_layers(&mut self, layers: usize) {
         if layers != self.layers {
@@ -88,6 +116,7 @@ impl LabState {
         self.inside = None;
         self.lensed = None;
         self.steered = None;
+        self.sweep = None;
     }
 }
 
@@ -101,6 +130,17 @@ fn confidence(p: f32) -> Color32 {
         let t = p * 2.0;
         Color32::from_rgb(230, (80.0 + 100.0 * t) as u8, 70)
     }
+}
+
+/// What the uncertainty figure means.
+const UNCERTAINTY: &str = "Uncertainty is the entropy of the model's own probabilities over every token, before the settings, in bits. \
+0 bits: it was certain. 1 bit: as unsure as a coin toss. n bits: as unsure as a fair pick among 2^n tokens. \
+It measures how spread out the model's guesses were, not whether the text is true.";
+
+/// How many equally likely tokens would be as uncertain as `bits`.
+fn equally_likely(bits: f32) -> String {
+    let n = 2f32.powf(bits.max(0.0));
+    if n < 1.05 { "1 token".into() } else if n < 10.0 { format!("{n:.1} tokens") } else if n < 1e6 { format!("{:.0} tokens", n) } else { "millions".into() }
 }
 
 fn percent(p: f32) -> String {
@@ -134,18 +174,30 @@ impl App {
     /// The Lab, beside the model list it shares with Ask AI.
     pub(super) fn lab_chat(&mut self, ui: &mut egui::Ui) {
         let name = self.ask.loaded.as_ref().map(|(_, n, _)| n.clone());
+        let t = kit::tokens(ui);
         ui.horizontal(|ui| {
-            ui.heading(name.as_deref().map_or("Lab".to_string(), |n| format!("Lab · {n}")));
+            crate::kit::icons::show(ui, crate::kit::Icon::Flask, 20.0, t.accent);
+            ui.label(egui::RichText::new("Lab").size(kit::TITLE - 2.0).color(t.strong));
+            if let Some(n) = &name {
+                ui.label(egui::RichText::new(format!("·  {n}")).size(14.0).color(t.weak));
+            }
             ui.add_space(8.0);
             let busy = self.ask.phase != super::ask::Phase::Idle;
             ui.add_enabled_ui(!busy, |ui| {
-                kit::segmented(ui, &mut self.ask.lab_state.page, &[(Page::Next, "Next token"), (Page::Inside, "Inside"), (Page::Steer, "Steer"), (Page::Speed, "Speed")], false);
+                kit::segmented(ui, &mut self.ask.lab_state.page, &[(Page::Next, "Next token"), (Page::Inside, "Inside"), (Page::Steer, "Steer"), (Page::Compare, "Compare"), (Page::Speed, "Speed")], false);
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                kit::badge(ui, "Free", Tone::Success).on_hover_text("Everything in the Lab is free: it's for learning how models work.");
             });
         });
+        ui.add_space(2.0);
+        about_page(ui, self.ask.lab_state.page);
+        ui.add_space(2.0);
         match self.ask.lab_state.page {
             Page::Speed => return self.lab_speed(ui, name),
             Page::Inside => return self.lab_inside(ui, name),
             Page::Steer => return self.lab_steer(ui, name),
+            Page::Compare => return self.lab_compare(ui, name),
             Page::Next => {}
         }
         ui.weak("What the model would write next, and how sure it is.");
@@ -166,11 +218,11 @@ impl App {
             let l = &mut self.ask.lab_state;
             let r = ui.add(egui::TextEdit::multiline(&mut l.text).desired_rows(2).desired_width(f32::INFINITY).hint_text("Text for the model to carry on…"));
             if r.changed() {
-                l.continuation.clear();
+                l.clear_tokens();
             }
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut l.chat, "As a chat message").on_hover_text("On: the text is wrapped in the model's chat template, as Ask AI sends a question, so you see how it starts an answer. Off: the model just carries on the text.").changed() {
-                    l.continuation.clear();
+                    l.clear_tokens();
                 }
                 ui.separator();
                 // Buttons that look like buttons: the page's own tab is also called Next token.
@@ -178,7 +230,7 @@ impl App {
                     if kit::button(ui, kit::Kind::Primary, None, "▶ Show next token").on_hover_text("What the model would write next, and the alternatives").clicked() {
                         run = Some(1);
                     }
-                    if kit::button(ui, kit::Kind::Secondary, None, &format!("Write {} tokens", l.steps)).on_hover_text("Write several tokens, each coloured by how likely the model thought it was").clicked() {
+                    if kit::button(ui, kit::Kind::Secondary, None, &format!("Write {} tokens", l.steps)).on_hover_text("Write several tokens, each coloured by the probability the model gave it").clicked() {
                         run = Some(l.steps);
                     }
                 });
@@ -190,9 +242,18 @@ impl App {
                 if busy {
                     ui.spinner();
                 }
-                if !l.continuation.is_empty() && ui.add_enabled(!busy, egui::Button::new("Start again")).on_hover_text("Forget the tokens chosen so far").clicked() {
-                    l.continuation.clear();
-                    l.run = None;
+                if !l.continuation.is_empty() {
+                    if ui.add_enabled(!busy, egui::Button::new("⏴ Step back")).on_hover_text("Take off the last token chosen, and see the choices there again").clicked()
+                        && let Some(m) = l.marks.pop()
+                    {
+                        l.continuation.truncate(m);
+                        l.shown = 0;
+                        run = Some(1);
+                    }
+                    if ui.add_enabled(!busy, egui::Button::new("Start again")).on_hover_text("Forget the tokens chosen so far").clicked() {
+                        l.clear_tokens();
+                        l.run = None;
+                    }
                 }
             });
         }
@@ -242,7 +303,9 @@ impl App {
         let shown = self.ask.lab_state.shown.min(r.steps.len().saturating_sub(1));
         ui.horizontal(|ui| {
             let avg = if r.steps.is_empty() { 0.0 } else { r.steps.iter().map(|s| s.chosen.raw).sum::<f32>() / r.steps.len() as f32 };
-            ui.weak(format!("{} tokens in {:.1} s · read {} tokens · average confidence {}", r.steps.len(), r.seconds, r.prompt_tokens, percent(avg)));
+            let bits = if r.steps.is_empty() { 0.0 } else { r.steps.iter().map(|s| s.entropy).sum::<f32>() / r.steps.len() as f32 };
+            ui.weak(format!("{} in {:.1} s · read {} tokens · average confidence {} · average uncertainty {:.1} bits", if r.steps.len() == 1 { "1 token".to_string() } else { format!("{} tokens", r.steps.len()) }, r.seconds, r.prompt_tokens, percent(avg), bits))
+                .on_hover_text(UNCERTAINTY);
             if r.steps.len() > 1 && ui.add_enabled(!busy, egui::Button::new("Keep these")).on_hover_text("Add the written tokens to the text, to carry on from there").clicked() {
                 keep = true;
             }
@@ -255,15 +318,19 @@ impl App {
         }
         if keep {
             let l = &mut self.ask.lab_state;
-            l.continuation.extend(r.steps.iter().filter(|s| !s.end).map(|s| s.chosen.text.clone()));
+            for st in r.steps.iter().filter(|s| !s.end) {
+                l.push_token(&st.chosen.text);
+            }
             l.run = None;
             l.shown = 0;
             run = Some(1);
         }
         if let Some((i, t)) = use_token {
             let l = &mut self.ask.lab_state;
-            l.continuation.extend(r.steps[..i].iter().map(|s| s.chosen.text.clone()));
-            l.continuation.push_str(&t);
+            for st in &r.steps[..i] {
+                l.push_token(&st.chosen.text);
+            }
+            l.push_token(&t);
             l.shown = 0;
             run = Some(1);
         }
@@ -287,7 +354,7 @@ impl App {
             path,
             when: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64),
             context: self.ask.actual_context,
-            gpu: super::ask::use_gpu(),
+            gpu: self.ask.gpu_layers.0 > 0,
             threads,
             read: b.read,
             write: b.write,
@@ -295,6 +362,7 @@ impl App {
             read_speed,
             write_speed,
             first_token,
+            device: crate::fit::device_name(self.ask.gpu_layers.0 > 0),
         };
         match crate::lab::results_file().map(|f| crate::lab::save_result(&f, r.clone())) {
             Some(Ok(all)) => l.results = Some(all),
@@ -321,7 +389,8 @@ impl App {
         let busy = self.ask.phase != super::ask::Phase::Idle;
         let mut start = false;
         let mut stop = false;
-        if name.is_some() {
+        {
+            let loaded = name.is_some();
             let l = &mut self.ask.lab_state;
             ui.horizontal(|ui| {
                 let b = &mut l.bench;
@@ -351,28 +420,49 @@ impl App {
                     if let Some((r, of)) = l.bench_progress {
                         ui.weak(format!("Run {r} of {of}…"));
                     }
-                } else if kit::button(ui, kit::Kind::Primary, None, "Run speed test").clicked() {
+                } else if loaded && kit::button(ui, kit::Kind::Primary, None, "Run speed test").clicked() {
                     start = true;
                 }
             });
-            ui.weak("The model is busy while it runs: other apps may be slower, and so is the test if they're busy too.");
-        } else {
-            ui.add_space(8.0);
-            ui.label("Load a model on the left to test its speed.");
+            if loaded {
+                ui.weak("The model is busy while it runs: other apps may be slower, and so is the test if they're busy too.");
+            } else {
+                ui.add_space(4.0);
+                ui.label("Load a model on the left to test its speed, or test several below.");
+            }
         }
+        ui.add_space(6.0);
+        self.lab_suite(ui);
         ui.add_space(8.0);
         let results = self.ask.lab_state.results.clone().unwrap_or_default();
         let current = self.ask.loaded.as_ref().map(|(p, _, _)| p.clone());
         if let Some(r) = results.iter().find(|r| Some(&r.path) == current.as_ref()) {
             speed_card(ui, r);
+            ui.add_space(6.0);
+            let mine: Vec<&BenchResult> = results.iter().filter(|r| Some(&r.path) == current.as_ref()).collect();
+            if mine.len() > 1 {
+                speed_history(ui, &mine);
+            }
             ui.add_space(10.0);
         }
         if results.is_empty() {
             ui.weak("No results yet.");
         } else {
-            ui.strong("All results");
+            let mut export = false;
+            ui.horizontal(|ui| {
+                ui.strong("All results");
+                export = ui.small_button("Export…").on_hover_text("Save every result, with the settings and hardware it ran with, as a CSV file for a spreadsheet").clicked();
+            });
             ui.add_space(2.0);
             results_table(ui, &results, current.as_deref());
+            if export {
+                let csv = crate::lab::results_csv(&results);
+                self.ask_path(super::dialogs::Dialog::new().set_title("Export speed results").set_file_name("filescape-speed.csv"), super::dialogs::Pick::Save, move |app, p| {
+                    if let Err(e) = std::fs::write(&p, csv.as_bytes()) {
+                        app.ask.problem = Some(format!("The results couldn't be saved: {e}"));
+                    }
+                });
+            }
         }
         if stop && let Some(e) = &self.ask.engine {
             e.stop.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -416,6 +506,57 @@ impl App {
 }
 
 /// Roughly how many words a speed in tokens is: about ¾ of a word a token, in English.
+/// A folded section under the Lab's tabs: what the page shows, how to read it, and what it
+/// doesn't mean. Accurate rather than impressive: these are read by people learning.
+fn about_page(ui: &mut egui::Ui, page: Page) {
+    let (title, lines): (&str, &[&str]) = match page {
+        Page::Next => (
+            "About Next token",
+            &[
+                "A language model writes one token at a time. For each, it gives every token in its vocabulary a probability; then one is picked from them.",
+                "The bars show those probabilities. Temperature, Top-K, Top-P and Min-P reshape them before the pick: low temperature favours the likeliest token, higher gives others more of a chance. With the same seed and settings, the same tokens are picked again.",
+                "A high probability means the model expects that token there, not that what it writes is true. Models can be very sure of wrong facts.",
+            ],
+        ),
+        Page::Inside => (
+            "About Inside",
+            &[
+                "Each token is represented inside the model by a long list of numbers, which every layer changes a little. The map shows how much each layer changed each token's numbers.",
+                "\"What each layer would predict\" passes a layer's output straight to the model's final step (a technique called the logit lens). It's a diagnostic view: early layers were never trained to be read this way, so their guesses are rough.",
+                "Neither is a direct view of meaning or of anything like thought. They're measurements of numbers inside the model, from the model you loaded.",
+            ],
+        ),
+        Page::Steer => (
+            "About Steer",
+            &[
+                "Steering adds a direction to one layer's numbers while the model writes, worked out from the difference between how the model represents two words.",
+                "It changes nothing in the model file, and only lasts for that answer. The effect is experimental: some directions change the tone clearly, others do little or make the text worse.",
+            ],
+        ),
+        Page::Compare => (
+            "About Compare",
+            &[
+                "Both sides read the same text and use the same seed, so any difference comes from the settings, or from the model if you kept one side and loaded another.",
+                "One run shows what one seed happened to pick. With temperature above 0, try a few seeds before deciding which settings or model writes better.",
+            ],
+        ),
+        Page::Speed => (
+            "About Speed",
+            &[
+                "Reading (prompt processing) is how fast the model takes in text; writing (generation) is how fast it produces new tokens, one at a time. They differ a lot, so they're measured apart.",
+                "Speeds are in tokens a second, not words: a token is about three quarters of an English word. Results depend on the model, its precision, the context length, the threads used and what else the computer is doing.",
+            ],
+        ),
+    };
+    egui::CollapsingHeader::new(egui::RichText::new(title).size(12.0)).id_salt(("lab-about", title)).default_open(false).show(ui, |ui| {
+        ui.set_max_width(760.0);
+        for l in lines {
+            ui.label(egui::RichText::new(*l).size(12.5));
+            ui.add_space(3.0);
+        }
+    });
+}
+
 fn words(tokens_per_sec: f32) -> f32 {
     tokens_per_sec * 0.75
 }
@@ -426,9 +567,9 @@ fn speed_card(ui: &mut egui::Ui, r: &BenchResult) {
     egui::Frame::new().fill(ui.visuals().faint_bg_color).corner_radius(6.0).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
         ui.horizontal(|ui| {
             for (big, what, tip) in [
-                (format!("{:.1}", r.write_speed), "tokens a second written", format!("About {:.0} words a second. People read about 4.", words(r.write_speed))),
+                (format!("{:.1}", r.write_speed), "tokens a second written", format!("Roughly {:.0} English words a second, as a token is about ¾ of a word. People read about 4.", words(r.write_speed))),
                 (format!("{:.0}", r.read_speed), "tokens a second read", "How fast it takes in a question or a document before answering".to_string()),
-                (format!("{:.1} s", r.first_token), "to the first word", format!("After reading {} tokens", r.read)),
+                (format!("{:.1}", r.first_token), "seconds to the first token", format!("After reading {} tokens", r.read)),
             ] {
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(big).size(22.0).color(t.accent).strong());
@@ -450,7 +591,32 @@ fn speed_card(ui: &mut egui::Ui, r: &BenchResult) {
     });
 }
 
-fn place(r: &BenchResult) -> String {
+/// This model's tests over time, oldest on the left: writing speed as bars, each with its
+/// settings on hover, so a change of context, threads or hardware shows beside its effect.
+fn speed_history(ui: &mut egui::Ui, mine: &[&BenchResult]) {
+    let t = kit::tokens(ui);
+    let shown: Vec<&&BenchResult> = mine.iter().take(24).collect();
+    let fastest = shown.iter().map(|r| r.write_speed).fold(0.0f32, f32::max).max(1e-3);
+    ui.horizontal(|ui| {
+        ui.weak(format!("Its last {} tests, tokens a second written:", shown.len()));
+    });
+    let (rect, _) = ui.allocate_exact_size(vec2((shown.len() as f32 * 22.0).min(ui.available_width()), 56.0), Sense::hover());
+    let w = rect.width() / shown.len() as f32;
+    for (i, r) in shown.iter().rev().enumerate() {
+        let h = (rect.height() - 14.0) * r.write_speed / fastest;
+        let bar = egui::Rect::from_min_max(egui::pos2(rect.left() + i as f32 * w + 2.0, rect.bottom() - 14.0 - h), egui::pos2(rect.left() + (i + 1) as f32 * w - 2.0, rect.bottom() - 14.0));
+        let resp = ui.interact(bar.expand2(vec2(0.0, 14.0)), ui.id().with(("speed-bar", i)), Sense::hover());
+        ui.painter().rect_filled(bar, 2.0, if resp.hovered() { t.strong } else { t.accent });
+        ui.painter().text(egui::pos2(bar.center().x, rect.bottom() - 6.0), egui::Align2::CENTER_CENTER, format!("{:.0}", r.write_speed), egui::FontId::proportional(9.5), t.weak);
+        let when = chrono::DateTime::from_timestamp(r.when, 0).map(|d| d.with_timezone(&chrono::Local).format("%-d %b %H:%M").to_string()).unwrap_or_default();
+        resp.on_hover_text(format!(
+            "{when}\n{:.1} tokens a second written, {:.0} read, first token after {:.1} s\n{} · {} tokens of context · read {}, wrote {}, middle of {} runs",
+            r.write_speed, r.read_speed, r.first_token, place(r), r.context, r.read, r.write, r.runs
+        ));
+    }
+}
+
+pub(super) fn place(r: &BenchResult) -> String {
     if r.gpu { "On the graphics chip".to_string() } else { format!("On the processor, {} threads", r.threads) }
 }
 
@@ -471,8 +637,9 @@ fn results_table(ui: &mut egui::Ui, results: &[BenchResult], current: Option<&st
                 ui.painter().rect_filled(rect, 3.0, ui.visuals().faint_bg_color);
                 ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, vec2(rect.width() * r.write_speed / fastest, rect.height())), 3.0, t.accent);
                 ui.label(format!("{:.0}/s", r.read_speed));
-                ui.label(format!("{:.1} s", r.first_token));
-                ui.label(place(r)).on_hover_text(format!("{} tokens of context; read {}, wrote {}, middle of {} runs", r.context, r.read, r.write, r.runs));
+                ui.label(format!("{:.1}", r.first_token));
+                let device = if r.device.is_empty() { String::new() } else { format!("{}\n", r.device) };
+                ui.label(place(r)).on_hover_text(format!("{device}{} tokens of context; read {}, wrote {}, middle of {} runs", r.context, r.read, r.write, r.runs));
                 let when = chrono::DateTime::from_timestamp(r.when, 0).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
                 ui.weak(when);
                 ui.end_row();
@@ -489,6 +656,7 @@ fn choices(ui: &mut egui::Ui, s: &Step, i: usize, n: usize, busy: bool) -> Optio
     ui.horizontal(|ui| {
         ui.strong(if n > 1 { format!("Token {} of {n}: the alternatives", i + 1) } else { "The next token: the alternatives".to_string() });
         ui.weak(format!("· the settings leave {} to pick from", s.kept));
+        ui.weak(format!("· uncertainty {:.1} bits, like a fair pick among {}", s.entropy, equally_likely(s.entropy))).on_hover_text(UNCERTAINTY);
     });
     ui.add_space(2.0);
     let bar_w = (ui.available_width() - 330.0).clamp(80.0, 420.0);

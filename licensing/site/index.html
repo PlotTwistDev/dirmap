@@ -3,10 +3,48 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Filescape</title>
+<title>Filescape: disk space analyzer and file manager</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="Filescape maps every file on your drive as a tile you can zoom through, with a full file manager, remote servers and VFX sequence tools built in. Windows, macOS and Linux.">
+<meta name="description" content="See where your disk space went: a zoomable map of every file, previews of 300+ file types and a full file manager. Windows, macOS and Linux.">
+<link rel="canonical" href="https://filescape.app/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Filescape">
+<meta property="og:title" content="Filescape: see where your disk space went">
+<meta property="og:description" content="See where your disk space went: a zoomable map of every file, previews of 300+ file types and a full file manager. Windows, macOS and Linux.">
+<meta property="og:url" content="https://filescape.app/">
+<meta property="og:image" content="https://filescape.app/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Filescape's colourful treemap of a drive, with the file manager above it">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "SoftwareApplication",
+ "name": "Filescape",
+ "url": "https://filescape.app/",
+ "applicationCategory": "UtilitiesApplication",
+ "operatingSystem": "Windows 10, Windows 11, macOS 11 or later, Linux",
+ "description": "See where your disk space went: a zoomable map of every file, previews of 300+ file types and a full file manager. Windows, macOS and Linux.",
+ "image": "https://filescape.app/img/og.png",
+ "offers": [
+  {
+   "@type": "Offer",
+   "name": "Filescape Free",
+   "price": "0",
+   "priceCurrency": "USD"
+  },
+  {
+   "@type": "Offer",
+   "name": "Filescape Pro",
+   "price": "4.99",
+   "priceCurrency": "USD",
+   "url": "https://filescape.app/#pricing"
+  }
+ ]
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
@@ -139,8 +177,8 @@ section { padding-block: 112px 0; }
 .copy { display: grid; gap: 14px; min-width: 0; }
 .copy p { color: var(--text-2); }
 .ticks { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 8px; font-size: 14px; color: var(--text-2); }
-.ticks li { display: flex; gap: 10px; }
-.ticks li::before { content: ""; flex: none; width: 6px; height: 6px; margin-top: 8px; border-radius: 2px; background: var(--coral); }
+.ticks li { position: relative; padding-left: 16px; }
+.ticks li::before { content: ""; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 2px; background: var(--coral); }
 .shot { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line-strong); box-shadow: 0 30px 80px -30px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.05); background: var(--ink); }
 .shot img { width: 100%; height: auto; aspect-ratio: 1280 / 820; }
 
@@ -201,6 +239,45 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 .foot a:hover { color: var(--text); }
 .foot .ver { margin-left: auto; font-family: var(--mono); font-size: 11px; }
 
+/* Feature pages (formats, ai-models, vfx) */
+.nav-links a[aria-current] { color: var(--text); }
+.page-hero { position: relative; padding-block: 72px 8px; }
+.page-hero + section { padding-top: 16px; }
+.page-hero .hero-glow { inset: -160px 0 auto; height: 560px; }
+.page-hero h1 { margin-top: 18px; font-size: clamp(36px, 6vw, 64px); line-height: 1.04; letter-spacing: -.033em; max-width: 16ch; }
+.page-hero .lede { margin-top: 18px; }
+.page-hero .dl-row { justify-content: flex-start; margin-top: 28px; }
+.tag-pro { display: inline-block; font-family: var(--mono); font-size: 10px; line-height: 1; padding: 3px 6px; margin-left: 6px; border-radius: 5px; border: 1px solid rgba(255,99,99,.4); color: var(--coral); vertical-align: 2px; }
+.free-note { display: inline-flex; gap: 8px; align-items: center; margin-top: 18px; font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.free-note::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--coral); }
+.more { display: inline-flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 14px; color: var(--text); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.more:hover { text-decoration-color: var(--coral); }
+.more::after { content: "→"; }
+.callout { margin-top: 56px; padding: 22px 24px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--ink); display: grid; gap: 8px; max-width: 820px; }
+.callout p { color: var(--text-2); font-size: 15px; }
+.fmt { margin-top: 40px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--ink); overflow: hidden; }
+.fmt-scroll { overflow-x: auto; }
+.fmt table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
+.fmt thead th { text-align: left; font: 400 11px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.fmt tbody th, .fmt td { text-align: left; vertical-align: top; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.fmt tbody tr:last-child th, .fmt tbody tr:last-child td { border-bottom: 0; }
+.fmt tbody th { font-weight: 500; color: var(--text); width: 24%; }
+.fmt td { color: var(--text-2); }
+.fmt td.exts { width: 30%; }
+.fmt code { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); background: var(--obsidian); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin: 0 2px 4px 0; display: inline-block; }
+.lab { border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--ink); overflow: hidden; min-width: 0; }
+.lab-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--text-3); }
+.lab-text { padding: 22px 18px 18px; font-family: var(--mono); font-size: 15px; line-height: 2; color: var(--text-2); }
+.lab-text i { font-style: normal; color: var(--text); padding: 2px 3px; border-radius: 4px; background: color-mix(in srgb, var(--coral) calc((1 - var(--p)) * 85%), #1d3a2a); }
+.lab-text i:nth-of-type(6) { outline: 1px solid var(--coral); }
+.lab-alts { border-top: 1px solid var(--line); padding: 12px 18px 16px; display: grid; gap: 7px; font-family: var(--mono); font-size: 12px; }
+.lab-head { display: flex; justify-content: space-between; color: var(--text-3); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.lab-row { display: grid; grid-template-columns: 70px 1fr 40px; gap: 10px; align-items: center; color: var(--text-2); }
+.lab-row b { height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--sky) var(--w), var(--obsidian) var(--w)); }
+.lab-row em { font-style: normal; text-align: right; color: var(--text); }
+.cta { margin-top: 112px; padding: 48px 24px; text-align: center; border-radius: 16px; border: 1px solid var(--line); background: radial-gradient(60% 120% at 50% 0%, var(--ember), var(--ink) 70%); display: grid; gap: 14px; justify-items: center; }
+.cta .lede { text-align: center; }
+.cta .dl-row { margin-top: 10px; }
 @media (max-width: 900px) {
   .showcase, .showcase.flip { grid-template-columns: minmax(0, 1fr); gap: 28px; }
   .showcase.flip .copy { order: 0; }
@@ -209,6 +286,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   .fact:nth-child(3) { border-left: 0; }
   .fact:nth-child(n+3) { border-top: 1px solid var(--line); }
   .reqs { grid-template-columns: minmax(0, 1fr); }
+  .nav-links { gap: 16px; font-size: 13px; }
 }
 @media (max-width: 640px) {
   .nav-links { display: none; }
@@ -228,6 +306,9 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   .fact b { font-size: 22px; }
   section { padding-block: 80px 0; }
   .foot .ver { margin-left: 0; }
+  .page-hero { padding-block: 48px 0; }
+  .page-hero .dl-row { margin-inline: 0; }
+  .cta { margin-top: 80px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; scroll-behavior: auto !important; }
@@ -245,14 +326,15 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 <header class="nav">
   <div class="wrap">
     <nav class="nav-bar" aria-label="Main">
-      <a class="brand" href="#top"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+      <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
       <div class="nav-links">
-        <a href="#features">Features</a>
-        <a href="#vfx">For VFX</a>
-        <a href="#pricing">Pricing</a>
-        <a href="#download">Download</a>
+        <a href="/#features">Features</a>
+        <a href="/formats">File previews</a>
+        <a href="/ai-models">AI models</a>
+        <a href="/vfx">VFX and 3D</a>
+        <a href="/#pricing">Pricing</a>
       </div>
-      <a class="btn btn-key btn-sm" href="#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
+      <a class="btn btn-key btn-sm" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
     </nav>
   </div>
 </header>
@@ -261,15 +343,15 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   <div class="hero">
     <div class="hero-glow" aria-hidden="true"></div>
     <div class="wrap">
-      <span class="eyebrow"><b>New in 2.3</b> Remote servers and transfers</span>
+      <a class="eyebrow" href="/formats" style="text-decoration:none"><b>New</b> Previews for 300+ file types, and your AI models</a>
       <h1>See where your disk went.</h1>
-      <p class="lede">Filescape scans a drive in seconds and draws every file as a tile you can zoom through. When you find what's eating the space, deal with it right there in a full file manager.</p>
+      <p class="lede">Filescape scans a drive in seconds and draws every file as a tile you can zoom through. Zoom in to see what's inside, then deal with it right there in a full file manager.</p>
       <div class="dl-row" id="hero-downloads">
         <a class="btn btn-key" data-os="windows" href="https://downloads.filescape.app/latest/windows"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for Windows</a>
         <a class="btn btn-ghost" data-os="mac" href="https://downloads.filescape.app/latest/macos"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for macOS</a>
         <a class="btn btn-ghost" data-os="linux" href="https://downloads.filescape.app/latest/linux-appimage"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download for Linux</a>
       </div>
-      <div class="dl-meta"><span>Free to use</span><span>Pro is <s class="js-list">$9.99</s> <span class="js-price">$4.99</span>, once</span><span>v2.3</span><span class="mac-help"><a href="/mac">Opening it on a Mac</a></span></div>
+      <div class="dl-meta"><span>Free to use</span><span>Pro is <s class="js-list">$9.99</s> <span class="js-price">$4.99</span>, once</span><span>v0.2.0</span><span class="mac-help"><a href="/mac">Opening it on a Mac</a></span></div>
 
       <div class="window" role="group" aria-label="Interactive example of the Filescape disk map">
         <div class="win-bar">
@@ -286,7 +368,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <div class="map-tip" id="map-tip" hidden></div>
         </div>
         <div class="win-foot">
-          <span class="readout" id="readout">~/Projects · 61.9 GB · 2,262 files</span>
+          <span class="readout" id="readout">~/Projects · 67.3 GB · 2,412 files</span>
           <span class="hint hint-mouse">Wheel to zoom · drag to pan · double-click to open · right-click to zoom out</span>
           <span class="hint hint-touch">Pinch to zoom · tap or hold for details · double-tap to open</span>
         </div>
@@ -299,7 +381,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   <div class="wrap">
     <div class="facts">
       <div class="fact"><b>47 s</b><span>to map 1.3 million files on our test drive</span></div>
-      <div class="fact"><b>25 MB</b><span>download, no installer or runtime on Windows</span></div>
+      <div class="fact"><b>300+</b><span>file types previewed, free in every edition</span></div>
       <div class="fact"><b>3</b><span>platforms: Windows, macOS and Linux</span></div>
       <div class="fact"><b><s class="js-list">$9.99</s> <span class="js-price">$4.99</span></b><span>once for Pro, on 3 computers at once</span></div>
     </div>
@@ -317,12 +399,12 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <h3>A treemap you can fly through</h3>
           <p>Every file is a tile sized by how much space it takes, in soft colours by type (or the classic cushion shading, if you prefer). The map is drawn on your graphics card, so zooming and panning stay smooth even with millions of files.</p>
           <ul class="ticks">
-            <li>Zoom toward the pointer, pan with inertia, step Back and Forward</li>
+            <li>Zoom in and big tiles show what's in them: photos, video, PDF pages, waveforms, text</li>
             <li>Colour by file type, by age, or by what changed since a snapshot</li>
-            <li>Switch to a sunburst when you want to see the folder tree as rings</li>
+            <li>Switch to a sunburst, or rest the pointer on a system file to learn what it is</li>
           </ul>
         </div>
-        <div class="shot"><img src="img/map-and-files.webp" alt="Filescape showing a folder list above a colourful treemap of a Projects folder, with a file types list on the right" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="/img/map-previews.webp" alt="Filescape's treemap zoomed in on a Photos folder, with each tile showing its picture and the selected photo in the preview pane" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="showcase flip">
@@ -330,12 +412,12 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <h3>A real file manager, with the map docked underneath</h3>
           <p>Browse without scanning first. Two panes, tabs, previews and the usual copy, move and rename. The map follows the folder you're in, and selecting a file highlights its tile.</p>
           <ul class="ticks">
-            <li>Details, Icons, Columns and Gallery views, with EXR and HDR thumbnails</li>
-            <li>Batch rename with a preview, Compare Folders and sync, tags and notes</li>
-            <li>Zip, 7z and tar archives open like folders</li>
+            <li>Details, Icons, Columns and Gallery views, Quick Look on Space</li>
+            <li>Undo for copies, moves, renames and deletes, with Replace, Keep Both or Merge</li>
+            <li>Batch rename with a preview, Compare Folders and sync, archives that open like folders</li>
           </ul>
         </div>
-        <div class="shot"><img src="img/files-dock.webp" alt="Filescape's Files workspace with a sidebar of drives, a file list and the analysis treemap docked below" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="/img/files-dock.webp" alt="Filescape's Files workspace with a sidebar of drives, a file list and the analysis treemap docked below" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="showcase">
@@ -345,10 +427,51 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <ul class="ticks">
             <li>Saved sites in the sidebar, SSH agent or key files</li>
             <li>Passwords kept in your system keychain, never in a settings file</li>
-            <li>Choose how many transfers run at once</li>
+            <li>Compare and sync with a server, or open an SSH terminal in the folder</li>
           </ul>
         </div>
-        <div class="shot"><img src="img/remote.webp" alt="The Remote workspace with a local folder and an SFTP server side by side and two transfers running in the queue" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="/img/remote.webp" alt="The Remote workspace with a local folder and an SFTP server side by side and two transfers running in the queue" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase flip">
+        <div class="copy">
+          <h3>Look inside without opening anything</h3>
+          <p>Press Space on a camera RAW photo, a Photoshop document, a spreadsheet, a font, a song or a 3D model and see it at once, with the details that matter. Nothing in a file is ever run, and every preview is free.</p>
+          <ul class="ticks">
+            <li>RAW, HEIC, AVIF, JPEG XL, PSD, Affinity, Sketch, Krita and GIMP</li>
+            <li>Word, Excel, PowerPoint, every PDF page, EPUB, Markdown and code in 200 languages</li>
+            <li>Audio waveforms, MIDI piano rolls, SQLite tables, archives, disk images and email</li>
+          </ul>
+          <a class="more" href="/formats">All 300+ supported formats</a>
+        </div>
+        <div class="shot"><img src="/img/previews-pane.webp" alt="The Files workspace in Icons view with thumbnails of fonts, photos, a MIDI piano roll, a PDF and a 3D model, and a song's cover, waveform and tags in the preview pane" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase">
+        <div class="copy">
+          <h3>Cloud folders, measured honestly</h3>
+          <p>Google Drive, OneDrive, iCloud Drive, Dropbox and others keep many files online only. Filescape shows what each file really takes on this computer, which ones are only in the cloud, and never downloads them behind your back.</p>
+          <ul class="ticks">
+            <li>Switch the map between size on disk, full size and what's only in the cloud</li>
+            <li>A status icon on every cloud file, and a breakdown of what's here and what isn't</li>
+            <li>Free Up Space or Always Keep on This Device, straight from the right-click menu</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="/img/cloud.webp" alt="A scan with a Dropbox folder: online-only files marked, and a bar under the map splitting local files, downloaded files and data only in the cloud" width="1440" height="922" loading="lazy"></div>
+      </div>
+
+      <div class="showcase flip">
+        <div class="copy">
+          <h3>Your AI models, found and explained</h3>
+          <p>Models from Ollama, LM Studio and Hugging Face are some of the biggest files on a drive. The AI Models workspace lists them all, shows what's inside each one and whether it will run here, lets you chat with it offline, and says what can be freed and why.</p>
+          <ul class="ticks">
+            <li>Model Inspector: architecture, tensors, tokens, health checks and memory needs</li>
+            <li>Ask AI runs GGUF models inside Filescape, about the files you give it, with nothing sent anywhere</li>
+            <li>The Lab shows what a model would say next, how sure it is, and how fast it runs</li>
+          </ul>
+          <a class="more" href="/ai-models">More about AI models</a>
+        </div>
+        <div class="shot"><img src="/img/ai-structure.webp" alt="The Model Inspector drawing Qwen3 1.7B as a map of its 28 layers, coloured by what each part does" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="keys">
@@ -356,6 +479,9 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
         <div class="keycard"><span class="kbd">Snapshots</span><h3>See what grew</h3><p>Save a snapshot, scan again next week, and colour the map by what changed.</p></div>
         <div class="keycard"><span class="kbd">Filters</span><h3>Show only what matters</h3><p>Filter by category, size or name pattern. Highlight matches or hide everything else.</p></div>
         <div class="keycard"><span class="kbd">Ctrl F</span><h3>Search subfolders</h3><p>Search a whole tree from the filter box and save searches you run often.</p></div>
+        <div class="keycard"><span class="kbd">What is this?</span><h3>Know what's safe to delete</h3><p>pagefile.sys, WinSxS, the sleep image, /proc and about 170 more, explained offline, with how to shrink them safely.</p></div>
+        <div class="keycard"><span class="kbd">Ctrl Z</span><h3>Undo it</h3><p>Copies, moves, renames, new items and Move to Trash can all be undone, putting deleted items back from the bin.</p></div>
+        <div class="keycard"><span class="kbd">Ctrl \</span><h3>Two panes</h3><p>Two folders side by side, each with its own tabs, sort and filter. Drag between them, or copy with Shift F5.</p></div>
         <div class="keycard"><span class="kbd">F1</span><h3>Help built in</h3><p>A searchable Help Centre and context help for every panel, offline.</p></div>
         <div class="keycard"><span class="kbd">--cli</span><h3>Reports from a terminal</h3><p>Print the largest folders or compare snapshots from the command line.</p></div>
       </div>
@@ -368,14 +494,15 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
         <div class="copy">
           <span class="eyebrow">For VFX and post</span>
           <h2>Frame sequences are one row, not 240.</h2>
-          <p>Filescape folds numbered frames into a single sequence with its range, size and any missing frames. Copy or move the whole shot at once, and play it straight from the list.</p>
+          <p>Filescape folds numbered frames into a single sequence with its range, size and any missing frames. Copy or move the whole shot at once, and play it straight from the list. 3D models, CAD drawings and Gaussian splat scenes preview too.</p>
           <ul class="ticks">
             <li>Player for EXR, DPX (8 to 16 bit), PNG and TIFF, played from memory</li>
             <li>sRGB, Rec.709 and Cineon log display, exposure, and .cube LUTs</li>
             <li>A/B wipe to compare a plate against the comp</li>
           </ul>
+          <a class="more" href="/vfx">Filescape for VFX and 3D</a>
         </div>
-        <div class="shot"><img src="img/player.webp" alt="The sequence player comparing a DPX plate and a PNG comp with an A/B wipe, at frame 11 of 30" width="1280" height="820" loading="lazy"></div>
+        <div class="shot"><img src="/img/player.webp" alt="The sequence player comparing a DPX plate and a PNG comp with an A/B wipe, at frame 11 of 30" width="1440" height="922" loading="lazy"></div>
       </div>
 
       <div class="vfx" role="region" aria-label="Example of sequences folded in the file list">
@@ -400,17 +527,19 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
       <div class="section-head">
         <span class="eyebrow">Pricing</span>
         <h2>Free to look. <span class="js-price">$4.99</span> to do everything.</h2>
-        <p class="lede">No subscription. Buy Pro once and use it on up to 3 of your computers at once.</p>
+        <p class="lede">Curiosity is free: exploring, previewing and looking inside your files and models costs nothing. Pro is for getting through a lot at once. No subscription; buy it once and use it on up to 3 of your computers.</p>
       </div>
       <div class="plans">
         <div class="plan">
           <div><h3>Free</h3><p class="small">Forever, no sign-up</p></div>
           <div class="price"><b>$0</b></div>
           <ul>
-            <li>The disk map: treemap and sunburst</li>
-            <li>The file browser</li>
-            <li>Zoom, browse and preview by hand</li>
-            <li>Scan exclusions</li>
+            <li>The disk map: treemap, sunburst and file types</li>
+            <li>The file manager: browse, copy, move, rename, delete, undo</li>
+            <li>Previews and Quick Look for 300+ file types</li>
+            <li>Cloud sizes and status icons, freeing up one file at a time</li>
+            <li>AI Models: find, inspect, health checks, Ask AI and the Lab</li>
+            <li>What system files are, and scan exclusions</li>
           </ul>
           <a class="btn btn-ghost" href="#download">Download free</a>
         </div>
@@ -419,10 +548,12 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
           <div class="price"><s class="js-list">$9.99</s><b class="js-price">$4.99</b><span>once<span class="js-launch">, launch price</span></span></div>
           <ul>
             <li>Everything in Free</li>
-            <li>Two-pane file management, batch rename, Compare Folders</li>
-            <li>SFTP, FTP(S) and WebDAV with the transfer queue</li>
             <li>Filter by type, by size or with your own pattern</li>
-            <li>Sequence player, duplicates and snapshots</li>
+            <li>Batch rename, Compare Folders and sync, duplicates, snapshots</li>
+            <li>SFTP, FTP(S) and WebDAV with the transfer queue</li>
+            <li>Frame sequences and the sequence player</li>
+            <li>Archives, saved searches, and cloud folders freed up in bulk</li>
+            <li>AI models: smaller copies, moving model folders, bulk clean-up and multi-model speed tests</li>
             <li>Active on 3 of your computers at once</li>
             <li>Every update for a year, then keep the version you have</li>
           </ul>
@@ -462,27 +593,18 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
       <p class="small" style="margin-top:16px">Memory: allow about 150 MB per million files scanned. Graphics: any GPU with Vulkan, Direct3D 12, Metal or OpenGL 3.3.</p>
 
       <div class="faq">
-        <details><summary>Do my files leave my computer?</summary><p>No. Scanning, the map and previews all run locally. Filescape only goes online to activate a Pro licence, or when you connect to a server yourself.</p></details>
+        <details><summary>Do my files leave my computer?</summary><p>No. Scanning, the map and previews all run locally. Filescape only goes online to check for a new version (which you can turn off), to activate a Pro licence, or when you ask it to connect to a server or download an AI model.</p></details>
         <details><summary>My Mac says Filescape can't be opened. Is it safe?</summary><p>Yes. Filescape isn't notarised by Apple yet, so macOS asks you to allow it once. Try to open it, click <b>Done</b>, then go to <b>System Settings &gt; Privacy &amp; Security</b> and click <b>Open Anyway</b>. <a href="/mac">Step-by-step instructions</a>.</p></details>
         <details><summary>Is this a subscription?</summary><p>No. Pro is a single <span class="js-price">$4.99</span> payment. There's nothing to renew.</p></details>
         <details><summary>I replaced my computer. Can I move my licence?</summary><p>Yes. Deactivate Filescape on the old computer, or release it from your account at account.filescape.app, and activate on the new one. A licence can be active on 3 computers at once.</p></details>
-        <details><summary>How is size calculated?</summary><p>Filescape adds up file sizes. Hard links count once per name, and compressed, sparse or cloud-only files show their full size, so totals can differ from what your system reports as used.</p></details>
+        <details><summary>How is size calculated?</summary><p>By default Filescape shows each file's size on disk, what it really takes on this computer, as Explorer's "Size on disk" and <span class="mono">du</span> count it. So files that are only in the cloud take almost no space. Switch to <b>Logical</b> for full file sizes, or <b>Cloud only</b> to see what isn't on this computer, without rescanning.</p></details>
+        <details><summary>Are previews and the AI features free?</summary><p>Yes. Every preview is free, and so are the AI Models workspace, Ask AI and the Lab, with no limits on model size. Pro is for filters, batch work, servers, sequences and doing many things at once, including making smaller copies of models and moving or cleaning up many models together.</p></details>
+        <details><summary>Does Ask AI send my files or questions anywhere?</summary><p>No. Ask AI runs the model inside Filescape on your own computer, with no internet connection needed. Reading what's inside a file is a tick box you choose for each question.</p></details>
       </div>
     </div>
   </section>
 </main>
 
-<footer>
-  <div class="wrap foot">
-    <a class="brand" href="#top"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
-    <a href="https://account.filescape.app/">Your licence</a>
-    <a href="/terms">Terms</a>
-    <a href="/privacy">Privacy</a>
-    <a href="/refunds">Refunds</a>
-    <a href="/contact">Contact</a>
-    <span class="ver">© 2026 Filescape</span>
-  </div>
-</footer>
 
 <script>
 (() => {
@@ -561,6 +683,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
       D("target", many(i => `lib${["egui", "wgpu", "russh", "image", "tokio", "serde", "rayon", "naga", "zstd", "ring"][i % 10]}-${(rnd() * 1e8 | 0).toString(16)}.rlib`, 520, 4 * MB, 1.6)),
       D("node_modules", many(i => `chunk_${i}.js`, 260, 600 * 1024, 1.8)),
       F("dataset.sqlite", 1.3 * GB),
+      F("build.log", 1.1 * GB),
     ]),
     D("Downloads", [F("ubuntu-24.04.iso", 5.9 * GB), F("installer.dmg", 300 * MB), F("Blender-4.2.zip", 340 * MB), F("manual.pdf", 12 * MB), F("plugins.zip", 40 * MB)]),
     D("Music", [D("samples", many(i => `kit_${pad(i, 3)}.wav`, 380, 9 * MB, 1.1)), F("album_master.wav", 900 * MB), F("stems.zip", 1.2 * GB)]),
@@ -570,7 +693,7 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
     exr: ["#b8d36a", "EXR"], dpx: ["#e8c27a", "DPX"], png: ["#7fd9a0", "PNG"], mov: ["#7aa7f5", "Video"], wav: ["#f0b45f", "Audio"], flac: ["#f0b45f", "Audio"],
     gguf: ["#f08585", "AI models"], safetensors: ["#e27ae6", "AI models"], cr3: ["#61c9b8", "Photos"], jpg: ["#61c9b8", "Photos"], psd: ["#ef7fb4", "Photoshop"],
     rlib: ["#c7a3f5", "Code"], js: ["#c7a3f5", "Code"], sqlite: ["#9db0c8", "Data"], iso: ["#6fe0e0", "Disk images"], dmg: ["#a68af0", "Disk images"],
-    zip: ["#d8d06a", "Archives"], pdf: ["#f28d72", "Documents"],
+    zip: ["#d8d06a", "Archives"], pdf: ["#f28d72", "Documents"], log: ["#8fc7f0", "Text"],
   };
   const OTHER = ["#9a9a9a", "Other"];
 
@@ -766,10 +889,12 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
       if (s[2] < 0 || s[0] > W || s[3] < 0 || s[1] > H) continue;
       l.s = s; paint(l, s);
     }
+    // What's in the files big enough to show it; those tiles carry their names on the preview.
+    const previewed = drawPreviews();
     // File names and sizes on tiles with room for them, fading in after a zoom.
     ctx.textBaseline = "top";
     for (const l of leaves) {
-      if (!l.s) continue;
+      if (!l.s || previewed.has(l)) continue;
       const [x0, y0, x1, y1] = l.s, sw = x1 - x0, sh = y1 - y0;
       if (sw < 80 || sh < 22) continue;
       const k = ink(colorOf(l));
@@ -836,6 +961,235 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   }
   function groupOf(l) { const tf = tagFolder(); let a = l; while (a.parent && a.parent !== tf) a = a.parent; return a.parent === tf ? a : null; }
   function hoverGroup() { return hover ? groupOf(hover) : null; }
+
+  /* ---------- What's in a file: previews on the tiles ---------- */
+  // As in the app (tilepreview.rs): a file tile that grows big enough on screen shows what's in
+  // it in place of a flat colour: a picture, a frame of video, a page, a waveform or the first
+  // lines of text. It starts at 70x52 points, is fully shown at 110x82, fades in over .18 s, keeps
+  // a frame of the tile's colour round it and puts the name on a dark strip along the bottom. A
+  // video plays silently once the pointer rests on it. Everything shown is sample media made for
+  // this demo (site-src/tools/demo_media.py), fetched once a tile is big enough to need it.
+  const P_MIN = [70, 52], P_FULL = [110, 82], P_MOST = 160, P_FADE = .18, P_KEEP = .6, P_PLAY_AFTER = .35;
+  const PREVIEW = new Set(["cr3", "jpg", "psd", "exr", "dpx", "png", "mov", "wav", "flac", "js", "sqlite", "pdf", "log"]);
+  const media = { photos: null, shots: null, film: null, asked: false };
+  function loadMedia() {
+    if (media.asked) return;
+    media.asked = true;
+    const img = src => { const i = new Image(); i.decoding = "async"; i.onload = () => { i.ready = true; redraw(); }; i.src = src; return i; };
+    media.photos = img("/img/demo-photos.webp");
+    media.shots = img("/img/demo-shots.webp");
+  }
+  const born = new Map(); // leaf -> [first shown, last shown] (ms)
+  let hoverSince = 0, hoverLeaf = null, playing = null;
+  const hash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
+  const frameNo = l => +(l.name.match(/\.(\d{4})\.\w+$/) || [0, 1001])[1];
+  // The part of a sample picture a file shows: [image, sx, sy, sw, sh], or null while loading.
+  function source(l) {
+    const ph = media.photos, sh = media.shots;
+    if (l.ext === "cr3" || l.ext === "jpg" || l.ext === "psd") {
+      if (!ph.ready) return null;
+      // Raw files come in bursts: a few frames in a row of the same view, each a little apart.
+      const n = +(l.name.match(/(\d+)\./) || [0, 0])[1];
+      const burst = l.ext === "cr3" ? Math.floor(n / 5) : n, k = hash(l.ext + burst) % 16, step = l.ext === "cr3" ? n % 5 : 0;
+      const zoomIn = l.ext === "psd" ? 1 : .8 + (hash(l.name) % 20) / 100;
+      const w = 480 * zoomIn, h = 320 * zoomIn;
+      return [ph, (k % 4) * 480 + (480 - w) * (.2 + step * .15), Math.floor(k / 4) * 320 + (320 - h) * .5, w, h];
+    }
+    if (l.ext === "exr" || l.ext === "dpx" || l.ext === "png" || l.ext === "mov") {
+      if (!sh.ready) return null;
+      // Frames of a shot: the camera moves along it, a little further each frame.
+      const t = l.ext === "mov" ? { final_cut: 0, rough_cut_v3: .45, trailer_prores: .9 }[l.name.split(".")[0]] || 0 : (frameNo(l) - 1001) / 240;
+      const row = l.ext === "dpx" || l.ext === "png" ? 1 : 0;
+      return [sh, t * 360, row * 400, 600, 400];
+    }
+    return null;
+  }
+  // A sound's loudness along it, made up but steady per file: drum hits, speech, or music.
+  const waves = new Map();
+  function wave(l) {
+    let w = waves.get(l);
+    if (w) return w;
+    let s = hash(l.name);
+    const r = () => { s = Math.imul(s ^ s >>> 15, 2246822507) + 0x9e3779b9 >>> 0; return s / 4294967296; };
+    w = new Float32Array(256);
+    if (l.name.startsWith("kit_")) { // one hit, then its tail
+      const decay = 8 + r() * 30;
+      for (let i = 0; i < 256; i++) w[i] = Math.exp(-i / decay) * (.55 + .45 * r()) * (i < 2 ? .7 : 1);
+    } else if (l.name.startsWith("dialog")) { // words in bursts, with pauses
+      let on = false, left = 0;
+      for (let i = 0; i < 256; i++) { if (--left <= 0) { on = !on; left = on ? 6 + r() * 20 : 2 + r() * 8; } w[i] = on ? .25 + .55 * r() : .03 * r(); }
+    } else { // music: sections of different loudness, with a beat
+      let lvl = .5, beat = 4 + Math.floor(r() * 3);
+      for (let i = 0; i < 256; i++) {
+        if (i % 48 === 0) lvl = .3 + .6 * r();
+        const fade = Math.min(1, i / 12, (255 - i) / 16);
+        w[i] = fade * lvl * (.55 + .3 * r() + (i % beat === 0 ? .25 : 0));
+      }
+    }
+    waves.set(l, w);
+    return w;
+  }
+  // The first lines of a text file, made up per file.
+  const texts = new Map();
+  function textOf(l) {
+    let t = texts.get(l);
+    if (t) return t;
+    const n = hash(l.name);
+    if (l.ext === "js") {
+      const mods = ["react", "lodash", "three", "d3", "zod", "date-fns", "marked", "pixi"], m = mods[n % mods.length];
+      t = `"use strict";\n/*! ${m} v${1 + n % 9}.${n % 17}.${n % 5} | MIT */\nimport { h as e, r as t } from "./${m}.js";\n\nexport function chunk${l.name.match(/\d+/)[0]}(n) {\n  const o = t(n.props);\n  if (!o.ready) return null;\n  for (let i = 0; i < o.items.length; i++) {\n    e(o.items[i], { key: i, onClick: () => n.select(i) });\n  }\n  return o.cache ??= new Map();\n}\n\nexport default { name: "${m}", version: ${n % 40} };\n`;
+    } else if (l.ext === "log") {
+      const lines = [];
+      for (let i = 0; i < 40; i++) {
+        const s = 12 + i * 3, crate = ["egui", "wgpu", "russh", "image", "tokio", "serde", "rayon", "naga"][(n + i) % 8];
+        lines.push(`[2026-11-27 09:${String(14 + (s / 60 | 0)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}] ${i % 7 === 3 ? "WARN " : "INFO "} ${i % 7 === 3 ? `${crate}: unused import, rebuilding` : `Compiling ${crate} v0.${(n + i) % 30}.${i % 9}`}`);
+      }
+      t = lines.join("\n");
+    } else if (l.ext === "sqlite") {
+      t = "photos  (2,481,906 rows)\nid      path                         taken                camera\n1       2026-iceland/IMG_4100.cr3    2026-06-14 22:41:07  EOS R5\n2       2026-iceland/IMG_4101.cr3    2026-06-14 22:41:08  EOS R5\n3       2026-iceland/IMG_4102.cr3    2026-06-14 22:41:08  EOS R5\n4       2026-iceland/IMG_4103.cr3    2026-06-14 22:43:51  EOS R5\n5       2026-iceland/IMG_4104.cr3    2026-06-14 22:43:52  EOS R5\n6       2026-iceland/IMG_4105.cr3    2026-06-15 00:12:30  EOS R5\n7       2026-iceland/IMG_4106.cr3    2026-06-15 00:12:31  EOS R5\n\ntags  (310,224 rows)\nphoto   tag\n1       glacier\n2       glacier\n4       aurora";
+    }
+    texts.set(l, t);
+    return t;
+  }
+  // The first lines of text wrapped to cols characters, at most rows of them (the app's wrap).
+  function wrapText(text, cols, rows) {
+    const out = [];
+    for (const line of text.split("\n")) {
+      let rest = line;
+      do {
+        if (out.length >= rows) return out;
+        if (rest.length <= cols) { out.push(rest); break; }
+        let cut = rest.lastIndexOf(" ", cols);
+        if (cut <= 0) cut = cols;
+        out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^ /, "");
+      } while (rest.length);
+    }
+    return out;
+  }
+  // The manual's first page, drawn once.
+  let page = null;
+  function pageImage() {
+    if (page) return page;
+    page = document.createElement("canvas"); page.width = 340; page.height = 440;
+    const g = page.getContext("2d");
+    g.fillStyle = "#fbfaf7"; g.fillRect(0, 0, 340, 440);
+    g.fillStyle = "#1f6feb"; g.fillRect(0, 0, 340, 120);
+    g.fillStyle = "#fff"; g.font = "700 30px system-ui, sans-serif"; g.fillText("Plugin Manual", 28, 66);
+    g.font = "400 14px system-ui, sans-serif"; g.fillText("Version 4.2 · Installation and setup", 28, 94);
+    g.fillStyle = "#222"; g.font = "600 16px system-ui, sans-serif"; g.fillText("1  Getting started", 28, 158);
+    let s = 7;
+    for (let y = 176; y < 410; y += 13) {
+      if (y > 268 && y < 330) { if (y < 282) { g.fillStyle = "#e3e7ee"; g.fillRect(28, 274, 284, 52); } continue; }
+      s = s * 48271 % 2147483647;
+      g.fillStyle = "#b9bcc2"; g.fillRect(28, y, y % 65 === 6 ? 120 + s % 80 : 250 + s % 34, 5);
+    }
+    return page;
+  }
+  const blendRgb = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  // The film playing on the tile under the pointer, made when first needed.
+  function film() {
+    if (!media.film) {
+      const v = document.createElement("video");
+      v.muted = true; v.loop = true; v.playsInline = true; v.preload = "auto";
+      v.src = v.canPlayType('video/mp4; codecs="avc1.42E01E"') ? "/img/demo-film.mp4" : "/img/demo-film.webm";
+      v.addEventListener("playing", () => redraw());
+      media.film = v;
+    }
+    return media.film;
+  }
+  function stopFilm() { if (playing) { media.film.pause(); playing = null; } }
+  // Draw previews on the file tiles big enough for one; returns the tiles that got one, so their
+  // names go on the preview's strip rather than on the tile.
+  function drawPreviews() {
+    const got = new Set(), now = performance.now();
+    if (trans) { stopFilm(); return got; }
+    let tiles = leaves.filter(l => l.s && PREVIEW.has(l.ext) && l.s[2] - l.s[0] >= P_MIN[0] && l.s[3] - l.s[1] >= P_MIN[1]);
+    if (!tiles.length) { stopFilm(); born.forEach((v, k) => { if (now - v[1] > P_KEEP * 1000) born.delete(k); }); return got; }
+    loadMedia();
+    const area = l => (Math.min(W, l.s[2]) - Math.max(0, l.s[0])) * (Math.min(H, l.s[3]) - Math.max(0, l.s[1]));
+    tiles.sort((a, b) => (born.has(b) - born.has(a)) || area(b) - area(a));
+    tiles = tiles.slice(0, P_MOST);
+    let fading = false, hoverSeen = false;
+    if (hover !== hoverLeaf) { hoverLeaf = hover; hoverSince = now; }
+    for (const l of tiles) {
+      const [x0, y0, x1, y1] = l.s, w = x1 - x0, h = y1 - y0;
+      const src = source(l);
+      const kind = l.ext === "wav" || l.ext === "flac" ? "wave" : l.ext === "pdf" ? "page" : l.ext === "js" || l.ext === "log" || l.ext === "sqlite" ? "text" : "pic";
+      if (kind === "pic" && !src) continue;
+      const b = born.get(l) || [now, now]; b[1] = now; born.set(l, b);
+      const fadeIn = reduce ? 1 : Math.min(1, (now - b[0]) / 1000 / P_FADE);
+      fading ||= fadeIn < 1;
+      const alpha = fadeIn * smooth(P_MIN[0], P_FULL[0], w) * smooth(P_MIN[1], P_FULL[1], h);
+      if (alpha < .02) continue;
+      const m = Math.min(6, Math.max(2, Math.min(w, h) * .03));
+      const ix = x0 + m, iy = y0 + m, iw = w - 2 * m, ih = h - 2 * m;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(ix, iy, iw, ih); ctx.clip();
+      ctx.globalAlpha = alpha;
+      const c = colorOf(l);
+      if (kind === "pic") {
+        let [im, sx, sy, sw, sh] = src;
+        // The film under the pointer plays on its tile, silently, round and round.
+        if (l.ext === "mov" && l === hover && alpha > .9 && !reduce && !drag) {
+          hoverSeen = true;
+          const v = film();
+          if (now - hoverSince > P_PLAY_AFTER * 1000) {
+            if (playing !== l) { playing = l; try { v.currentTime = { final_cut: 0, rough_cut_v3: 2, trailer_prores: 4 }[l.name.split(".")[0]] || 0; } catch (e) {} v.play().catch(() => {}); }
+            if (v.readyState >= 2 && !v.paused) { im = v; sx = 0; sy = 0; sw = v.videoWidth; sh = v.videoHeight; }
+          } else fading = true; // keep drawing until it's time to play
+        }
+        // Fill the tile, cropped to its shape from the middle.
+        const s = Math.max(iw / sw, ih / sh), cw = iw / s, ch = ih / s;
+        ctx.drawImage(im, sx + (sw - cw) / 2, sy + (sh - ch) / 2, cw, ch, ix, iy, iw, ih);
+        if (l.ext === "dpx") { ctx.fillStyle = "rgba(128,128,120,.38)"; ctx.fillRect(ix, iy, iw, ih); } // a log scan: flat and grey
+        if (l.ext === "exr" && l.name.includes("comp")) { ctx.globalCompositeOperation = "soft-light"; ctx.fillStyle = "#ffb070"; ctx.fillRect(ix, iy, iw, ih); ctx.globalCompositeOperation = "source-over"; }
+        if (l.ext === "png") {
+          // A roto matte: the shape being cut out, white on black.
+          const f = (frameNo(l) - 1001) / 180;
+          ctx.fillStyle = "#000"; ctx.fillRect(ix, iy, iw, ih);
+          ctx.fillStyle = "#fff"; ctx.beginPath();
+          ctx.ellipse(ix + iw * (.3 + .35 * f), iy + ih * .62, iw * .16, ih * .22, -.3 + f * .5, 0, Math.PI * 2);
+          ctx.ellipse(ix + iw * (.3 + .35 * f) + iw * .05, iy + ih * .34, iw * .07, ih * .1, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (kind === "page") {
+        ctx.fillStyle = "rgba(0,0,0,.59)"; ctx.fillRect(ix, iy, iw, ih);
+        const pg = pageImage(), s = Math.max(0, Math.min((iw - 8) / pg.width, (ih - 8) / pg.height));
+        ctx.drawImage(pg, ix + (iw - pg.width * s) / 2, iy + (ih - pg.height * s) / 2, pg.width * s, pg.height * s);
+      } else if (kind === "wave") {
+        ctx.fillStyle = css(blendRgb([14, 15, 18], c, .22)); ctx.fillRect(ix, iy, iw, ih);
+        const strip = ih >= 60 ? 22 : 0, ax = ix + 6, aw = iw - 12, ah = ih - 12 - strip, mid = iy + 6 + ah / 2;
+        const wv = wave(l), most = Math.max(8, aw / 3 | 0);
+        let k = 1; while (wv.length / k > most) k *= 2; // whole runs, so the bars hold still as the tile grows
+        const bars = wv.length / k, bw = aw / bars;
+        ctx.fillStyle = css(blendRgb(c, [255, 255, 255], .15));
+        for (let i = 0; i < bars; i++) {
+          let v = 0; for (let j = i * k; j < (i + 1) * k; j++) v = Math.max(v, wv[j]);
+          const hh = Math.max(.75, v * ah * .5);
+          ctx.fillRect(ax + i * bw + bw * .15, mid - hh, bw * .7, hh * 2);
+        }
+      } else {
+        ctx.fillStyle = "rgb(20,22,26)"; ctx.fillRect(ix, iy, iw, ih);
+        const size = Math.min(15, Math.max(7, iw / 46)), row = size * 1.3;
+        const rows = Math.max(1, (ih - 22) / row | 0), cols = Math.max(4, (iw - 10) / (size * .6) | 0);
+        ctx.font = `400 ${size}px ${mono}`; ctx.fillStyle = "rgb(214,218,224)"; ctx.textBaseline = "top";
+        wrapText(textOf(l), cols, rows).forEach((t, i) => ctx.fillText(t, ix + 6, iy + 5 + i * row));
+      }
+      // The name on a dark strip along the bottom.
+      if (ih >= 60) {
+        const fs = Math.min(14, Math.max(11, w / 22));
+        ctx.fillStyle = "rgba(0,0,0,.65)"; ctx.fillRect(ix, iy + ih - fs - 8, iw, fs + 8);
+        ctx.font = `500 ${fs}px ${mono}`; ctx.fillStyle = "rgba(255,255,255,.94)"; ctx.textBaseline = "middle";
+        ctx.fillText(`${l.name}  ·  ${fmt(l.size)}`, ix + 6, iy + ih - (fs + 8) / 2);
+      }
+      ctx.restore();
+      if (alpha > .35) got.add(l);
+    }
+    if (!hoverSeen) stopFilm();
+    born.forEach((v, k) => { if (now - v[1] > P_KEEP * 1000) born.delete(k); });
+    if (fading || playing) requestAnimationFrame(() => redraw());
+    return got;
+  }
 
   let queued = false;
   const redraw = () => { if (queued || trans || camAnim) return; queued = true; requestAnimationFrame(() => { queued = false; draw(); }); };
@@ -1268,5 +1622,19 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   if (document.fonts) document.fonts.ready.then(() => { mono = getComputedStyle(document.body).getPropertyValue("--mono") || mono; draw(); });
 })();
 </script>
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+    <a href="/formats">Supported formats</a>
+    <a href="/ai-models">AI models</a>
+    <a href="/vfx">VFX and 3D</a>
+    <a href="https://account.filescape.app/">Your licence</a>
+    <a href="/terms">Terms</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/refunds">Refunds</a>
+    <a href="/contact">Contact</a>
+    <span class="ver">© 2026 Filescape</span>
+  </div>
+</footer>
 </body>
 </html>

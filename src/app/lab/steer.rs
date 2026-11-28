@@ -20,6 +20,23 @@ impl Default for Steering {
     }
 }
 
+/// Word pairs to start from: (towards, away).
+const PRESETS: [(&str, &str); 6] = [("Love", "Hate"), ("Happy", "Sad"), ("Formal", "Casual"), ("Calm", "Angry"), ("Poetry", "Science"), ("Yes", "No")];
+
+/// The strengths a sweep tries, in this order.
+pub(super) const SWEEP: [f32; 5] = [2.0, 4.0, 6.0, 8.0, 10.0];
+
+/// A strength sweep: the same push at several strengths, one after the other.
+#[derive(Clone, Debug, Default)]
+pub(super) struct Sweep {
+    /// Strengths still to write.
+    pub left: Vec<f32>,
+    /// Written so far: (strength, text).
+    pub done: Vec<(f32, Run)>,
+    /// The unpushed text, from the first run.
+    pub plain: Option<Run>,
+}
+
 /// About a third of the way in: early enough to change what comes after, late enough that the
 /// layer knows what the words mean.
 pub(super) fn default_layer(layers: usize) -> usize {
@@ -27,7 +44,7 @@ pub(super) fn default_layer(layers: usize) -> usize {
 }
 
 /// A run's tokens, coloured by how sure the model was of each.
-fn run_text(ui: &mut egui::Ui, r: &Run) {
+pub(super) fn run_text(ui: &mut egui::Ui, r: &Run) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for s in &r.steps {
@@ -38,13 +55,73 @@ fn run_text(ui: &mut egui::Ui, r: &Run) {
     });
 }
 
+fn st_eq(s: &Steering, t: &str, a: &str) -> bool {
+    s.towards.trim().eq_ignore_ascii_case(t) && s.away.trim().eq_ignore_ascii_case(a)
+}
+
+/// A sweep's texts, one row per strength under the unpushed one.
+fn sweep_table(ui: &mut egui::Ui, sw: &Sweep, busy: bool) {
+    egui::ScrollArea::vertical().id_salt("steer-sweep").auto_shrink([false, true]).show(ui, |ui| {
+        egui::Grid::new("steer-sweep-grid").num_columns(2).spacing([14.0, 8.0]).striped(true).show(ui, |ui| {
+            if let Some(p) = &sw.plain {
+                ui.strong("Without");
+                ui.vertical(|ui| run_text(ui, p));
+                ui.end_row();
+            }
+            for (s, r) in &sw.done {
+                ui.strong(format!("{s:+.0}"));
+                ui.vertical(|ui| run_text(ui, r));
+                ui.end_row();
+            }
+        });
+        if busy && !sw.left.is_empty() || busy && sw.done.len() < SWEEP.len() {
+            ui.weak(format!("Writing {} of {}…", sw.done.len() + 1, SWEEP.len()));
+        }
+    });
+    ui.weak("Each row is the same text and seed, pushed harder. Where it first changes, and where it stops making sense, differs by model, layer and words.");
+}
+
 impl App {
+    /// Starts a sweep: the push at each of [`SWEEP`]'s strengths, in the direction chosen.
+    fn lab_sweep(&mut self) {
+        let sign = if self.ask.lab_state.steer.strength < 0.0 { -1.0 } else { 1.0 };
+        let mut left: Vec<f32> = SWEEP.iter().map(|s| s * sign).collect();
+        left.reverse();
+        self.ask.lab_state.sweep = Some(Sweep { left, ..Default::default() });
+        self.ask.lab_state.steered = None;
+        self.lab_sweep_next();
+    }
+
+    /// Writes the sweep's next strength, if any is left.
+    pub(in crate::app) fn lab_sweep_next(&mut self) {
+        let Some(next) = self.ask.lab_state.sweep.as_mut().and_then(|s| s.left.pop()) else { return };
+        self.lab_steer_at(next);
+    }
+
+    /// A steered run arrived while sweeping: keep it, then write the next strength.
+    pub(in crate::app) fn lab_swept(&mut self, plain: Run, steered: Run) -> bool {
+        let strength = self.ask.lab_state.sweep_strength;
+        let Some(sw) = self.ask.lab_state.sweep.as_mut() else { return false };
+        sw.plain.get_or_insert(plain);
+        sw.done.push((strength, steered));
+        self.ask.phase = super::super::ask::Phase::Idle;
+        self.lab_sweep_next();
+        true
+    }
+
     fn lab_steer_run(&mut self) {
+        self.ask.lab_state.sweep = None;
+        let strength = self.ask.lab_state.steer.strength;
+        self.lab_steer_at(strength);
+    }
+
+    fn lab_steer_at(&mut self, strength: f32) {
         let Some(e) = &self.ask.engine else { return };
         if self.ask.loaded.is_none() || self.ask.phase != super::super::ask::Phase::Idle {
             return;
         }
         let l = &mut self.ask.lab_state;
+        l.sweep_strength = strength;
         self.ask.problem = None;
         self.ask.phase = super::super::ask::Phase::Answering;
         e.send(Request::Steer(crate::llm::Steer {
@@ -53,7 +130,7 @@ impl App {
             towards: l.steer.towards.clone(),
             away: l.steer.away.clone(),
             layer: l.steer.layer,
-            strength: l.steer.strength,
+            strength,
             steps: l.steps,
             settings: l.settings,
         }));
@@ -73,6 +150,7 @@ impl App {
         }
         let busy = self.ask.phase != super::super::ask::Phase::Idle;
         let mut go = false;
+        let mut sweep = false;
         let mut stop = false;
         {
             let l = &mut self.ask.lab_state;
@@ -80,6 +158,17 @@ impl App {
             ui.checkbox(&mut l.chat, "As a chat message").on_hover_text("On: the text is wrapped in the model's chat template, as Ask AI sends a question.");
             ui.add_space(4.0);
             let layers = l.layers.max(2);
+            ui.horizontal_wrapped(|ui| {
+                ui.weak("Try:");
+                for (t, a) in PRESETS {
+                    let on = st_eq(&l.steer, t, a);
+                    if ui.selectable_label(on, format!("{t} ↔ {a}")).on_hover_text(format!("Towards \u{201C}{t}\u{201D}, away from \u{201C}{a}\u{201D}")).clicked() {
+                        l.steer.towards = t.into();
+                        l.steer.away = a.into();
+                    }
+                }
+            });
+            ui.add_space(2.0);
             let st = &mut l.steer;
             egui::Grid::new("lab-steer").num_columns(4).spacing([10.0, 4.0]).show(ui, |ui| {
                 ui.label("Towards").on_hover_text("A word or phrase for what you want more of");
@@ -102,6 +191,9 @@ impl App {
                     ui.spinner();
                 } else {
                     go = kit::button(ui, kit::Kind::Primary, None, &format!("Write {} both ways", l.steps)).on_hover_text("Write the same text without and with the push, with the same settings and seed").clicked();
+                    sweep = kit::button(ui, kit::Kind::Secondary, None, "Sweep strengths")
+                        .on_hover_text("Write the same text pushed at strengths 2, 4, 6, 8 and 10 (or minus those, if Strength is below 0), to see where the push starts to change it and where the text falls apart")
+                        .clicked();
                 }
                 egui::ComboBox::from_id_salt("steer-steps").width(60.0).selected_text(format!("{}", l.steps)).show_ui(ui, |ui| {
                     for n in [10u32, 30, 100] {
@@ -113,7 +205,10 @@ impl App {
         }
         ui.add_space(6.0);
         ui.separator();
-        match self.ask.lab_state.steered.clone() {
+        if let Some(sw) = self.ask.lab_state.sweep.clone() {
+            sweep_table(ui, &sw, busy);
+        } else {
+            match self.ask.lab_state.steered.clone() {
             Some((plain, steered, push)) => {
                 let st = &self.ask.lab_state.steer;
                 let what = match (st.towards.trim(), st.away.trim()) {
@@ -143,11 +238,18 @@ impl App {
             }
             None => {}
         }
+        }
         if stop && let Some(e) = &self.ask.engine {
+            if let Some(sw) = self.ask.lab_state.sweep.as_mut() {
+                sw.left.clear();
+            }
             e.stop.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         if go {
             self.lab_steer_run();
+        }
+        if sweep {
+            self.lab_sweep();
         }
     }
 }

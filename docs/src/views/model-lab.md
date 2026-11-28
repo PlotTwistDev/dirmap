@@ -8,6 +8,9 @@ Open the [AI Models workspace](ai-models.md) (**Ctrl+4**, **⌘4** on a Mac) and
 the toolbar. The models on the left are the ones Ask AI lists; load one the same way. The Lab and
 Ask AI share the loaded model, so switching between them doesn't load it again.
 
+Each tab has an **About** section under its name that explains what it shows and what it
+doesn't: a probability is how likely the model thinks a token is, not whether it's true.
+
 ## Seeing what comes next
 
 Type some text, such as "The capital of France is", and press **Show next token**. A model writes in
@@ -20,12 +23,19 @@ the ten tokens the model thought likeliest:
 - The grey bar is the model's probability; the coloured bar is the one after the settings.
 
 **Use this** writes a different token in its place and shows what the model would write after it,
-so you can follow a road the model didn't take. **Start again** forgets the tokens you've chosen.
+so you can follow a road the model didn't take. **⏴ Step back** takes off the last token you chose
+and shows the choices there again, so you can try another road. **Start again** forgets the tokens
+you've chosen.
+
+Beside the alternatives, **uncertainty** says how spread out the model's guesses were, in bits,
+before the settings: 0 bits means it was certain, 1 bit is as unsure as a coin toss, and n bits is
+as unsure as a fair pick among 2ⁿ tokens ("like a fair pick among 169 tokens"). It measures how
+sure the model was, not whether the text is true.
 
 **Write 30 tokens** (or 10, 100 or 300) writes several tokens at once. Each is coloured by how sure the
 model was of it: green for confident, amber, then red for unlikely. Click a token to see its
 alternatives. **Keep these** adds what was written to the text, to carry on from there. The line
-under the text gives the average confidence and the speed.
+under the text gives the average confidence, the average uncertainty and the speed.
 
 Tick **As a chat message** to send the text the way Ask AI sends a question, wrapped in the model's
 chat template. You then see how the model starts an answer rather than how it carries on a
@@ -58,7 +68,9 @@ text and press **Look inside** to watch this happen. The Lab reads up to 256 tok
 
 The map shows a column for each token and a row for each layer, the first at the top. The brighter
 a square, the more that layer changed the token: a small nudge is dark, a big rewrite is bright
-orange. Hover over a square for the exact amount. The first row stays dark, because it is where
+orange; the scale under the map shows the range, from a change of 2% of the token's length or
+less to 200%. Hover over a square for the exact amount. The **average** column on the right shows
+how much each layer changes the tokens on average; hover over it for the figure. The first row stays dark, because it is where
 each token's meaning starts. Look for the layers where many tokens change at once, and for tokens
 that keep changing late (often the ones the next word depends on).
 
@@ -91,10 +103,32 @@ Researchers call this *activation steering*, and the difference a *steering vect
   have little room left to change anything; about a third of the way in usually works best and is
   where the Lab starts.
 - Leave one box empty to push towards (or away from) a single idea.
+- The pairs under the boxes, such as **Happy / Sad** or **Formal / Casual**, fill both boxes in one
+  click.
+- **Sweep strengths** writes the text without a push and then at strengths 2, 4, 6, 8 and 10, one
+  under another, so you can see where the push starts to show and where the text falls apart.
+  **■ Stop** stops it after the one it's writing.
 
 The push only exists while the text is written, in a copy of the model's working memory that's
 thrown away afterwards. The model's file, Ask AI and the other Lab pages aren't affected. The
 sampling settings are the ones on **Next token**.
+
+## Comparing settings or models
+
+Press **Compare** at the top of the Lab to write the same text twice, side by side, with two sets
+of sampling settings. Each side has its own Temperature, Top-k, Top-p and Min-p, with three
+starting points: **Likeliest** (temperature 0), **Ask AI's** and **Adventurous** (temperature 1.2,
+no limits). Press **Write 30 tokens both ways** (or 10 or 100); both sides use the seed set on **Next token**, so only the
+settings differ. Under each text are its average confidence, average uncertainty and speed, and
+the line under both says where the two texts part.
+
+To compare two models, write once, tick **Keep this result** on one side, load another model on
+the left and press **Write 30 tokens** again: only the other side is written, with the new model. Each side
+names the model that wrote it. If you change the text after keeping a side, that side says it was
+written from different text.
+
+One run shows what one seed happened to pick. Above temperature 0, try a few seeds before deciding
+which settings or model you prefer. For speeds, the **Speed** page measures more carefully.
 
 ## Testing a model's speed
 
@@ -111,11 +145,29 @@ The result shows:
   answers. This is usually much faster than writing.
 - **To the first word**: how long you'd wait for an answer to start after sending that much text.
 
+Once a model has been tested more than once, a chart under the result shows its last tests (up to
+24) as bars of tokens a second written; hover over a bar to see that test's settings.
+
 Every result is kept, with the model, where it ran (the graphics chip, or the processor and how
 many threads), the context length and the date, so you can compare models and settings in the
-**All results** table. The results are kept in `lab-speed.json` in Filescape's settings folder.
+**All results** table; hover over **Where** to see the processor or graphics chip by name. The
+results are kept in `lab-speed.json` in Filescape's settings folder. **Export…** saves them all as a
+CSV file for a spreadsheet, with every setting and the hardware each test ran with.
 
 Other busy apps slow the test down, and the test slows them down while it runs.
+
+### Testing several models (Professional)
+
+**Test several models**, under the speed controls, tests a list of models one after another with
+the same Read, Write and Runs settings, so you don't have to load each one yourself. Tick the
+models (or **Tick all**) and press **Test N models**. Each model is loaded in turn and tested;
+**■ Stop** stops after the current step. A model that can't be loaded, or doesn't fit in memory,
+is listed with the reason and the rest carry on.
+
+The table under the list puts the fastest writer first, with how fast each read, how long it took
+to the first word and where it ran. Two copies of one model at different precisions are told
+apart by their precision (for example *Q4_K_M* and *F32*). Every result is also kept in
+**All results**, so it can be exported with the others.
 
 ## What to expect
 

@@ -25,6 +25,19 @@ swatches in the **File types** list. Other colour modes show age or change since
 [Colour modes](color-modes.md). Empty dark areas are files a filter has hidden; see
 [Filtering overview](../filtering/overview.md).
 
+### Applications
+
+A Mac application such as `Slack.app` is a folder of programs, libraries and pictures, but it's
+one thing to you, so the map treats it as one: **every file inside an application takes the same
+colour**, and with the Modern tile style its tag shows the app's own icon and its name without
+`.app`. Zoom into an application to see what it's made of: inside it, files take their own
+colours again, and the **File types** tab of Insights starts with **Inside** *the app*, which
+splits its size into its frameworks, program, resources, plug-ins, helpers and the rest, and points
+out a part that takes most of the app (an app carrying its own copy of a web browser engine, for
+example). Apps are recognised by what's inside them, as in the
+[file manager](file-manager.md#applications), and turning off **Recognise application bundles**
+in Settings › Files turns this off too.
+
 ## The summary under the map
 
 Under the map, a strip of totals sums up the scan:
@@ -38,6 +51,7 @@ Under the map, a strip of totals sums up the scan:
 | **Cloud only** | Data in the cloud that isn't on this computer (only with cloud files in the scan). |
 | **Reclaimable** | Space your cloud app could free up on this computer (Mac and Windows cloud folders only). |
 | **Files**, **Folders** | How many there are in the scan. |
+| **Applications** | How many Mac applications there are in the scan and the space they take, with everything inside them (only when there are some). Click it to show only applications; click it again to show everything. |
 | **Matching** | With a filter on: the size and number of the files that match. |
 
 The totals are always the whole scan's, so data that's only in the cloud is never counted as on

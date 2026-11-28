@@ -534,6 +534,27 @@ impl App {
         }
     }
 
+    /// Move items to the bin now (asked about already, or dropped on the Trash), noting where
+    /// each went so Undo can put it back. `name` is how the progress line calls them.
+    pub(super) fn trash_paths(&mut self, name: String, paths: Vec<PathBuf>) {
+        let rec = self.ops.record();
+        self.run_op(format!("Moving {name} to the {}", actions::BIN), move || {
+            let mut steps = Vec::new();
+            let mut r = Ok(None);
+            for p in &paths {
+                match actions::trash_keep(p) {
+                    Ok(receipt) => steps.push(Step::Trashed { original: p.clone(), receipt }),
+                    Err(e) => {
+                        r = Err(e);
+                        break;
+                    }
+                }
+            }
+            *rec.lock().unwrap() = steps;
+            (r, paths)
+        })
+    }
+
     /// Run a file operation on a background thread. `work` returns its outcome (an optional
     /// note on success) and the paths it touched, which are then re-read from disk.
     pub(super) fn run_op(&mut self, label: String, work: impl FnOnce() -> (Result<Option<String>, String>, Vec<PathBuf>) + Send + 'static) {
@@ -879,25 +900,7 @@ impl App {
                     let r = paths.iter().try_for_each(|p| actions::delete(p)).map(|_| None).map_err(|e| format!("Couldn't delete everything: {e}"));
                     (r, paths)
                 }),
-                TreeAction::Recycle => {
-                    let rec = self.ops.record();
-                    self.run_op(format!("Moving {name} to the {}", actions::BIN), move || {
-                        // Each item goes to the bin, noting where it went so Undo can put it back.
-                        let mut steps = Vec::new();
-                        let mut r = Ok(None);
-                        for p in &paths {
-                            match actions::trash_keep(p) {
-                                Ok(receipt) => steps.push(Step::Trashed { original: p.clone(), receipt }),
-                                Err(e) => {
-                                    r = Err(e);
-                                    break;
-                                }
-                            }
-                        }
-                        *rec.lock().unwrap() = steps;
-                        (r, paths)
-                    })
-                }
+                TreeAction::Recycle => self.trash_paths(name, paths),
                 _ => self.run_op(format!("Emptying {name}"), move || {
                     let r = paths.iter().try_for_each(|p| actions::empty_folder(p)).map(|_| None).map_err(|e| format!("Couldn't delete everything: {e}"));
                     (r, paths)

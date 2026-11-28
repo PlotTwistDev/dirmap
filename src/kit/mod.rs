@@ -8,10 +8,12 @@
 //! focus with Tab, answers Space/Enter, shows a focus ring, and dims (and says why, where the
 //! caller gives a reason) when disabled.
 
+pub mod glossary;
 pub mod icons;
 
 use crate::app::style::{self, Pal};
 use eframe::egui::{self, Align, Color32, CornerRadius, Layout, Margin, Rect, RichText, Sense, Stroke, StrokeKind, Ui, Vec2, vec2};
+pub use glossary::glossary;
 pub use icons::Icon;
 
 // ---------- the scale ----------

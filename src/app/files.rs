@@ -580,6 +580,8 @@ pub(super) struct Files {
     pub(super) suggest: addr::Suggest,
     /// Quick Look and the preview pane.
     pub(super) look: preview::Look,
+    /// Applications' versions, signatures and sizes for the preview pane.
+    pub(super) app_info: crate::apps::DetailsCache,
     /// Where the address bar's suggestion list was drawn.
     pub(super) suggest_rect: Option<Rect>,
     /// Text worked out in the background for the clipboard (UNC paths).
@@ -656,6 +658,7 @@ impl Files {
             fav_edit: None,
             suggest: Default::default(),
             look: Default::default(),
+            app_info: Default::default(),
             suggest_rect: None,
             text_rx: None,
             net: Vec::new(),
@@ -766,6 +769,20 @@ impl Files {
         }
         self.tab().hist.go(to);
         self.after_move();
+    }
+
+    /// Move every tab showing a folder under `root` to the Computer view, so nothing here holds
+    /// the drive open (before ejecting it).
+    pub(super) fn leave(&mut self, root: &Path) {
+        for pane in &mut self.panes {
+            for t in &mut pane.tabs {
+                if t.here().dir().is_some_and(|d| d.starts_with(root)) {
+                    t.hist.go(Location::Computer);
+                    t.arrived();
+                }
+            }
+        }
+        self.path_edit = None;
     }
 
     /// Go somewhere in a pane's current tab.
@@ -1033,7 +1050,7 @@ pub(super) fn order_entries(
     let mut o: Vec<u32> = (0..entries.len() as u32)
         .filter(|&i| {
             let e = &entries[i as usize];
-            (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, &e.name, e.is_dir)
+            (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, e)
         })
         .collect();
     let size_of = |e: &Entry| if e.is_dir { sizes.and_then(|s| s.get(&e.name)).map(|s| s.0).unwrap_or(0) } else { e.shown_size() };
@@ -1061,7 +1078,7 @@ pub(super) fn order_entries(
 /// Add the entries from `from` on that pass the filter to the end of `order`.
 fn append_new(order: &mut Vec<u32>, entries: &[Entry], from: usize, show_hidden: bool, filter: &str) {
     for (i, e) in entries.iter().enumerate().skip(from) {
-        if (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, &e.name, e.is_dir) {
+        if (show_hidden || !e.hidden) && crate::fsys::listing::entry_matches(filter, e) {
             order.push(i as u32);
         }
     }
@@ -1146,6 +1163,10 @@ pub(super) enum FAction {
     /// Applications: launch them, or go inside (Show Package Contents).
     LaunchApp,
     ShowContents,
+    /// The preview pane's Details for an application (Get Application Info).
+    AppInfo,
+    /// External drives, removable media and disk images (`ejectui`).
+    Eject,
 }
 
 impl App {
@@ -1441,7 +1462,7 @@ impl App {
             .on_hover_text("Show only some kinds of file: audio, video, images, documents…");
         });
         if let Some(k) = picked
-            && (k & !kinds == 0 || self.premium(crate::licence::Feature::Filters))
+            && (!crate::categories::adds_pro_kind(kinds, k) || self.premium(crate::licence::Feature::Filters))
         {
             self.files.pane_mut().kinds = k;
         }
@@ -1718,7 +1739,7 @@ impl App {
         }
         dirs.extend(self.files.side.dirs().cloned());
         // Servers send no change notices, and archives don't change.
-        dirs.retain(|d| !remote::is_remote(d) && archive::split(d).is_none());
+        dirs.retain(|d| !remote::is_remote(d) && archive::split(d).is_none() && !self.ejecting(d));
         let c = ctx.clone();
         self.files.watcher.wake_with(move || c.request_repaint());
         self.files.watcher.set(dirs);
@@ -1979,7 +2000,11 @@ impl App {
                 }
                 let resp = resp.on_hover_ui(|ui| drive_tip(ui, d, &all));
                 capacity_bar_held(ui, resp.rect, d);
-                self.place_row(ui, &resp, &root, &mut picks);
+                let can_eject = crate::eject::ejectable(d);
+                if can_eject && self.eject_button(ui, resp.rect, &root, resp.rect.top() + ROW_F / 2.0) {
+                    picks.menu = Some((FAction::Eject, vec![root.clone()]));
+                }
+                self.place_row_with(ui, &resp, &root, &mut picks, can_eject);
             }
             for ph in self.phones.clone() {
                 let resp = side_row(ui, drives::Kind::Phone.icon(), &ph.name, ph.path.as_ref().is_some_and(|p| here == Location::Dir(p.clone())), ROW_F)
@@ -2105,6 +2130,31 @@ impl App {
         let pinned = self.files.is_pinned(path);
         let other = self.files.other();
         resp.context_menu(|ui| place_menu(ui, path, pinned, other.is_some(), picks));
+    }
+
+    /// `place_row` for a drive: its menu ends with Eject when that applies.
+    fn place_row_with(&mut self, ui: &egui::Ui, resp: &egui::Response, path: &Path, picks: &mut FPicks, eject: bool) {
+        if !eject {
+            return self.place_row(ui, resp, path, picks);
+        }
+        let loc = Location::Dir(path.to_path_buf());
+        if resp.clicked() {
+            picks.go = Some(loc.clone());
+        }
+        if resp.middle_clicked() {
+            picks.new_tab = Some(loc);
+        }
+        if let Some(d) = self.folder_drop(ui, resp, path) {
+            picks.drop = Some(d);
+        }
+        let pinned = self.files.is_pinned(path);
+        let other = self.files.other();
+        let busy = self.ejecting_now(path);
+        resp.context_menu(|ui| {
+            place_menu(ui, path, pinned, other.is_some(), picks);
+            ui.separator();
+            eject_item(ui, path, busy, picks);
+        });
     }
 
     // ---------- main area ----------
@@ -2420,13 +2470,22 @@ impl App {
                     if resp.middle_clicked() {
                         picks.new_tab = Some(Location::Dir(root.clone()));
                     }
+                    let can_eject = crate::eject::ejectable(d);
+                    if can_eject && self.eject_button(ui, r, &root, r.top() + 16.0) {
+                        picks.menu = Some((FAction::Eject, vec![root.clone()]));
+                    }
                     let pinned = self.files.is_pinned(&root);
+                    let busy = self.ejecting_now(&root);
                     resp.context_menu(|ui| {
                         if ui.add(egui::Button::new(style::mi("Analyse This Drive"))).on_hover_text("Scan it and show its treemap in the analysis dock").clicked() {
                             picks.menu = Some((FAction::Analyse, vec![root.clone()]));
                         }
                         ui.separator();
                         place_menu(ui, &root, pinned, false, picks);
+                        if can_eject {
+                            ui.separator();
+                            eject_item(ui, &root, busy, picks);
+                        }
                     });
                 }
             });
@@ -3703,6 +3762,14 @@ impl App {
                 }
             }
             FAction::LaunchApp => self.launch_apps(paths),
+            FAction::AppInfo => {
+                // Show the app's details in the preview pane.
+                self.files.prefs.preview = true;
+                self.files.prefs.map_preview_tab = super::rails::PreviewTab::Details;
+                if let Some(name) = paths.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()) {
+                    self.files.select_name(&name);
+                }
+            }
             FAction::ShowContents => {
                 if let Some(p) = paths.into_iter().next() {
                     self.files.go(Location::Dir(p));
@@ -3739,6 +3806,11 @@ impl App {
             }
             FAction::AskAi => self.ask_about_paths(paths),
             FAction::CompareScenes => self.open_scene_compare(paths),
+            FAction::Eject => {
+                if let Some(p) = paths.first() {
+                    self.ask_eject(p);
+                }
+            }
             FAction::CopyUnc => {
                 // Asking Windows can wait on the network, so it's done in the background.
                 let (tx, rx) = mpsc::channel();
@@ -3996,6 +4068,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
         let label = if crate::apps::CAN_LAUNCH { "Open Application" } else { "Open Application (on a Mac)" };
         item(ui, crate::apps::CAN_LAUNCH, label, run_key, FAction::LaunchApp);
         item(ui, true, "Show Package Contents", inside_key, FAction::ShowContents);
+        item(ui, true, "Get Application Info", String::new(), FAction::AppInfo);
     } else {
         item(ui, true, &open, k(M::NONE, Key::Enter), FAction::Open);
     }
@@ -4149,6 +4222,13 @@ fn place_menu(ui: &mut egui::Ui, path: &Path, pinned: bool, two: bool, picks: &m
     }
     if ui.add(egui::Button::new(style::mi("Analyse This Folder"))).clicked() {
         picks.menu = Some((FAction::Analyse, vec![path.to_path_buf()]));
+    }
+}
+
+/// Eject, at the end of a drive's menu.
+fn eject_item(ui: &mut egui::Ui, path: &Path, busy: bool, picks: &mut FPicks) {
+    if ui.add_enabled(!busy, egui::Button::new(style::mi("Eject"))).on_hover_text("Unmount it so it can be unplugged safely").clicked() {
+        picks.menu = Some((FAction::Eject, vec![path.to_path_buf()]));
     }
 }
 

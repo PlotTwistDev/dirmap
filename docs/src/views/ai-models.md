@@ -35,10 +35,27 @@ Files that belong to one model are shown as one entry: numbered parts
 
 ## Reading the list
 
-Models are sorted by size, largest first. Each one shows its name, size and where it's from, then
-a line of details:
+A strip above the list adds things up:
 
-`GGUF · qwen3 · 8B · Q4_K_M · 40K context`
+| Total | Meaning |
+|---|---|
+| **Models** | Models found, not counting Ollama downloads no model uses. |
+| **On disk** | Space the model files take on the drive. A file shared under two names (a hard link, as sharing copies in [Freeing space](#freeing-space) makes) is counted once, so this can be less than the sizes in the list added up. |
+| **Recoverable** | Space in extra copies of a model kept elsewhere and in unused Ollama downloads. **Free up space** opens Storage, which also finds unfinished downloads and old versions. |
+| **Locations** | Folders models were found in. |
+| **Runs in Filescape** | Whole GGUF models on this computer, which Ask AI and the Lab can load. |
+
+Each model has a coloured tile for its kind: **Language**, **Image generation**, **Video
+generation**, **Audio and speech**, **Embedding**, **Vision**, **Multimodal**, **Adapter or LoRA**,
+or **Unidentified**. The kind comes from the model's own files when they say: the architecture in a
+GGUF file, or the class named in a Hugging Face `config.json` or `model_index.json`. Otherwise it's
+a guess from the folder it's in (ComfyUI's `loras` or `checkpoints`, say) or its name: a guess has
+a dashed tile and says **(probably)**. When nothing tells, the model is **Unidentified** rather than
+assumed to be anything.
+
+The second line gives the details:
+
+`Language  ·  GGUF · qwen3 · 1.7B · Q4_K_M · 40K context`
 
 | Detail | Meaning |
 |---|---|
@@ -49,21 +66,67 @@ a line of details:
 | Context | The longest text the model can read at once, in tokens (roughly ¾ of a word each). |
 | Add-on | A vision projector or adapter that works together with a model, not on its own. |
 
-Click a model to see what's known about it on the right, with the full path of each of its files.
-Right-click it and choose **Show in Files**, or press **Show in Files** on the right, to open the
-folder it's in with the file selected. **Copy path** copies the path of its first file. For a
-GGUF model, **💬 Ask AI** opens [Ask AI](ask-ai.md) with that model picked, to chat with it. **🔬 Lab** in the toolbar shows what it would write next and how sure it is: see [The Lab](model-lab.md).
+A green dot beside the app means Filescape can run the model; an orange dot on the tile means it's
+an extra copy or an unused download.
+
+### Finding a model
+
+- The chips above the list (**All**, **Language**, **Image** …) show one kind of model. Only kinds
+  that were found get a chip.
+- **Search models** matches names, details, apps and paths. Every word must match.
+- **Sort** orders by size, name, type or app.
+- **Filters** shows only models from one app, in one format, that run in Filescape, that **fit this
+  computer**, or that are copies and unused downloads. **Fits this computer** is a quick estimate
+  from the file size: the model, with room for a short conversation, fits the memory Filescape can
+  give it. **Will it run?** on the model's page has the details.
+- The two buttons beside Sort show every model file on its own line, or **versions of one model
+  together**: `qwen3:1.7b` from Ollama and `Qwen3-1.7B-Q8_0.gguf` from LM Studio sit under one
+  heading with their precisions and apps. Click a heading to open it. Versions are put together by
+  name, never treated as copies: copies are found only by comparing the files' contents.
+
+The **Locations** panel on the left lists where Filescape looked, with how many models and how much
+space it found in each. Click a folder to open it in Files. The ⟨ button folds the panel away, and
+the ⟩ button on the thin rail brings it back.
+
+### The model panel
+
+Click a model to see it on the right: its kind, its parameters, size, precision and context (or
+**Unknown** when the files don't say), whether Filescape can run it and why not, its files, and
+other places the same files are kept. Every action for the model is here, and in its **⋯** menu or
+right-click menu. Only actions that apply to it are shown:
+
+| Action | What it does |
+|---|---|
+| **Inspect** | Opens the model's page, below. Double-clicking a model does the same. |
+| **Ask AI** | Opens [Ask AI](ask-ai.md) with the model picked. |
+| **Open in Lab** | Opens [the Lab](model-lab.md) with the model picked. |
+| **Will it run?** | Opens the model's page at **Will it run?** |
+| **Compare…** | Opens the model's page compared with another model you choose. |
+| **Show in Files** | Opens the folder it's in, with the file selected. |
+| **Show in Storage Analysis** | Selects it on the map when the current scan includes it; otherwise scans the folder it was found in. |
+| **Copy path** | Copies the path of its first file (menu only). |
+| **Optimise size…** | Makes a smaller copy at a lower precision: see [Shrinking a model](#shrinking-a-model). Professional. |
+| **Move to Trash…** | Removes the model after showing everything it removes. **Move to Recycle Bin…** on Windows. |
 
 ## Inspecting a model
 
-Double-click a model, or press **🔍 Inspect**, to see what's inside it. Filescape reads only the
+Double-click a model, or press **Inspect**, to see what's inside it. Filescape reads only the
 part of each file where the model describes itself and lists its pieces, never the weights, so
-this takes a moment even for a model of many gigabytes. **⏴ All models** or **Esc** goes back to the
+this takes a moment even for a model of many gigabytes. The **←** button or **Esc** goes back to the
 list.
 
-**Overview** lists what's known about the model, such as its architecture, layers, attention
-heads, context length, vocabulary, licence and number of parameters. A tag beside each fact says
-where it comes from:
+The top of the page shows the model's kind, name, format and app, with **Ask AI**, **Open in Lab**,
+**Show in Files** (the folder button) and **Compare…** beside it. Below, tiles give the facts most
+people want first: parameters, size, precision, context, layers and whether Filescape can run it.
+A fact the model's files don't give says **Unknown**. Hover over a fact's name for a short
+explanation of the term.
+
+The tabs on the left (**Overview**, **Health**, **Will it run?**, **Structure**) are for everyone.
+The ones under **Advanced** (**Tensors**, **Tokens**, **Metadata**) show the model's raw parts.
+
+**Overview** lists what's known about the model in groups (about it, its shape, how it handles
+text, and the file), such as its architecture, layers, attention heads, context length,
+vocabulary, licence and number of parameters. A tag beside each fact says where it comes from:
 
 | Tag | Meaning |
 |---|---|
@@ -98,19 +161,31 @@ in **Tensors**.
 **Will it run?** estimates how much memory the model needs on this computer, and where it would
 run:
 
-- **This computer** shows its memory and its graphics card's memory. On a Mac with Apple silicon
-  the two are shared. If Filescape can't find the graphics card's memory, type it in.
+- **This computer** shows the processor (its name, how many threads it runs at once, and the
+  instruction sets Filescape's AI runtime uses), the memory and how much is free now, and the
+  graphics card with its memory. On a Mac with Apple silicon the memory is shared with the
+  graphics chip. If Filescape can't find the graphics card's memory, type it in. **Filescape runs
+  models on** says where Filescape's own Ask AI and Lab run models, as its runtime reports it: the
+  graphics chip on a Mac with Apple silicon, the graphics card on Windows and Linux when its
+  drivers support Vulkan, and otherwise the processor.
 - Move **Context** to choose how much text the model reads at once, in tokens (about ¾ of a word
   each). The memory a model needs grows with it, because it keeps a cache of everything it has
   read. **Compact (Q8)** stores that cache in about half the space.
-- The result says whether the model runs fully on the graphics chip (fast), split between the
-  graphics card and main memory, in main memory on the processor (slow), or not at all. The bar
-  shows the model itself, the cache and working space, against the memory available.
+- **In Filescape** says whether Ask AI and the Lab can run it here, and where. If it needs more
+  memory than is free right now, it says so: close other apps first.
+- Where Filescape runs models on the processor (an Intel Mac, or a PC without Vulkan), **In apps
+  that use the graphics card** says the same for Ollama, LM Studio and other apps that put models
+  on a graphics card: fully on the card (fast), split between the card and main memory, on the
+  processor, or not at all. Where Filescape uses the graphics chip or card too, there is one
+  answer.
+- If the Lab's **Speed** tab has measured the model on this computer, its newest result is shown,
+  with the context, the processor or graphics chip and the threads it ran with.
+- The bar shows the model itself, the cache and working space, against the memory available.
 - **At other context lengths** lists the same for each length, and **Smaller versions of this
   model** what a compressed version would need, such as Q4_K_M.
 
-These are estimates for apps based on llama.cpp, such as Ollama and LM Studio. Each app adds a
-little of its own.
+These are estimates in the way llama.cpp lays a model out, which Filescape, Ollama and LM Studio
+all use. Each app adds a little of its own, and the system and other open apps need memory too.
 
 **Structure** shows how the model is built and where its space goes:
 
@@ -160,7 +235,7 @@ and a model joins these pieces to spell anything its vocabulary lacks.
 **Metadata** lists every entry the model file carries, such as its training settings and
 tokenizer, with a box to find one.
 
-**Compare with…**, at the top right, puts this model beside another one from the list, in a
+**Compare…**, at the top right, puts this model beside another one from the list, in a
 **Compare** tab:
 
 - A sentence sums up what they share, for example "Same architecture and size, stored at
@@ -203,8 +278,10 @@ aren't checked for copies. Reading them would download them.
 
 ## Freeing space
 
-Press **🖴 Storage** in the toolbar to see how much space models take, by app (Ollama, LM Studio,
-Hugging Face and other folders), and what can be freed:
+Press **🖴 Storage** in the toolbar to see how much space models take. The strip at the top shows
+**On disk** (files shared as one are counted once), **Can be freed** and how many **Apps** keep
+models; below it is the space by app (Ollama, LM Studio, Hugging Face and other folders), and what
+can be freed:
 
 - **Downloads no model uses**: Ollama files none of its models needs, usually left behind by a
   removed model or a stopped download.
@@ -217,7 +294,21 @@ Hugging Face and other folders), and what can be freed:
 - **Extra copies**: model files that are byte-for-byte the same as files another model keeps, such
   as the same GGUF file in LM Studio and in Downloads.
 
-Each item says why it can go. **Move to Trash…** shows every file, folder and link it removes, and
+Each item is marked **Safe to remove** or **Probably unused**, and **Why** lists what that rests
+on (hover over the mark to see the same list):
+
+- **Safe to remove**: the app's own records say nothing uses it, such as a file none of the models
+  in Ollama's list names, or a download that stopped more than a day ago.
+- **Probably unused**: nothing Filescape can see uses it, but something it can't see might. An
+  older Hugging Face version is one: programs normally ask for the current version, but one that
+  asks for an exact older version by its code still uses it. A download that stopped less than a
+  day ago is another, since a paused download could carry on from it.
+
+Filescape also looks at what the models it found link to. If a model elsewhere is a link to a file
+here (some tools link Ollama's downloads into LM Studio's folder, for example), that file is kept
+and the item says which model links to it; if nothing else is left, the item isn't offered.
+
+**Move to Trash…** shows every file, folder and link it removes, and
 asks once. Choose **Move to Trash** to be able to put it back (the space comes back when the Trash
 is emptied), or **Delete for good** to get the space back straight away. Removing one item at a
 time is free; ticking several and pressing **Remove N items…** is part of managing models in bulk,
@@ -229,7 +320,8 @@ two files once more first, then makes the copy a second name of the file it's th
 *hard link*). Removing either name later keeps the other. A loose copy can also be moved to the
 Trash; a copy an app keeps can only be shared, since removing it would take the model from that
 app. Copies on different drives can't be shared. Sharing several at once is Professional, like
-removing several.
+removing several; **Share all N as one file each…** beside **Extra copies** does every copy that
+can be shared in one go, after the same confirmation listing each pair.
 
 Filescape only calls something unused when the app's own records say so. If Ollama's list of
 models or Hugging Face's version records can't be read, nothing in that folder is offered.
@@ -244,7 +336,9 @@ goes before anything happens:
 - **Hugging Face**: its files in the cache, and the links to them in each version.
 - **LM Studio and other folders**: its files.
 
-If Ollama is downloading a model, let it finish first.
+If Ollama is downloading a model, let it finish first. If another model links to the files (a
+tool can link an Ollama download into LM Studio's folder, for example), Filescape doesn't remove
+it and says which link would stop working.
 
 ## Moving models to another drive
 
@@ -260,11 +354,17 @@ place. The original is deleted only after the link has been checked; if anything
 press **Stop**, everything is put back as it was. On Windows the link is a directory junction,
 which needs no special rights.
 
-A folder that has already been moved shows where its link leads.
+A folder that has already been moved shows where its link leads, and **Move back…** undoes the
+move: Filescape checks that this drive has room (and that Ollama isn't running), copies the models
+back beside the link, compares the copy, and puts it in place of the link. The folder on the other
+drive is deleted only after that; if anything fails or you press **Stop**, the link stays as it
+was and the app keeps finding its models on the other drive. Moving back is Professional, like
+moving.
 
 ## Shrinking a model
 
-Right-click a GGUF model in the list and choose **Shrink (quantise)…** to make a smaller copy with
+Right-click a GGUF model in the list and choose **Optimise size (quantise)…** to open **Optimise
+model size**, which makes a smaller copy with
 less precise weights: it loads faster, needs less memory, and writes slightly worse. This is part
 of model quantisation (Professional).
 
@@ -279,6 +379,18 @@ it's finished, so stopping or a failure leaves nothing half-written behind. Shri
 already-shrunk model is allowed with a warning: it loses more than shrinking the original would.
 llama.cpp does the work in a separate copy of Filescape, so a model it can't handle can't take the
 app down with it.
+
+Before the new file is named, Filescape reopens it and checks it: it must read as a model, say the
+precision you chose, hold every part (tensor) of the original with the same shape, and be long
+enough for all of them. If any check fails, the new file isn't kept and the window says which.
+
+When it passes, the window shows the original and the new file side by side: size on disk,
+precision, bits per weight (the file's size in bits over its weights, measured from the files),
+the number of weights and of tensors, and how many tensors now use fewer bits (some, such as
+normalisation weights, stay precise on purpose). **Compare with the original** opens both in the
+model's page to compare every tensor; **Show in Files** shows the new file. The checks say the file
+is complete and well formed, not how well it writes: try it in Ask AI or on the Lab's **Compare**
+page for that.
 
 ## On the command line
 

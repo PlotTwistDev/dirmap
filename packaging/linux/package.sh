@@ -6,7 +6,12 @@
 #   Filescape-linux.deb       Ubuntu, Debian, Linux Mint, Pop!_OS and other apt systems
 #   Filescape-linux.rpm       Fedora, RHEL, openSUSE and other rpm systems
 #
-#   packaging/linux/package.sh target/release/filescape dist
+#   packaging/linux/package.sh target/release/filescape dist engine
+#
+# `engine` is a folder of the AI engine's libraries (libllama, libggml, a processor build for
+# each kind of x86 processor and Vulkan for graphics cards). They go in /usr/lib/filescape, or
+# beside the program in the .tar.gz; the program looks in both. Vulkan itself (libvulkan.so.1)
+# is not bundled: it comes with the graphics drivers, and without it models run on the processor.
 #
 # Needs dpkg-deb, rpmbuild (the `rpm` package on Ubuntu) and curl. The binary is built on an
 # older Ubuntu (22.04) so it runs on any distribution with glibc 2.35 or later; nothing else is
@@ -15,6 +20,7 @@ set -euo pipefail
 
 bin=$(realpath "$1")
 out=$(mkdir -p "$2" && realpath "$2")
+engine=$(realpath "$3")
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 version=$(grep -m1 '^version' "$repo/Cargo.toml" | cut -d'"' -f2)
@@ -31,6 +37,8 @@ APPIMAGETOOL_SHA256=46fdd785094c7f6e545b61afcfb0f3d98d8eab243f644b4b17698c01d060
 # ---------- The installed layout, shared by the .deb, the .rpm and the AppImage ----------
 root=$work/root
 install -Dm755 "$bin" "$root/usr/bin/filescape"
+install -d "$root/usr/lib/filescape"
+cp -a "$engine"/. "$root/usr/lib/filescape/"
 install -Dm644 "$repo/packaging/filescape.desktop" "$root/usr/share/applications/filescape.desktop"
 install -Dm644 "$repo/packaging/filescape.svg" "$root/usr/share/icons/hicolor/scalable/apps/filescape.svg"
 for s in 128 256 512; do
@@ -44,11 +52,12 @@ install -Dm644 "$repo/README.md" "$root/usr/share/doc/filescape/README.md"
 # ---------- tar.gz (unchanged from before: a folder with the program in it) ----------
 mkdir "$work/filescape"
 cp "$bin" "$repo/README.md" "$repo/packaging/filescape.desktop" "$repo/packaging/filescape.png" "$work/filescape/"
+cp -a "$engine"/. "$work/filescape/"
 tar -C "$work" --owner=0 --group=0 -czf "$out/Filescape-linux.tar.gz" filescape
 
 # ---------- .deb ----------
 # The oldest glibc the binary asks for, so apt refuses it on a system too old to run it.
-glibc=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
+glibc=$(objdump -T "$bin" "$engine"/*.so* | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
 deb=$work/deb
 cp -a "$root" "$deb"
 mkdir "$deb/DEBIAN"
@@ -58,8 +67,8 @@ Version: $version
 Architecture: amd64
 Maintainer: Filescape <noreply@filescape.app>
 Installed-Size: $(du -sk "$root" | cut -f1)
-Depends: libc6 (>= $glibc), libgcc-s1, libxkbcommon0, libegl1 | libgl1
-Recommends: libxkbcommon-x11-0, libx11-6, libxcursor1, libxi6, libxrandr2, libwayland-client0, libwayland-egl1, xdg-desktop-portal
+Depends: libc6 (>= $glibc), libgcc-s1, libstdc++6, libxkbcommon0, libegl1 | libgl1
+Recommends: libvulkan1, mesa-vulkan-drivers, libxkbcommon-x11-0, libx11-6, libxcursor1, libxi6, libxrandr2, libwayland-client0, libwayland-egl1, xdg-desktop-portal
 Section: utils
 Priority: optional
 Homepage: https://filescape.app/
@@ -92,12 +101,17 @@ Recommends: libXi.so.6()(64bit)
 Recommends: libXrandr.so.2()(64bit)
 Recommends: libwayland-client.so.0()(64bit)
 Recommends: libwayland-egl.so.1()(64bit)
+Recommends: libvulkan.so.1()(64bit)
 
 # Prebuilt: no debug package, no stripping (the line tables give crash.log its file names).
 %global debug_package %{nil}
 %global __os_install_post %{nil}
 %global _build_id_links none
 %global _binary_payload w6.xzdio
+# The engine's libraries are private to Filescape: not offered to other packages, and Vulkan is
+# optional (models run on the processor without it).
+%global __provides_exclude_from ^/usr/lib/filescape/.*$
+%global __requires_exclude ^(libggml.*|libllama.*|libvulkan\\.so.*)$
 
 %description
 Filescape scans a drive or folder and draws everything on it as a map, where each file is a
@@ -109,6 +123,7 @@ cp -a $root/. %{buildroot}/
 
 %files
 /usr/bin/filescape
+/usr/lib/filescape
 /usr/share/applications/filescape.desktop
 /usr/share/icons/hicolor/*/apps/filescape.*
 /usr/share/metainfo/app.filescape.Filescape.metainfo.xml

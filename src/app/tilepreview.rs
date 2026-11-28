@@ -333,7 +333,14 @@ impl App {
             alloc: n.alloc,
             flags: n.flags,
             modified: n.modified,
-            bundle: 0,
+            // An application gets its icon, details and Launch button, as in Files.
+            bundle: if crate::apps::node_is_app(n) {
+                crate::apps::Bundle::App.code()
+            } else if n.is_dir {
+                0
+            } else {
+                crate::apps::file_code(&n.name)
+            },
         };
         Some((self.full_path(sel), e))
     }
@@ -372,8 +379,13 @@ impl App {
         let Some(n) = tree.at(&sel) else { return };
         let Some((path, e)) = self.map_target() else { return };
         let w = ui.available_width();
+        let is_app = crate::apps::own_icon(e.bundle) && !crate::fsys::remote::is_remote(&path);
+        let app_info = if is_app { self.files.app_info.get(ui.ctx(), &path, e.modified) } else { None };
         if details {
             // The Details tab: no big preview, everything known about it.
+        } else if is_app {
+            let (r, _) = ui.allocate_exact_size(vec2(w, 112.0), Sense::hover());
+            self.icons.paint_app(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), &path, e.modified);
         } else if n.is_dir {
             let (r, _) = ui.allocate_exact_size(vec2(w, 96.0), Sense::hover());
             self.icons.paint(ui, Rect::from_center_size(r.center(), vec2(64.0, 64.0)), true, "", Color32::GRAY);
@@ -388,12 +400,16 @@ impl App {
         }
         let facts_top = ui.cursor().top();
         ui.add_space(8.0);
-        ui.add(egui::Label::new(egui::RichText::new(&*n.name).strong()).wrap());
+        ui.add(egui::Label::new(egui::RichText::new(browser::node_name(n)).strong()).wrap());
         ui.add_space(4.0);
         let total = tree.size.max(1);
         if !details {
             // The Preview tab: what it is and how big, in one line; the rest is under Details.
-            let what = browser::kind_for(&n.name, n.is_dir);
+            let what = browser::kind_of(n);
+            let what = match app_info.as_ref().and_then(|d| d.info.as_ref()).and_then(|i| i.version.clone()) {
+                Some(v) => format!("{what} · version {v}"),
+                None => what,
+            };
             let line = if n.is_dir { format!("{what} · {} · {} files", scan::human(n.size), group(n.files)) } else { format!("{what} · {}", scan::human(n.size)) };
             ui.add(egui::Label::new(egui::RichText::new(line).color(pal.weak)).wrap());
             ui.add_space(4.0);
@@ -406,17 +422,22 @@ impl App {
         let mut go = None;
         egui::Grid::new("map-preview-facts").num_columns(2).spacing([10.0, 3.0]).show(ui, |ui| {
             ui.weak("Kind");
-            ui.label(browser::kind_for(&n.name, n.is_dir));
+            ui.label(browser::kind_of(n));
             ui.end_row();
-            ui.weak("Size");
-            ui.add(egui::Label::new(sizes_text(n, self.metric)).wrap());
-            ui.end_row();
+            if is_app {
+                // Its size and files are among the app's facts.
+                super::preview::app_facts(ui, app_info.as_deref());
+            } else {
+                ui.weak("Size");
+                ui.add(egui::Label::new(sizes_text(n, self.metric)).wrap());
+                ui.end_row();
+            }
             if !n.is_dir {
                 ui.weak("Bytes");
                 ui.label(group(n.logical));
                 ui.end_row();
             }
-            if n.is_dir {
+            if n.is_dir && !is_app {
                 ui.weak("Files");
                 ui.label(group(n.files));
                 ui.end_row();
@@ -521,7 +542,15 @@ impl App {
         use crate::kit::{self, Icon, Kind};
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-            if kit::button(ui, Kind::Secondary, Some(Icon::External), "Open").on_hover_text("Open it with its usual app").clicked() {
+            let app = self.map_target().is_some_and(|(_, e)| crate::apps::is_app(e.bundle)) && !crate::fsys::remote::is_remote(path);
+            if app {
+                // An application: launch it (never just by selecting or previewing it).
+                let r = ui.add_enabled_ui(crate::apps::CAN_LAUNCH, |ui| kit::button(ui, Kind::Primary, Some(Icon::External), "Launch Application")).inner;
+                if r.clicked() {
+                    self.launch_apps(vec![path.to_path_buf()]);
+                }
+                r.on_hover_text("Open it, as Finder would").on_disabled_hover_text("This is a macOS application: it can only be launched on a Mac.");
+            } else if kit::button(ui, Kind::Secondary, Some(Icon::External), "Open").on_hover_text("Open it with its usual app").clicked() {
                 let p = path.to_path_buf();
                 self.files.spawn(move || crate::actions::open(&p));
             }

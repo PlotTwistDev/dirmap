@@ -39,6 +39,35 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # The AI engine's Vulkan part (graphics cards on Windows and Linux) is built with the
+      # Vulkan SDK. Only the build needs it: the app loads Vulkan from the graphics drivers, and
+      # runs models on the processor where there are none.
+      - name: Vulkan SDK (Windows, Linux)
+        if: runner.os != 'macOS'
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: 1.4.313.0
+          cache: true
+
+      # Visual Studio's own build files can't build the Vulkan part's shader generator; Ninja,
+      # with the compiler set up for it, can.
+      - name: Ninja and the compiler for CMake (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Use Ninja (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ninja --no-progress -y
+          Add-Content $env:GITHUB_ENV "CMAKE_GENERATOR=Ninja"
+
+      # llama-cpp-sys-2 copies its libraries to a folder it works out from Cargo's build folder,
+      # which newer Cargo puts a level deeper: make sure that folder exists. (Filescape's own
+      # build script puts the libraries where they're needed.)
+      - name: Folders for the AI engine's build
+        shell: bash
+        run: mkdir -p target/release/build/deps target/debug/build/deps
+
       - name: Test
         run: cargo test --release
 
@@ -58,10 +87,16 @@ jobs:
         shell: pwsh
         run: |
           cargo build --release
-          New-Item -ItemType Directory dist | Out-Null
-          Copy-Item target/release/filescape.exe dist/Filescape.exe
-          Compress-Archive -Path dist/Filescape.exe, README.md -DestinationPath dist/Filescape-${{ matrix.name }}.zip
-          Remove-Item dist/Filescape.exe
+          New-Item -ItemType Directory dist, dist/Filescape | Out-Null
+          Copy-Item target/release/filescape.exe dist/Filescape/Filescape.exe
+          Copy-Item README.md dist/Filescape/
+          # The AI engine, beside the program: llama.cpp, and a processor build for each kind of
+          # processor plus Vulkan, which Filescape loads when it starts.
+          Copy-Item target/release/*.dll dist/Filescape/
+          if (-not (Test-Path dist/Filescape/ggml-vulkan.dll)) { throw "no Vulkan engine" }
+          Get-ChildItem dist/Filescape | Format-Table Name, Length
+          Compress-Archive -Path dist/Filescape -DestinationPath dist/Filescape-${{ matrix.name }}.zip
+          Remove-Item -Recurse dist/Filescape
 
       - name: Build (Linux)
         if: runner.os == 'Linux'
@@ -69,12 +104,20 @@ jobs:
           cargo build --release
           # The build for sale must never contain the test-serial mode.
           if grep -q FILESCAPE_LICENCE_DEV target/release/filescape; then echo "test mode in release build" >&2; exit 1; fi
+          # The AI engine's libraries: llama.cpp, a processor build for each kind of x86 processor,
+          # and Vulkan. Debug information stripped: crash.log only needs the program's own.
+          # (build.rs put them beside the program.)
+          mkdir engine
+          find target/release -maxdepth 1 -type f \( -name 'libllama.so.0' -o -name 'libggml*.so.0' -o -name 'libggml-*.so' \) -exec cp {} engine/ \;
+          strip --strip-unneeded engine/*
+          test -f engine/libggml-vulkan.so && ls -l engine
           # AppImage, .deb, .rpm and the plain .tar.gz. Built on 22.04 so they run on glibc 2.35+.
           sudo apt-get update -qq && sudo apt-get install -y -qq rpm desktop-file-utils
-          packaging/linux/package.sh target/release/filescape dist
+          packaging/linux/package.sh target/release/filescape dist engine
           # The packages must install and start their program.
           sudo apt-get install -y -qq ./dist/Filescape-linux.deb
           filescape --help
+          ldd /usr/bin/filescape | tee /dev/stderr | grep -q 'lib/filescape/libllama.so'
           rpm -qpl dist/Filescape-linux.rpm | grep -qx /usr/bin/filescape
           ./dist/Filescape-linux.AppImage --appimage-extract-and-run --help
 

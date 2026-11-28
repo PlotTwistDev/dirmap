@@ -1,10 +1,17 @@
 //! Bundles the help pages in `docs/src` (Markdown and images) into the program, so the Help
-//! Centre works offline and always matches the version it ships with.
+//! Centre works offline and always matches the version it ships with. Also puts the AI engine's
+//! libraries (Windows, Linux) beside the program, and tells the Linux program to look there.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    // On Linux the AI engine's libraries sit beside the program (the .tar.gz) or in
+    // ../lib/filescape from it (the .deb, .rpm and AppImage): look for them there.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN:$ORIGIN/../lib/filescape");
+    }
+    engine_beside_program();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs").join("src");
     // A directory here makes Cargo rerun this script when anything inside it changes.
     println!("cargo:rerun-if-changed=docs/src");
@@ -95,4 +102,49 @@ fn has_ext(p: &Path, ext: &str) -> bool {
 fn rel(root: &Path, p: &Path) -> String {
     let r = p.strip_prefix(root).unwrap();
     r.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
+}
+
+/// Copies the AI engine's libraries (llama.cpp, ggml and its backends: a processor build for
+/// each kind of x86 processor, and Vulkan) from where llama-cpp-sys-2 built them to beside the
+/// program and its tests, so `target/release/filescape` runs as it is and packaging finds them in
+/// one place. Only on Windows and Linux; the Mac build has the engine built in.
+fn engine_beside_program() {
+    println!("cargo:rerun-if-env-changed=DEP_LLAMA_ROOT");
+    let Ok(root) = std::env::var("DEP_LLAMA_ROOT") else { return };
+    let windows = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
+    let root = PathBuf::from(root);
+    // target/<profile>: the folder above `build`, wherever OUT_DIR sits under it.
+    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let Some(profile) = out.ancestors().find(|a| a.file_name().is_some_and(|n| n == "build")).and_then(Path::parent) else { return };
+    let mut files = Vec::new();
+    let (libs, ok): (PathBuf, fn(&str) -> bool) = if windows {
+        (root.join("bin"), |n| n.ends_with(".dll"))
+    } else {
+        // The names the program asks for (libllama.so.0); the files they point to are copied.
+        (root.join("lib"), |n| (n.starts_with("libllama") || n.starts_with("libggml")) && n.ends_with(".so.0"))
+    };
+    for dir in [libs, root.join("backends")] {
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if ok(&name) || (dir.ends_with("backends") && (name.ends_with(".so") || name.ends_with(".dll"))) {
+                files.push(e.path());
+            }
+        }
+    }
+    for dest in [profile.to_path_buf(), profile.join("deps")] {
+        for f in &files {
+            let to = dest.join(f.file_name().unwrap());
+            // A link left by an earlier build would be written through: replace it.
+            if to.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
+                let _ = std::fs::remove_file(&to);
+            }
+            let same = |a: &Path, b: &Path| match (std::fs::metadata(a), std::fs::metadata(b)) {
+                (Ok(x), Ok(y)) => x.len() == y.len() && x.modified().ok() <= y.modified().ok(),
+                _ => false,
+            };
+            if !same(f, &to) {
+                let _ = std::fs::copy(f, &to);
+            }
+        }
+    }
 }

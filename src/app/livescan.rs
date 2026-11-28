@@ -311,7 +311,8 @@ impl App {
         let wanted = self.settings.watch_changes
             && self.tree.is_some()
             && !crate::fsys::remote::is_remote(&self.scanned_path)
-            && !crate::fsys::archive::inside(&self.scanned_path);
+            && !crate::fsys::archive::inside(&self.scanned_path)
+            && !self.ejecting(&self.scanned_path);
         let key = (self.scanned_path.clone(), self.scanned_at);
         if !wanted {
             self.live = None;

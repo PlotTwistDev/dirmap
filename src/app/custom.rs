@@ -266,14 +266,14 @@ impl App {
         let filter = self.filter.clone();
         let (f, c) = (filter.clone(), cancel.clone());
         std::thread::spawn(move || {
-            let keep = |n: &Node| f.matches(n);
+            let keep = |n: &Node, in_app: bool| f.matches_in(n, in_app);
             let done = if want_tree {
-                subset::subset(&tree, &keep, &c).map(|(node, back)| {
+                subset::subset_in(&tree, &keep, &c).map(|(node, back)| {
                     let exts = scan::ext_stats(&node);
                     FilterDone::Subset(node, back, exts)
                 })
             } else {
-                subset::hits(&tree, &keep, &c).map(FilterDone::Hits)
+                subset::hits_ctx(&tree, &keep, &c).map(FilterDone::Hits)
             };
             if let Some(d) = done.filter(|_| !c.load(Ordering::Relaxed)) {
                 let _ = tx.send(d);

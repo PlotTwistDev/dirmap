@@ -8,6 +8,13 @@ Open the [AI Models workspace](ai-models.md) (**Ctrl+4**, **⌘4** on a Mac) and
 in the toolbar. Press **Library** to go back to the list of models. You can also select a model
 in the library and press **💬 Ask AI** beside **🔍 Inspect**.
 
+Before the first question, Ask AI offers some places to start: **Understand a document**, **Explore
+a folder**, **Explain a script**, **Analyse a log**, **Summarise a folder of documents**,
+**Understand storage use** (after a scan in Storage Analysis) and **Ask about my AI models**. Each
+one asks you to pick the file or folder, attaches it and writes a first question you can change
+before sending. Only models that write text are listed: image, audio and embedding models can't
+chat.
+
 ## Choosing a model
 
 The left side lists the models Filescape can run: GGUF models, the kind Ollama and LM Studio
@@ -28,9 +35,12 @@ depending on the model's size and the disk. **Unload** frees the memory again.
   question gets the same answer; high is more varied, and more likely to wander.
 
 On a Mac with Apple silicon, models run on the graphics chip. On Windows and Linux they run on the
-processor, which needs one with AVX2 (nearly every PC made since 2015). A small model of 1 to 4
-billion parameters answers at a comfortable reading speed on most computers; larger ones are
-slower.
+graphics card if its drivers support Vulkan (most cards from NVIDIA, AMD and Intel made since
+2016 do): as much of the model as fits on the card, the rest on the processor. Without Vulkan
+they run on the processor, using the fastest instructions it has. The line under the model list
+says where the loaded model runs. On an Intel Mac models run on the processor, which needs AVX2. A
+small model of 1 to 4 billion parameters answers at a comfortable reading speed on most
+computers; larger ones are slower.
 
 ## Getting a small model
 
@@ -75,6 +85,9 @@ About This…** (**Ask AI About These…** for several items in Files). Ask AI o
 attached to your next question, shown above the question box as **📎 About …**. Ask something like
 "What is this folder for?" or "What could I delete here?".
 
+From inside Ask AI, press **Attach…** under **Send** and choose **A file…** or **A folder…**, or
+drop files and folders from your file manager onto Ask AI.
+
 What the model is told:
 
 - The item's path, whether it's a file or folder, its size and when it was last changed.
@@ -89,6 +102,13 @@ What the model is told:
 Press **×** to ask without them. After you send the question, **📎 About …** stays above it; hover
 it to see exactly what the model was told. Follow-up questions in the same chat can refer back to
 it.
+
+Under the answer, **Based on** lists the files and folders it was given, and whether the model saw
+only their names, sizes and dates or the text of the files too. Click one to show it in Files.
+
+What comes from your files is marked off from your question, and the model is told it is material
+to answer about, not instructions. A document that says "ignore your instructions" is read as part
+of the document. Small models can still be misled by what they read, so check answers that matter.
 
 Nothing is sent anywhere: the model runs on this computer. Ask AI never deletes, moves or renames
 anything, whatever the answer says.
