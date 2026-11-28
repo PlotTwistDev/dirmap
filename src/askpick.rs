@@ -50,15 +50,26 @@ fn cost(s: &str) -> usize {
 /// What `text` that fits in `room` best answers `question`. `number` puts each line's number in
 /// front of it, so the model can cite it.
 pub fn pick(text: &str, room: usize, question: &str, number: bool) -> Picked {
+    pick_more(text, room, question, number, &[])
+}
+
+/// Like [`pick`], leaving out the lines in `given` (first and last, from 1): what the model was
+/// given before, when it's asked to look at the rest.
+pub fn pick_more(text: &str, room: usize, question: &str, number: bool, given: &[(usize, usize)]) -> Picked {
     let lines: Vec<&str> = text.lines().collect();
     let total = lines.len();
     let line = |i: usize| if number { format!("{}: {}", i + 1, lines[i]) } else { lines[i].to_string() };
     let all: usize = (0..total).map(|i| cost(&line(i)) + 1).sum();
-    if all <= room {
+    if all <= room && given.is_empty() {
         let text = (0..total).map(line).collect::<Vec<_>>().join("\n");
         return Picked { text, ranges: if total == 0 { Vec::new() } else { vec![(1, total)] }, total, cut: false };
     }
-    let chunks = chunks(&lines);
+    // Passages already given are left out altogether.
+    let seen = |(a, b): (usize, usize)| given.iter().any(|&(x, y)| x <= a + 1 && b < y);
+    let chunks: Vec<(usize, usize)> = chunks(&lines).into_iter().filter(|&c| !seen(c)).collect();
+    if chunks.is_empty() {
+        return Picked { text: String::new(), ranges: Vec::new(), total, cut: false };
+    }
     let want = terms(question);
     let scores: Vec<usize> = chunks.iter().map(|&(a, b)| score(&lines[a..=b], &want)).collect();
     let spread = spread_order(chunks.len());
@@ -69,21 +80,48 @@ pub fn pick(text: &str, room: usize, question: &str, number: bool) -> Picked {
         }
         r
     };
-    // The start always goes first: titles and definitions are there. Then the best matches, and
-    // where nothing matches (or among equal matches), passages spread through the document.
+    // The start goes first: titles and definitions are there. Then the best matches, and
+    // where nothing matches (or among equal matches), passages spread through the document. When
+    // the start would take more than half the room from passages that match, it takes its turn.
+    let gap = cost("[…]") + 1;
+    let size = |(a, b): (usize, usize)| (a..=b).map(|k| cost(&line(k)) + 1).sum::<usize>() + gap;
+    let matches = scores.iter().skip(1).any(|&s| s > 0);
+    let first = chunks[0].0 == 0 && (!matches || size(chunks[0]) <= room / 2);
     let mut order: Vec<usize> = (1..chunks.len()).collect();
     order.sort_by_key(|&i| (std::cmp::Reverse(scores[i]), rank[i]));
-    order.insert(0, 0);
-    let gap = cost("[…]") + 1;
+    if first {
+        order.insert(0, 0);
+    } else {
+        order.push(0);
+        order.sort_by_key(|&i| (std::cmp::Reverse(scores[i]), rank[i]));
+    }
     let mut left = room;
     let mut chosen = vec![false; chunks.len()];
+    // Parts of passages that match but don't fit whole: the matching line and its neighbours.
+    let mut parts: Vec<(usize, usize)> = Vec::new();
     for i in order {
         let (a, b) = chunks[i];
-        let c: usize = (a..=b).map(|k| cost(&line(k)) + 1).sum::<usize>() + gap;
+        let c = size((a, b));
         if c <= left {
             chosen[i] = true;
             left -= c;
-        } else if i == 0 {
+        } else if scores[i] > 0 && !(i == 0 && first) {
+            let Some(hit) = (a..=b).find(|&k| score(&lines[k..=k], &want) > 0) else { continue };
+            let (mut x, mut y) = (hit, hit);
+            if size((x, y)) > left {
+                continue;
+            }
+            // Grow around it, a line after then a line before, while it fits.
+            loop {
+                let grew = [(x, (y + 1).min(b)), (x.saturating_sub(1).max(a), y)].into_iter().find(|&r| r != (x, y) && size(r) <= left);
+                match grew {
+                    Some(r) => (x, y) = r,
+                    None => break,
+                }
+            }
+            left -= size((x, y));
+            parts.push((x, y));
+        } else if i == 0 && first {
             // A huge opening paragraph: as many of its lines as fit.
             let mut end = a;
             let mut used = gap;
@@ -107,7 +145,9 @@ pub fn pick(text: &str, room: usize, question: &str, number: bool) -> Picked {
             return Picked { text, ranges: vec![(1, 1)], total, cut: true };
         }
     }
-    let runs: Vec<(usize, usize)> = chunks.iter().zip(&chosen).filter(|(_, c)| **c).map(|(r, _)| *r).collect();
+    let mut runs: Vec<(usize, usize)> = chunks.iter().zip(&chosen).filter(|(_, c)| **c).map(|(r, _)| *r).collect();
+    runs.extend(parts);
+    runs.sort_unstable();
     finish(&runs, total, &line)
 }
 
@@ -328,6 +368,32 @@ mod tests {
         let p = pick(&t, 100, "", true);
         assert!(p.start_only() && p.cut, "{p:?}");
         assert!(p.text.starts_with("1: yyy") && cost(&p.text) <= 100);
+    }
+
+    #[test]
+    fn a_tight_room_goes_to_the_match_before_the_start() {
+        let mut t: Vec<String> = (0..400).map(|i| format!("plain filler words on line {i}")).collect();
+        t[300] = "Commercial use is allowed without royalties.".into();
+        let t = t.join("\n");
+        for room in [700, 300] {
+            let p = pick(&t, room, "Can I use these commercially?", true);
+            assert!(p.ranges.iter().any(|&(a, b)| a <= 301 && 301 <= b), "{room}: {:?}", p.ranges);
+            assert!(cost(&p.text) <= room, "{room}");
+        }
+    }
+
+    #[test]
+    fn the_rest_leaves_out_what_was_given() {
+        let t = licence();
+        let first = pick(&t, 900, "Can I use this commercially?", true);
+        let rest = pick_more(&t, 900, "Can I use this commercially?", true, &first.ranges);
+        assert!(!rest.ranges.is_empty());
+        for &(a, b) in &rest.ranges {
+            assert!(first.ranges.iter().all(|&(x, y)| b < x || a > y), "{:?} overlaps {:?}", rest.ranges, first.ranges);
+        }
+        // Everything given: nothing left.
+        let all = pick_more(&t, 100_000, "x", true, &[(1, t.lines().count())]);
+        assert!(all.ranges.is_empty() && all.text.is_empty());
     }
 
     #[test]

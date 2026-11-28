@@ -344,7 +344,13 @@ impl App {
         let avail = ui.available_height();
         let mut ask_now: Option<(String, bool)> = None;
         let mut reveal: Option<PathBuf> = None;
-        egui::ScrollArea::vertical().id_salt("files-ask-chat").auto_shrink(false).stick_to_bottom(true).max_height((avail - footer_h).max(80.0)).show(ui, |ui| {
+        let mut msg_act = None;
+        let jump_id = egui::Id::new("files-ask-jump");
+        let mut scroll = egui::ScrollArea::vertical().id_salt("files-ask-chat").auto_shrink(false).stick_to_bottom(true).max_height((avail - footer_h).max(80.0));
+        if let Some(o) = ask::jump_offset(ui, jump_id) {
+            scroll = scroll.vertical_scroll_offset(o);
+        }
+        let out = scroll.show(ui, |ui| {
             let c = &self.ask.side;
             if c.conversation.is_empty() && c.answering.is_none() {
                 if let Some(p) = ctx.first() {
@@ -389,17 +395,22 @@ impl App {
             let model = loaded.clone().unwrap_or_else(|| "Model".into());
             for (i, m) in c.conversation.iter().enumerate() {
                 let about = c.attached.get(&i).map(|a| (a.label.as_str(), a.text.as_str()));
-                ask::message(ui, i, m.role, &m.text, &model, false, about);
+                let last = self.ask.phase == Phase::Idle && i + 1 == c.conversation.len();
+                if let Some(a) = ask::message(ui, i, m.role, &m.text, &model, false, last, about) {
+                    msg_act = Some(a);
+                }
                 if m.role == Role::Assistant
-                    && let Some(a) = (0..i).rev().find_map(|q| c.attached.get(&q))
+                    && let Some(q) = (0..i).rev().find(|q| c.attached.contains_key(q))
+                    && let Some(a) = c.attached.get(&q)
                     && !a.paths.is_empty()
+                    && let Some(act) = ask::sources(ui, i, q, a, &m.text, last, &mut reveal)
                 {
-                    ask::sources(ui, i, a, &m.text, &mut reveal);
+                    msg_act = Some(act);
                 }
                 ui.add_space(18.0);
             }
             if here && let Some(a) = &c.answering {
-                ask::message(ui, c.conversation.len(), Role::Assistant, a, &model, true, None);
+                ask::message(ui, c.conversation.len(), Role::Assistant, a, &model, true, false, None);
             }
             if here && c.reading.is_some() {
                 ui.horizontal(|ui| {
@@ -408,6 +419,7 @@ impl App {
                 });
             }
         });
+        ask::jump_button(ui, &out, jump_id);
 
         // The question box.
         let bottom_top = ui.cursor().top();
@@ -446,11 +458,12 @@ impl App {
                 (true, Some(s)) => asksuggest::hint(s),
                 (true, None) => "Ask a question…",
             };
+            let rows = ask::draft_rows(&self.ask.side.draft, ui.available_width());
             let r = ui.add_enabled(
                 ready,
                 egui::TextEdit::multiline(&mut self.ask.side.draft)
                     .hint_text(hint)
-                    .desired_rows(2)
+                    .desired_rows(rows)
                     .desired_width(ui.available_width())
                     .frame(egui::Frame::NONE)
                     .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))),
@@ -464,20 +477,17 @@ impl App {
                     ui.label(egui::RichText::new(format!("{n} {} in context", if n == 1 { "item" } else { "items" })).size(11.5).color(t.weak));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if answering {
-                        stop = ui.button("■ Stop").on_hover_text("Stop the answer here").clicked();
-                    } else if ui.add_enabled(ready && !self.ask.side.draft.trim().is_empty() && self.ask.phase == Phase::Idle, egui::Button::new("Send")).clicked() {
-                        send = true;
+                    let can = ready && !self.ask.side.draft.trim().is_empty() && self.ask.phase == Phase::Idle;
+                    let (s, st) = ask::send_button(ui, can, answering);
+                    send |= s;
+                    stop |= st;
+                    ui.add_space(4.0);
+                    if kit::icon_button(ui, Icon::External, "Open in AI Models: carry on this conversation there, with more room. It replaces the conversation there.").clicked() {
+                        expand = true;
                     }
-                    let r = kit::icon_button(ui, Icon::More, "More");
-                    egui::Popup::menu(&r).show(|ui| {
-                        if ui.add_enabled(!fresh && !answering, egui::Button::new("New chat")).clicked() {
-                            new_chat = true;
-                        }
-                        if ui.button("Open in AI Models").on_hover_text("Carry on this conversation in the AI Models workspace, with more room. It replaces the conversation there.").clicked() {
-                            expand = true;
-                        }
-                    });
+                    if ui.add_enabled_ui(!fresh && !answering, |ui| kit::icon_button(ui, Icon::Plus, "New chat")).inner.clicked() {
+                        new_chat = true;
+                    }
                 });
             });
         });
@@ -495,6 +505,9 @@ impl App {
         }
         if stop {
             self.stop_answer(Which::Side);
+        }
+        if let Some(a) = msg_act {
+            self.answer_act(Which::Side, a);
         }
         if send {
             // Follow-ups after the first question keep the context the conversation already has.

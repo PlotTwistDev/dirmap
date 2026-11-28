@@ -435,6 +435,12 @@ fn render(parts: Vec<Part>, readable: Vec<PathBuf>, budget: usize, whole: bool) 
 /// A document too long for its share is cut to the passages that best fit `question` (see
 /// [`crate::askpick`]), and both the model and the user are told which parts went in.
 pub fn contents(files: &[PathBuf], budget: usize, question: &str) -> Read {
+    contents_more(files, budget, question, &[])
+}
+
+/// [`contents`], leaving out of each text file the lines in `given` for it: what the model was
+/// given before, when it's asked to look at the rest.
+pub fn contents_more(files: &[PathBuf], budget: usize, question: &str, given: &[(PathBuf, Vec<(usize, usize)>)]) -> Read {
     let mut out = Read::default();
     let mut skipped = Vec::new();
     for (k, f) in files.iter().enumerate() {
@@ -503,7 +509,7 @@ pub fn contents(files: &[PathBuf], budget: usize, question: &str) -> Read {
             }
             None => {}
         }
-        let Some(t) = read_text(f, (room * 8).clamp(SCAN_MIN, SCAN_MAX)) else {
+        let Some(t) = read_text(f, SCAN_MAX) else {
             out.text.push_str(&format!("\n{name} isn't a text file, so its contents weren't read.\n"));
             note("not a text file, so it wasn't read".into());
             continue;
@@ -512,16 +518,26 @@ pub fn contents(files: &[PathBuf], budget: usize, question: &str) -> Read {
         let unread = t.len() as u64 + 4 < md.len();
         let t = if unread { t.rsplit_once('\n').map_or(t.as_str(), |(a, _)| a).to_string() } else { t };
         // Lines are numbered with their real numbers so the model can point at them.
-        let p = crate::askpick::pick(&t, room, question, true);
-        let part = if p.whole() && !unread {
+        let before = given.iter().find(|(g, _)| g == f).map_or(&[][..], |(_, r)| r.as_slice());
+        let p = crate::askpick::pick_more(&t, room, question, true, before);
+        if !before.is_empty() && p.ranges.is_empty() {
+            out.text.push_str(&format!("\nAll of {name} that was read has been given already.\n"));
+            note("nothing left that wasn't given before".into());
+            continue;
+        }
+        // Past a long file's first part, the lines aren't counted.
+        let what = if unread { p.describe().replacen(" of ", " of the first ", 1) } else { p.describe() };
+        let part = if !before.is_empty() {
+            note(format!("included {what}, parts not given before"));
+            format!(" (more of it: {what}, parts not given before; […] marks lines left out)")
+        } else if p.whole() && !unread {
             String::new()
         } else if p.start_only() {
-            note(if p.cut { "read the start only".to_string() } else { format!("read the start only ({})", p.describe()) });
+            note(if p.cut { "read the start only".to_string() } else { format!("read the start only ({what})") });
             " (the start only)".to_string()
         } else {
-            let of = if unread { " of the part of the file looked at" } else { "" };
-            note(format!("included only the parts most related to the question{of}: {}", p.describe()));
-            format!(" (only the parts most related to the question, {}{of}; […] marks lines left out)", p.describe())
+            note(format!("included only the parts most related to the question: {what}"));
+            format!(" (only the parts most related to the question, {what}; […] marks lines left out)")
         };
         out.lines.push((f.clone(), p.ranges.clone()));
         out.text.push_str(&format!("\nContents of {name}{part}, lines numbered:\n```\n{}\n```\n", p.text));

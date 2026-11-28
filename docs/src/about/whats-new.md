@@ -41,6 +41,11 @@
   warranties), or passages from all through it for a general question, and says which lines
   went in. Small documents go in whole, and Ask AI works out the room from the context left after
   the conversation and the answer.
+- Under each answer: **Copy**, **Copy as Markdown**, **Save** and **Write again**. When a file was
+  only partly given, **Review the rest** asks again with the parts the model hasn't seen. The
+  question box grows as you type, has a round Send button that turns into Stop, and **Jump to
+  latest** brings you back to the end after scrolling up. A question too long for the model's
+  context is sent again with less of the file instead of failing.
 - Gemma 4 and gpt-oss thinking is shown under **Thought about it** instead of in the answer, and
   line references like `[12]` are checked when the question is about one file.
 - Large folders: Ask AI describes a folder's shape first, the folders inside it up to three

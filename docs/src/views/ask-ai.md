@@ -69,9 +69,18 @@ the model, delete its file from the folder above.
 
 ## Asking
 
-Type a question and press **Enter**, or **Send**. **Shift+Enter** starts a new line. The answer
-appears as it's written; **■ Stop** ends it early. **New chat** starts a new conversation with
-the same model, and **Copy** under an answer copies it.
+Type a question and press **Enter**, or the round **Send** button. **Shift+Enter** starts a new
+line, and the box grows with what you type, up to eight lines. The answer appears as it's
+written; while it's being written the Send button becomes **Stop**, which ends it early. **New
+chat** starts a new conversation with the same model. **+** in the question box asks about a
+file or folder, and the box says how many items the conversation is about.
+
+Under each answer is a row of buttons: **Copy** (the answer as plain text), **Copy as Markdown**
+(with its formatting marks), **Save** (as a Markdown or text file of your choosing) and, under the
+latest answer, **Write again**, which asks the model for a new answer to the same question.
+
+If you scroll up while an answer is being written, the conversation stays where you are; **Jump
+to latest** takes you back to the end.
 
 Your questions sit on the right in a tinted bubble, with what they were about beside **You**;
 hover that to see exactly what the model was told. Answers start under the model's name and are
@@ -111,10 +120,10 @@ From the top, the tab shows:
   text, code, PDF, EPUB, Word, PowerPoint, OpenDocument and Excel files. A picture gets
   **Describe this picture** and **What text is in it?** when the loaded model can see images
   (see [Asking about pictures](#asking-about-pictures)).
-- **The conversation**, with **Copy** and **Based on** under each answer, as below.
-- **The question box**. **Enter** sends; follow-up questions keep what the chat is about. **…**
-  has **New chat** and **Open in AI Models**, which carries the conversation on in the AI Models
-  workspace with more room (it replaces the conversation there).
+- **The conversation**, with the answer buttons and **Based on** under each answer, as below.
+- **The question box**. **Enter** sends; follow-up questions keep what the chat is about. Beside
+  Send, **+** starts a new chat and **Open in AI Models** carries the conversation on in the AI
+  Models workspace with more room (it replaces the conversation there).
 
 **Include the file's contents** is ticked for a single file Filescape can read, so its text goes
 with the first question. Folders are described by their names, sizes and dates, not by reading
@@ -195,7 +204,7 @@ Right-click a file or folder in Storage Analysis and choose **💬 Ask AI About 
 attached to your next question, shown above the question box as **📎 About …**. Ask something like
 "What is this folder for?" or "What could I delete here?".
 
-From inside Ask AI, press **Attach…** under **Send** and choose **A file…** or **A folder…**, or
+From inside Ask AI, press **+** in the question box and choose **A file…** or **A folder…**, or
 drop files and folders from your file manager onto Ask AI.
 
 What the model is told:
@@ -241,6 +250,14 @@ to 6 of 40"), a file not read, files left unread for lack of room, or a large fo
 only partly listed ("Samples: listed 40 of 1,250 items by name, the rest only counted"). The
 answer covers only what the model was given. Hover the line to see everything; ask about fewer
 items, or one on its own, to give it more room.
+
+When text files were only partly given, **Review the rest** beside the line asks the question
+again with the parts of them the model hasn't seen yet, in place of the parts it has, so the
+rest gets the room. Press it again to keep going; when nothing is left, the line says so.
+
+If a file's text turns out denser than expected and the question doesn't fit in the model's
+context, Filescape reads less of it and sends the question again by itself, rather than stopping
+with an error.
 
 Ask AI asks the model to cite the files it relies on, like `[config.yaml:12]`, and sends text
 files with their lines numbered so it can. Under the answer, **Cited** lists those references,
