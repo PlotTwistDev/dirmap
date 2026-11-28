@@ -215,7 +215,7 @@ impl App {
                         let i = c.conversation.len().saturating_sub(1);
                         if let Some(a) = c.attached.get_mut(&i) {
                             a.text.push_str(&read.text);
-                            a.notes = read.notes;
+                            a.notes.extend(read.notes);
                         }
                         self.dispatch(w);
                     }
@@ -537,7 +537,7 @@ impl App {
         if let Some(About { facts: Some(f), read, .. }) = c.about.take() {
             let i = c.conversation.len() - 1;
             let reads = read && !f.readable.is_empty();
-            c.attached.insert(i, Attached { label: f.label.clone(), text: f.text.clone(), paths: f.paths.clone(), read: reads, measured: f.text.len(), notes: Vec::new() });
+            c.attached.insert(i, Attached { label: f.label.clone(), text: f.text.clone(), paths: f.paths.clone(), read: reads, measured: f.text.len(), notes: f.notes.clone() });
             if reads {
                 reading = Some(f.readable);
             }
@@ -956,8 +956,8 @@ pub(super) fn sources(ui: &mut egui::Ui, i: usize, a: &Attached, reveal: &mut Op
     if !a.notes.is_empty() {
         let first = a.notes.iter().take(3).cloned().collect::<Vec<_>>().join(" · ");
         let more = if a.notes.len() > 3 { format!(" · and {} more", a.notes.len() - 3) } else { String::new() };
-        ui.label(egui::RichText::new(format!("⚠ Partly read: {first}{more}")).size(11.0).color(t.warn))
-            .on_hover_text(format!("The answer is based only on what was read. Ask about a file on its own to give it more room.\n\n{}", a.notes.join("\n")));
+        ui.label(egui::RichText::new(format!("⚠ Partly included: {first}{more}")).size(11.0).color(t.warn))
+            .on_hover_text(format!("The answer is based only on what the model was given. Ask about fewer items, or a file or folder on its own, to give it more room.\n\n{}", a.notes.join("\n")));
     }
     let measured = &a.text[..a.measured.min(a.text.len())];
     if !measured.trim().is_empty() {
@@ -1158,6 +1158,7 @@ fn models_facts(list: &[Model]) -> askabout::Facts {
         text,
         readable: Vec::new(),
         paths: Vec::new(),
+        notes: Vec::new(),
     }
 }
 

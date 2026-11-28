@@ -145,7 +145,9 @@ What goes with each:
 
 - Folder questions use the folder's names, sizes and dates, never the files' contents, except
   **Summarise Documents**, which reads the text files and documents directly in the folder (not in
-  folders inside it), smallest first, as many as fit. **Based on** lists them.
+  folders inside it), smallest first. Room a short document doesn't use goes to the next; when
+  the room runs out, the rest aren't read and **⚠ Partly included** names them. **Based on**
+  lists them.
 - **Find Related Files** also lists what sits beside the folder in its parent folder.
 - When Storage Analysis has scanned the folder, its sizes count everything inside, with a
   breakdown by file type. Otherwise only what the folder holds directly is listed.
@@ -168,9 +170,15 @@ drop files and folders from your file manager onto Ask AI.
 What the model is told:
 
 - The item's path, whether it's a file or folder, its size and when it was last changed.
-- For a folder, what it holds directly, largest first, until the room for it runs out, then how
-  many more items there are. From Storage Analysis, sizes include everything inside folders, and
-  there's also a breakdown by file type.
+- For a folder, its shape first: the folders inside it, up to three levels down (largest first
+  from Storage Analysis, by name otherwise, with how many items each holds). This takes up to a
+  third of the room for the folder, and is left out when nothing is nested.
+- Then what the folder holds directly, largest first, until the room for it runs out, then how
+  many more items there are and their total size. From Storage Analysis, sizes include
+  everything inside folders, and there's also a breakdown by file type. A folder with more than
+  5,000 items directly in it has only the first 5,000 looked at.
+- Nothing is opened to describe a folder, and Filescape looks no deeper than three levels, so a
+  question about a large folder is answered quickly.
 - **Not** what's inside the files, unless you tick **Include the file's contents**. That box
   appears when you ask about files, and applies to that one question: Filescape then reads the
   start of each chosen text file, or the text of a PDF, EPUB book, Word, PowerPoint, OpenDocument
@@ -186,10 +194,12 @@ it.
 Under the answer, **Based on** lists the files and folders it was given, and whether the model saw
 only their names, sizes and dates or the text of the files too. Click one to show it in Files.
 
-When a file was only partly read, or not read at all, a **⚠ Partly read** line under **Based on**
-says so, such as "report.pdf: read the start only, pages 1 to 6 of 40". The answer covers only
-what was read. Hover the line for every file; ask about a long file on its own to give it more
-room.
+When the model wasn't given everything, a **⚠ Partly included** line under **Based on** says
+what was left out: a file read only in part ("report.pdf: read the start only, pages 1 to 6 of
+40"), a file not read, files left unread for lack of room, or a large folder whose items were
+only partly listed ("Samples: listed 40 of 1,250 items by name, the rest only counted"). The
+answer covers only what the model was given. Hover the line to see everything; ask about fewer
+items, or one on its own, to give it more room.
 
 **Measured by Filescape** under an answer opens the names, sizes, dates and counts Filescape read
 from the disk itself. Those are facts; the answer above them is the model's interpretation of

@@ -44,6 +44,9 @@ pub struct Facts {
     pub readable: Vec<PathBuf>,
     /// The files and folders asked about, listed as the answer's sources.
     pub paths: Vec<PathBuf>,
+    /// A line for the user on each folder only partly described, so an answer never seems to
+    /// cover more than the model was told.
+    pub notes: Vec<String>,
 }
 
 /// Where what came from the user's files starts and ends in a message to the model. The system
@@ -67,8 +70,9 @@ pub fn from_disk(paths: &[PathBuf], budget: usize) -> Facts {
         if !it.is_dir && !it.online_only && md.is_file() {
             readable.push(p.clone());
         }
-        let inside = it.is_dir.then(|| listing(p));
-        parts.push(Part { path: p.clone(), item: it, inside, types: None });
+        let (inside, unlisted) = if it.is_dir { let (v, more) = listing(p); (Some(v), more) } else { (None, false) };
+        let outline = if it.is_dir { outline_disk(p) } else { Vec::new() };
+        parts.push(Part { path: p.clone(), item: it, inside, types: None, outline, unlisted });
     }
     render(parts, readable, budget, false)
 }
@@ -88,7 +92,8 @@ pub fn from_tree(nodes: &[(PathBuf, &Node)], budget: usize) -> Facts {
         } else {
             (None, None)
         };
-        parts.push(Part { path: p.clone(), item: it, inside, types });
+        let outline = if n.is_dir { outline_tree(n) } else { Vec::new() };
+        parts.push(Part { path: p.clone(), item: it, inside, types, outline, unlisted: false });
     }
     render(parts, readable, budget, true)
 }
@@ -98,6 +103,10 @@ struct Part {
     item: Item,
     inside: Option<Vec<Item>>,
     types: Option<Vec<(String, u64, u64)>>,
+    /// The folders below a folder, a few levels down, as indented lines.
+    outline: Vec<String>,
+    /// Items in the folder that weren't looked at (a very large folder on disk).
+    unlisted: bool,
 }
 
 fn item_of(n: &Node) -> Item {
@@ -124,10 +133,74 @@ fn item_from(p: &Path, md: &std::fs::Metadata) -> Item {
     }
 }
 
-/// What a folder holds directly. Only metadata: nothing is opened.
-fn listing(dir: &Path) -> Vec<Item> {
-    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
-    rd.flatten().take(5000).filter_map(|e| e.metadata().ok().map(|md| item_from(&e.path(), &md))).collect()
+/// The least room worth giving one file's contents, in characters.
+const MIN_READ: usize = 300;
+
+/// Items looked at in one folder on disk.
+const LISTING_MAX: usize = 5000;
+/// How deep the outline of a folder's folders goes, and its most lines.
+const OUTLINE_DEPTH: usize = 3;
+const OUTLINE_LINES: usize = 400;
+
+/// What a folder holds directly, and whether there was more than was looked at. Only
+/// metadata: nothing is opened.
+fn listing(dir: &Path) -> (Vec<Item>, bool) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return (Vec::new(), false) };
+    let mut rd = rd.flatten();
+    let v: Vec<Item> = rd.by_ref().take(LISTING_MAX).filter_map(|e| e.metadata().ok().map(|md| item_from(&e.path(), &md))).collect();
+    let more = v.len() == LISTING_MAX && rd.next().is_some();
+    (v, more)
+}
+
+/// The folders inside `n`, a few levels down, largest first, with their sizes and file
+/// counts: the shape of the folder before any detail.
+fn outline_tree(n: &Node) -> Vec<String> {
+    fn walk(n: &Node, depth: usize, out: &mut Vec<String>) {
+        let mut dirs: Vec<&Node> = n.children.iter().filter(|c| c.is_dir).collect();
+        dirs.sort_by(|a, b| b.logical.cmp(&a.logical).then(a.name.cmp(&b.name)));
+        for d in dirs {
+            if out.len() >= OUTLINE_LINES {
+                return;
+            }
+            out.push(format!("{}{}/ ({}, {})", "  ".repeat(depth), d.name, scan::human(d.logical), count(d.files, "file")));
+            if depth + 1 < OUTLINE_DEPTH {
+                walk(d, depth + 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(n, 0, &mut out);
+    out
+}
+
+/// The folders inside `dir` on disk, a few levels down, by name, with how many items each
+/// holds directly. Sizes would mean reading every folder to the bottom, so they're left out;
+/// stops after a few thousand folders are listed or a second and a half.
+fn outline_disk(dir: &Path) -> Vec<String> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<String>, seen: &mut usize, until: std::time::Instant) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut dirs: Vec<(String, PathBuf)> = rd
+            .flatten()
+            .take(LISTING_MAX)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
+            .collect();
+        dirs.sort_by_key(|d| d.0.to_lowercase());
+        for (name, path) in dirs {
+            if out.len() >= OUTLINE_LINES || *seen > 3000 || std::time::Instant::now() > until {
+                return;
+            }
+            *seen += 1;
+            let items = std::fs::read_dir(&path).map(|r| r.take(LISTING_MAX).count()).unwrap_or(0);
+            out.push(format!("{}{name}/ ({})", "  ".repeat(depth), count(items as u64, "item")));
+            if depth + 1 < OUTLINE_DEPTH {
+                walk(&path, depth + 1, out, seen, until);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, 0, &mut out, &mut 0, std::time::Instant::now() + std::time::Duration::from_millis(1500));
+    out
 }
 
 /// Bytes and files by extension, largest first.
@@ -202,8 +275,10 @@ fn render(parts: Vec<Part>, readable: Vec<PathBuf>, budget: usize, whole: bool) 
         }
     };
     text.push_str(if parts.len() == 1 { "The user is asking about this item on their computer:\n" } else { "The user is asking about these items on their computer:\n" });
-    // Each item gets a fair share of the room; what doesn't fit is summed up.
+    // Each item gets a fair share of the room; what doesn't fit is summed up, and the user is
+    // told.
     let share = budget / parts.len().max(1);
+    let mut notes = Vec::new();
     for p in &parts {
         let start = text.len();
         text.push_str(&format!("\n{} ({})\n", p.path.display(), describe(&p.item)));
@@ -214,6 +289,22 @@ fn render(parts: Vec<Part>, readable: Vec<PathBuf>, budget: usize, whole: bool) 
             let t: Vec<String> = types.iter().take(8).map(|(e, b, f)| format!("{e} {} ({})", scan::human(*b), count(*f, "file"))).collect();
             text.push_str(&t.join(", "));
             text.push('\n');
+        }
+        // The shape first: the folders inside, a few levels down, in up to a third of the room.
+        if !p.outline.is_empty() && p.outline.iter().any(|l| l.starts_with("  ")) {
+            text.push_str(&format!("Folders inside it, {} levels down{}:\n", OUTLINE_DEPTH, if whole { ", largest first" } else { "" }));
+            let mut shown = 0;
+            for l in &p.outline {
+                if text.len() - start + l.len() + 3 > share / 3 {
+                    break;
+                }
+                text.push_str(&format!("- {l}\n"));
+                shown += 1;
+            }
+            if shown < p.outline.len() {
+                text.push_str(&format!("- and {} more folders\n", p.outline.len() - shown));
+                notes.push(format!("{}: outlined {} of {} folders inside it", p.item.name, shown, p.outline.len()));
+            }
         }
         if let Some(inside) = &p.inside {
             let mut v: Vec<&Item> = inside.iter().collect();
@@ -243,10 +334,15 @@ fn render(parts: Vec<Part>, readable: Vec<PathBuf>, budget: usize, whole: bool) 
                 let rest = &v[shown..];
                 let bytes: u64 = rest.iter().filter_map(|i| i.size).sum();
                 text.push_str(&format!("- and {} more items ({})\n", rest.len(), scan::human(bytes)));
+                notes.push(format!("{}: listed {} of {} items by name, the rest only counted", p.item.name, shown, v.len()));
+            }
+            if p.unlisted {
+                text.push_str(&format!("- it holds more than {LISTING_MAX} items; only the first {LISTING_MAX} were looked at\n"));
+                notes.push(format!("{}: only the first {LISTING_MAX} items were looked at", p.item.name));
             }
         }
     }
-    Facts { label, summary, text, readable, paths }
+    Facts { label, summary, text, readable, paths, notes }
 }
 
 /// The text of `files`, at most `budget` characters in all (see [`fit`]), for a question the user ticked
@@ -254,9 +350,19 @@ fn render(parts: Vec<Part>, readable: Vec<PathBuf>, budget: usize, whole: bool) 
 /// but not read.
 pub fn contents(files: &[PathBuf], budget: usize) -> Read {
     let mut out = Read::default();
-    let share = budget / files.len().max(1);
-    for f in files {
+    let mut skipped = Vec::new();
+    for (k, f) in files.iter().enumerate() {
         let name = f.file_name().map_or_else(|| f.display().to_string(), |n| n.to_string_lossy().to_string());
+        // What's left is shared among the files still to read, so room a short file didn't use
+        // goes to the next. Once there's too little left to be useful, the rest are listed as
+        // skipped rather than squeezed in or allowed to overrun the model's context.
+        let left = budget.saturating_sub(out.text.len());
+        if left < MIN_READ && k > 0 {
+            skipped.extend(files[k..].iter().map(|f| f.file_name().map_or_else(|| f.display().to_string(), |n| n.to_string_lossy().to_string())));
+            break;
+        }
+        // Never less than is useful, never more than is left.
+        let share = (left / (files.len() - k)).max(MIN_READ).min(left.max(MIN_READ));
         let Ok(md) = std::fs::metadata(f) else { continue };
         let mut note = |n: String| out.notes.push(format!("{name}: {n}"));
         if scan::on_disk(&md, || f.clone(), 4096).1 & store::ONLINE_ONLY != 0 {
@@ -264,7 +370,7 @@ pub fn contents(files: &[PathBuf], budget: usize) -> Read {
             note("in the cloud only, so it wasn't downloaded or read".into());
             continue;
         }
-        let room = share.max(200);
+        let room = share.max(MIN_READ);
         match extract(f, room) {
             Some(Ok(mut t)) => {
                 let (fitted, cut) = fit(&t.text, room);
@@ -310,6 +416,12 @@ pub fn contents(files: &[PathBuf], budget: usize) -> Read {
             note("read the start only".into());
         }
         out.text.push_str(&format!("\nContents of {name}{}:\n```\n{t}\n```\n", if cut { " (the start only)" } else { "" }));
+    }
+    if !skipped.is_empty() {
+        let names = skipped.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+        let more = if skipped.len() > 5 { format!(" and {} more", skipped.len() - 5) } else { String::new() };
+        out.text.push_str(&format!("\n{} not read, for lack of room: {names}{more}.\n", count(skipped.len() as u64, "more file")));
+        out.notes.push(format!("{} not read, for lack of room in the model's context: {names}{more}", count(skipped.len() as u64, "file")));
     }
     out
 }
@@ -565,6 +677,46 @@ mod tests {
         assert!(some.text.contains("(the start only: page"), "{}", some.text);
         assert_eq!(some.notes.len(), 1);
         assert!(some.notes[0].starts_with("r.pdf: read the start only, page"), "{:?}", some.notes);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn many_files_share_the_room_and_the_rest_are_named() {
+        let d = tmp("many");
+        let mut files = Vec::new();
+        for i in 0..40 {
+            let p = d.join(format!("n{i:02}.txt"));
+            std::fs::write(&p, format!("note {i} ").repeat(30)).unwrap();
+            files.push(p);
+        }
+        let r = contents(&files, 3000);
+        // Never past the room (plus one file's headings), however many files there are.
+        assert!(r.text.len() < 3000 + 400, "{}", r.text.len());
+        assert!(r.text.contains("Contents of n00.txt"), "{}", r.text);
+        assert!(!r.text.contains("Contents of n39.txt"), "{}", r.text);
+        let last = r.notes.last().unwrap();
+        assert!(last.contains("not read, for lack of room") && last.contains("n39.txt") || last.contains("more"), "{last}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn deep_folders_are_outlined_and_cuts_are_noted() {
+        let d = tmp("outline");
+        std::fs::create_dir_all(d.join("src/app/widgets")).unwrap();
+        std::fs::create_dir_all(d.join("docs")).unwrap();
+        for i in 0..60 {
+            std::fs::write(d.join(format!("file{i:02}.txt")), "x").unwrap();
+        }
+        let f = from_disk(&[d.clone()], 1500);
+        assert!(f.text.contains("Folders inside it, 3 levels down:"), "{}", f.text);
+        assert!(f.text.contains("- src/ (1 item)\n- app/ (1 item)") || f.text.contains("  app/ (1 item)"), "{}", f.text);
+        assert!(f.text.contains("    widgets/ (0 items)"), "{}", f.text);
+        // 62 items don't fit in 1,500 characters: the user is told.
+        assert!(f.notes.iter().any(|n| n.contains("listed") && n.contains("of 62 items")), "{:?}", f.notes);
+        // A folder with nothing nested gets no outline, only its listing.
+        let g = from_disk(&[d.join("docs")], 1500);
+        assert!(!g.text.contains("Folders inside it"), "{}", g.text);
+        assert!(g.notes.is_empty());
         let _ = std::fs::remove_dir_all(&d);
     }
 
