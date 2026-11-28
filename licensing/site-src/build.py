@@ -66,6 +66,14 @@ PAGES += [
      "to give it Full Disk Access.", "", "0.5"),
     ("/contact", "contact.html", "pages/contact.html", "Contact and support · Filescape",
      "Contact Filescape", "Send a question, bug report or licence request to Filescape.", "", "0.4"),
+    ("/security", "security.html", "pages/security.html", "Security and privacy · Filescape",
+     "How Filescape keeps your files private",
+     "What Filescape sends over the internet and when, how it stores passwords and licences, local "
+     "AI, safe deleting, and how to check your download.", "security", "0.6"),
+    ("/about", "about.html", "pages/about.html", "About Filescape",
+     "About Filescape",
+     "Filescape brings file management, storage maps, file previews and local AI models together in "
+     "one desktop app for Windows, macOS and Linux.", "about", "0.5"),
     ("/terms", "terms.html", "pages/terms.html", "Terms of sale · Filescape", "Terms of sale",
      "Filescape terms of sale and licence.", "", "0.2"),
     ("/privacy", "privacy.html", "pages/privacy.html", "Privacy policy · Filescape", "Privacy policy",

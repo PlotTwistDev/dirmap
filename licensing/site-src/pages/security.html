@@ -1,0 +1,59 @@
+<main id="top" class="doc">
+<div class="wrap doc-wrap">
+<section class="doc-hero"><h1>Security and privacy</h1><p>Filescape works on your computer. This page lists everything it sends over the internet, what it keeps, and how it handles passwords, licences and downloads. It describes the app as it is today; if something here changes, this page changes with it.</p></section>
+
+<div class="card"><h2>In short</h2><ul>
+<li>Scanning, the disk map, previews, file operations and Ask AI run on your computer. Your files, file names and questions are never uploaded.</li>
+<li>The app goes online for four things only: licensing, the update check, an AI model you choose to download, and servers you connect to. Each is described below.</li>
+<li>There is no analytics, crash reporting or advertising in the app, and no account is needed to use it.</li>
+</ul></div>
+
+<h2>Your files</h2>
+<p>Filescape reads your drives to measure and preview them. Previews are drawn by Filescape's own code; it never runs a file, a macro or a script to show it. Nothing it reads is sent anywhere.</p>
+<p>Deleting is the one thing that can lose data, so Filescape treats it carefully:</p>
+<ul>
+<li><b>Move to Trash</b> (Recycle Bin on Windows) can be undone with Ctrl+Z, as can copies, moves, renames and new items. Filescape remembers the last 30.</li>
+<li><b>Delete Permanently</b> skips the bin and can't be undone. Filescape always asks first and says how much is involved.</li>
+<li><b>Replacing</b> a file in a name clash moves the old one to the bin, so Undo can bring it back. On a server there is no bin, so replacing or deleting there is permanent, and Filescape asks first.</li>
+<li><b>Cloud folders</b> (Google Drive, OneDrive, iCloud Drive, Dropbox): Free Up Space removes only the copy on this computer; the file stays in the cloud. Deleting a file there deletes it from the cloud too, as it would in Explorer or Finder.</li>
+</ul>
+<p>Filescape comes with no warranty, and no tool replaces a backup. Please keep one. See the <a href="/terms">terms</a>.</p>
+
+<h2>Local AI</h2>
+<p>Ask AI and the Lab run models inside Filescape, on your processor or graphics card. Your questions, the files you attach and the answers stay on your computer, and work without an internet connection. File text you attach is given to the model as data, marked off from your question, and Filescape shows which files an answer used.</p>
+<p><b>Downloading a model</b> happens only after you agree to it. The starter model comes from a fixed version of its publisher's page on Hugging Face, and Filescape checks its SHA-256 checksum before using it. Hugging Face sees an ordinary download from your computer.</p>
+
+<h2>Servers and passwords</h2>
+<ul>
+<li><b>SFTP</b>: the server's key is checked against your <span class="mono">~/.ssh/known_hosts</span> and Filescape's own list. A new server's key is shown to you before anything is sent, and a server whose key has changed is refused.</li>
+<li><b>Signing in</b> tries your SSH agent and key files before a password.</li>
+<li><b>Passwords</b> you save are kept in your system's own store: Keychain on macOS, Credential Manager on Windows, the Secret Service on Linux. They're never written to Filescape's settings.</li>
+<li><b>Plain FTP and http WebDAV</b> send passwords and files unencrypted, so Filescape asks before connecting that way. Use SFTP, FTPS or https where you can.</li>
+</ul>
+
+<h2>What the app sends, and when</h2>
+<div class="card"><ul>
+<li><b>Update check</b>, at each launch: asks api.filescape.app for the latest version. It sends nothing about you, your computer or your licence. Turn it off in Settings &gt; General.</li>
+<li><b>Activating Pro</b>: the serial number, an activation ID, an anonymous computer identifier (a one-way hash of the computer's system ID), the app version and the operating system's name.</li>
+<li><b>Licence check</b>, about once a week while you're online: the activation ID and the same computer identifier. Being offline never turns Pro off; the check just waits until you're back online.</li>
+<li><b>Offline activation</b>: the same request, saved as a file you carry to a computer with internet access yourself.</li>
+<li><b>AI model downloads</b> and <b>servers you connect to</b>, as above.</li>
+</ul></div>
+<p>Licences are signed certificates (Ed25519) that the app checks with a public key built into it, so a licence can't be forged or edited, and the app doesn't need to ask the server each time it starts.</p>
+
+<h2>Buying</h2>
+<p>Payments are taken by Paddle, our reseller and Merchant of Record. Your card details go to Paddle, never to Filescape. Paddle tells us your name, email address and the transaction ID so we can send your licence. On filescape.app, Paddle's checkout script loads only when you start to buy.</p>
+<p>The website sets no cookies of its own, uses no analytics or advertising trackers, and serves its fonts itself. The full list of what's kept is in the <a href="/privacy">privacy policy</a>.</p>
+
+<h2>Is the download genuine?</h2>
+<ul>
+<li><b>macOS</b>: not yet signed with an Apple Developer ID or notarised by Apple, so macOS asks you to allow it the first time. <a href="/mac">How to open it on a Mac</a>.</li>
+<li><b>Windows</b>: not yet code-signed, so SmartScreen may say it doesn't recognise the app.</li>
+<li><b>Linux</b>: AppImage, .deb, .rpm and .tar.gz, unsigned.</li>
+</ul>
+<p>Download Filescape only from filescape.app or downloads.filescape.app. Apple notarisation and Windows code signing aren't in place yet; this page will say when they are.</p>
+
+<h2>Reporting a security problem</h2>
+<p>If you find a way Filescape could expose someone's files, passwords or licence, please <a href="/contact?topic=privacy">tell us through the contact form</a> and choose <b>Privacy request</b>. We'll reply, fix it and say what changed in <b>What's new</b>.</p>
+</div>
+</main>
