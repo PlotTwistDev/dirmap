@@ -287,6 +287,13 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 .cta .dl-row { margin-top: 10px; }
 /* Buy, contact, Mac and legal pages: one readable column */
 .doc p { margin: 0 0 12px; }
+.doc h3 { color: var(--text); font-size: 16px; margin: 24px 0 6px; }
+.doc code { font-family: var(--mono); font-size: .88em; color: var(--text); }
+.jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.jump a { font-family: var(--mono); font-size: 12px; text-decoration: none; padding: 5px 10px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text-2); }
+.jump a:hover { color: var(--text); border-color: var(--coral); }
+.doc .news h2 { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 24px; }
+.doc .news h2 .tag-pro { vertical-align: 4px; }
 .doc-wrap { max-width: 760px; padding-block: 40px 8px; color: var(--text-2); line-height: 1.6; }
 .doc h1 { color: var(--text); font-size: clamp(30px, 5vw, 44px); line-height: 1.1; letter-spacing: -.03em; margin: 0 0 14px; }
 .doc h2 { color: var(--text); font-size: 19px; letter-spacing: -.01em; margin: 32px 0 8px; }
@@ -406,6 +413,7 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
         <div class="nav-group">
           <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-resources">Resources</button>
           <ul class="nav-menu" id="m-resources">
+            <li><a href="/whats-new">What's new<small>Every version and what changed</small></a></li>
             <li><a href="/#download">Downloads<small>Windows, macOS and Linux</small></a></li>
             <li><a href="/formats">Supported formats<small>Every format and what it shows</small></a></li>
             <li><a href="/mac">Opening it on a Mac<small>The one-time Gatekeeper step</small></a></li>
@@ -552,6 +560,7 @@ footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color
       </nav>
       <nav class="foot-col" aria-label="Resources">
         <h2>Resources</h2>
+        <a href="/whats-new">What's new</a>
         <a href="/#download">Downloads</a>
         <a href="/formats">Supported formats</a>
         <a href="/mac">Opening it on a Mac</a>

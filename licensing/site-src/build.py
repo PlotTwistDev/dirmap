@@ -70,6 +70,10 @@ PAGES += [
      "How Filescape keeps your files private",
      "What Filescape sends over the internet and when, how it stores passwords and licences, local "
      "AI, safe deleting, and how to check your download.", "security", "0.6"),
+    ("/whats-new", "whats-new.html", "pages/whats-new.html", "What's new in Filescape",
+     "What's new in Filescape",
+     "Every Filescape version and what changed: new features, improvements and fixes, and what's "
+     "coming in the next version.", "whats-new", "0.6"),
     ("/about", "about.html", "pages/about.html", "About Filescape",
      "About Filescape",
      "Filescape brings file management, storage maps, file previews and local AI models together in "
@@ -118,6 +122,71 @@ def formats_table():
     return "\n".join(out), len(rows), exts
 
 
+def md_inline(text):
+    """Bold, code and links from the manual's Markdown. Links into the manual become plain text,
+    since the Help Centre lives in the app; web links stay links."""
+    # "See [a manual page](../x.md)." pointers make no sense outside the app: drop them.
+    text = re.sub(r"\s*\(?[Ss]ee (?:also )?\[[^\]]+\]\((?!https://)[^)]+\)(?:(?:,| and| or) \[[^\]]+\]\((?!https://)[^)]+\))*\)?\.?", "", text)
+    text = html.escape(text, quote=False)
+    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"\[([^\]]+)\]\((https://[^)]+)\)", r'<a href="\2">\1</a>', text)
+    return re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+
+
+def whats_new():
+    """The What's new page body, from docs/src/about/whats-new.md (the same text as the app's
+    Help Centre), and the list of versions for the jump links. "Next version" is labelled as
+    not released yet, so the site never presents it as available."""
+    md = (REPO / "docs/src/about/whats-new.md").read_text()
+    md = md[:md.index("## Related topics")] if "## Related topics" in md else md
+    out, versions, items, para = [], [], [], []
+
+    def flush():
+        if para:
+            out.append("<p>" + md_inline(" ".join(para)) + "</p>"); para.clear()
+        if items:
+            def li(i):
+                sub = "".join(f"<li>{md_inline(s)}</li>" for s in i[1])
+                return f"<li>{md_inline(i[0])}" + (f"<ul>{sub}</ul>" if sub else "") + "</li>"
+            out.append("<ul>" + "".join(li(i) for i in items) + "</ul>"); items.clear()
+
+    for line in md.splitlines():
+        if line.startswith("# "):
+            continue
+        if line.startswith("## "):
+            flush()
+            name = line[3:].strip()
+            slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+            versions.append((slug, name))
+            label = name + (' <span class="tag-pro">not released yet</span>' if name.lower() == "next version" else "")
+            out.append(f'<h2 id="{slug}">{label}</h2>')
+            if name.lower() == "next version":
+                out.append('<p class="mute">Being worked on now. These changes arrive in the next release; the download is still the latest released version.</p>')
+        elif line.startswith("### "):
+            flush(); out.append(f"<h3>{md_inline(line[4:].strip())}</h3>")
+        elif line.startswith("- "):
+            if para:
+                flush()
+            items.append([line[2:].strip(), []])
+        elif line.startswith("  - ") and items:
+            items[-1][1].append(line[4:].strip())
+        elif line.startswith("  ") and line.strip() and items:
+            if items[-1][1] and line.startswith("    "):
+                items[-1][1][-1] += " " + line.strip()
+            else:
+                items[-1][0] += " " + line.strip()
+        elif line.strip():
+            if items:
+                flush()
+            para.append(line.strip())
+        else:
+            flush()
+    flush()
+    jump = "".join(f'<a href="#{s}">{html.escape(n)}</a>' for s, n in versions)
+    return "\n".join(out), jump
+
+
 def lastmod(*files):
     """The newest commit date of the files a page is made from (today if any are uncommitted)."""
     today = datetime.date.today().isoformat()
@@ -143,6 +212,7 @@ for f in (SRC / "fonts").glob("*.woff2"):
     shutil.copy(f, DIST / "fonts" / f.name)
 
 table, n_formats, n_exts = formats_table()
+NEWS, NEWS_JUMP = whats_new()
 urls = []
 # Download checksums: published only when ../site/SHA256SUMS.txt exists (licensing/SETUP.md step 9
 # says how to make it), so the site never shows sums for files it can't vouch for.
@@ -158,7 +228,9 @@ def render(path, out, src, title, og_title, desc, key, extra_head=""):
                 .replace("{{formats_count}}", str(n_formats))
                 .replace("{{extensions_count}}", str(n_exts))
                 .replace("{{version}}", VERSION)
-                .replace("{{checksums}}", CHECKSUMS))
+                .replace("{{checksums}}", CHECKSUMS)
+                .replace("{{whats_new}}", NEWS)
+                .replace("{{whats_new_jump}}", NEWS_JUMP))
     page_head = (head.replace("{{title}}", html.escape(title))
                      .replace("{{og_title}}", html.escape(og_title))
                      .replace("{{description}}", html.escape(desc))
@@ -191,6 +263,8 @@ for path, out, src, title, og_title, desc, key, priority in PAGES:
     sources = [SRC / "head.html", SRC / "nav.html", SRC / "foot.html", SRC / src]
     if out == "formats.html":
         sources.append(REPO / "docs/src/reference/formats.md")
+    if out == "whats-new.html":
+        sources.append(REPO / "docs/src/about/whats-new.md")
     urls.append((path, lastmod(*sources), priority))
 for out, src, title in UNLISTED:
     render("/" + out.removesuffix(".html"), out, src, title, title, "This page doesn't exist.", "",

@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>What&#x27;s new in Filescape</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Every Filescape version and what changed: new features, improvements and fixes, and what&#x27;s coming in the next version.">
+<link rel="canonical" href="https://filescape.app/whats-new">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Filescape">
+<meta property="og:title" content="What&#x27;s new in Filescape">
+<meta property="og:description" content="Every Filescape version and what changed: new features, improvements and fixes, and what&#x27;s coming in the next version.">
+<meta property="og:url" content="https://filescape.app/whats-new">
+<meta property="og:image" content="https://filescape.app/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Filescape's colourful treemap of a drive, with the file manager above it">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+/* Fonts served from filescape.app (site-src/fonts), not Google */
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 400 500; font-display: swap; src: url(/fonts/geist-mono-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 400 500; font-display: swap; src: url(/fonts/geist-mono-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400 600; font-display: swap; src: url(/fonts/inter-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400 600; font-display: swap; src: url(/fonts/inter-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+/* Layout: one quiet near-black column; the live treemap is the only loud object on the page. */
+:root {
+  --void: #040506;      /* page canvas */
+  --ink: #07080a;       /* cards, panels */
+  --obsidian: #111214;  /* wells, pressed */
+  --line: rgba(255,255,255,.07);
+  --line-strong: rgba(255,255,255,.12);
+  --text: #ffffff;
+  --text-2: #b4b5b6;    /* body copy */
+  --text-3: #7c7d7e;    /* captions */
+  --key: #e6e6e6;       /* light key buttons */
+  --key-text: #111214;
+  --coral: #ff6363;     /* the one accent */
+  --ember: #2a1617;     /* coral-tinted surface */
+  --sky: #63a1ff;
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --mono: "Geist Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  --max: 1160px;
+  --radius: 12px;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--void); }
+body { background: var(--void); color: var(--text); font-family: var(--font); font-size: 16px; line-height: 1.55; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+a { color: inherit; }
+img { max-width: 100%; display: block; }
+:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; border-radius: 6px; }
+.wrap { max-width: var(--max); margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.mono { font-family: var(--mono); }
+.eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600; }
+h2 { font-size: clamp(28px, 4vw, 44px); line-height: 1.1; letter-spacing: -.022em; font-weight: 500; }
+h3 { font-size: 18px; line-height: 1.3; letter-spacing: -.01em; font-weight: 500; }
+p { margin: 0; }
+.lede { color: var(--text-2); font-size: 18px; max-width: 60ch; }
+
+/* Nav */
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--void); }
+.nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; padding-block: 14px; }
+.nav-bar { display: flex; align-items: center; gap: 24px; padding: 8px 8px 8px 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(7,8,10,.72); backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; text-decoration: none; letter-spacing: -.01em; }
+.brand svg { width: 20px; height: 20px; }
+.nav-links { display: flex; gap: 4px; margin-left: auto; font-size: 14px; color: var(--text-2); }
+.nav-links a { text-decoration: none; }
+.nav-links a:hover { color: var(--text); }
+.nav-group { position: relative; }
+.nav-top { font: inherit; color: inherit; background: none; border: 0; padding: 6px 10px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.nav-top::after { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); opacity: .6; transition: transform .15s ease; }
+.nav-top:hover, .nav-top[aria-expanded="true"] { color: var(--text); background: rgba(255,255,255,.04); }
+.nav-top[aria-expanded="true"]::after { transform: translateY(1px) rotate(225deg); }
+.nav-menu { list-style: none; margin: 0; padding: 6px; position: absolute; top: calc(100% + 12px); left: -6px; min-width: 300px; display: none; border: 1px solid var(--line); border-radius: 12px; background: #0b0c0e; box-shadow: 0 16px 40px rgba(0,0,0,.5); }
+.nav-top[aria-expanded="true"] + .nav-menu { display: grid; }
+.nav-menu a { display: grid; gap: 2px; padding: 9px 12px; border-radius: 8px; color: var(--text); }
+.nav-menu a:hover, .nav-menu a:focus-visible { background: rgba(255,255,255,.05); }
+.nav-menu a[aria-current] { box-shadow: inset 2px 0 0 var(--coral); }
+.nav-menu small { color: var(--text-3); font-size: 12px; }
+.nav-toggle { display: none; margin-left: auto; width: 36px; height: 32px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--obsidian); color: var(--text); cursor: pointer; align-items: center; justify-content: center; }
+.nav-toggle svg { width: 16px; height: 16px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.skip { position: absolute; left: 12px; top: -60px; z-index: 50; padding: 10px 14px; border-radius: 8px; background: var(--key); color: var(--key-text); text-decoration: none; font-weight: 500; }
+.skip:focus { top: 12px; }
+
+/* Buttons: light keys on dark, Raycast style */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 10px; font: 500 14px/1 var(--font); text-decoration: none; cursor: pointer; border: 0; white-space: nowrap; transition: transform .15s ease, background .15s ease; }
+.btn svg { width: 16px; height: 16px; flex: none; }
+.btn-key { background: var(--key); color: var(--key-text); box-shadow: inset 0 -2px 0 rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.7); }
+.btn-key:hover { background: #fff; }
+.btn-key:active { transform: translateY(1px); }
+.btn-ghost { background: var(--obsidian); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong), inset 0 1px 0 rgba(255,255,255,.04); }
+.btn-ghost:hover { background: #17181a; }
+.btn-sm { height: 32px; padding: 0 12px; font-size: 13px; border-radius: 8px; }
+
+/* Hero */
+.hero { position: relative; padding-block: 72px 40px; text-align: center; }
+.hero-glow { position: absolute; inset: -80px 0 auto; height: 720px; pointer-events: none; z-index: -1; overflow: hidden; }
+.hero-glow::before, .hero-glow::after { content: ""; position: absolute; border-radius: 50%; filter: blur(90px); opacity: .45; }
+.hero-glow::before { width: 520px; height: 360px; left: calc(50% - 460px); top: 260px; background: radial-gradient(closest-side, rgba(255,99,99,.55), transparent); }
+.hero-glow::after { width: 520px; height: 360px; left: calc(50% - 40px); top: 300px; background: radial-gradient(closest-side, rgba(99,161,255,.45), transparent); }
+.hero .eyebrow { display: inline-flex; gap: 8px; align-items: center; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--ink); }
+.hero .eyebrow b { color: var(--coral); font-weight: 500; }
+.hero h1 { margin-top: 24px; font-size: clamp(40px, 7vw, 76px); line-height: 1.02; letter-spacing: -.035em; font-weight: 600; }
+.hero .lede { margin: 20px auto 0; text-align: center; }
+.dl-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 32px; }
+.dl-meta { margin-top: 14px; font-family: var(--mono); font-size: 12px; color: var(--text-3); display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.dl-meta span + span::before { content: "|"; margin-right: 10px; opacity: .5; }
+.dl-meta a { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; }
+.dl-meta a:hover { color: var(--text); }
+
+/* The app window around the live map */
+.window { margin-top: 56px; border-radius: 14px; background: var(--ink); border: 1px solid var(--line-strong); box-shadow: 0 40px 120px -20px rgba(0,0,0,.9), 0 0 0 1px #000, inset 0 1px 0 rgba(255,255,255,.05); overflow: hidden; text-align: left; }
+.win-bar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--text-3); min-width: 0; }
+.dots { display: flex; gap: 6px; flex: none; }
+.dots i { width: 10px; height: 10px; border-radius: 50%; background: #2a2b2d; }
+.crumbs { display: flex; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.crumbs button { all: unset; cursor: pointer; color: var(--text-2); }
+.crumbs button:hover { color: var(--text); }
+.crumbs button[aria-current] { color: var(--text); cursor: default; }
+.crumbs .sep { opacity: .4; }
+.win-actions { margin-left: auto; display: flex; gap: 6px; flex: none; }
+.chip { font-family: var(--mono); font-size: 11px; padding: 4px 8px; border-radius: 6px; background: var(--obsidian); color: var(--text-2); border: 1px solid var(--line); cursor: pointer; }
+.chip:hover { color: var(--text); }
+.chip[aria-pressed="true"] { color: var(--text); border-color: rgba(255,99,99,.5); background: var(--ember); }
+.map-wrap { position: relative; aspect-ratio: 16 / 8; max-width: 100%; background: #000; }
+.map-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: zoom-in; touch-action: pan-y; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+/* Hold a finger on a tile: its name, size and type in a label above the finger */
+.map-tip { position: absolute; z-index: 1; pointer-events: none; max-width: min(78%, 360px); padding: 7px 10px; border-radius: 8px; background: rgba(8,9,11,.94); border: 1px solid var(--line-strong); box-shadow: 0 8px 24px rgba(0,0,0,.6); font-family: var(--mono); font-size: 11px; line-height: 1.45; color: var(--text-2); }
+.map-tip b { display: block; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.win-foot { display: flex; gap: 16px; align-items: center; padding: 9px 12px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--text-3); min-width: 0; flex-wrap: wrap; row-gap: 4px; }
+.readout { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); flex: 1 1 auto; }
+.hint { flex: 1 0 100%; }  /* own line, so a long path never loses out to it and the footer never changes height */
+.hint-touch { display: none; }
+/* Phones and tablets: the finger hint, bigger buttons, and a readout that wraps instead of cutting off the size */
+@media (hover: none) and (pointer: coarse) {
+  .hint-mouse { display: none; }
+  .hint-touch { display: block; flex-basis: 100%; }
+  .win-foot { flex-wrap: wrap; row-gap: 4px; }
+  .readout { white-space: normal; overflow-wrap: anywhere; flex-basis: 100%; }
+  .chip { padding: 7px 10px; }
+}
+.demo-badge { flex: none; display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; color: var(--coral); background: var(--ember); border: 1px solid rgba(255,99,99,.3); white-space: nowrap; }
+.demo-badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--coral); }
+.demo-cap { margin: 14px auto 0; max-width: 72ch; font-size: 13px; line-height: 1.5; color: var(--text-3); text-align: center; }
+.demo-cap a { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.demo-cap a:hover { color: var(--text); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 12px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 8px; height: 8px; border-radius: 2px; }
+
+/* Facts strip */
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); border-block: 1px solid var(--line); margin-top: 72px; }
+.fact { padding: 24px 20px; display: grid; gap: 4px; }
+.fact + .fact { border-left: 1px solid var(--line); }
+.fact b { font-size: 28px; font-weight: 500; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.fact span { font-size: 13px; color: var(--text-3); }
+
+/* Sections */
+section { padding-block: 112px 0; }
+.section-head { display: grid; gap: 16px; max-width: 720px; }
+.showcase { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: center; margin-top: 64px; }
+.showcase.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+.showcase.flip .copy { order: 2; }
+.copy { display: grid; gap: 14px; min-width: 0; }
+.copy p { color: var(--text-2); }
+.ticks { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 8px; font-size: 14px; color: var(--text-2); }
+.ticks li { position: relative; padding-left: 16px; }
+.ticks li::before { content: ""; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 2px; background: var(--coral); }
+.shot { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line-strong); box-shadow: 0 30px 80px -30px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.05); background: var(--ink); }
+.shot img { width: 100%; height: auto; aspect-ratio: 1280 / 820; }
+
+/* Keyboard-key cards */
+.keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 56px; }
+.keycard { padding: 22px; border-radius: var(--radius); background: linear-gradient(180deg, #0c0d0f, #08090a); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -3px 0 rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.02); display: grid; gap: 10px; align-content: start; min-width: 0; }
+.keycard .kbd { justify-self: start; font-family: var(--mono); font-size: 11px; color: var(--text-2); padding: 3px 7px; border-radius: 6px; background: var(--obsidian); border: 1px solid var(--line-strong); box-shadow: inset 0 -2px 0 rgba(0,0,0,.6); }
+.keycard p { color: var(--text-2); font-size: 14px; }
+
+/* VFX listing */
+.vfx { margin-top: 56px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--ink); overflow: hidden; }
+.vfx-scroll { overflow-x: auto; }
+.vfx table { width: 100%; min-width: 640px; border-collapse: collapse; font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+.vfx th { text-align: left; font-weight: 400; color: var(--text-3); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.vfx td { padding: 11px 16px; border-bottom: 1px solid var(--line); color: var(--text-2); white-space: nowrap; }
+.vfx tr:last-child td { border-bottom: 0; }
+.vfx td:first-child { color: var(--text); }
+.vfx .num { text-align: right; }
+.vfx .miss { color: var(--coral); }
+.vfx-cap { padding: 12px 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--text-3); }
+
+/* Pricing */
+.plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 56px; max-width: 880px; }
+.plan { padding: 28px; border-radius: 16px; border: 1px solid var(--line); background: var(--ink); display: grid; gap: 18px; align-content: start; min-width: 0; }
+.plan.pro { background: linear-gradient(180deg, var(--ember), var(--ink) 55%); border-color: rgba(255,99,99,.28); box-shadow: inset 0 1px 0 rgba(255,140,140,.12); }
+.price { display: flex; align-items: baseline; gap: 8px; }
+.price b { font-size: 48px; font-weight: 600; letter-spacing: -.03em; }
+.price span { color: var(--text-3); font-size: 14px; }
+.price s, .js-list { color: var(--text-3); font-weight: 400; }
+.price s { font-size: 24px; }
+.plan ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 9px; font-size: 14px; color: var(--text-2); }
+.plan li { display: flex; gap: 10px; }
+.plan li::before { content: ""; flex: none; width: 12px; height: 7px; margin-top: 6px; border-left: 1.5px solid var(--text-3); border-bottom: 1.5px solid var(--text-3); transform: rotate(-45deg); }
+.plan.pro li::before { border-color: var(--coral); }
+.plan .btn { width: 100%; }
+.small { font-size: 12px; color: var(--text-3); }
+.checkout-note { font-size: 13px; color: var(--text-2); font-family: var(--mono); }
+
+/* Requirements + FAQ */
+.reqs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 48px; }
+.req { padding: 20px; border-radius: var(--radius); border: 1px solid var(--line); display: grid; gap: 8px; align-content: start; }
+.req p { font-size: 14px; color: var(--text-2); }
+.req .btn { justify-self: start; margin-top: 6px; }
+.req p.req-alt { font-size: 12px; color: var(--text-3); }
+.req-alt a { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; }
+.req-alt a:hover { color: var(--text); }
+.faq { margin-top: 40px; display: grid; gap: 0; max-width: 820px; border-top: 1px solid var(--line); }
+.faq details { border-bottom: 1px solid var(--line); padding-block: 18px; }
+.faq summary { cursor: pointer; font-weight: 500; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; font-family: var(--mono); color: var(--text-3); }
+.faq details[open] summary::after { content: "–"; }
+.faq p { margin-top: 10px; color: var(--text-2); font-size: 15px; max-width: 65ch; }
+.faq ul { margin: 8px 0 0; padding-left: 20px; color: var(--text-2); font-size: 15px; display: grid; gap: 4px; max-width: 65ch; }
+.principles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-top: 56px; }
+.principle { display: grid; gap: 10px; align-content: start; }
+.principle h2 { font-size: 22px; letter-spacing: -.015em; }
+.principle h2::before { content: ""; display: block; width: 18px; height: 3px; border-radius: 2px; margin-bottom: 12px; background: var(--coral); }
+.principle:nth-child(2) h2::before { background: #63a1ff; }
+.principle:nth-child(3) h2::before { background: #e6e6e6; }
+.principle p { color: var(--text-2); font-size: 15px; }
+.principle a { color: var(--text); text-underline-offset: 3px; }
+.terms { list-style: none; padding: 0; margin: 32px 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border-block: 1px solid var(--line); }
+.terms li { padding: 20px 18px; display: grid; gap: 6px; align-content: start; }
+.terms li + li { border-left: 1px solid var(--line); }
+.terms b { font-weight: 500; }
+.terms span { font-size: 13px; color: var(--text-3); }
+.terms a { color: var(--text-2); }
+
+footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32px 48px; }
+.foot { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: center; font-size: 13px; color: var(--text-3); }
+.foot a { text-decoration: none; }
+.foot a:hover { color: var(--text); }
+.foot .ver { margin-left: auto; font-family: var(--mono); font-size: 11px; }
+
+/* Feature pages (formats, ai-models, vfx) */
+.nav-links a[aria-current] { color: var(--text); }
+.page-hero { position: relative; padding-block: 72px 8px; }
+.page-hero + section { padding-top: 16px; }
+.page-hero .hero-glow { inset: -160px 0 auto; height: 560px; }
+.page-hero h1 { margin-top: 18px; font-size: clamp(36px, 6vw, 64px); line-height: 1.04; letter-spacing: -.033em; max-width: 16ch; }
+.page-hero .lede { margin-top: 18px; }
+.page-hero .dl-row { justify-content: flex-start; margin-top: 28px; }
+.tag-pro { display: inline-block; font-family: var(--mono); font-size: 10px; line-height: 1; padding: 3px 6px; margin-left: 6px; border-radius: 5px; border: 1px solid rgba(255,99,99,.4); color: var(--coral); vertical-align: 2px; }
+.free-note { display: inline-flex; gap: 8px; align-items: center; margin-top: 18px; font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.free-note::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--coral); }
+.more { display: inline-flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 14px; color: var(--text); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.more:hover { text-decoration-color: var(--coral); }
+.more::after { content: "→"; }
+.callout { margin-top: 56px; padding: 22px 24px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--ink); display: grid; gap: 8px; max-width: 820px; }
+.callout p { color: var(--text-2); font-size: 15px; }
+.fmt { margin-top: 40px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--ink); overflow: hidden; }
+.fmt-scroll { overflow-x: auto; }
+.fmt table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
+.fmt thead th { text-align: left; font: 400 11px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.fmt tbody th, .fmt td { text-align: left; vertical-align: top; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.fmt tbody tr:last-child th, .fmt tbody tr:last-child td { border-bottom: 0; }
+.fmt tbody th { font-weight: 500; color: var(--text); width: 24%; }
+.fmt td { color: var(--text-2); }
+.fmt td.exts { width: 30%; }
+.fmt code { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); background: var(--obsidian); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin: 0 2px 4px 0; display: inline-block; }
+.lab { border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--ink); overflow: hidden; min-width: 0; }
+.lab-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--text-3); }
+.lab-text { padding: 22px 18px 18px; font-family: var(--mono); font-size: 15px; line-height: 2; color: var(--text-2); }
+.lab-text i { font-style: normal; color: var(--text); padding: 2px 3px; border-radius: 4px; background: color-mix(in srgb, var(--coral) calc((1 - var(--p)) * 85%), #1d3a2a); }
+.lab-text i:nth-of-type(6) { outline: 1px solid var(--coral); }
+.lab-alts { border-top: 1px solid var(--line); padding: 12px 18px 16px; display: grid; gap: 7px; font-family: var(--mono); font-size: 12px; }
+.lab-head { display: flex; justify-content: space-between; color: var(--text-3); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.lab-row { display: grid; grid-template-columns: 70px 1fr 40px; gap: 10px; align-items: center; color: var(--text-2); }
+.lab-row b { height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--sky) var(--w), var(--obsidian) var(--w)); }
+.lab-row em { font-style: normal; text-align: right; color: var(--text); }
+.cta { margin-top: 112px; padding: 48px 24px; text-align: center; border-radius: 16px; border: 1px solid var(--line); background: radial-gradient(60% 120% at 50% 0%, var(--ember), var(--ink) 70%); display: grid; gap: 14px; justify-items: center; }
+.cta .lede { text-align: center; }
+.cta .dl-row { margin-top: 10px; }
+/* Buy, contact, Mac and legal pages: one readable column */
+.doc p { margin: 0 0 12px; }
+.doc h3 { color: var(--text); font-size: 16px; margin: 24px 0 6px; }
+.doc code { font-family: var(--mono); font-size: .88em; color: var(--text); }
+.jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.jump a { font-family: var(--mono); font-size: 12px; text-decoration: none; padding: 5px 10px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text-2); }
+.jump a:hover { color: var(--text); border-color: var(--coral); }
+.doc .news h2 { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 24px; }
+.doc .news h2 .tag-pro { vertical-align: 4px; }
+.doc-wrap { max-width: 760px; padding-block: 40px 8px; color: var(--text-2); line-height: 1.6; }
+.doc h1 { color: var(--text); font-size: clamp(30px, 5vw, 44px); line-height: 1.1; letter-spacing: -.03em; margin: 0 0 14px; }
+.doc h2 { color: var(--text); font-size: 19px; letter-spacing: -.01em; margin: 32px 0 8px; }
+.doc b, .doc strong { color: var(--text); font-weight: 500; }
+.doc a { color: var(--text); text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.doc a:hover { text-decoration-color: var(--coral); }
+.doc a.btn { color: var(--key-text); }
+.doc ol, .doc ul { padding-left: 22px; }
+.doc li { margin: 6px 0; }
+.doc .mute { color: var(--text-3); }
+.doc .legal .mute:first-of-type { font-family: var(--mono); font-size: 12px; }
+.doc-hero { padding: 8px 0 24px; }
+.doc-hero p { font-size: 18px; max-width: 620px; }
+.doc .card { background: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin: 24px 0; }
+.doc .card h2 { margin-top: 0; }
+.doc .note { border-left: 2px solid var(--coral); padding: 8px 14px; background: var(--ember); border-radius: 0 8px 8px 0; }
+.doc .form { display: grid; gap: 16px; margin: 24px 0; }
+.doc .form label { display: grid; gap: 6px; color: var(--text); font-size: 14px; font-weight: 500; }
+.doc .form label .mute { font-weight: 400; }
+.doc .form input, .doc .form select, .doc .form textarea { width: 100%; font: 15px/1.5 var(--font); color: var(--text); background: var(--ink); border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; }
+.doc .form textarea { resize: vertical; min-height: 180px; }
+.doc .form input:focus, .doc .form select:focus, .doc .form textarea:focus { outline: 2px solid var(--coral); outline-offset: 1px; border-color: transparent; }
+.doc .form .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.btn:disabled { opacity: .6; cursor: default; }
+[hidden] { display: none !important; }
+.doc pre.code { margin: 12px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px 14px; background: var(--void); border: 1px solid var(--line-strong); border-radius: 10px; font: 13px/1.5 var(--mono); color: var(--text); user-select: all; }
+
+/* Footer columns */
+.foot-cols { display: grid; grid-template-columns: 1.4fr repeat(4, minmax(0, 1fr)); gap: 32px; font-size: 13px; }
+.foot-brand p { margin: 12px 0 0; color: var(--text-3); max-width: 28ch; }
+.foot-col { display: grid; gap: 8px; align-content: start; }
+.foot-col h2 { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); margin: 0 0 4px; }
+.foot-col a { color: var(--text-2); text-decoration: none; }
+.foot-col a:hover { color: var(--text); }
+footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+
+@media (max-width: 900px) {
+  .showcase, .showcase.flip { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .showcase.flip .copy { order: 0; }
+  .keys { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .facts { grid-template-columns: repeat(2, 1fr); }
+  .fact:nth-child(3) { border-left: 0; }
+  .fact:nth-child(n+3) { border-top: 1px solid var(--line); }
+  .reqs { grid-template-columns: minmax(0, 1fr); }
+  .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .foot-brand { grid-column: 1 / -1; }
+  .principles { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .terms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .terms li + li { border-left: 0; }
+  .terms li { border-top: 1px solid var(--line); }
+  .terms li:nth-child(-n+2) { border-top: 0; }
+  .terms li:nth-child(even) { border-left: 1px solid var(--line); }
+  .nav-links { gap: 16px; font-size: 13px; }
+}
+@media (max-width: 640px) {
+  .nav-bar { flex-wrap: wrap; gap: 8px; }
+  .nav-toggle { display: inline-flex; }
+  .nav-links { display: none; order: 3; flex-basis: 100%; flex-direction: column; gap: 14px; margin: 6px 0 4px; max-height: calc(100dvh - 120px); overflow-y: auto; padding: 8px 4px 8px 0; border-top: 1px solid var(--line); }
+  .menu-open .nav-links { display: flex; }
+  .nav-top { pointer-events: none; padding: 4px 4px 0; font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+  .nav-top::after { display: none; }
+  .nav-menu, .nav-top + .nav-menu { display: grid; position: static; min-width: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+  .nav-menu a { padding: 8px 4px; }
+  .hero { padding-block: 48px 24px; }
+  .hero .eyebrow { font-size: 10px; letter-spacing: .05em; }
+  .dl-row { flex-direction: column; align-items: stretch; max-width: 320px; margin-inline: auto; }
+  .map-wrap { aspect-ratio: 4 / 5; }
+  .hint-mouse { display: none; }
+  .demo-long { display: none; }
+  .dots { display: none; }
+  .win-bar { gap: 8px; }
+  .demo-badge { letter-spacing: .04em; padding-inline: 7px; }
+  .demo-badge::before { display: none; }
+  .demo-cap { font-size: 12px; padding-inline: 4px; }
+  .keys, .plans { grid-template-columns: minmax(0, 1fr); }
+  .fact b { font-size: 22px; }
+  section { padding-block: 80px 0; }
+  .foot .ver { margin-left: 0; }
+  .page-hero { padding-block: 48px 0; }
+  .page-hero .dl-row { margin-inline: 0; }
+  .cta { margin-top: 80px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; scroll-behavior: auto !important; }
+}
+</style>
+<script src="/config.js"></script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-dl" viewBox="0 0 16 16"><path d="M8 2v8m0 0L4.5 6.5M8 10l3.5-3.5M3 13h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-logo" viewBox="0 0 20 20"><rect x="1" y="1" width="10" height="11" rx="2" fill="#ff6363"/><rect x="12" y="1" width="7" height="6" rx="1.5" fill="#e6e6e6"/><rect x="12" y="8" width="7" height="4" rx="1.2" fill="#63a1ff"/><rect x="1" y="13" width="6" height="6" rx="1.5" fill="#e6e6e6"/><rect x="8" y="13" width="5" height="6" rx="1.2" fill="#6a6b6c"/><rect x="14" y="13" width="5" height="6" rx="1.2" fill="#ff6363" opacity=".55"/></symbol>
+</svg>
+
+<a class="skip" href="#top">Skip to content</a>
+<header class="nav">
+  <div class="wrap">
+    <nav class="nav-bar" aria-label="Main">
+      <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links"><span class="sr">Menu</span><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      <div class="nav-links" id="nav-links">
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-product">Product</button>
+          <ul class="nav-menu" id="m-product">
+            <li><a href="/#features">File manager and storage maps<small>Two panes, a zoomable treemap, duplicates, snapshots</small></a></li>
+            <li><a href="/formats">File previews<small>Look inside hundreds of formats, free</small></a></li>
+            <li><a href="/ai-models">AI models<small>Find, inspect and run local models</small></a></li>
+            <li><a href="/#pricing">Pricing<small>Free, or Pro once for <span class="js-price">$4.99</span></small></a></li>
+          </ul>
+        </div>
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-solutions">Solutions</button>
+          <ul class="nav-menu" id="m-solutions">
+            <li><a href="/vfx">VFX, 3D and creative<small>Frame sequences, EXR and DPX, splats</small></a></li>
+          </ul>
+        </div>
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-resources">Resources</button>
+          <ul class="nav-menu" id="m-resources">
+            <li><a href="/whats-new" aria-current="page">What's new<small>Every version and what changed</small></a></li>
+            <li><a href="/#download">Downloads<small>Windows, macOS and Linux</small></a></li>
+            <li><a href="/formats">Supported formats<small>Every format and what it shows</small></a></li>
+            <li><a href="/mac">Opening it on a Mac<small>The one-time Gatekeeper step</small></a></li>
+          </ul>
+        </div>
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-company">Company</button>
+          <ul class="nav-menu" id="m-company">
+            <li><a href="/about">About Filescape<small>What it is and what we believe</small></a></li>
+            <li><a href="/security">Security<small>What the app sends, and when</small></a></li>
+            <li><a href="/contact">Contact and support<small>Questions, problems and licences</small></a></li>
+            <li><a href="https://account.filescape.app/">Your licence<small>Your computers, serial and receipts</small></a></li>
+            <li><a href="/privacy">Privacy<small>What Filescape collects and why</small></a></li>
+            <li><a href="/terms">Terms</a></li>
+            <li><a href="/refunds">Refunds<small>14 days, no questions asked</small></a></li>
+          </ul>
+        </div>
+      </div>
+      <a class="btn btn-key btn-sm nav-dl" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
+    </nav>
+  </div>
+</header>
+<script>
+(() => {
+  // Dropdowns: open on click (and keyboard), close on Escape, outside click or leaving the group.
+  const bar = document.querySelector(".nav-bar");
+  const tops = [...bar.querySelectorAll(".nav-top")];
+  const close = except => tops.forEach(b => { if (b !== except) b.setAttribute("aria-expanded", "false"); });
+  tops.forEach(b => b.addEventListener("click", () => {
+    const open = b.getAttribute("aria-expanded") !== "true";
+    close(b); b.setAttribute("aria-expanded", String(open));
+  }));
+  const toggle = bar.querySelector(".nav-toggle");
+  toggle.addEventListener("click", () => {
+    const open = toggle.getAttribute("aria-expanded") !== "true";
+    toggle.setAttribute("aria-expanded", String(open));
+    document.documentElement.classList.toggle("menu-open", open);
+  });
+  document.addEventListener("click", e => { if (!bar.contains(e.target)) close(); });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    const open = tops.find(b => b.getAttribute("aria-expanded") === "true");
+    if (open) { close(); open.focus(); }
+    else if (toggle.getAttribute("aria-expanded") === "true") { toggle.click(); toggle.focus(); }
+  });
+  bar.addEventListener("focusout", e => { if (!bar.contains(e.relatedTarget)) close(); });
+  // A link inside the phone menu closes it (same-page anchors don't reload).
+  bar.querySelectorAll(".nav-menu a").forEach(a => a.addEventListener("click", () => {
+    close(); if (toggle.getAttribute("aria-expanded") === "true") toggle.click();
+  }));
+})();
+</script>
+<main id="top" class="doc">
+<div class="wrap doc-wrap news">
+<section class="doc-hero"><h1>What's new</h1><p>Every version of Filescape and what changed in it. This is the same list as <b>Help &gt; What's new</b> in the app.</p>
+<nav class="jump" aria-label="Versions"><a href="#next-version">Next version</a><a href="#version-0-2-0">Version 0.2.0</a><a href="#version-0-1">Version 0.1</a></nav></section>
+<h2 id="next-version">Next version <span class="tag-pro">not released yet</span></h2>
+<p class="mute">Being worked on now. These changes arrive in the next release; the download is still the latest released version.</p>
+<h3>Eject drives</h3>
+<ul><li>External drives, USB sticks, SD cards and disk images can be ejected from Filescape on macOS, Windows and Linux: the <b>⏏</b> button by a drive in the sidebar and in <b>Computer</b>, or <b>Eject</b> on its right-click menu. Disk images stored on a drive are ejected first, and when an app is still using the drive Filescape names it, with <b>Try Again</b> and <b>Force Eject</b>.</li></ul>
+<h3>Where a database's space goes</h3>
+<ul><li>SQLite previews show how much of the file each table takes, run the tabs largest first and open on the largest table, so a big database whose first table is empty no longer looks empty. Search-index tables are counted with their index, and the details name the three largest tables and any unused space a VACUUM would give back.</li></ul>
+<h3>Easier to read maps</h3>
+<ul><li><b>Display &gt; Detail on the map</b>: <b>Minimal</b>, <b>Balanced</b> or <b>Detailed</b> names and sizes on the tiles, with shares at Detailed. Remembered, and shared by Storage Analysis and the dock.</li><li>The clicked item's ring now reads on any tile colour, and a zoomed-in map shows how far it's zoomed.</li></ul>
+<h3>One map, two places</h3>
+<ul><li>The analysis dock in Files has the same toolbar as Storage Analysis, in a compact form: <b>Treemap</b> / <b>Sunburst</b>, <b>Follow</b>, <b>Colour</b>, and display options under <b>⋯</b>. It keeps its own colours.</li><li><b>Follow</b> can now follow the <b>left</b> or <b>right</b> pane as well as the active one or the selection, or be <b>Locked</b> on one folder.</li><li><b>Open in Storage Analysis</b> takes the dock's folder, view, colours and selection with it, and <b>Reveal in Files</b> (on Storage Analysis's right-click menu and Preview pane) goes the other way.</li><li>The dock's information line says how much of a folder is only in the cloud.</li></ul>
+<h3>Panes that make room for the map</h3>
+<ul><li>The Preview pane beside the Storage Analysis map has <b>Preview</b> and <b>Details</b> tabs, opens by itself when you click a tile and folds away when nothing is selected. Pin it to keep it open. It remembers its width and tab, and has <b>Reveal in Files</b> to jump to the item in the Files workspace.</li><li>The Insights panel (File types, Sizes, Changes, Duplicates, Sequences) folds away too, with <b>Alt+I</b> (<b>⌥I</b>). Folded panes leave a narrow rail at the window's edge with a button for each.</li></ul>
+<h3>Totals, legend and storage under the map</h3>
+<ul><li>Under the Storage Analysis map, a strip of totals: <b>On disk</b>, <b>Logical size</b>, <b>Cloud only</b>, <b>Reclaimable</b>, <b>Files</b>, <b>Folders</b> and, with a filter on, <b>Matching</b>. The total the map is sized by is highlighted, and clicking another switches to it. Cloud-only data is never counted as on this computer.</li><li>A new legend shows each type's colour, size and share. Point to a type to see where those files are on the map, click to highlight them, and Ctrl+click (⌘-click) to highlight several. <b>All N types</b> lists every type, sortable by size, count or name. The Files dock uses the same legend.</li><li><b>Details</b> and <b>Storage</b> open the scan's details and the cloud storage breakdown, now a full-width bar with Reclaimable beside it. The status bar keeps to what's happening.</li></ul>
+<h3>A calmer Storage Analysis toolbar</h3>
+<ul><li>The controls above the map are one row now: <b>Treemap</b> / <b>Sunburst</b>, a <b>Size</b> menu, a <b>Colour</b> menu, <b>Filters</b>, a search box and a <b>Display</b> menu. Back, Forward, Up, Whole map and Zoom to selection sit beside a breadcrumb of the folder on the map, whose last part opens the scan controls. In a narrow window, menus fold into <b>⋯</b> instead of wrapping.</li><li>Filters moved into a <b>Filters</b> panel that stays open while you use the map: file types, where files are stored, size presets and ranges, and a new <b>Last changed</b> filter (last 7 or 30 days, last year, or untouched for over a year or five years).</li><li>Each filter that's on shows as a removable chip under the toolbar, with <b>Highlight</b> / <b>Only matches</b>, the match count and <b>Clear all</b>. With no filter on, the row is hidden.</li></ul>
+<h3>Storage Analysis keeps up with changes</h3>
+<ul><li>Files added, changed or removed after a scan now show in Storage Analysis by themselves: a download appears in the map a second or so after it finishes, and a file deleted in another app disappears. Downloads still being written (.crdownload, .part, Safari's .download) are left out until they're done. Turn it off under <b>Settings &gt; General &gt; Keep up with changes</b>.</li></ul>
+<h3>Gaussian splat scenes</h3>
+<ul><li><b>SPZ</b> files (every version) and <b>PLY</b> splat scenes now preview in Files and Storage Analysis: the splats drawn for real on the graphics chip, to turn, move and zoom about, with their view-dependent colour (points where the graphics can't), the splat count, colour detail, size and the graphics memory it would need, and checks for invisible, oversized or stray splats. PLY files are told apart by their header, so meshes still show as models, and PLY point clouds now show their points instead of "no faces to show".</li><li>More splat formats: <b>compressed PLY</b> (PlayCanvas and SuperSplat), <b>SPLAT</b>, <b>KSPLAT</b>, <b>SOG</b> (bundled or loose), <b>GLB</b> files with Gaussian splats, and <b>web pages exported from SuperSplat</b>, whose embedded scene is read without running the page.</li><li>Splat thumbnails in Icons view and on map tiles are drawn as real splats on the graphics chip, and map tiles show the format and splat count. Quick Look has <b>◀</b> and <b>▶</b> buttons for the previous and next file, and a camera button on a splat scene saves the view as a PNG of up to 4K.</li><li>A splat scene's preview can show its splats as outlines or centres, or in false colour by opacity, size, crowding or distance; <b>Problems</b> picks out the splats the checks found, including a new check for floaters. There's also a box round the main body, a field of view control, and <b>W A S D</b> to move about. Turning a scene is smoother: pictures arrive while you drag, at half size, instead of only when you stop.</li><li>The <b>Storage optimiser</b> under a splat scene's details measures how big it would be as SPZ, compressed PLY or standard PLY, and saves a converted copy, read back and checked, next to the original, which is kept. As SPZ, a trainer's PLY is often about a tenth of the size.</li><li><b>Compare Scenes</b> (Professional): select two splat scenes and right-click to see them side by side, split by a line you drag, or as their difference, turning together, with how alike the pictures are and both scenes' details side by side.</li><li><b>Splat scenes that change over time</b> play in the preview: 4D scenes (Space-Time Gaussians Lite PLYs) and numbered splat files in a folder, with a play button and a slider under the picture.</li><li><b>Big splat scenes</b> kept in chunks preview: streamed SOG (<code>lod-meta.json</code>), and XGRIDS LCC and LCC2, showing the most detailed level that fits. Chunks only in the cloud are counted, never downloaded.</li><li><b>Splat training folders</b> preview as a summary of what trained them, the photos and starting points used, and the scenes saved along the way. Professional adds what takes the space and a timeline of each saved scene by training step, with its splat count.</li></ul>
+<h3>The AI Models workspace</h3>
+<ul><li><b>🖴 Storage</b> shows how much space AI models take, by app, and finds what can be freed: Ollama downloads no model uses, unfinished downloads, older Hugging Face versions and copies. Copies on the same drive can be shared as one file (a hard link), so every app keeps working. Each item lists what it changes, with one confirmation. Right-click a model and choose <b>Move to Trash…</b> to remove it properly: for Ollama, as <code>ollama rm</code> would. <b>Move to another drive…</b> moves an app's whole model folder and leaves a link, so the app finds its models as before (Professional). <b>Shrink (quantise)…</b> in a model's right-click menu makes a smaller copy (Q8_0 to Q2_K), keeping the original (Professional).</li></ul>
+<ul><li><b>🔬 Lab</b> shows what a model would write next and how sure it is: each token coloured by its probability, the ten likeliest alternatives, and what temperature, top-k, top-p and min-p do to them. Pick a different token to see where the text goes instead. <b>Inside</b> shows how much each of the model's layers changes each word, and what each layer would predict if the model stopped there. <b>Steer</b> pushes a model towards one idea and away from another while it writes, beside what it writes unpushed. <b>Speed</b> tests how fast a model reads and writes on this computer, and keeps the results to compare. Free.</li><li><b>💬 Ask AI</b> chats with a model already on this computer, run by Filescape itself: no Ollama, LM Studio or internet connection needed, and nothing you ask leaves the computer. It runs GGUF models, on the graphics chip of a Mac with Apple silicon and on the processor elsewhere. Ask AI is free.</li><li><b>Ask AI About This…</b> in the right-click menus of Files and Storage Analysis asks about a file or folder: its size, dates and what it holds. Reading what's inside files is a tick box for each question.</li><li>No model yet? <b>Get a small model…</b> in Ask AI downloads Qwen3 1.7B (1.7 GB) from Qwen's own page, after showing you its size, licence and the memory it needs. Filescape checks the file before using it, and a stopped download carries on where it left off.</li></ul>
+<ul><li>A new <b>✨ AI Models</b> workspace (<b>Ctrl+4</b>) lists the AI models on this computer: what Ollama, LM Studio and Hugging Face have downloaded, model files in Downloads and in folders you add, and those in the Storage Analysis scan. Each shows its size, format, family, parameters, precision and context length, read from the file without loading it.</li><li>Files that are byte-for-byte copies of another model are marked, as are Ollama downloads no installed model uses.</li><li><code>filescape --cli --models PATH</code> prints the same list.</li><li>Double-click a model to inspect it: its architecture, layers, heads, vocabulary, licence and parameters, each tagged with where it comes from (the file, Filescape's own count, or the publisher's notes), how its numbers are stored, and every tensor and metadata entry, searchable and sortable. PyTorch checkpoints are never opened, since they can run code.</li><li>A model's <b>Health</b> finds missing parts, files cut short by a stopped download, damaged files, unsafe formats and size labels that don't add up, and can verify Ollama and Hugging Face downloads against their checksums.</li><li><b>Will it run?</b> estimates the memory a model needs at any context length and says whether it runs on this computer's graphics chip, split, on the processor, or not at all.</li><li>Click a tensor to see a histogram and statistics of its numbers, and <b>Check the numbers</b> in Health samples every tensor for broken values or missing data.</li><li>A model's <b>Tokens</b> show its vocabulary: which languages and kinds of text it covers, its special tokens and chat template, and every token, searchable.</li><li><b>Compare with…</b> puts two models side by side: their facts, where their space goes, how their numbers are stored, and which tensors and metadata differ, so you can tell two compressions of one model from two different models.</li><li>A model's <b>Structure</b> shows its layers in order and draws the model as a map of its layers and tensors, coloured by what each part does or by how its numbers are stored.</li></ul>
+<h3>See what's in files on the map</h3>
+<ul><li>Zoom in on the treemap and tiles big enough show what's in the file: pictures, video frames, a PDF's first page, a sound's waveform, and the first lines of text, code and Word or OpenDocument documents. Rest the pointer on a video tile and it plays there, silently. They load in the background and never download cloud files.</li><li>Storage Analysis has a preview pane beside the map: click a tile to see its preview and details (bytes, size on disk, share of the analysis, how a cloud file is stored, and a folder's largest items). <b>Alt+P</b> shows or hides it. Videos play right in the preview panes, and on macOS sound now pauses at once and can jump to any point. Word and OpenDocument files now preview as text in both workspaces.</li><li>Markdown files preview formatted, with headings, lists, tables and links. <b>Raw</b> shows the text as written, and the preview panes remember which one you picked.</li><li>Right-click any part of the path above the file list, or a tab, and choose <b>Copy Path</b>.</li><li>SVG drawings now preview as pictures, on map tiles, in icon views and in the preview panes, sharp at any zoom, with <b>Source</b> to see the markup.</li><li>Code previews in syntax colours, for about 200 languages, and the details say which language.</li><li>Fonts preview as a specimen drawn in the font, with its family, style and glyph count; on tiles and in icon views they show a large "Aa".</li><li>Sound previews show the album cover and the waveform, which fills in as it plays and jumps where you click, and the details list the title, artist, album, length and format.</li><li>Camera RAW photos (CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 and more) preview on tiles, in icon views and in the panes, from the preview the camera stores in the file, with the camera, lens and exposure in the details.</li><li>HEIC (iPhone) and AVIF pictures preview through the system's own decoders.</li><li>Photoshop documents (PSD and PSB) preview from the flattened picture saved with them.</li><li>Spreadsheets (Excel and OpenDocument) preview as a table of their cells, sheet by sheet, and their first rows show on map tiles. Formulas and macros are never run.</li><li>Word, PowerPoint and OpenDocument files preview formatted: headings, bold and italic, lists and tables, and each slide's title and points. Icon views show the picture of the first page or slide saved with them.</li><li>EPUB books preview as formatted text, chapter by chapter, with the title and author in the details and the cover in icon views.</li><li>JPEG XL pictures (.jxl) preview everywhere pictures do.</li><li>SQLite databases preview as their tables, read-only, and CSV and TSV files as a table with their column names.</li><li>Archives preview as a tree of folders, biggest first, with sizes, how much compression saved, and warnings about password-protected files, unsafe names and archives that unpack to a huge size.</li><li>Pictures can be looked at channel by channel, HDR and OpenEXR pictures have an exposure slider, and multilayer OpenEXR files show each layer (render pass).</li><li>Videos have a filmstrip under the picture (click a frame to play from there), and a video that starts black or with a title card is shown by a more telling frame.</li><li>3D models (STL, OBJ, PLY, glTF/GLB and 3MF) preview as a shaded model to turn about, and show in Icons view.</li><li>Thumbnails are kept on disk between runs, so folders you've seen show their pictures at once. A new <b>Previews &amp; thumbnails</b> page in Settings has presets, the cache's size and <b>Clear</b>, and switches for filmstrips, video pictures and 3D and MIDI thumbnails.</li><li>Emails (.eml, .emlx) preview with the sender, recipients, date, text and a list of attachments. HTML mail is shown as plain text, so nothing in it is loaded (no tracking pictures). Mailboxes (.mbox) list their messages, contact cards (.vcf) show the contact or a list of contacts, and calendars (.ics) show the event or a list of events and to-dos.</li><li>Map files preview as a drawing of their shapes: GPS tracks (.gpx) with the distance, climb, height, time and average speed; GeoJSON with its features and properties; and KML and KMZ (Google Earth) with their placemarks. No map is drawn behind them, since that would mean fetching it from the internet.</li><li>DXF drawings preview as the drawing itself (lines, curves, circles and blocks, in their colours), with the AutoCAD version, units, layers and overall size. DWG, STEP and IGES files show what they say about themselves: the program that made them, the units, the author and the parts.</li><li>Pages, Numbers and Keynote documents, and files from Sketch, Affinity, CorelDRAW, SketchUp, Blender, Cinema 4D and 3ds Max, preview from the picture the app saved inside them, with the version that saved them. Maya and Houdini scenes show their version, units and what's in them.</li><li>Files from the Craft Apps (PhotoCraft, VectorCraft, EffectCraft, FigCraft, DesignCraft, TextureCraft, DeckCraft, AniCraft, MaterialCraft, FilmCraft and SoundCraft) preview from the picture or PDF the app saved inside them, with their pages, layers, size, length and the version that saved them. Filescape reads them itself, without the apps.</li><li>Music projects, and FilmCraft, SoundCraft and EffectCraft projects, list the footage and sound files they use: where each one is (this drive, another drive, a network drive or the cloud), which are missing or only in the cloud, and their size together. Click one to show it in Files.</li><li>After Effects projects (.aep, .aepx) show the version that saved them, their compositions and the footage files they use.</li><li>LightCraft library folders preview like a file: their photos and albums, what the catalogue, thumbnail cache and imported photos take, and the photos used from other folders. PhotoCraft documents saved as a folder preview like the single-file ones.</li><li>12-bit and arithmetic-coded JPEGs now show, as do DICOM scans compressed with 12-bit JPEG.</li><li>Photoshop documents list their layers: groups, hidden layers, text layers, smart objects and adjustments, and the names at the top of the stack.</li><li>Krita, OpenRaster and Figma files show the picture saved inside them, with their layers. GIMP and Paint.NET pictures are drawn from their layers.</li><li>FBX, COLLADA (.dae) and Alembic (.abc) models show as shaded clay to turn about, like other 3D models. AutoCAD DWG drawings are drawn, converted to DXF in a separate process first.</li><li>Music projects from Ableton Live (.als), REAPER (.rpp), FL Studio (.flp) and Cubase or Nuendo (.cpr, .npr) show the version that saved them, the tempo, tracks, plugins and the sound files they use, marking any that aren't on this computer.</li><li>DICOM medical scans and FITS astronomy images preview as pictures, with what they show and how they were taken. Patient names, IDs and birth dates are never shown.</li><li>Disk images preview without being mounted: an ISO shows the files on the disc, virtual machine disks show their size and type, and Windows images list their editions.</li><li>Disc images that use UDF (DVDs, Blu-ray discs and Windows install discs) list their files too.</li><li>JPEG 2000 pictures (.jp2, .j2k) preview, and DICOM scans compressed with JPEG 2000, JPEG-LS or lossless JPEG now show their picture.</li><li>Logic Pro projects preview with Logic's picture of the project window, tempo, key and sound files.</li><li><b>Steadier tile previews.</b> Previews on the Storage Analysis map no longer blink off and fade back in as you pan and zoom: a tile keeps its preview while the map sharpens, and sound waveforms hold their shape as tiles grow.</li><li><b>Roomier preview pane.</b> In Storage Analysis the preview takes all the room the details leave, and the details sit at the bottom of the pane.</li><li><b>Video timeline.</b> A video's filmstrip is a timeline: click it to play from there, or drag along it to scrub, the picture following back and forth. The video's sound is drawn under it when it has some. Dragging the time slider scrubs too.</li><li><b>Line numbers</b> beside the text of text files and scripts in previews.</li><li><b>Help › Supported Formats</b> lists every kind of file Filescape previews, what the preview shows and what reads it.</li><li>MIDI files preview as a piano roll, with the length, tempo, tracks and instruments in the details.</li><li>Quick Look works in Storage Analysis too: click a tile and press <b>Space</b>. <b>Full screen</b> (or <b>F</b>) fills the window with the preview, in both workspaces.</li><li>PDFs preview every page, drawn by Filescape itself: scroll through them in the preview panes, with the title, page count and paper size in the details. Thumbnails and map tiles of PDFs are drawn the same way, so they no longer need a PDF tool installed on Linux.</li><li>Files with a missing or wrong extension, such as a download saved as <code>file</code>, now preview by what they really are when Filescape can tell from their first bytes.</li><li><b>Help &gt; About Filescape &gt; Third-party licences</b> lists the open-source software Filescape is built with and the full text of each licence.</li></ul>
+<h3>What system files and folders are</h3>
+<ul><li>Filescape explains the files and folders you didn't make and whose names say little: <code>pagefile.sys</code>, <code>hiberfil.sys</code>, <code>WinSxS</code>, <code>System Volume Information</code>, <code>.Spotlight-V100</code>, the sleep image, <code>/proc</code>, the systemd journal, snap and Flatpak, and about 170 more on Windows, macOS, Linux and removable drives. It says what each one is, whether it's safe to delete, and how to make it smaller safely. The guide is built in and works offline.</li><li>An info icon after the name in the file manager, the Storage Analysis list and the tree (hover it), a *What is this?* box in the preview pane, a note in the status bar over the map, and <b>What Is This?</b> in the right-click menus.</li><li>Free in every edition.</li></ul>
+<h3>Freeing up cloud space</h3>
+<ul><li><b>Free Up Space</b> and <b>Always Keep on This Device</b> (Windows), or <b>Remove Download</b> and <b>Download Now</b> (macOS), in the right-click menu of cloud files and folders in the file manager, the Storage Analysis list and the tree. Filescape asks the system, which asks your cloud app: nothing is deleted, files stay in the cloud, and files with changes not yet uploaded are left alone. Keeping files that aren't downloaded asks first, saying how much would download.</li><li>A <b>Reclaimable</b> size on the <b>Size</b> switch maps the space freeing up would give back, and the storage breakdown says how much that is. Click it to see where.</li><li>On the command line, <code>--free-up PATH</code> and <code>--keep PATH</code> do the same (with Filescape Professional), and <code>--reclaimable</code> ranks a report by reclaimable space.</li><li>One file at a time is free; folders, several items at once and the Reclaimable view are part of Filescape Professional.</li></ul>
+<h3>Cloud storage awareness</h3>
+<ul><li>Filescape recognises cloud folders and drives: Google Drive, OneDrive, SharePoint, iCloud Drive, Dropbox, Box, Nextcloud, ownCloud, pCloud, MEGA, Synology Drive, and drives mounted with rclone or other FUSE tools. Nothing is installed and no provider is contacted: Filescape looks where these services keep their folders.</li><li>A status icon after the name of each cloud file says whether it's <b>online only</b>, <b>partly downloaded</b>, <b>downloaded</b>, <b>always kept on this device</b> or <b>unknown</b>; hover it for what that means and which service it belongs to. Shown in the file manager, the Storage Analysis list and the tree.</li><li>A <b>storage breakdown</b> under the map splits a scan into files not in the cloud, downloaded cloud files and data only in the cloud, with the share that is on this computer.</li><li>A third size, <b>Cloud only</b>, on the <b>Size</b> switch maps where the data that isn't on this computer is.</li><li><b>Stored</b> filter chips show only online-only, downloaded, pinned or local files (Professional), and the Storage Analysis list gains <b>Stored</b> and other-size columns for cloud scans.</li><li>A new <b>Cloud storage</b> page in Settings, with the default size, the icons and breakdown, asking before downloads, and whether to walk into mounted cloud drives (off by default).</li><li>On Windows, OneDrive and other cloud placeholders no longer show as links in the file manager.</li></ul>
+<h3>Size on disk, and cloud files that stay in the cloud</h3>
+<ul><li>Filescape now reads two sizes for every file: its <b>size on disk</b> (what it really takes on this computer, as <code>du</code> and Explorer's "Size on disk" count it) and its <b>logical size</b>. The new <b>Size</b> switch above the map changes between them at once, without rescanning; everything follows it: the map, sunburst, folder list, File types, size histogram, summary, filters and the file manager's Size column. <b>On disk</b> is the default.</li><li>Cloud folders (Google Drive, OneDrive, iCloud Drive, Dropbox, Box…) now show what they use on this computer: files that are only online take almost no space, instead of their full size. Hover an item to see both sizes and whether it's online only.</li><li>Filescape no longer downloads online-only files behind your back: no thumbnails for them, the preview asks first, <b>Find duplicates</b> skips them, <b>Compare contents</b> compares them by size and date, and the sequence player asks before playing frames that aren't downloaded.</li><li>On macOS and Linux, files with several names (hard links) count once in sizes on disk.</li><li>Snapshots now record both sizes. Snapshots saved by earlier versions still open; they're compared by logical size.</li><li>The command-line report (<code>--cli</code>) prints both totals and counts online-only files; add <code>--logical</code> to rank by logical size.</li></ul>
+<h3>A redesigned Settings window</h3>
+<ul><li>Settings has a sidebar of pages with icons, and opens on the page you used last. Each page has a title, a line on what it's for, and its settings in grouped sections, each with a sentence on what it does. The window can be resized.</li><li><b>Find a setting…</b> (or <b>Ctrl+F</b>) searches every setting by name or by everyday words such as "zoom", "threads", "hidden files" or "licence", and takes you to it.</li><li>On/off settings are switches, choices are segmented buttons, and sliders show their value (drag or type it) with a reset button once changed.</li><li>Pictures show what you're choosing: the themes, a folder list preview that follows the columns you pick, and a small treemap drawn with the current treemap settings, with the tile styles and presets as thumbnails. The Classic cushion settings only show when that style is chosen.</li><li><b>General</b> has a new <b>Interface size</b> (80% to 150%, which <b>Ctrl +</b> and <b>Ctrl −</b> also change and which is now remembered), an example for the size units, and an <b>Updates</b> section with your version, the last successful check, <b>Check now</b> and release notes.</li><li><b>Filtering</b> keeps rules as lists you add to, edit and remove from, with <b>Browse…</b> for folders, warnings for rules that can't work, common patterns to add with one click, a name tester, sizes in any unit and ages in days, weeks, months or years. A summary at the top says what's skipped and when a rescan is needed.</li><li><b>Advanced</b> has scanner thread profiles (Automatic, Low, Balanced, High, Network, Custom), a Permissions section that gives the right advice for Windows, macOS and Linux, and Diagnostics with the settings folder and system details to copy.</li><li><b>Licensing</b> shows your edition and state at a glance, a bar for the evaluation's days left, a <b>Paste</b> button for the licence key, and makes clear that a perpetual licence never expires even after its updates end.</li><li>The footer has <b>Restore page defaults</b> and <b>Restore all…</b> (which asks first). <b>Apply</b> is greyed out until something changes, and <b>Cancel</b> or <b>Esc</b> undoes everything not applied.</li></ul>
+<h3>Update notices</h3>
+<ul><li>Filescape checks for a newer version each time it starts and, when there is one, says so at the top of the window, with a download link and whether your licence covers it. Turn it off in <b>Settings &gt; General</b>.</li><li><b>❓ Help &gt; Contact Filescape…</b> (and <b>Contact Us…</b> in <b>About Filescape</b>) opens the contact form on filescape.app.</li></ul>
+<h3>A new look for the treemap</h3>
+<ul><li>Under the Storage Analysis map, a summary shows the scanned folder, its size and file count, and the file types taking the most space, each in its map colour. It follows the filters, so with <b>Larger than</b> or <b>Smaller than</b> set you see how much space the matching files take and of which types. Click a type to highlight it.</li><li>The treemap has a new <b>Modern</b> tile style, the same look as the map on filescape.app: soft pastel tiles, names and sizes written on the tiles, and the folders on screen outlined with dark name tags. The cushion look is still there as <b>Classic cushion</b> under <b>Settings &gt; Treemap &gt; Tile style</b>.</li><li>Filescape has its own icon, the tile-grid logo from the website, in the window, the taskbar and the Dock.</li></ul>
+<h3>Files workspace</h3>
+<ul><li>Filescape now opens as a <b>file manager</b>. Browse your drives, folders and network shares straight away, with no scan. It has:<ul><li>a sidebar with Home, Desktop, Documents, Downloads and the rest, favourites, drives with their space, and recent folders;</li><li>tabs that are restored next time;</li><li>Back, Forward and Up;</li><li>a path you can click or type in (<b>Ctrl+L</b>), including <code>\\server\share</code> paths;</li><li>a sortable Details list with a filter box and type-to-select;</li><li>Shift and Ctrl selection.</li></ul></li></ul>
+<p></p>
+<ul><li><b>A full file manager.</b> Copy, cut and paste (<b>Ctrl+C</b>, <b>Ctrl+X</b>, <b>Ctrl+V</b>), drag and drop, <b>F2</b> to rename and <b>Delete</b> to send to the Recycle Bin or Trash now work in Files. Drops move items on the same drive and copy them to another, as in Explorer and Finder, and the label by the pointer says which.</li><li><b>Undo and name clashes.</b> <b>Ctrl+Z</b> undoes copies, moves, renames, new items and Move to Trash, putting deleted items back from the bin. When a copy or move meets a name that's taken, Filescape asks: Replace, Keep Both, Skip, or Merge for folders.</li><li><b>Servers: SFTP, FTP and WebDAV.</b> Browse, copy to and from, rename and delete on servers as if they were drives, and analyse their folders. <b>Connect to Server…</b> saves them in the sidebar. SFTP checks the server's identity and signs in with your SSH agent, key files or a password; passwords are only ever kept in the system keychain, and only if you ask. FTP and plain-http WebDAV are marked as not encrypted.</li><li><b>Image sequences and a sequence player.</b> Numbered frames (<code>shot.1001.exr</code>, <code>shot.1002.exr</code>…) show as one row with their range and any missing frames, and copy, move, delete and drag as one item. Double-click one to play it from memory, with a timeline, loop, ping-pong, frame rates from 23.976 to 60, exposure and colour transforms (sRGB, Rec.709, Cineon log). Select two and press <b>Enter</b> to compare them with a wipe. EXR, DPX, PNG, TIFF and the other image types all play.</li><li><b>Two panes</b> (<b>Ctrl+\\</b>): two folders side by side or one above the other, each with its own tabs, sort and filter. Drag between them, or press <b>Shift+F5</b> to copy and <b>Shift+F6</b> to move to the other one.</li><li><b>Favourites.</b> Drag a folder onto the sidebar to bookmark it; nothing is moved. Reorder them by dragging, rename them, and sort them into groups. Pinned folders become favourites.</li><li><b>Quick Look and a preview pane.</b> Press <b>Space</b> for a large preview, or <b>Alt+P</b> for a preview pane, with zoom and pan. Images (including OpenEXR and HDR) and text files.</li><li><b>Four views.</b> Details, Icons, Columns (the folders above this one at the left, as in Finder) and Gallery (a large preview over a strip of pictures), from the buttons at the bottom right of the list. Icons and Gallery show pictures of images, videos and PDFs. Each folder remembers its own view, sort and grouping.</li><li><b>Groups.</b> <b>View &gt; Group By</b> puts the Details list under headings by type, date or size.</li><li><b>Rename many items at once.</b> Select several items, or a sequence, and press <b>F2</b>: find and replace (with regular expressions), change case, add numbers or change the extension, with every new name shown before anything changes.</li><li><b>Compare and sync folders.</b> With two panes, <b>View &gt; Compare Folders…</b> shows what's only on one side, newer on one side or different, then copies one way, both ways or mirrors the left onto the right. Replaced and deleted items go to the bin, and Undo reverses a sync.</li><li><b>Search subfolders.</b> <b>🗐</b> beside the filter searches the folder and every folder below it, and <b>☆</b> keeps the search in the sidebar.</li><li><b>Colours, tags and notes.</b> Give items a colour, tags and a note from the right-click menu. The sidebar's <b>Tags</b> shows everything with a tag.</li><li><b>Open With your own apps.</b> Add the programs you use for each type of file (Nuke, RV, a text editor) and open items in them from the right-click menu.</li><li><b>Redo</b> (<b>Ctrl+Y</b> or <b>Ctrl+Shift+Z</b>) after an Undo, and <b>F6</b> to move the keyboard to the sidebar and back.</li><li><b>LUTs in the sequence player.</b> <b>LUT…</b> shows frames through a <code>.cube</code> file.</li><li><b>Archives.</b> Open zip, 7z and tar archives like folders, preview what's in them, and take things out with <b>Extract Here</b>, <b>Extract To…</b>, copy and paste or a drag.</li><li><b>Pause and queue.</b> Copies and moves show their progress in the status bar, can be paused, resumed and stopped, and ones started while another runs wait their turn.</li><li><b>Changes made by other programs</b> show up in the list by themselves, without <b>F5</b>.</li><li><b>Video, PDF and sound previews.</b> A frame from a video and a PDF's first page from the system's thumbnailers, and sound files play in the preview.</li><li><b>A smarter address bar.</b> Suggestions as you type, <b>Tab</b> completion, <code>%VAR%</code> and <code>$VAR</code>, <code>&gt;</code> for commands and <code>@</code> for favourites. Each part of the path takes drops and has a menu of the folders inside it.</li><li><b>New menu.</b> New folders and small valid starter files (text, Markdown, JSON, XML, CSV, scripts), plus your own templates: put any file or folder in the templates folder and New copies it.</li><li><b>Network &amp; Remote.</b> Mapped drives (including offline ones), network mounts, saved servers and <b>Connect to Server…</b> for SMB shares. The system asks for passwords; Filescape never sees them.</li><li><b>The analysis dock</b> (<b>Ctrl+J</b>) shows the treemap or sunburst of the folder you're in, under the list. Once a folder or drive is analysed, every folder inside it shows its treemap straight away as you browse, with no rescanning.<ul><li><b>Analyse Folder</b> scans in the background while you keep browsing.</li><li><b>Refresh Analysis</b> rescans just one folder inside a bigger analysis.</li><li>The dock can follow the open folder, follow the selected folder, or stay pinned to one folder.</li><li>Selecting in the list outlines the item on the map, and clicking a tile selects it in the list. Tiles have the same right-click menu as the list.</li><li>A line above the map shows the folder's size, file and folder counts, its largest file and subfolder, and whether it has changed since it was analysed. The legend under the map highlights a file type when you click it.</li></ul></li></ul>
+<p></p>
+<ul><li><b>Storage Analysis</b> is still the Filescape you know, with everything in it. <b>Ctrl+1</b> and <b>Ctrl+3</b> switch between the two workspaces, and each keeps your place.</li><li><b>A new look.</b> It has:<ul><li>calmer panel colours in both themes, and one accent colour;</li><li>grouped toolbar buttons;</li><li>proper tabs, which you can drag to reorder;</li><li>resizable columns;</li><li>Comfortable or Compact rows (<b>View</b> menu);</li><li>a status bar that shows background work.</li></ul></li><li>Folder sizes from the last scan show in the Files list.</li><li>Big folders and slow network drives never freeze the window: folders are read in the background, and a share that takes a while says so and can be cancelled.</li></ul>
+<h3>Linux distributions in the sidebar</h3>
+<ul><li>On Windows, your <b>WSL</b> distributions are listed under <b>Linux</b> in the sidebar, as in Explorer. Click one to browse its files.</li></ul>
+<h3>Windows' own right-click menu</h3>
+<ul><li>On Windows, <b>Show More Options</b> at the bottom of an item's right-click menu (or <b>Shift+F10</b>, or <b>Shift+right-click</b>) opens the menu Explorer shows, with what other apps add to it: 7-Zip or PeaZip, Notepad++, PowerToys, antivirus scanners, <b>Send to</b> and the rest.</li></ul>
+<h3>Show in Files</h3>
+<ul><li><b>Show</b> beside the filter in Files keeps only some kinds of file (Audio, Video, Images, Documents…), and with <b>🗐</b> gathers them from every subfolder.</li><li><b>The preview pane counts a selection</b> of several items by kind, with sizes. Click a kind to preview one of them.</li><li><b>Crashes are saved</b> to <code>crash.log</code> in Filescape's settings folder, and on Windows a message says what happened, so a crash can be reported.</li></ul>
+<h3>Fixes</h3>
+<ul><li><b>Menus have icons</b>, in a column of their own so the names line up.</li><li><b>File names on map tiles are easier to read.</b> They sit on a dark backing and get bigger as you zoom in.</li><li><b><code>pagefile.sys</code>, <code>swapfile.sys</code> and <code>hiberfil.sys</code> aren't counted as Programs</b> any more. They're Windows' memory saved to disk, and now count as Other.</li><li><b>Previews of UTF-16 text files</b>, such as PowerShell output, show the text instead of "No preview". <b>PDFs on Windows</b> show their first page without needing a PDF app's thumbnails.</li><li><b>The File Manager toolbar no longer overlaps itself on a narrow window.</b> Back, Forward, Up, the path and the filter now sit on the pane's own bar above the tabs, and on a narrow window the toolbar's buttons show only their symbols.</li><li><b>Resizing the window on Windows</b> no longer makes the panels shake. Filescape now draws with OpenGL there. <code>DIRMAP_RENDERER=wgpu</code> brings back DirectX 12.</li><li><b>Rename</b> no longer replaces a different file whose name differs only in capital letters (<code>readme</code> → <code>README</code>) on Linux and on case-sensitive Mac disks.</li></ul>
+<h2 id="version-0-2-0">Version 0.2.0</h2>
+<h3>File manager</h3>
+<ul><li>The folder list at the top is now a <b>file manager</b> like Finder or Windows Explorer, with the map still underneath. Choose <b>List</b>, <b>Icons</b>, <b>Columns</b> or <b>Tree</b>, each with every item's size and share of its folder. Sort by name, size, kind, items or date; click the path, use Back, Forward and Up, the arrow keys and type-to-select. Opening a folder zooms the map there, and zooming the map moves the file manager.</li><li><b>Tabs</b>: <b>Ctrl+T</b>, <b>Ctrl+W</b>, <b>Ctrl+Tab</b>, middle-click a folder or <b>Open in New Tab</b>.</li><li><b>Select several items</b> with Ctrl- and Shift-click or <b>Ctrl+A</b>.</li><li><b>Rename</b> (<b>F2</b>), <b>New Folder</b> (<b>Ctrl+Shift+N</b>), <b>Copy</b>, <b>Cut</b> and <b>Paste</b> (<b>Ctrl+C</b>, <b>Ctrl+X</b>, <b>Ctrl+V</b>), and <b>drag and drop</b> onto folders, the path or tabs (hold <b>Alt</b> to copy).</li><li><b>Copy Path</b> is now <b>Ctrl+Shift+C</b>, since <b>Ctrl+C</b> copies the items.</li></ul>
+<h3>Help and documentation</h3>
+<ul><li><b>Help Centre</b> built into Filescape: the complete manual, tutorials, keyboard and mouse references, filter syntax and troubleshooting, searchable and available offline. Open it from <b>❓ Help</b> in the toolbar.</li><li><b>F1</b> opens help for the part of the window under the pointer.</li><li>More tooltips and <b>?</b> help links in the Settings window, the Custom filter and the side tabs.</li><li>The status bar now says how many items couldn't be read after a scan.</li></ul>
+<h3>Custom filter and sequences</h3>
+<ul><li><b>🔍 Custom</b> filter (<b>Ctrl+F</b>): wildcards, multiple patterns, exclusions with <code>!</code>, frame numbers with <code>#</code> and <code>{frame}</code>, padding and ranges, case-sensitive and match-all options, presets, recent patterns, examples and extension completion.</li><li><b>Highlight</b> or <b>Show matches only</b> for every filter, with a live match count.</li><li><b>Sequences</b> tab: numbered image and render sequences with frame ranges and missing frames.</li></ul>
+<h3>Right-click menus</h3>
+<ul><li>A WinDirStat-style right-click menu on the file manager, with keyboard shortcuts: Open, Copy Path, Select in Explorer, Command Prompt and PowerShell (Terminal elsewhere), Refresh Selected, Properties, Compute Hash (SHA-256), Add to Exclusion Filter, Delete Permanently, Delete to Recycle Bin, Remove Empty Folders, Empty Folder and Move to.</li><li>A right-click menu on the File types list: Find all files of a type, Highlight, Copy Extension, Add to Exclusion Filter.</li><li>Only changed items are read again after a file operation.</li></ul>
+<h3>Treemap</h3>
+<ul><li>Smooth zoom towards the pointer, panning with inertia, animated opening and closing of folders, Back and Forward (Alt+←/→ and the mouse's side buttons), Zoom to selection and Whole map.</li><li>GPU drawing: only what's in view is worked out, so millions of files stay smooth.</li><li>Interactive pointer lighting, a slight bevel, and tile labels that fade in.</li><li>Navigation and effects settings under <b>⚙ Settings &gt; Treemap</b>.</li></ul>
+<h3>Earlier in 0.2.0</h3>
+<ul><li>Windows: offer to run as administrator.</li><li>Linux and macOS builds, a macOS app bundle and correct whole-disk scanning on macOS.</li><li>Sunburst view, colour by age and change, size histogram, snapshots and comparison, duplicate finder.</li><li>Wheel zoom, tile labels, hover information and kind and size filters.</li><li>Live scan progress and live file manager, Explorer icons on Windows, the Settings window.</li><li>Light theme fixes.</li></ul>
+<h2 id="version-0-1">Version 0.1</h2>
+<ul><li>First version: parallel scanning, drive list, file manager and cushion treemap.</li></ul>
+<div class="card"><h2>Tell us what you'd like next</h2><p>Ideas and bug reports go straight to the developer. <a href="/contact?topic=feature">Suggest a feature</a> or <a href="/contact?topic=bug">report a bug</a>.</p></div>
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-cols">
+      <div class="foot-brand">
+        <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+        <p>See your files differently. Free for Windows, macOS and Linux.</p>
+      </div>
+      <nav class="foot-col" aria-label="Product">
+        <h2>Product</h2>
+        <a href="/#features">Features</a>
+        <a href="/formats">File previews</a>
+        <a href="/ai-models">AI models</a>
+        <a href="/#pricing">Pricing</a>
+      </nav>
+      <nav class="foot-col" aria-label="Solutions">
+        <h2>Solutions</h2>
+        <a href="/vfx">VFX, 3D and creative</a>
+      </nav>
+      <nav class="foot-col" aria-label="Resources">
+        <h2>Resources</h2>
+        <a href="/whats-new">What's new</a>
+        <a href="/#download">Downloads</a>
+        <a href="/formats">Supported formats</a>
+        <a href="/mac">Opening it on a Mac</a>
+      </nav>
+      <nav class="foot-col" aria-label="Company">
+        <h2>Company</h2>
+        <a href="/about">About</a>
+        <a href="/security">Security</a>
+        <a href="/contact">Contact and support</a>
+        <a href="https://account.filescape.app/">Your licence</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/refunds">Refunds</a>
+      </nav>
+    </div>
+    <p class="ver">© 2026 Filescape</p>
+  </div>
+</footer>
+<script>
+// Prices come from /config.js on every page, so ending the launch price is one edit there.
+(() => {
+  const c = window.FILESCAPE || {};
+  if (!c.priceLabel) return;
+  document.querySelectorAll(".js-price").forEach(e => { e.textContent = c.priceLabel; });
+  if (!c.listPriceLabel) document.querySelectorAll(".js-list, .js-launch").forEach(e => e.remove());
+  else document.querySelectorAll(".js-list").forEach(e => { e.textContent = c.listPriceLabel; });
+})();
+</script>
+</body>
+</html>
