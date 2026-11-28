@@ -4,7 +4,7 @@ The **File types** buttons in the **Filters** panel above the map limit the map 
 click more to add other kinds (a file of **any** chosen kind is shown); click **All** to turn them
 all off. Hover over a button to see a summary of what it covers.
 
-The **File types** buttons in the **Filters** panel are part of Filescape Professional (see [Licensing](../settings/licensing.md#free-and-professional-features)).
+The **File types** buttons in the **Filters** panel are part of Filescape Professional, except **Applications**, which is free in every edition (see [Licensing](../settings/licensing.md#free-and-professional-features)).
 
 A file's category comes from its extension, ignoring case, except for files inside an
 application, which are all **Applications**. The complete lists are:

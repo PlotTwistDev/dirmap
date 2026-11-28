@@ -384,7 +384,7 @@ pub fn entry(e: &fs::DirEntry) -> Option<Entry> {
     if md.is_file() {
         flags |= cloud_for(e);
     }
-    let bundle = if is_dir { crate::apps::bundle_at(&e.path(), &name) } else { 0 };
+    let bundle = if is_dir { crate::apps::bundle_at(&e.path(), &name) } else { crate::apps::file_code(&name) };
     Some(Entry {
         bundle,
         hidden: crate::scan::is_hidden(&name, &md),
