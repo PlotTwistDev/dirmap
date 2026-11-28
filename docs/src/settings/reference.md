@@ -63,6 +63,12 @@ How the Files workspace shows and opens applications. See [Applications](../view
 | **Double-click to launch applications** <!-- setting:app_double_click --> | On | Double-click or **Enter** launches an application. Off, they show its contents instead; **Open Application** on the right-click menu still launches it. Greyed out while the next setting is on. |
 | **Treat application bundles as folders** <!-- setting:app_as_folders --> | Off | For developers and administrators: double-click and **Enter** go inside applications like any folder, and the right-click menu has the folder commands too. Applications keep their icons and names. |
 
+### Ask AI
+
+| Setting | Default | Effect |
+|---|---|---|
+| **Show Ask AI in Files** <!-- setting:ask_in_files --> | On | Shows the **Ask AI** tab beside **Preview** and **Details** in the Files preview pane, and the **Ask AI** buttons in the preview pane and Quick Look. Off hides them; Ask AI is still in the [AI Models workspace](../views/ask-ai.md). |
+
 ## Filtering
 
 These are scan exclusions: they **need a rescan** and change the totals. See

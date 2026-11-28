@@ -896,9 +896,15 @@ fn look_viewport() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("quick-look")
 }
 
+/// Whether Ask AI can be asked about `path` from a preview: a file on this computer (not on a
+/// server or inside an archive).
+pub(super) fn ask_ok(path: &Path) -> bool {
+    !crate::fsys::remote::is_remote(path) && !crate::fsys::archive::inside(path)
+}
+
 impl App {
     /// The item a preview shows: the cursor's item in the focused pane.
-    fn look_target(&self) -> Option<(PathBuf, Entry)> {
+    pub(super) fn look_target(&self) -> Option<(PathBuf, Entry)> {
         if self.files.look.from_map {
             return self.map_target().filter(|(_, e)| !e.is_dir);
         }
@@ -940,6 +946,7 @@ impl App {
         let full = self.files.look.full;
         let mut open = true;
         let mut step = 0i64;
+        let mut ask_here = false;
         let mut win = egui::Window::new(egui::RichText::new(format!("{}", e.name)).strong())
             // A window of its own when full, so it comes back to its old size and place.
             .id(egui::Id::new(("quick-look", full)))
@@ -957,6 +964,9 @@ impl App {
                         if ui.button("Open").clicked() {
                             let p = path.clone();
                             self.files.spawn(move || crate::actions::open(&p));
+                        }
+                        if self.ask_in_files() && !self.files.look.from_map && ask_ok(&path) && crate::kit::button(ui, crate::kit::Kind::Ghost, Some(crate::kit::Icon::Ai), "Ask AI").on_hover_text("Ask AI about this file, in the preview pane beside the list").clicked() {
+                            ask_here = true;
                         }
                         let (icon, tip) = if full { ("Window", "Back to a window (F)") } else { ("Full screen", "Fill the window (F)") };
                         if ui.button(icon).on_hover_text(tip).clicked() {
@@ -980,6 +990,12 @@ impl App {
                 let avail = ui.available_size();
                 self.preview_body(ui, &path, &e, avail);
             });
+        if ask_here {
+            // Ask AI sits in the preview pane: Quick Look closes so the answer can be read beside
+            // the list.
+            open = false;
+            self.open_files_ask(Some(path.clone()));
+        }
         if !open {
             self.files.look.open = false;
             self.files.look.full = false;
@@ -1007,7 +1023,7 @@ impl App {
             .with_inner_size(home.1)
             .with_min_inner_size([320.0, 240.0]);
         let full = self.files.look.full;
-        let (mut close, mut step, mut toggle) = (false, 0i64, false);
+        let (mut close, mut step, mut toggle, mut ask_here) = (false, 0i64, false, false);
         ctx.show_viewport_immediate(id, builder, |ctx, _class| {
             let (closing, outer, inner) = ctx.input(|i| (i.viewport().close_requested(), i.viewport().outer_rect, i.viewport().inner_rect));
             close |= closing;
@@ -1036,6 +1052,9 @@ impl App {
                             let p = path.clone();
                             self.files.spawn(move || crate::actions::open(&p));
                         }
+                        if self.ask_in_files() && !self.files.look.from_map && ask_ok(&path) && crate::kit::button(ui, crate::kit::Kind::Ghost, Some(crate::kit::Icon::Ai), "Ask AI").on_hover_text("Ask AI about this file, in the preview pane beside the list").clicked() {
+                            ask_here = true;
+                        }
                         let (label, tip) = if full { ("Window", "Back to a window (F)") } else { ("Full screen", "Fill the screen (F)") };
                         if ui.button(label).on_hover_text(tip).clicked() {
                             toggle = true;
@@ -1060,6 +1079,10 @@ impl App {
         if toggle {
             self.files.look.full = !full;
             ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Fullscreen(!full));
+        }
+        if ask_here {
+            close = true;
+            self.open_files_ask(Some(path.clone()));
         }
         if close {
             self.files.look.open = false;
@@ -1142,18 +1165,33 @@ impl App {
         ui.separator();
     }
 
-    /// The preview pane at the right of the list, laid out as Storage Analysis's: Preview and
-    /// Details tabs, the preview taking all the room the facts under it leave in the pane
-    /// (`tall` points high), so they sit at the bottom and pictures and videos get the space.
-    pub(super) fn preview_pane(&mut self, ui: &mut egui::Ui, tall: f32) {
+    /// The Files preview pane's tabs: Preview, Details and (unless turned off in Settings) Ask AI,
+    /// with the button that closes the pane.
+    pub(super) fn preview_tabs(&mut self, ui: &mut egui::Ui) {
         use super::rails::PreviewTab;
-        use crate::kit::{self, Icon, Kind as K};
-        let pal = style::pal(ui);
+        use crate::kit::{self, Icon};
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            let mut tab = self.files.prefs.map_preview_tab;
-            kit::segmented(ui, &mut tab, &[(PreviewTab::Preview, "Preview"), (PreviewTab::Details, "Details")], false);
-            self.files.prefs.map_preview_tab = tab;
+            let ask = self.ask_in_files();
+            // 0 Preview, 1 Details, 2 Ask AI.
+            let mut tab = match (self.files.prefs.ask_tab && ask, self.files.prefs.map_preview_tab) {
+                (true, _) => 2,
+                (_, PreviewTab::Details) => 1,
+                _ => 0,
+            };
+            let before = tab;
+            if ask {
+                kit::segmented(ui, &mut tab, &[(0, "Preview"), (1, "Details"), (2, "Ask AI")], false)
+                    .on_hover_text("Ask AI: ask a model running on this computer about the selected file or folder");
+            } else {
+                kit::segmented(ui, &mut tab, &[(0, "Preview"), (1, "Details")], false);
+            }
+            if tab != before {
+                self.files.prefs.ask_tab = tab == 2;
+                if tab < 2 {
+                    self.files.prefs.map_preview_tab = if tab == 1 { PreviewTab::Details } else { PreviewTab::Preview };
+                }
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if kit::icon_button(ui, Icon::FoldRight, "Close the preview pane (Alt+P)").clicked() {
                     self.files.prefs.preview = false;
@@ -1161,6 +1199,16 @@ impl App {
             });
         });
         ui.add_space(4.0);
+    }
+
+    /// The preview pane at the right of the list, laid out as Storage Analysis's: Preview and
+    /// Details tabs, the preview taking all the room the facts under it leave in the pane
+    /// (`tall` points high), so they sit at the bottom and pictures and videos get the space.
+    pub(super) fn preview_pane(&mut self, ui: &mut egui::Ui, tall: f32) {
+        use super::rails::PreviewTab;
+        use crate::kit::{self, Icon, Kind as K};
+        let pal = style::pal(ui);
+        self.preview_tabs(ui);
         let details = self.files.prefs.map_preview_tab == PreviewTab::Details;
         self.selection_tally(ui);
         let Some((path, e)) = self.look_target() else {
@@ -1244,6 +1292,9 @@ impl App {
                 if !e.is_dir && kit::button(ui, K::Secondary, Some(Icon::Eye), "Quick Look").on_hover_text("A large preview (Space)").clicked() {
                     app.files.look.open = true;
                     app.files.look.from_map = false;
+                }
+                if app.ask_in_files() && local && kit::button(ui, K::Secondary, Some(Icon::Ai), "Ask AI").on_hover_text("Ask a model running on this computer about it").clicked() {
+                    app.open_files_ask(Some(path.clone()));
                 }
                 let r = kit::icon_button(ui, Icon::More, "More");
                 egui::Popup::menu(&r).show(|ui| {

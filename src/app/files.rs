@@ -125,6 +125,8 @@ pub(super) struct FilesPrefs {
     pub map_preview_pin: bool,
     pub map_preview_width: f32,
     pub map_preview_tab: super::rails::PreviewTab,
+    /// The Files preview pane shows its Ask AI tab.
+    pub ask_tab: bool,
     /// Storage Analysis's Insights panel (File types, Sizes, Changes…): open, or folded to the
     /// rail, and its width.
     pub insights_open: bool,
@@ -212,6 +214,7 @@ impl Default for FilesPrefs {
             map_preview_pin: false,
             map_preview_width: 300.0,
             map_preview_tab: super::rails::PreviewTab::Preview,
+            ask_tab: false,
             insights_open: true,
             insights_width: 330.0,
             map_density: super::viz::MapDensity::Balanced,
@@ -2193,7 +2196,14 @@ impl App {
                 .frame(egui::Frame::new().fill(pal.side).inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 8 }))
                 .show(ui, |ui| {
                     let tall = ui.available_height();
-                    egui::ScrollArea::vertical().id_salt("preview-scroll").auto_shrink(false).show(ui, |ui| self.preview_pane(ui, tall));
+                    if self.files.prefs.ask_tab && self.ask_in_files() {
+                        // Ask AI keeps its question box at the bottom, so it scrolls only the conversation.
+                        self.preview_tabs(ui);
+                        let target = self.files.cursor_entry().and_then(|e| Some((self.files.here().dir()?.join(&*e.name), e))).filter(|(p, _)| super::preview::ask_ok(p));
+                        self.files_ask_pane(ui, target);
+                    } else {
+                        egui::ScrollArea::vertical().id_salt("preview-scroll").auto_shrink(false).show(ui, |ui| self.preview_pane(ui, tall));
+                    }
                 });
             self.files.prefs.preview_width = r.response.rect.width();
             ui.painter().vline(r.response.rect.left(), r.response.rect.y_range(), Stroke::new(1.0, pal.hairline));

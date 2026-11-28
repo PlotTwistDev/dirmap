@@ -78,6 +78,47 @@ away under **Thought about it**; click it to read it.
 
 Under the last answer, Filescape shows how many tokens it took and how fast they were written.
 
+## Ask AI in Files
+
+You don't have to leave [Files](file-manager.md) to ask about a file. Open the preview pane
+(**Alt+P**) and choose its **Ask AI** tab, beside **Preview** and **Details**, or press **Ask AI**
+under the preview, or in a [Quick Look](file-manager.md) window. The selected file or folder is what
+the conversation is about: there's nothing to attach.
+
+![The Ask AI tab in the Files preview pane, about a licence file](../images/ask-ai-files.png)
+
+From the top, the tab shows:
+
+- **What it's about**: the file or folder's name, kind and size. **×** starts a new chat.
+- **The model**: a green dot and its name when one is loaded. It's the same loaded model as in the
+  AI Models workspace, so it doesn't take any more memory. **Change** loads another. With none
+  loaded, **Load** loads the one shown (the one picked last, or the smallest), **⏷** picks another,
+  and **Get a small model…** shows the [download offer](#getting-a-small-model) right there.
+- **Suggested questions** for what it is, before the first question. A licence gets **Summarise
+  this licence**, **Can I use this commercially?** and **What restrictions apply?**; a log gets
+  **Find the errors**; code gets **Explain this code** and **Find possible issues**; a spreadsheet
+  gets **Explain the columns**; a folder gets **What is this folder?** and **What's using the
+  space?**. Questions that need a file's text are only offered when Filescape can read it: plain
+  text, code, Word, PowerPoint, OpenDocument and Excel files. Describing what's in a picture needs a
+  model that can see images, which Filescape can't run yet.
+- **The conversation**, with **Copy** and **Based on** under each answer, as below.
+- **The question box**. **Enter** sends; follow-up questions keep what the chat is about. **…**
+  has **New chat** and **Open in AI Models**, which carries the conversation on in the AI Models
+  workspace with more room (it replaces the conversation there).
+
+**Include the file's contents** is ticked for a single file Filescape can read, so its text goes
+with the first question. Folders are described by their names, sizes and dates, not by reading
+the files in them.
+
+When you select something else after asking, the chat isn't changed behind your back. A bar
+offers **New chat** (start again about the new item), **Replace** (keep the conversation, and ask
+about the new item from now on), **Add** (ask about it too) or **Keep this chat**.
+
+The Files chat and the AI Models chat are separate conversations sharing one model. The model
+answers one question at a time; if it's busy in the other one, the tab says so.
+
+To hide Ask AI in Files, turn off **Show Ask AI in Files** in Settings › Files.
+
 ## Asking about files and folders
 
 Right-click a file or folder in [Files](file-manager.md) or in Storage Analysis and choose **💬 Ask AI
@@ -96,7 +137,8 @@ What the model is told:
   there's also a breakdown by file type.
 - **Not** what's inside the files, unless you tick **Include the file's contents**. That box
   appears when you ask about files, and applies to that one question: Filescape then reads the
-  start of each chosen text file, as much as fits in the model's context. Files that aren't text,
+  start of each chosen text file, or the text of a Word, PowerPoint, OpenDocument or Excel file,
+  as much as fits in the model's context. Other files,
   and files that are only in the cloud, aren't read, so asking never downloads anything.
 
 Press **×** to ask without them. After you send the question, **📎 About …** stays above it; hover
@@ -118,3 +160,16 @@ anything, whatever the answer says.
 Answers come from the model, not from Filescape, and can be wrong, especially from small models.
 Filescape only shows them: it never deletes, moves or opens anything because of what a model
 wrote, and links in an answer aren't opened.
+
+Under every conversation, in AI Models and in Files, Ask AI says **Private · Local processing ·
+Read-only** and "Local AI models can make mistakes. Always verify important information before
+acting on AI-generated responses." Hover **ⓘ** beside it for more:
+
+- AI models may give incorrect, incomplete or misleading answers.
+- Accuracy depends on the model you choose: its abilities, its size and how much context it has.
+- Smaller or heavily quantised models make more mistakes.
+- Check what it says about licences, legal documents, money and technical problems yourself.
+- Large files and folders may only be partly read, because a model can only take in so much at
+  once. **Based on** says what the model was given.
+- Suggestions that files are redundant, duplicated or unneeded are guesses, not facts.
+- Filescape never runs commands, or changes, moves or deletes files, because of an answer.

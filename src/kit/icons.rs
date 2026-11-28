@@ -91,6 +91,8 @@ pub enum Icon {
     Gauge,
     /// Multimodal models: a four-point sparkle.
     Sparkle,
+    /// Ask AI, wherever it appears: a sparkle with a small star beside it.
+    Ai,
 }
 
 /// Draw `icon` filling `rect` (best square), in `color`.
@@ -438,6 +440,10 @@ pub fn paint(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Sparkle => {
             poly(&[(8.0, 1.5), (9.4, 6.6), (14.5, 8.0), (9.4, 9.4), (8.0, 14.5), (6.6, 9.4), (1.5, 8.0), (6.6, 6.6)], true);
+        }
+        Icon::Ai => {
+            poly(&[(6.5, 3.0), (7.8, 7.2), (12.0, 8.5), (7.8, 9.8), (6.5, 14.0), (5.2, 9.8), (1.0, 8.5), (5.2, 7.2)], true);
+            poly(&[(12.5, 1.0), (13.1, 2.9), (15.0, 3.5), (13.1, 4.1), (12.5, 6.0), (11.9, 4.1), (10.0, 3.5), (11.9, 2.9)], true);
         }
     }
 }

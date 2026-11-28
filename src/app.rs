@@ -59,6 +59,7 @@ mod summary;
 mod cloud;
 mod models;
 mod ask;
+mod askpane;
 mod lab;
 mod storage;
 mod explain;
