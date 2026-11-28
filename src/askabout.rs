@@ -30,6 +30,9 @@ pub struct Item {
 pub struct Read {
     pub text: String,
     pub notes: Vec<String>,
+    /// Text files sent with their lines numbered, and how many lines were sent: what a
+    /// reference such as "notes.txt:12" in the answer can be checked against.
+    pub lines: Vec<(PathBuf, usize)>,
 }
 
 /// What the model is told, ready to send.
@@ -410,12 +413,15 @@ pub fn contents(files: &[PathBuf], budget: usize) -> Read {
             note("not a text file, so it wasn't read".into());
             continue;
         };
-        let (t, fitted) = fit(&t, room);
+        // Lines are numbered so the model can point at them; the numbers take some of the room.
+        let (t, fitted) = fit(&t, room - room / 8);
         let cut = fitted || t.len() as u64 + 4 < md.len();
         if cut {
             note("read the start only".into());
         }
-        out.text.push_str(&format!("\nContents of {name}{}:\n```\n{t}\n```\n", if cut { " (the start only)" } else { "" }));
+        let (t, n) = numbered(&t, cut);
+        out.lines.push((f.clone(), n));
+        out.text.push_str(&format!("\nContents of {name}{}, lines numbered:\n```\n{t}\n```\n", if cut { " (the start only)" } else { "" }));
     }
     if !skipped.is_empty() {
         let names = skipped.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
@@ -532,6 +538,17 @@ fn extract(p: &Path, chars: usize) -> Option<Result<Extracted, String>> {
     };
     let cut = text.chars().count() > chars;
     Some(Ok(Extracted { text: text.chars().take(chars).collect(), cut, pages: None }))
+}
+
+/// `text` with each line numbered from 1 ("12: …"), and how many lines there are. When the
+/// text was cut short, its last line may be partial, so it's left out.
+fn numbered(text: &str, cut: bool) -> (String, usize) {
+    let mut lines: Vec<&str> = text.lines().collect();
+    if cut && lines.len() > 1 && !text.ends_with('\n') {
+        lines.pop();
+    }
+    let out = lines.iter().enumerate().map(|(i, l)| format!("{}: {l}", i + 1)).collect::<Vec<_>>().join("\n");
+    (out, lines.len())
 }
 
 /// The start of `text` that fits in `room`, counting each character outside ASCII as four:
@@ -651,7 +668,8 @@ mod tests {
         std::fs::write(d.join("long.txt"), "y".repeat(10_000)).unwrap();
         let r = contents(&[d.join("a.txt"), d.join("b.bin"), d.join("long.txt")], 3000);
         let c = &r.text;
-        assert!(c.contains("Contents of a.txt:\n```\nhéllo world\n```"), "{c}");
+        assert!(c.contains("Contents of a.txt, lines numbered:\n```\n1: héllo world\n```"), "{c}");
+        assert_eq!(r.lines.iter().map(|(p, n)| (p.file_name().unwrap().to_str().unwrap(), *n)).collect::<Vec<_>>(), vec![("a.txt", 1), ("long.txt", 1)]);
         assert!(c.contains("b.bin isn't a text file"), "{c}");
         assert!(c.contains("Contents of long.txt (the start only)"), "{c}");
         assert!(c.len() < 3300, "{}", c.len());
@@ -729,7 +747,7 @@ mod tests {
         let d = tmp("scripts");
         std::fs::write(d.join("zh.txt"), "文".repeat(1000)).unwrap();
         let r = contents(&[d.join("zh.txt")], 400);
-        assert_eq!(r.text.matches('文').count(), 100, "{}", r.text);
+        assert_eq!(r.text.matches('文').count(), 87, "{}", r.text);
         assert_eq!(r.notes, vec!["zh.txt: read the start only".to_string()]);
         let _ = std::fs::remove_dir_all(&d);
     }
