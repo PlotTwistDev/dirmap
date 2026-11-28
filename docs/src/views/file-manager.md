@@ -307,7 +307,7 @@ read shows its type's icon instead.
 | Command | What it does |
 |---|---|
 | **Open** / **Open in New Tab** / **Open in Other Pane** | Opens folders here, in a new tab or in the other pane, and files in their apps. |
-| **Open Application** / **Show Package Contents** | On an [application](#applications): launches it, or goes inside it. |
+| **Open Application** / **Show Package Contents** / **Get Application Info** | On an [application](#applications): launches it, goes inside it, or shows its details in the preview pane. |
 | **Open With** | Opens the item in one of [your apps](#open-with), or lets you choose one. |
 | **Quick Look** (**Space**) | A [large preview](#quick-look-and-the-preview-pane) of the file. |
 | **Copy** / **Cut** / **Paste** (**Ctrl+C**, **Ctrl+X**, **Ctrl+V**) | See [Copying, moving and deleting](#copying-moving-and-deleting). |
@@ -731,6 +731,14 @@ in /Applications, ~/Applications, on other drives or anywhere else are all recog
   it needs a newer version of macOS, you don't have permission, and so on.
 - **Show Package Contents** on the right-click menu goes inside the application, to look at its
   resources, programs, libraries and settings files. Everything works there as in any folder.
+- **Get Application Info** (or select the app with the preview pane open, on its **Details**
+  tab) shows its name, publisher, version and build, bundle identifier, whether it runs on Apple
+  silicon, Intel or both (**Universal**), the macOS version it needs, its size, where it is, who
+  signed it and whether Gatekeeper allows it (notarised by Apple, from the Mac App Store, part of
+  macOS). An app downloaded from the internet and not opened yet is marked as such. The pane's
+  **Launch Application** button opens it. These details come from the app's `Info.plist`, its
+  program's header (read, never run) and macOS's own `codesign` and `spctl` checks, worked out in
+  the background.
 - **Analyse Application Storage** shows what takes up the app's space in the
   [analysis dock](#the-analysis-dock).
 

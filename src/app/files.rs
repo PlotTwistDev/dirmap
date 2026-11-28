@@ -580,6 +580,8 @@ pub(super) struct Files {
     pub(super) suggest: addr::Suggest,
     /// Quick Look and the preview pane.
     pub(super) look: preview::Look,
+    /// Applications' versions, signatures and sizes for the preview pane.
+    pub(super) app_info: crate::apps::DetailsCache,
     /// Where the address bar's suggestion list was drawn.
     pub(super) suggest_rect: Option<Rect>,
     /// Text worked out in the background for the clipboard (UNC paths).
@@ -656,6 +658,7 @@ impl Files {
             fav_edit: None,
             suggest: Default::default(),
             look: Default::default(),
+            app_info: Default::default(),
             suggest_rect: None,
             text_rx: None,
             net: Vec::new(),
@@ -1160,6 +1163,8 @@ pub(super) enum FAction {
     /// Applications: launch them, or go inside (Show Package Contents).
     LaunchApp,
     ShowContents,
+    /// The preview pane's Details for an application (Get Application Info).
+    AppInfo,
     /// External drives, removable media and disk images (`ejectui`).
     Eject,
 }
@@ -3757,6 +3762,14 @@ impl App {
                 }
             }
             FAction::LaunchApp => self.launch_apps(paths),
+            FAction::AppInfo => {
+                // Show the app's details in the preview pane.
+                self.files.prefs.preview = true;
+                self.files.prefs.map_preview_tab = super::rails::PreviewTab::Details;
+                if let Some(name) = paths.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()) {
+                    self.files.select_name(&name);
+                }
+            }
             FAction::ShowContents => {
                 if let Some(p) = paths.into_iter().next() {
                     self.files.go(Location::Dir(p));
@@ -4055,6 +4068,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
         let label = if crate::apps::CAN_LAUNCH { "Open Application" } else { "Open Application (on a Mac)" };
         item(ui, crate::apps::CAN_LAUNCH, label, run_key, FAction::LaunchApp);
         item(ui, true, "Show Package Contents", inside_key, FAction::ShowContents);
+        item(ui, true, "Get Application Info", String::new(), FAction::AppInfo);
     } else {
         item(ui, true, &open, k(M::NONE, Key::Enter), FAction::Open);
     }
