@@ -936,9 +936,12 @@ mod tests {
         let clip = Clip { label: "f".into(), first: 0, step: 1, slots };
         // Room for 4 frames of 16×16 half RGBA (2 KB each).
         let e = Engine::new(&clip, 4 * 2048, 1);
-        let wait = |e: &Engine| {
-            for _ in 0..200 {
-                if !e.busy() {
+        // The engine is idle until a worker picks up the first frame, so "not busy" alone could
+        // be seen before it starts: wait for the frames expected (or give up after 10 s), then
+        // for it to settle.
+        let wait = |e: &Engine, want: &dyn Fn(&[(bool, bool)]) -> bool| {
+            for _ in 0..1000 {
+                if want(&e.map()) && !e.busy() {
                     std::thread::sleep(std::time::Duration::from_millis(20));
                     if !e.busy() {
                         return;
@@ -947,7 +950,7 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         };
-        wait(&e);
+        wait(&e, &|m| m[0].0 && m[1].0 && m[2].0 && m[3].0);
         let m = e.map();
         assert!(m[0].0 && m[1].0 && m[2].0 && m[3].0, "{m:?}");
         assert!(m[4].1 && !m[4].0);
@@ -955,7 +958,7 @@ mod tests {
         assert_eq!(e.slot(4), Slot::Missing);
         // Moving on drops the frames behind for the ones ahead.
         e.seek(6, 1);
-        wait(&e);
+        wait(&e, &|m| m[6].0 && m[7].0 && m[8].0 && m[9].0 && !m[0].0);
         let m = e.map();
         assert!(m[6].0 && m[7].0 && m[8].0 && m[9].0, "{m:?}");
         assert!(!m[0].0);

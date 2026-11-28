@@ -1,6 +1,8 @@
 # What's new
 
-## Next version
+## Version 0.3.0
+
+Released 28 November 2026.
 
 ### Ask AI in Files
 

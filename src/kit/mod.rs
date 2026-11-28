@@ -434,6 +434,53 @@ pub fn button(ui: &mut Ui, kind: Kind, icon: Option<Icon>, text: &str) -> egui::
     resp
 }
 
+/// A Secondary button with a dropdown arrow joined to it, divided by a line: the main part does
+/// the usual thing, the arrow offers others. Returns (main, arrow).
+pub fn split_button(ui: &mut Ui, icon: Option<Icon>, text: &str, arrow_tip: &str) -> (egui::Response, egui::Response) {
+    let t = tokens(ui);
+    let enabled = ui.is_enabled();
+    let font = egui::FontId::proportional(LABEL - 0.5);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font, t.text);
+    let icon_w = if icon.is_some() { 14.0 + 6.0 } else { 0.0 };
+    let main_w = galley.size().x + icon_w + 14.0 * 2.0 - 4.0;
+    let arrow_w = 28.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(main_w + arrow_w, 30.0), Sense::hover());
+    let main_rect = Rect::from_min_size(rect.min, vec2(main_w, rect.height()));
+    let arrow_rect = Rect::from_min_max(egui::pos2(main_rect.max.x, rect.min.y), rect.max);
+    let main = ui.interact(main_rect, ui.id().with(("split-main", text)), Sense::click());
+    let arrow = ui.interact(arrow_rect, ui.id().with(("split-arrow", text)), Sense::click());
+    main.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text));
+    arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, arrow_tip));
+    if ui.is_rect_visible(rect) {
+        let edge = if t.dark { Color32::from_rgb(0x45, 0x48, 0x50) } else { Color32::from_rgb(0xc9, 0xcd, 0xd4) };
+        let fg = if enabled { t.strong } else { t.disabled };
+        let p = ui.painter();
+        p.rect(rect, CONTROL_RADIUS, t.card, Stroke::NONE, StrokeKind::Inside);
+        for (r, resp, round) in [
+            (main_rect, &main, egui::CornerRadius { nw: CONTROL_RADIUS, sw: CONTROL_RADIUS, ne: 0, se: 0 }),
+            (arrow_rect, &arrow, egui::CornerRadius { nw: 0, sw: 0, ne: CONTROL_RADIUS, se: CONTROL_RADIUS }),
+        ] {
+            if enabled && resp.is_pointer_button_down_on() {
+                p.rect_filled(r, round, t.track);
+            } else if enabled && resp.hovered() {
+                p.rect_filled(r, round, t.pal.hover);
+            }
+        }
+        p.rect(rect, CONTROL_RADIUS, Color32::TRANSPARENT, Stroke::new(1.0, if enabled { edge } else { t.divider }), StrokeKind::Inside);
+        p.line_segment([egui::pos2(arrow_rect.min.x, rect.min.y + 6.0), egui::pos2(arrow_rect.min.x, rect.max.y - 6.0)], Stroke::new(1.0, edge));
+        let mut x = main_rect.center().x - (galley.size().x + icon_w) / 2.0;
+        if let Some(i) = icon {
+            icons::paint(p, Rect::from_center_size(egui::pos2(x + 7.0, rect.center().y), vec2(14.0, 14.0)), i, fg);
+            x += icon_w;
+        }
+        p.galley_with_override_text_color(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, fg);
+        icons::paint(p, Rect::from_center_size(arrow_rect.center(), vec2(12.0, 12.0)), Icon::ChevronDown, fg);
+        focus_ring(ui, main_rect, &main, CONTROL_RADIUS as f32);
+        focus_ring(ui, arrow_rect, &arrow, CONTROL_RADIUS as f32);
+    }
+    (main, arrow.on_hover_text(arrow_tip))
+}
+
 /// A square button showing only an icon (give it a tooltip).
 pub fn icon_button(ui: &mut Ui, icon: Icon, tip: &str) -> egui::Response {
     let t = tokens(ui);

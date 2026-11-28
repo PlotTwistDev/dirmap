@@ -50,6 +50,19 @@ pub fn find(answer: &str, asked: &[PathBuf], sent: &[(PathBuf, usize)]) -> Vec<R
         if out.iter().any(|o| o.text == inner) || out.len() >= 30 {
             continue;
         }
+        // Asked about one file, models often cite its lines alone: [3], [63-78], [25-26, 72].
+        if let [(only, n)] = sent
+            && let Some(ranges) = bare_lines(inner)
+        {
+            let name = only.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            for (a, b) in ranges {
+                let text = if a == b { format!("{name}:{a}") } else { format!("{name}:{a}-{b}") };
+                if !out.iter().any(|o| o.text == text) {
+                    out.push(check_at(text, Some(only.clone()), Some((a, b)), &[(only.clone(), *n)]));
+                }
+            }
+            continue;
+        }
         match parse(inner) {
             Some(r) => out.push(check(inner, r, asked, sent)),
             // A name without an extension (LICENSE, Makefile) counts only when it's really there,
@@ -96,8 +109,37 @@ fn parse_bare(s: &str) -> Option<(String, Option<(usize, usize)>)> {
     (!name.is_empty() && name.len() < 64 && !name.contains(char::is_whitespace) && !name.chars().all(|c| c.is_ascii_digit())).then(|| (name.to_string(), lines))
 }
 
+/// Line numbers alone, as ranges: "3", "63-78", "25-26, 72", "lines 4 and 9". None if `s` is
+/// anything else.
+fn bare_lines(s: &str) -> Option<Vec<(usize, usize)>> {
+    let s = s.trim();
+    let s = s.strip_prefix("lines").or_else(|| s.strip_prefix("line")).or_else(|| s.strip_prefix("L")).unwrap_or(s);
+    let mut out = Vec::new();
+    for part in s.split([',', ';']).flat_map(|p| p.split(" and ")) {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let mut ends = part.split(['-', '–']).map(|x| x.trim().trim_start_matches('L').parse::<usize>());
+        let a = ends.next()?.ok()?;
+        let b = match ends.next() {
+            Some(b) => b.ok()?,
+            None => a,
+        };
+        if ends.next().is_some() || a == 0 || b < a {
+            return None;
+        }
+        out.push((a, b));
+    }
+    (!out.is_empty() && out.len() <= 10).then_some(out)
+}
+
 fn check(text: &str, (name, lines): (String, Option<(usize, usize)>), asked: &[PathBuf], sent: &[(PathBuf, usize)]) -> Ref {
-    let mut r = Ref { text: text.to_string(), path: resolve(&name, asked), lines, check: Check::NotFound, quote: None, why: String::new() };
+    check_at(text.to_string(), resolve(&name, asked), lines, sent)
+}
+
+fn check_at(text: String, path: Option<PathBuf>, lines: Option<(usize, usize)>, sent: &[(PathBuf, usize)]) -> Ref {
+    let mut r = Ref { text, path, lines, check: Check::NotFound, quote: None, why: String::new() };
     let Some(p) = &r.path else {
         r.why = "No file by this name is among what the model was given; it may be made up.".into();
         return r;
@@ -165,7 +207,7 @@ mod tests {
         std::fs::write(d.join("config.yaml"), "a: 1\nport: 8080\nc: 3\n").unwrap();
         std::fs::write(d.join("src/main.rs"), "fn main() {}\n").unwrap();
         let asked = vec![d.clone()];
-        let sent = vec![(d.join("config.yaml"), 3)];
+        let sent = vec![(d.join("config.yaml"), 3), (d.join("other.txt"), 1)];
         std::fs::write(d.join("LICENSE"), "MIT\n").unwrap();
         let answer = "The port is set in [config.yaml:2], see also [src/main.rs], [missing.txt:4], \
                       [config.yaml:9], [src/main.rs:1], a [link](http://x), a footnote [1], [LICENSE] and [optional].";
@@ -186,6 +228,33 @@ mod tests {
         assert_eq!(r[0].path.as_deref(), Some(d.join("config.yaml").as_path()));
         // Nothing outside what was asked about, even if it exists.
         assert!(find("[../etc/passwd]", &asked, &sent).iter().all(|r| r.check == Check::NotFound));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Asked about one file, bare line numbers are that file's lines.
+    #[test]
+    fn bare_lines_belong_to_the_only_file() {
+        let d = std::env::temp_dir().join(format!("filescape-refs-bare-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let lic = d.join("LICENSE");
+        std::fs::write(&lic, (1..=80).map(|i| format!("line {i}\n")).collect::<String>()).unwrap();
+        let sent = vec![(lic.clone(), 80)];
+        let r = find("CC0 [3]. Waived [63-78] for anyone [25-26, 72], see [99] and [optional].", std::slice::from_ref(&lic), &sent);
+        let got: Vec<(&str, Check)> = r.iter().map(|r| (r.text.as_str(), r.check)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("LICENSE:3", Check::Verified),
+                ("LICENSE:63-78", Check::Verified),
+                ("LICENSE:25-26", Check::Verified),
+                ("LICENSE:72", Check::Verified),
+                ("LICENSE:99", Check::FileOnly),
+            ]
+        );
+        assert_eq!(r[0].quote.as_deref(), Some("line 3"));
+        assert_eq!(bare_lines("lines 4 and 9"), Some(vec![(4, 4), (9, 9)]));
+        assert_eq!(bare_lines("a-b"), None);
+        assert_eq!(bare_lines("1-2-3"), None);
         let _ = std::fs::remove_dir_all(&d);
     }
 

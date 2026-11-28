@@ -92,6 +92,8 @@ pub(super) struct FilesPrefs {
     pub model_folders: Vec<PathBuf>,
     /// Programs offered under Open With.
     pub apps: Vec<openwith::UserApp>,
+    /// Open With's pinned apps and the ones used last for each type.
+    pub open: openwith::OpenPrefs,
     /// The sequence player's settings.
     pub player: seqplayer::PlayerPrefs,
     /// Folders opened most recently, newest first.
@@ -194,6 +196,7 @@ impl Default for FilesPrefs {
             searches: Vec::new(),
             model_folders: Vec::new(),
             apps: Vec::new(),
+            open: Default::default(),
             player: Default::default(),
             recent: Vec::new(),
             recent_servers: Vec::new(),
@@ -2850,7 +2853,7 @@ impl App {
                         hovered_row = Some(i);
                     }
                     let pinned = e.is_dir && self.files.is_pinned(&dir.join(&*e.name));
-                    let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste, marks: &self.files.marks, apps: &self.files.prefs.apps };
+                    let ic = ItemCtx { t, l, dir, sizes, two: two_panes, can_paste, marks: &self.files.marks, apps: &self.files.prefs };
                     item_actions(ui, resp, i, &ic, pinned, picks, &mut rows_drop);
                 }
             });
@@ -2983,7 +2986,7 @@ impl App {
         let two_panes = self.files.panes.len() > 1;
         let sys_notes = self.settings.system_notes && !crate::fsys::remote::is_remote(dir);
         let files = &mut self.files;
-        let (panes, thumb_cache, favourites, marks, apps) = (&files.panes, &mut files.thumbs, &files.prefs.favourites, &files.marks, &files.prefs.apps);
+        let (panes, thumb_cache, favourites, marks, apps) = (&files.panes, &mut files.thumbs, &files.prefs.favourites, &files.marks, &files.prefs);
         let icons = &mut self.icons;
         let t = panes[pane].tab();
         let Some(l) = t.listing.as_ref() else { return };
@@ -3648,7 +3651,7 @@ impl App {
             .file_name()
             .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
             .unwrap_or_default();
-        let Some(a) = item_menu(ui, &m, &self.files.prefs.apps.clone(), disk, &ext) else { return };
+        let Some(a) = item_menu(ui, &m, &self.files.prefs, disk, &ext) else { return };
         match a {
             FAction::Open if is_dir || (archive && self.premium(crate::licence::Feature::Archives)) => self.files.go(Location::Dir(disk.to_path_buf())),
             FAction::Open if archive => {}
@@ -4032,7 +4035,8 @@ pub(super) struct ItemCtx<'a> {
     pub(super) two: bool,
     pub(super) can_paste: bool,
     pub(super) marks: &'a crate::fsys::marks::Marks,
-    pub(super) apps: &'a [openwith::UserApp],
+    /// Open With's apps, pins and recents.
+    pub(super) apps: &'a FilesPrefs,
 }
 
 /// Clicks, double-clicks, middle-clicks, dragging and the right-click menu for one item (a row
@@ -4098,7 +4102,7 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     });
 }
 
-fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], path: &Path, ext: &str) -> Option<FAction> {
+fn item_menu(ui: &mut egui::Ui, m: &RowMenu, prefs: &FilesPrefs, path: &Path, ext: &str) -> Option<FAction> {
     use egui::{Key, Modifiers as M};
     let ctx = ui.ctx().clone();
     let k = |m, key| ctx.format_shortcut(&egui::KeyboardShortcut::new(m, key));
@@ -4145,7 +4149,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], path: &
     let with = if m.seq {
         None
     } else {
-        openwith::menu(ui, apps, path, ext, m.is_dir)
+        openwith::menu(ui, &prefs.apps, &prefs.open, path, ext, m.is_dir)
     };
     if m.archive {
         if !many {
