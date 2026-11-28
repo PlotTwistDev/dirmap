@@ -53,11 +53,26 @@ impl Back {
 
 /// Copy the files of `root` that `keep` accepts, with the folders above them. Folders left
 /// without matches are dropped; the root always stays. None if cancelled.
+#[cfg(test)]
 pub fn subset<F>(root: &Node, keep: &F, cancel: &AtomicBool) -> Option<(Node, Back)>
 where
     F: Fn(&Node) -> bool + Sync,
 {
-    Some(walk(root, keep, cancel)?.unwrap_or_else(|| (empty_like(root), Back::default())))
+    subset_in(root, &|n: &Node, _| keep(n), cancel)
+}
+
+/// [`subset`] with a `keep` that is also told whether the file is inside an application
+/// (see `crate::apps::node_is_app`), for the Applications kind.
+pub fn subset_in<F>(root: &Node, keep: &F, cancel: &AtomicBool) -> Option<(Node, Back)>
+where
+    F: Fn(&Node, bool) -> bool + Sync,
+{
+    Some(walk(root, crate::apps::node_is_app(root), keep, cancel)?.unwrap_or_else(|| (empty_like(root), Back::default())))
+}
+
+/// Whether a child folder's files are inside an application.
+fn inside(in_app: bool, c: &Node) -> bool {
+    in_app || crate::apps::node_is_app(c)
 }
 
 fn empty_like(dir: &Node) -> Node {
@@ -65,17 +80,17 @@ fn empty_like(dir: &Node) -> Node {
 }
 
 /// The filtered folder and its map, or None inside if nothing in it matched. None if cancelled.
-fn walk<F>(dir: &Node, keep: &F, cancel: &AtomicBool) -> Option<Option<(Node, Back)>>
+fn walk<F>(dir: &Node, in_app: bool, keep: &F, cancel: &AtomicBool) -> Option<Option<(Node, Back)>>
 where
-    F: Fn(&Node) -> bool + Sync,
+    F: Fn(&Node, bool) -> bool + Sync,
 {
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
     let kids = if dir.children.len() > 64 || dir.children.iter().any(|c| c.is_dir) {
-        dir.children.par_iter().enumerate().map(|(i, c)| child(i, c, keep, cancel)).collect::<Option<Vec<_>>>()?
+        dir.children.par_iter().enumerate().map(|(i, c)| child(i, c, in_app, keep, cancel)).collect::<Option<Vec<_>>>()?
     } else {
-        dir.children.iter().enumerate().map(|(i, c)| child(i, c, keep, cancel)).collect::<Option<Vec<_>>>()?
+        dir.children.iter().enumerate().map(|(i, c)| child(i, c, in_app, keep, cancel)).collect::<Option<Vec<_>>>()?
     };
     let mut kids: Vec<(u32, Node, Option<Back>)> = kids.into_iter().flatten().collect();
     if kids.is_empty() {
@@ -98,13 +113,13 @@ where
 }
 
 /// One child: Some(None) = dropped, Some(Some(..)) = kept, None = cancelled.
-fn child<F>(i: usize, c: &Node, keep: &F, cancel: &AtomicBool) -> Option<Option<(u32, Node, Option<Back>)>>
+fn child<F>(i: usize, c: &Node, in_app: bool, keep: &F, cancel: &AtomicBool) -> Option<Option<(u32, Node, Option<Back>)>>
 where
-    F: Fn(&Node) -> bool + Sync,
+    F: Fn(&Node, bool) -> bool + Sync,
 {
     if c.is_dir {
-        Some(walk(c, keep, cancel)?.map(|(n, b)| (i as u32, n, Some(b))))
-    } else if keep(c) {
+        Some(walk(c, inside(in_app, c), keep, cancel)?.map(|(n, b)| (i as u32, n, Some(b))))
+    } else if keep(c, in_app) {
         let n = c.clone();
         Some(Some((i as u32, n, None)))
     } else {
@@ -153,12 +168,21 @@ impl Hits {
 }
 
 /// Find where the files `keep` accepts are. None if cancelled.
+#[cfg(test)]
 pub fn hits<F>(root: &Node, keep: &F, cancel: &AtomicBool) -> Option<Hits>
 where
     F: Fn(&Node) -> bool + Sync,
 {
+    hits_ctx(root, &|n: &Node, _| keep(n), cancel)
+}
+
+/// [`hits`] with a `keep` that is also told whether the file is inside an application.
+pub fn hits_ctx<F>(root: &Node, keep: &F, cancel: &AtomicBool) -> Option<Hits>
+where
+    F: Fn(&Node, bool) -> bool + Sync,
+{
     let mut exts = Vec::new();
-    let mut h = hits_in(root, keep, cancel, &mut exts)?;
+    let mut h = hits_in(root, crate::apps::node_is_app(root), keep, cancel, &mut exts)?;
     // Biggest first, like the File types list.
     exts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     h.exts = exts;
@@ -172,9 +196,9 @@ fn tally(exts: &mut Vec<(String, u64)>, ext: &str, bytes: u64) {
     }
 }
 
-fn hits_in<F>(dir: &Node, keep: &F, cancel: &AtomicBool, exts: &mut Vec<(String, u64)>) -> Option<Hits>
+fn hits_in<F>(dir: &Node, in_app: bool, keep: &F, cancel: &AtomicBool, exts: &mut Vec<(String, u64)>) -> Option<Hits>
 where
-    F: Fn(&Node) -> bool + Sync,
+    F: Fn(&Node, bool) -> bool + Sync,
 {
     if cancel.load(Ordering::Relaxed) {
         return None;
@@ -182,7 +206,7 @@ where
     let mut h = Hits::default();
     // Files here, on this thread.
     for (i, c) in dir.children.iter().enumerate() {
-        if !c.is_dir && keep(c) {
+        if !c.is_dir && keep(c, in_app) {
             h.files += 1;
             h.bytes += c.size;
             if c.size > 0 {
@@ -201,7 +225,7 @@ where
         .par_iter()
         .map(|&(i, c)| {
             let mut e = Vec::new();
-            hits_in(c, keep, cancel, &mut e).map(|sub| (i, sub, e))
+            hits_in(c, inside(in_app, c), keep, cancel, &mut e).map(|sub| (i, sub, e))
         })
         .collect::<Option<Vec<_>>>()?;
     for (i, sub, e) in found {
@@ -423,6 +447,25 @@ mod tests {
         let f = Filter::compile("*.exr, *.png", Options::default()).unwrap();
         let h = hits(&t, &|n: &Node| f.matches(&n.name), &never).unwrap();
         assert_eq!(h.main_ext(), Some("png"), "comp.1001.png (5000 B) outweighs the exr frames");
+    }
+
+    #[test]
+    fn applications_count_their_insides_once() {
+        use crate::categories::{Category, of_in};
+        let _g = crate::apps::PREFS_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let t = crate::apps::tests::sample_scan();
+        let never = AtomicBool::new(false);
+        let of_kind = |k: Category| hits_ctx(&t, &|n: &Node, in_app| of_in(&n.name, in_app) == k, &never).unwrap();
+        let apps = of_kind(Category::Applications);
+        // Slack's five files (its helper's plist too) and Calculator's program; not Notes.app's readme.
+        assert_eq!(apps.files, 6);
+        let images = of_kind(Category::Images);
+        assert_eq!(images.files, 1, "only the photo: the app's icon is the app's");
+        // Every file is in exactly one kind.
+        let all: u64 = Category::ALL.iter().map(|&k| of_kind(k).files).sum();
+        assert_eq!(all, t.files);
+        let (sub, _) = subset_in(&t, &|n: &Node, in_app| of_in(&n.name, in_app) == Category::Applications, &never).unwrap();
+        assert_eq!((sub.files, sub.size), (apps.files, apps.bytes));
     }
 
     #[test]

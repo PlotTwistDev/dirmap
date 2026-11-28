@@ -3104,7 +3104,7 @@ mod splat_save_tests {
 
 /// An application's rows in the preview pane's Details: from its Info.plist, its program's
 /// header and, on macOS, its signature. "Reading…" until the details have been worked out.
-fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
+pub(super) fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
     let mut row = |k: &str, v: String| {
         ui.weak(k);
         ui.add(egui::Label::new(v).wrap());

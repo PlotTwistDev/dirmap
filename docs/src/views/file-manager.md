@@ -216,10 +216,10 @@ items keep the sort order. **None** turns grouping off.
 ## Showing only some kinds of file
 
 **Show** beside the filter keeps only some kinds of file: **Audio**, **Video**, **Images**, **AI
-models**, **Archives**, **Documents**, **Code**, **Programs**, **Disk images** or **Other** (the
-same kinds as Storage Analysis's [Show row](../filtering/categories.md)). Pick several to see them
-all; **All** shows everything again. While it's on, the button is lit and says what it shows, and
-folders are hidden.
+models**, **Archives**, **Documents**, **Code**, **Applications**, **Programs**, **Disk images**
+or **Other** (the same kinds as Storage Analysis's [Show row](../filtering/categories.md)). Pick
+several to see them all; **All** shows everything again. While it's on, the button is lit and says
+what it shows, and folders are hidden, except applications when **Applications** is picked.
 
 With **🗐** on as well, it gathers those files from every subfolder too, so **Show > Video** with
 **🗐** lists every video under the folder. It works together with the filter text: **Images** and

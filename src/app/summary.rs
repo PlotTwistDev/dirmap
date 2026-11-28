@@ -51,6 +51,9 @@ fn count_folders(n: &Node) -> u64 {
     count
 }
 
+/// The label of the Applications total, which filters to applications when clicked.
+const APPS: &str = "APPLICATIONS";
+
 /// One total in the strip.
 struct Card {
     label: &'static str,
@@ -63,22 +66,29 @@ struct Card {
 }
 
 /// Draws a total: a small label over a large value. Highlighted when it's the map's measure.
-fn card(ui: &mut egui::Ui, c: &Card, active: bool) -> egui::Response {
+/// `swatch`: the colour the card's items have on the map, shown beside its label as a key.
+fn card(ui: &mut egui::Ui, c: &Card, active: bool, swatch: Option<Color32>) -> egui::Response {
     let t = kit::tokens(ui);
     let label = ui.painter().layout_no_wrap(c.label.to_string(), FontId::proportional(10.0), t.weak);
     let value = ui.painter().layout_no_wrap(c.value.clone(), FontId::proportional(15.5), t.strong);
-    let w = label.size().x.max(value.size().x) + 22.0;
-    let (rect, resp) = ui.allocate_exact_size(vec2(w, 42.0), if c.measure.is_some() { Sense::click() } else { Sense::hover() });
+    let key = if swatch.is_some() { 12.0 } else { 0.0 };
+    let w = (label.size().x + key).max(value.size().x) + 22.0;
+    let clickable = c.measure.is_some() || c.label == APPS;
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 42.0), if clickable { Sense::click() } else { Sense::hover() });
     if ui.is_rect_visible(rect) {
-        let hovered = resp.hovered() && c.measure.is_some();
+        let hovered = resp.hovered() && clickable;
         let fill = if active { t.accent_soft } else if hovered { t.pal.hover } else { Color32::TRANSPARENT };
         ui.painter().rect_filled(rect, 6.0, fill);
         let x = rect.left() + 11.0;
-        ui.painter().galley_with_override_text_color(pos2(x, rect.top() + 6.0), label, if active { t.accent } else { t.weak });
+        if let Some(col) = swatch {
+            let r = Rect::from_min_size(pos2(x, rect.top() + 7.5), vec2(8.0, 8.0));
+            ui.painter().rect_filled(r, 2.0, col);
+        }
+        ui.painter().galley_with_override_text_color(pos2(x + key, rect.top() + 6.0), label, if active { t.accent } else { t.weak });
         ui.painter().galley_with_override_text_color(pos2(x, rect.top() + 19.0), value, t.strong);
         kit::focus_ring(ui, rect, &resp, 6.0);
     }
-    resp.widget_info(|| egui::WidgetInfo::labeled(if c.measure.is_some() { egui::WidgetType::Button } else { egui::WidgetType::Label }, true, format!("{} {}", c.label, c.value)));
+    resp.widget_info(|| egui::WidgetInfo::labeled(if clickable { egui::WidgetType::Button } else { egui::WidgetType::Label }, true, format!("{} {}", c.label, c.value)));
     let more = match c.measure {
         Some(_) if active => "\n\nThe map is sized by this.",
         Some(_) => "\n\nClick to size the map by this.",
@@ -130,6 +140,18 @@ impl App {
             return Some(Summary { files: h.files, bytes: h.bytes, types: top(&mut h.exts.iter().map(|(e, b)| LegendItem { ext: e.clone(), bytes: *b, files: None })), ..whole() });
         }
         Some(Summary { pending: true, ..whole() })
+    }
+
+    /// Applications in the scan (outermost ones) and their size, counted once per tree.
+    fn app_total(&mut self) -> (u64, u64) {
+        let Some(tree) = self.tree.as_ref() else { return (0, 0) };
+        let key = Arc::as_ptr(tree) as usize ^ crate::apps::prefs().recognise as usize;
+        if self.app_sum.is_none_or(|a| a.0 != key) {
+            let apps = crate::apps::apps_in(tree, usize::MAX);
+            let size = apps.iter().filter_map(|p| tree.at(p)).map(|n| n.size).sum();
+            self.app_sum = Some((key, apps.len() as u64, size));
+        }
+        self.app_sum.map(|a| (a.1, a.2)).unwrap_or((0, 0))
     }
 
     /// Folders in the scan, counted once per tree.
@@ -197,6 +219,21 @@ impl App {
         v.push(Card { label: "FILES", value: group(tree.files), tip: "Files in the scan, whatever the filters.".into(), measure: None, rank: 8 });
         let folders = self.folder_total();
         v.push(Card { label: "FOLDERS", value: group(folders), tip: "Folders in the scan, whatever the filters.".into(), measure: None, rank: 3 });
+        let (apps, app_bytes) = self.app_total();
+        if apps > 0 {
+            v.push(Card {
+                label: APPS,
+                value: format!("{} · {}", group(apps), scan::human(app_bytes)),
+                tip: format!(
+                    "{} application{} in the scan, taking {} with everything inside them. On the map each one is a single colour (the square here); zoom into one to see what it's made of. Click to show only applications, and again to show everything.",
+                    group(apps),
+                    if apps == 1 { "" } else { "s" },
+                    scan::human(app_bytes)
+                ),
+                measure: None,
+                rank: 2,
+            });
+        }
         if self.filter.active() {
             let (value, tip) = if sum.pending {
                 ("Counting…".to_string(), "The files matching the filters are still being counted.".to_string())
@@ -245,6 +282,7 @@ impl App {
             cards.remove(i);
         }
         let mut measure = None;
+        let mut apps_click = false;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let mut last_kind = None;
@@ -255,8 +293,13 @@ impl App {
                     divider(ui);
                 }
                 last_kind = Some(kind);
-                if card(ui, c, c.measure == Some(self.metric)).clicked() {
+                let apps_on = c.label == APPS && self.filter.kinds == crate::categories::Category::Applications.bit();
+                let swatch = (c.label == APPS && self.color_mode == ColorMode::Type).then(|| self.app_color());
+                if card(ui, c, c.measure == Some(self.metric) || apps_on, swatch).clicked() {
                     measure = c.measure;
+                    if c.label == APPS {
+                        apps_click = true;
+                    }
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -273,6 +316,11 @@ impl App {
                 }
             });
         });
+        if apps_click {
+            // Show only applications, or everything again.
+            let bit = crate::categories::Category::Applications.bit();
+            self.filter.kinds = if self.filter.kinds == bit { 0 } else { bit };
+        }
         ui.data_mut(|d| d.insert_persisted(details_id, details));
         if breakdown != self.settings.cloud_breakdown {
             self.settings.cloud_breakdown = breakdown;

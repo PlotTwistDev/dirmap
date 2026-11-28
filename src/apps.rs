@@ -125,6 +125,95 @@ pub fn bundle_at(path: &Path, name: &str) -> u8 {
     if ok { b.code() } else { 0 }
 }
 
+/// The same check as [`bundle_at`] for a folder in a finished scan, from the children it
+/// recorded (no disk access). Only applications: Storage Analysis treats them as one item.
+pub fn node_is_app(n: &crate::scan::Node) -> bool {
+    // Called for every folder on a path when the maps are coloured: no allocation here.
+    let name = n.name.as_bytes();
+    if !n.is_dir || name.len() < 5 || !name[name.len() - 4..].eq_ignore_ascii_case(b".app") || !prefs().recognise {
+        return false;
+    }
+    let child = |name: &str| n.children.iter().find(|c| &*c.name == name);
+    child("Contents").is_some_and(|c| c.is_dir && c.children.iter().any(|g| &*g.name == "Info.plist" || &*g.name == "MacOS"))
+        || child("WrappedBundle").is_some()
+        || child("Info.plist").is_some_and(|c| !c.is_dir)
+}
+
+/// How deep the first application on a path of child indices is: `Some(k)` when
+/// `root.at(&path[..=k])` is an app (so everything below it belongs to that app).
+pub fn app_on_path(root: &crate::scan::Node, path: &[u32]) -> Option<usize> {
+    if !prefs().recognise {
+        return None;
+    }
+    let mut n = root;
+    for (k, &i) in path.iter().enumerate() {
+        n = n.children.get(i as usize)?;
+        if n.is_dir && node_is_app(n) {
+            return Some(k);
+        }
+    }
+    None
+}
+
+/// The applications in a scan, outermost only (an app's helper apps belong to it): each one's
+/// path of child indices. Stops after `max`.
+pub fn apps_in(root: &crate::scan::Node, max: usize) -> Vec<Vec<u32>> {
+    fn walk(n: &crate::scan::Node, path: &mut Vec<u32>, out: &mut Vec<Vec<u32>>, max: usize) {
+        for (i, c) in n.children.iter().enumerate() {
+            if out.len() >= max {
+                return;
+            }
+            if !c.is_dir {
+                continue;
+            }
+            path.push(i as u32);
+            if node_is_app(c) {
+                out.push(path.clone());
+            } else {
+                walk(c, path, out, max);
+            }
+            path.pop();
+        }
+    }
+    let mut out = Vec::new();
+    if prefs().recognise {
+        walk(root, &mut Vec::new(), &mut out, max);
+    }
+    out
+}
+
+/// What takes the space inside an application, biggest first: (part, what it is, its node).
+/// The parts are the folders in `Contents` that people ask about; the rest is "Other".
+pub fn parts(app: &crate::scan::Node) -> Vec<(&'static str, &'static str, u64)> {
+    let Some(contents) = app.children.iter().find(|c| &*c.name == "Contents" && c.is_dir) else { return Vec::new() };
+    let mut out: Vec<(&'static str, &'static str, u64)> = Vec::new();
+    let mut other = app.size.saturating_sub(contents.size);
+    for c in contents.children.iter() {
+        let part = match &*c.name {
+            "Frameworks" => Some(("Frameworks", "Libraries the app brings with it")),
+            "Resources" => Some(("Resources", "Pictures, sounds, translations and other data")),
+            "MacOS" => Some(("Program", "The app's own program")),
+            "PlugIns" | "Extensions" => Some(("Plug-ins", "Plug-ins and extensions")),
+            "Helpers" | "Library" | "XPCServices" | "Login Items" | "LoginItems" => Some(("Helpers", "Helper programs and background services")),
+            "SharedSupport" => Some(("Shared support", "Extra content, such as installers or samples")),
+            _ => None,
+        };
+        match part {
+            Some((name, what)) => match out.iter_mut().find(|p| p.0 == name) {
+                Some(p) => p.2 += c.size,
+                None => out.push((name, what, c.size)),
+            },
+            None => other += c.size,
+        }
+    }
+    if other > 0 {
+        out.push(("Other", "Everything else in the bundle", other));
+    }
+    out.retain(|p| p.2 > 0);
+    out.sort_by(|a, b| b.2.cmp(&a.2));
+    out
+}
+
 /// What the user chose under Settings > Files > Applications & Executables. Kept here (not
 /// passed around) because names and icons are drawn in many places.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -139,6 +228,10 @@ pub struct Prefs {
 }
 
 static PREFS: AtomicU8 = AtomicU8::new(0b00111);
+
+/// Held by tests that change the preferences, or need the defaults, so they don't race.
+#[cfg(test)]
+pub static PREFS_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub fn set_prefs(p: Prefs) {
     let bits = p.recognise as u8 | (p.icons as u8) << 1 | (p.hide_ext as u8) << 2 | (p.double_click as u8) << 3 | (p.as_folders as u8) << 4;
@@ -462,6 +555,7 @@ fn signature(_app: &Path) -> (Option<String>, Option<String>) {
 }
 
 /// Who signed it, from `codesign -dv` output.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn signer(t: &str) -> String {
     if t.contains("not signed at all") {
         return "Not signed".into();
@@ -484,6 +578,7 @@ fn signer(t: &str) -> String {
 }
 
 /// Gatekeeper's verdict, from `spctl -a -vv` output.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn gatekeeper(t: &str) -> String {
     let source = t.lines().find_map(|l| l.trim().strip_prefix("source=")).unwrap_or("");
     if t.contains(": accepted") || t.lines().any(|l| l.trim() == "accepted") {
@@ -566,7 +661,7 @@ impl DetailsCache {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
@@ -619,6 +714,7 @@ mod tests {
 
     #[test]
     fn names_and_prefs() {
+        let _g = PREFS_TEST.lock().unwrap_or_else(|e| e.into_inner());
         let app = Bundle::App.code();
         set_prefs(Prefs { recognise: true, icons: true, hide_ext: true, double_click: true, as_folders: false });
         assert_eq!(shown_name("Safari.app", app), "Safari");
@@ -634,6 +730,99 @@ mod tests {
         assert_eq!(shown_name("Safari.app", app), "Safari.app");
         assert!(!is_app(app));
         set_prefs(Prefs { recognise: true, icons: true, hide_ext: true, double_click: true, as_folders: false });
+    }
+
+    /// A scanned folder tree: `name/` makes a folder of the following items up to `..`.
+    pub(crate) fn scanned(items: &[(&str, u64)]) -> crate::scan::Node {
+        use crate::scan::Node;
+        fn node(name: &str, size: u64, children: Vec<Node>) -> Node {
+            let is_dir = name.ends_with('/');
+            let mut n = Node { name: name.trim_end_matches('/').into(), size, logical: size, alloc: size, flags: 0, files: 1, modified: 0, is_dir, children };
+            if is_dir {
+                n.resum();
+            }
+            n
+        }
+        let mut stack: Vec<(String, Vec<Node>)> = vec![("root/".into(), Vec::new())];
+        for &(name, size) in items {
+            if name == ".." {
+                let (n, kids) = stack.pop().unwrap();
+                stack.last_mut().unwrap().1.push(node(&n, 0, kids));
+            } else if name.ends_with('/') {
+                stack.push((name.into(), Vec::new()));
+            } else {
+                stack.last_mut().unwrap().1.push(node(name, size, Vec::new()));
+            }
+        }
+        while stack.len() > 1 {
+            let (n, kids) = stack.pop().unwrap();
+            stack.last_mut().unwrap().1.push(node(&n, 0, kids));
+        }
+        let (n, kids) = stack.pop().unwrap();
+        node(&n, 0, kids)
+    }
+
+    /// Two real apps (one with a helper app inside), a fake one and a photo.
+    pub(crate) fn sample_scan() -> crate::scan::Node {
+        const MB: u64 = 1024 * 1024;
+        scanned(&[
+            ("Applications/", 0),
+            ("Slack.app/", 0),
+            ("Contents/", 0),
+            ("Info.plist", 2_000),
+            ("MacOS/", 0),
+            ("Slack", 40 * MB),
+            ("..", 0),
+            ("Frameworks/", 0),
+            ("Electron Framework.framework/", 0),
+            ("Engine", 300 * MB),
+            ("..", 0),
+            ("Slack Helper.app/", 0),
+            ("Contents/", 0),
+            ("Info.plist", 1_000),
+            ("..", 0),
+            ("..", 0),
+            ("..", 0),
+            ("Resources/", 0),
+            ("icon.png", 5 * MB),
+            ("..", 0),
+            ("..", 0),
+            ("..", 0),
+            ("Notes.app/", 0),
+            ("readme.txt", 10),
+            ("..", 0),
+            ("Calculator.app/", 0),
+            ("Contents/", 0),
+            ("MacOS/", 0),
+            ("Calculator", 3 * MB),
+            ("..", 0),
+            ("..", 0),
+            ("..", 0),
+            ("..", 0),
+            ("photo.png", 2 * MB),
+        ])
+    }
+
+    #[test]
+    fn apps_in_a_scan() {
+        let _g = PREFS_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let t = sample_scan();
+        let apps = apps_in(&t, usize::MAX);
+        let names: Vec<&str> = apps.iter().map(|p| &*t.at(p).unwrap().name).collect();
+        // Outermost only (the helper app belongs to Slack), and not the fake Notes.app.
+        assert_eq!(apps.len(), 2, "{names:?}");
+        assert!(names.contains(&"Slack.app") && names.contains(&"Calculator.app"), "{names:?}");
+        let slack = apps.iter().find(|p| &*t.at(p).unwrap().name == "Slack.app").unwrap();
+        // Everything below an app is on that app's path.
+        let mut deep = slack.clone();
+        deep.extend([0, 0]);
+        assert_eq!(app_on_path(&t, &deep), Some(slack.len() - 1));
+        let photo = vec![t.children.iter().position(|c| &*c.name == "photo.png").unwrap() as u32];
+        assert_eq!(app_on_path(&t, &photo), None);
+        let parts = parts(t.at(slack).unwrap());
+        assert_eq!(parts[0].0, "Frameworks", "{parts:?}");
+        assert_eq!(parts.iter().map(|p| p.0).collect::<Vec<_>>(), ["Frameworks", "Program", "Resources", "Other"]);
+        assert_eq!(parts.iter().map(|p| p.2).sum::<u64>(), t.at(slack).unwrap().size, "the parts add up to the app");
     }
 
     #[test]

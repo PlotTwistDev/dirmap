@@ -65,6 +65,7 @@ mod explain;
 mod livescan;
 mod rails;
 mod viz;
+mod appmap;
 pub(crate) mod style;
 use files::Workspace;
 
@@ -116,11 +117,18 @@ impl ViewFilter {
     }
 
     /// Whether a file passes. Folders are judged by the files inside them.
+    #[cfg(test)]
     fn matches(&self, n: &Node) -> bool {
+        self.matches_in(n, false)
+    }
+
+    /// [`Self::matches`] for a file that may be inside an application, which then counts as
+    /// the application's (the Applications kind) and not by its own name.
+    fn matches_in(&self, n: &Node, in_app: bool) -> bool {
         let (name, size) = (&*n.name, n.size);
         (self.larger == 0 || size >= self.larger)
             && (self.smaller == 0 || size < self.smaller)
-            && (self.kinds == 0 || self.kinds & categories::of(name).bit() != 0)
+            && (self.kinds == 0 || self.kinds & categories::of_in(name, in_app).bit() != 0)
             && (self.stored == 0 || self.stored & scan::Stored::of(n.flags).bit() != 0)
             && (self.newer == 0 || n.modified >= self.newer)
             && (self.older == 0 || n.modified < self.older)
@@ -343,6 +351,8 @@ pub struct App {
     cloud_sum: Option<(usize, scan::CloudTally)>,
     /// Folders in the scan, counted once per tree (keyed by its address).
     folder_sum: Option<(usize, u64)>,
+    /// Applications in the scan, counted once per tree: (tree pointer, how many, their size).
+    app_sum: Option<(usize, u64, u64)>,
     /// Show the "run as administrator?" question (first start without admin rights).
     admin_prompt: bool,
     /// Set when a restart as administrator didn't happen, to say so.
@@ -483,6 +493,7 @@ impl App {
             dup_skipped: (0, 0),
             cloud_sum: None,
             folder_sum: None,
+            app_sum: None,
             admin_prompt,
             admin_declined: false,
             backup_reminder_closed: false,
@@ -848,6 +859,7 @@ impl App {
     /// Color of a file or folder on the maps under the current color mode. `abs` is its path from the scan root.
     fn node_color(&self, n: &Node, abs: &[u32]) -> Color32 {
         match self.color_mode {
+            ColorMode::Type if self.whole_app_at(abs) => self.app_color(),
             ColorMode::Type => self.color_of(n),
             ColorMode::Age => age_color(n.modified),
             ColorMode::Change => match self.diff.as_deref().and_then(|(d, _)| d.at(abs)) {
@@ -1294,7 +1306,7 @@ impl App {
                     dim: if n.is_dir {
                         hits.as_ref().is_some_and(|h| h.at(&row.path).is_none())
                     } else {
-                        dim_filter.as_ref().is_some_and(|f| !f.matches(n))
+                        dim_filter.as_ref().is_some_and(|f| !f.matches_in(n, self.in_app(&row.path)))
                     },
                     badge: cloud_icons && stored(n) != scan::Stored::Local,
                     sys: false,
@@ -1521,6 +1533,7 @@ impl App {
     // ---------- extension list ----------
 
     fn ext_panel(&mut self, ui: &mut egui::Ui) {
+        self.app_parts_panel(ui);
         let total: u64 = self.shown_tree().map(|t| t.size).unwrap_or(0).max(1);
         if self.shown.is_some() {
             ui.weak("Matching files only");
@@ -2065,7 +2078,7 @@ impl App {
                 }
             } else if self.dupes_only && !self.dup_set.contains(&full) {
                 c = Color32::from_gray(45);
-            } else if self.filter.active() && !self.filter.matches(n) {
+            } else if self.filter.active() && !self.filter.matches_in(n, self.in_app(&abs)) {
                 // Hidden, as on the treemap.
                 c = Color32::from_gray(45);
             } else if self.highlight_ext.active() && !self.highlight_ext.shows(n.ext()) {
@@ -2203,7 +2216,8 @@ impl App {
         }
         let mut h = std::collections::hash_map::DefaultHasher::new();
         let fade = self.cloud_fade_on();
-        (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key(), fade).hash(&mut h);
+        (self.paint_gen, &self.highlight_ext, &self.filter, self.dupes_only, self.color_mode, self.view().treemap_key(), fade, self.zoom_app()).hash(&mut h);
+        crate::apps::prefs().recognise.hash(&mut h);
         self.shown.as_ref().map(|s| Arc::as_ptr(&s.tree) as usize).hash(&mut h);
         let hits = self.current_hits();
         hits.as_ref().map(|h| Arc::as_ptr(h) as usize).hash(&mut h);
@@ -2223,7 +2237,14 @@ impl App {
         let dupes_only = self.dupes_only;
         let dup_set = self.dup_set.clone();
         let highlight = self.highlight_ext.clone();
+        // Files inside an application count as the app's: one colour for the whole app (unless
+        // the view is inside it, to see what it's made of), and the Applications kind.
+        let app_tree = self.shown_tree();
+        let zoom_app = self.zoom_app();
+        let app_color = self.app_color();
         let colorize: mapview::Colorizer = Arc::new(move |n: &Node, abs: &[u32]| {
+            let app = app_tree.as_deref().and_then(|t| crate::apps::app_on_path(t, abs)).map(|k| &abs[..=k]);
+            let whole_app = app.is_some_and(|a| zoom_app.as_deref().is_none_or(|z| z != a));
             let full;
             let abs = match &back {
                 Some(b) => {
@@ -2236,6 +2257,7 @@ impl App {
                 return None;
             }
             let c = match mode {
+                ColorMode::Type if whole_app => app_color,
                 ColorMode::Type => {
                     let ext = n.ext();
                     match colors.get(ext) {
@@ -2251,7 +2273,7 @@ impl App {
             };
             // Highlight mode: what doesn't match is hidden (left as empty background), so the
             // matches stand out in their places.
-            if filtering && !filter.matches(n) {
+            if filtering && !filter.matches_in(n, app.is_some()) {
                 return None;
             }
             let c = if fade { cloud_fade(c, n.flags) } else { c };
@@ -2322,10 +2344,26 @@ impl App {
                 p.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_black_alpha(140)), egui::StrokeKind::Inside);
             }
             let vis = r.intersect(bounds);
+            let app = crate::apps::node_is_app(c);
+            // An application shown whole: its own icon in the middle, when there's room.
+            if app && vis.width() >= 72.0 && vis.height() >= 72.0 && !self.map.in_transition() {
+                let side = (vis.width().min(vis.height()) * 0.4).clamp(32.0, 128.0);
+                let mut abs = root.to_vec();
+                abs.extend_from_slice(&path);
+                abs.push(i as u32);
+                let full = self.full_path(&abs);
+                let at = Rect::from_center_size(vis.center() - vec2(0.0, 10.0), vec2(side, side));
+                let ctx = p.ctx().clone();
+                self.icons.paint_app_on(&ctx, &p, at, &full, c.modified);
+            }
             if vis.width() < 90.0 || vis.height() < 28.0 {
                 continue;
             }
-            let label = format!("{}/  {}", c.name, scan::human(c.size));
+            let label = if app {
+                format!("{}  {}", crate::apps::shown_name(&c.name, crate::apps::Bundle::App.code()), scan::human(c.size))
+            } else {
+                format!("{}/  {}", c.name, scan::human(c.size))
+            };
             let g = p.layout_no_wrap(label, font.clone(), Color32::WHITE);
             let w = (g.size().x + 14.0).min(vis.width() - 12.0);
             let tag = Rect::from_min_size(pos2(vis.left() + 6.0, vis.bottom() - 28.0), vec2(w, 20.0));
@@ -3496,6 +3534,16 @@ mod filter_tests {
         assert!(!f.matches(&with(0)), "not in the cloud");
         let local = ViewFilter { stored: Stored::Local.bit(), ..Default::default() };
         assert!(local.matches(&with(0)) && !local.matches(&with(store::CLOUD)));
+    }
+
+    #[test]
+    fn files_inside_apps_are_applications() {
+        let apps = ViewFilter { kinds: Category::Applications.bit(), ..Default::default() };
+        assert!(apps.matches_in(&file("icon.png", 1), true));
+        assert!(!apps.matches_in(&file("icon.png", 1), false));
+        let images = ViewFilter { kinds: Category::Images.bit(), ..Default::default() };
+        assert!(!images.matches_in(&file("icon.png", 1), true), "counted once, as the app's");
+        assert!(ViewFilter { larger: 10, ..Default::default() }.matches_in(&file("big.dylib", 20), true), "other filters still apply");
     }
 
     #[test]

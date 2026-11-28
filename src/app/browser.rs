@@ -218,7 +218,15 @@ const COL_W: f32 = 250.0;
 
 /// What a folder's entry is: "Folder", "PNG image", "File".
 pub(super) fn kind_of(n: &Node) -> String {
+    if crate::apps::node_is_app(n) {
+        return crate::apps::Bundle::App.kind().into();
+    }
     kind_for(&n.name, n.is_dir)
+}
+
+/// The name a scanned item is shown by: an application's without `.app`, as in Files.
+pub(super) fn node_name(n: &Node) -> &str {
+    if crate::apps::node_is_app(n) { crate::apps::shown_name(&n.name, crate::apps::Bundle::App.code()) } else { &n.name }
 }
 
 /// What an item is, from its name: "Folder", "PNG image", "File".
@@ -287,7 +295,7 @@ pub(super) fn kind_for(name: &str, is_dir: bool) -> String {
         Category::Archives => "archive",
         Category::Documents => "document",
         Category::Code => "source",
-        Category::Programs => "program",
+        Category::Programs | Category::Applications => "program",
         Category::DiskImages => "disk image",
         Category::Other => "file",
     };
@@ -657,7 +665,7 @@ impl App {
         if self.shown.is_some() || !self.filter.active() {
             return false;
         }
-        if n.is_dir { hits.as_ref().is_some_and(|h| h.at(path).is_none()) } else { !self.filter.matches(n) }
+        if n.is_dir { hits.as_ref().is_some_and(|h| h.at(path).is_none()) } else { !self.filter.matches_in(n, self.in_app(path)) }
     }
 
     fn icon_tint(&self, n: &Node, path: &[u32]) -> Color32 {
@@ -1610,7 +1618,7 @@ impl App {
                     match col {
                         Col::Name => {
                             let icon = Rect::from_min_size(pos2(cell.left() + 8.0, cy - 8.0), vec2(16.0, 16.0));
-                            self.icons.paint(ui, icon, n.is_dir, n.ext(), tint);
+                            self.paint_node_icon(ui, icon, n, &path, tint);
                             let st = stored_of(n);
                             let mut end = cell.right() - 6.0;
                             if cloud_icons && st != scan::Stored::Local {
@@ -1631,7 +1639,7 @@ impl App {
                             }
                             let clip = Rect::from_min_max(pos2(cell.left() + 30.0, rect.top()), pos2(end, rect.bottom()));
                             let np = p.with_clip_rect(clip.intersect(p.clip_rect()));
-                            np.text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &*n.name, font.clone(), tc);
+                            np.text(pos2(clip.left(), cy), Align2::LEFT_CENTER, node_name(n), font.clone(), tc);
                         }
                         Col::Size => {
                             p.text(right, Align2::RIGHT_CENTER, scan::human(n.size), font.clone(), tc);
@@ -1793,7 +1801,7 @@ impl App {
                     let tint = self.icon_tint(n, &path);
                     let tint = if dim { custom::dim(tint) } else { tint };
                     let icon = Rect::from_center_size(pos2(cell.center().x, cell.top() + 28.0), vec2(42.0, 42.0));
-                    self.icons.paint(ui, icon, n.is_dir, n.ext(), tint);
+                    self.paint_node_icon(ui, icon, n, &path, tint);
                     if dim {
                         p.rect_filled(icon, 0.0, vis.panel_fill.gamma_multiply(0.6));
                     }
@@ -1811,7 +1819,7 @@ impl App {
                     } else {
                         vis.text_color()
                     };
-                    let mut job = egui::text::LayoutJob::simple(n.name.to_string(), FontId::proportional(12.0), tc, cell.width() - 8.0);
+                    let mut job = egui::text::LayoutJob::simple(node_name(n).to_string(), FontId::proportional(12.0), tc, cell.width() - 8.0);
                     job.wrap.max_rows = 2;
                     job.wrap.break_anywhere = true;
                     job.halign = egui::Align::Center;
@@ -1911,14 +1919,14 @@ impl App {
                             let cy = rect.center().y;
                             let tint = self.icon_tint(n, &path);
                             let tint = if dim { custom::dim(tint) } else { tint };
-                            self.icons.paint(ui, Rect::from_min_size(pos2(rect.left() + 8.0, cy - 8.0), vec2(16.0, 16.0)), n.is_dir, n.ext(), tint);
+                            self.paint_node_icon(ui, Rect::from_min_size(pos2(rect.left() + 8.0, cy - 8.0), vec2(16.0, 16.0)), n, &path, tint);
                             let size_w = 74.0;
                             p.text(pos2(rect.right() - 20.0, cy), Align2::RIGHT_CENTER, scan::human(n.size), FontId::proportional(11.5), weak);
                             if n.is_dir {
                                 p.text(pos2(rect.right() - 8.0, cy), Align2::CENTER_CENTER, "›", FontId::proportional(14.0), weak);
                             }
                             let clip = Rect::from_min_max(pos2(rect.left() + 30.0, rect.top()), pos2(rect.right() - 20.0 - size_w, rect.bottom()));
-                            p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, &*n.name, FontId::proportional(13.0), tc);
+                            p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(clip.left(), cy), Align2::LEFT_CENTER, node_name(n), FontId::proportional(13.0), tc);
                             // A plain click in another column makes that column's folder the current one.
                             let before = picks.select.is_some();
                             self.item_input(ui, &resp, &path, n, picks);
