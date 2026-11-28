@@ -188,6 +188,14 @@ address into **URL inspection** at the top and press **Request indexing**.
    Uploading again replaces the file. The GitHub release keeps the same files as a mirror.
 4. Check each link downloads with the right name: `curl -sI https://downloads.filescape.app/latest/linux-deb`
    shows the `content-disposition` line.
+5. Publish checksums, so people can check their download. In the folder with the six files, name
+   them as they arrive in a browser and write the sums into the site, then rebuild and deploy it:
+   ```
+   cp Filescape-linux.deb filescape_amd64.deb; cp Filescape-linux.rpm filescape.x86_64.rpm
+   { echo "# Filescape $(grep -m1 '^version' ../Cargo.toml | cut -d'"' -f2), SHA-256"; shasum -a 256 Filescape-windows.zip Filescape-macos.dmg Filescape-linux.AppImage filescape_amd64.deb filescape.x86_64.rpm Filescape-linux.tar.gz; } > licensing/site/SHA256SUMS.txt
+   ```
+   (adjust the paths to where the files and the repo are). The homepage's Downloads section links
+   to the file only while it exists; delete it if a later upload goes out without new sums.
 
 To build the Linux packages yourself on Ubuntu (22.04 for the widest reach):
 `sudo apt install rpm`, `cargo build --release`, then

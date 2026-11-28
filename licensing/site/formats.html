@@ -18,10 +18,13 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Filescape's colourful treemap of a drive, with the file manager above it">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+/* Fonts served from filescape.app (site-src/fonts), not Google */
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 400 500; font-display: swap; src: url(/fonts/geist-mono-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 400 500; font-display: swap; src: url(/fonts/geist-mono-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400 600; font-display: swap; src: url(/fonts/inter-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400 600; font-display: swap; src: url(/fonts/inter-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 /* Layout: one quiet near-black column; the live treemap is the only loud object on the page. */
 :root {
   --void: #040506;      /* page canvas */
@@ -64,9 +67,25 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .nav-bar { display: flex; align-items: center; gap: 24px; padding: 8px 8px 8px 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(7,8,10,.72); backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%); }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; text-decoration: none; letter-spacing: -.01em; }
 .brand svg { width: 20px; height: 20px; }
-.nav-links { display: flex; gap: 22px; margin-left: auto; font-size: 14px; color: var(--text-2); }
+.nav-links { display: flex; gap: 4px; margin-left: auto; font-size: 14px; color: var(--text-2); }
 .nav-links a { text-decoration: none; }
 .nav-links a:hover { color: var(--text); }
+.nav-group { position: relative; }
+.nav-top { font: inherit; color: inherit; background: none; border: 0; padding: 6px 10px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.nav-top::after { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); opacity: .6; transition: transform .15s ease; }
+.nav-top:hover, .nav-top[aria-expanded="true"] { color: var(--text); background: rgba(255,255,255,.04); }
+.nav-top[aria-expanded="true"]::after { transform: translateY(1px) rotate(225deg); }
+.nav-menu { list-style: none; margin: 0; padding: 6px; position: absolute; top: calc(100% + 12px); left: -6px; min-width: 300px; display: none; border: 1px solid var(--line); border-radius: 12px; background: #0b0c0e; box-shadow: 0 16px 40px rgba(0,0,0,.5); }
+.nav-top[aria-expanded="true"] + .nav-menu { display: grid; }
+.nav-menu a { display: grid; gap: 2px; padding: 9px 12px; border-radius: 8px; color: var(--text); }
+.nav-menu a:hover, .nav-menu a:focus-visible { background: rgba(255,255,255,.05); }
+.nav-menu a[aria-current] { box-shadow: inset 2px 0 0 var(--coral); }
+.nav-menu small { color: var(--text-3); font-size: 12px; }
+.nav-toggle { display: none; margin-left: auto; width: 36px; height: 32px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--obsidian); color: var(--text); cursor: pointer; align-items: center; justify-content: center; }
+.nav-toggle svg { width: 16px; height: 16px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.skip { position: absolute; left: 12px; top: -60px; z-index: 50; padding: 10px 14px; border-radius: 8px; background: var(--key); color: var(--key-text); text-decoration: none; font-weight: 500; }
+.skip:focus { top: 12px; }
 
 /* Buttons: light keys on dark, Raycast style */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 10px; font: 500 14px/1 var(--font); text-decoration: none; cursor: pointer; border: 0; white-space: nowrap; transition: transform .15s ease, background .15s ease; }
@@ -144,6 +163,18 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 /* Sections */
 section { padding-block: 112px 0; }
 .section-head { display: grid; gap: 16px; max-width: 720px; }
+.caps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 48px; }
+.cap { display: grid; gap: 8px; align-content: start; padding: 22px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--ink); text-decoration: none; transition: border-color .15s ease, transform .15s ease; }
+.cap:hover { border-color: rgba(255,99,99,.35); transform: translateY(-2px); }
+.cap-k { font: 11px var(--mono); color: var(--coral); }
+.cap h3 { font-size: 17px; }
+.cap p { color: var(--text-2); font-size: 14px; }
+.flow { margin-top: 56px; padding: 28px; border-radius: 16px; border: 1px solid var(--line); background: linear-gradient(180deg, #0b0c0e, var(--ink)); }
+.flow h3 { font-size: 18px; max-width: 46ch; }
+.flow ol { list-style: none; counter-reset: step; padding: 0; margin: 22px 0 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+.flow li { counter-increment: step; display: grid; gap: 6px; align-content: start; position: relative; padding-top: 30px; }
+.flow li::before { content: counter(step); position: absolute; top: 0; left: 0; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font: 11px var(--mono); color: var(--key-text); background: var(--key); }
+.flow li span { color: var(--text-2); font-size: 14px; }
 .showcase { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: center; margin-top: 64px; }
 .showcase.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
 .showcase.flip .copy { order: 2; }
@@ -205,6 +236,21 @@ section { padding-block: 112px 0; }
 .faq summary::after { content: "+"; font-family: var(--mono); color: var(--text-3); }
 .faq details[open] summary::after { content: "–"; }
 .faq p { margin-top: 10px; color: var(--text-2); font-size: 15px; max-width: 65ch; }
+.faq ul { margin: 8px 0 0; padding-left: 20px; color: var(--text-2); font-size: 15px; display: grid; gap: 4px; max-width: 65ch; }
+.principles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-top: 56px; }
+.principle { display: grid; gap: 10px; align-content: start; }
+.principle h2 { font-size: 22px; letter-spacing: -.015em; }
+.principle h2::before { content: ""; display: block; width: 18px; height: 3px; border-radius: 2px; margin-bottom: 12px; background: var(--coral); }
+.principle:nth-child(2) h2::before { background: #63a1ff; }
+.principle:nth-child(3) h2::before { background: #e6e6e6; }
+.principle p { color: var(--text-2); font-size: 15px; }
+.principle a { color: var(--text); text-underline-offset: 3px; }
+.terms { list-style: none; padding: 0; margin: 32px 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border-block: 1px solid var(--line); }
+.terms li { padding: 20px 18px; display: grid; gap: 6px; align-content: start; }
+.terms li + li { border-left: 1px solid var(--line); }
+.terms b { font-weight: 500; }
+.terms span { font-size: 13px; color: var(--text-3); }
+.terms a { color: var(--text-2); }
 
 footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32px 48px; }
 .foot { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: center; font-size: 13px; color: var(--text-3); }
@@ -228,7 +274,37 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 .more::after { content: "→"; }
 .callout { margin-top: 56px; padding: 22px 24px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--ink); display: grid; gap: 8px; max-width: 820px; }
 .callout p { color: var(--text-2); font-size: 15px; }
-.fmt { margin-top: 40px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--ink); overflow: hidden; }
+.compare { margin-top: 28px; max-width: 880px; }
+.compare summary { cursor: pointer; font-weight: 500; color: var(--text); display: inline-flex; gap: 8px; align-items: center; }
+.compare summary::after { content: "+"; font-family: var(--mono); color: var(--text-3); }
+.compare[open] summary::after { content: "–"; }
+.compare .small { margin-top: 12px; }
+.fmt.compare-table table { min-width: 0; table-layout: fixed; }
+.fmt.compare-table tbody th { width: auto; }
+.compare-table thead th:not(:first-child) { width: 90px; }
+.compare-table tbody th span { display: block; font-weight: 400; font-size: 13px; color: var(--text-3); margin-top: 2px; }
+.compare-table td { width: 90px; font-size: 13px; }
+.compare-table td.yes { color: var(--text); }
+.compare-table td.no { color: var(--text-3); }
+.compare-table tr.area th { font: 400 11px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--coral); padding-top: 18px; width: auto; }
+.fmt-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 40px; }
+.fmt-tools input, .fmt-tools select { height: 40px; font: 14px var(--font); color: var(--text); background: var(--ink); border: 1px solid var(--line-strong); border-radius: 10px; padding: 0 12px; max-width: 100%; }
+.fmt-tools label { flex: 0 1 auto; min-width: 0; }
+.fmt-tools select { padding-right: 8px; width: 100%; }
+.fmt-tools .fmt-q { flex: 1 1 260px; }
+.fmt-q input { width: 100%; }
+.fmt-tools input:focus, .fmt-tools select:focus { outline: 2px solid var(--coral); outline-offset: 1px; border-color: transparent; }
+.fmt-count { margin-left: auto; font: 12px var(--mono); color: var(--text-3); }
+.lvl-legend { list-style: none; padding: 0; margin: 14px 0 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--text-3); }
+.lvl { display: inline-block; font: 500 10.5px/1 var(--mono); letter-spacing: .02em; padding: 4px 6px; border-radius: 5px; border: 1px solid var(--line-strong); color: var(--text-2); white-space: nowrap; margin: 0 4px 4px 0; }
+.lvl-rendered { color: #8fe0b0; border-color: rgba(143,224,176,.35); }
+.lvl-embedded { color: #9cc2ff; border-color: rgba(156,194,255,.35); }
+.lvl-content { color: #f0d08a; border-color: rgba(240,208,138,.35); }
+.lvl-details { color: var(--text-3); }
+.fmt .grp { display: block; margin-top: 4px; font: 400 11px var(--mono); color: var(--text-3); }
+.fmt-none { padding: 20px 16px; color: var(--text-2); font-size: 14px; }
+.fmt tr[hidden] { display: none; }
+.fmt { margin-top: 20px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--ink); overflow: hidden; }
 .fmt-scroll { overflow-x: auto; }
 .fmt table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
 .fmt thead th { text-align: left; font: 400 11px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); padding: 12px 16px; border-bottom: 1px solid var(--line); }
@@ -251,6 +327,51 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
 .cta { margin-top: 112px; padding: 48px 24px; text-align: center; border-radius: 16px; border: 1px solid var(--line); background: radial-gradient(60% 120% at 50% 0%, var(--ember), var(--ink) 70%); display: grid; gap: 14px; justify-items: center; }
 .cta .lede { text-align: center; }
 .cta .dl-row { margin-top: 10px; }
+/* Buy, contact, Mac and legal pages: one readable column */
+.doc p { margin: 0 0 12px; }
+.doc h3 { color: var(--text); font-size: 16px; margin: 24px 0 6px; }
+.doc code { font-family: var(--mono); font-size: .88em; color: var(--text); }
+.jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.jump a { font-family: var(--mono); font-size: 12px; text-decoration: none; padding: 5px 10px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text-2); }
+.jump a:hover { color: var(--text); border-color: var(--coral); }
+.doc .news h2 { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 24px; }
+.doc .news h2 .tag-pro { vertical-align: 4px; }
+.doc-wrap { max-width: 760px; padding-block: 40px 8px; color: var(--text-2); line-height: 1.6; }
+.doc h1 { color: var(--text); font-size: clamp(30px, 5vw, 44px); line-height: 1.1; letter-spacing: -.03em; margin: 0 0 14px; }
+.doc h2 { color: var(--text); font-size: 19px; letter-spacing: -.01em; margin: 32px 0 8px; }
+.doc b, .doc strong { color: var(--text); font-weight: 500; }
+.doc a { color: var(--text); text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.doc a:hover { text-decoration-color: var(--coral); }
+.doc a.btn { color: var(--key-text); }
+.doc ol, .doc ul { padding-left: 22px; }
+.doc li { margin: 6px 0; }
+.doc .mute { color: var(--text-3); }
+.doc .legal .mute:first-of-type { font-family: var(--mono); font-size: 12px; }
+.doc-hero { padding: 8px 0 24px; }
+.doc-hero p { font-size: 18px; max-width: 620px; }
+.doc .card { background: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin: 24px 0; }
+.doc .card h2 { margin-top: 0; }
+.doc .note { border-left: 2px solid var(--coral); padding: 8px 14px; background: var(--ember); border-radius: 0 8px 8px 0; }
+.doc .form { display: grid; gap: 16px; margin: 24px 0; }
+.doc .form label { display: grid; gap: 6px; color: var(--text); font-size: 14px; font-weight: 500; }
+.doc .form label .mute { font-weight: 400; }
+.doc .form input, .doc .form select, .doc .form textarea { width: 100%; font: 15px/1.5 var(--font); color: var(--text); background: var(--ink); border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; }
+.doc .form textarea { resize: vertical; min-height: 180px; }
+.doc .form input:focus, .doc .form select:focus, .doc .form textarea:focus { outline: 2px solid var(--coral); outline-offset: 1px; border-color: transparent; }
+.doc .form .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.btn:disabled { opacity: .6; cursor: default; }
+[hidden] { display: none !important; }
+.doc pre.code { margin: 12px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px 14px; background: var(--void); border: 1px solid var(--line-strong); border-radius: 10px; font: 13px/1.5 var(--mono); color: var(--text); user-select: all; }
+
+/* Footer columns */
+.foot-cols { display: grid; grid-template-columns: 1.4fr repeat(4, minmax(0, 1fr)); gap: 32px; font-size: 13px; }
+.foot-brand p { margin: 12px 0 0; color: var(--text-3); max-width: 28ch; }
+.foot-col { display: grid; gap: 8px; align-content: start; }
+.foot-col h2 { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); margin: 0 0 4px; }
+.foot-col a { color: var(--text-2); text-decoration: none; }
+.foot-col a:hover { color: var(--text); }
+footer .ver { margin-top: 32px; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+
 @media (max-width: 900px) {
   .showcase, .showcase.flip { grid-template-columns: minmax(0, 1fr); gap: 28px; }
   .showcase.flip .copy { order: 0; }
@@ -259,11 +380,27 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   .fact:nth-child(3) { border-left: 0; }
   .fact:nth-child(n+3) { border-top: 1px solid var(--line); }
   .reqs { grid-template-columns: minmax(0, 1fr); }
+  .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .foot-brand { grid-column: 1 / -1; }
+  .principles { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .caps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flow ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .terms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .terms li + li { border-left: 0; }
+  .terms li { border-top: 1px solid var(--line); }
+  .terms li:nth-child(-n+2) { border-top: 0; }
+  .terms li:nth-child(even) { border-left: 1px solid var(--line); }
   .nav-links { gap: 16px; font-size: 13px; }
 }
 @media (max-width: 640px) {
-  .nav-links { display: none; }
-  .nav-bar .btn { margin-left: auto; }
+  .nav-bar { flex-wrap: wrap; gap: 8px; }
+  .nav-toggle { display: inline-flex; }
+  .nav-links { display: none; order: 3; flex-basis: 100%; flex-direction: column; gap: 14px; margin: 6px 0 4px; max-height: calc(100dvh - 120px); overflow-y: auto; padding: 8px 4px 8px 0; border-top: 1px solid var(--line); }
+  .menu-open .nav-links { display: flex; }
+  .nav-top { pointer-events: none; padding: 4px 4px 0; font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+  .nav-top::after { display: none; }
+  .nav-menu, .nav-top + .nav-menu { display: grid; position: static; min-width: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+  .nav-menu a { padding: 8px 4px; }
   .hero { padding-block: 48px 24px; }
   .hero .eyebrow { font-size: 10px; letter-spacing: .05em; }
   .dl-row { flex-direction: column; align-items: stretch; max-width: 320px; margin-inline: auto; }
@@ -275,18 +412,27 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   .demo-badge { letter-spacing: .04em; padding-inline: 7px; }
   .demo-badge::before { display: none; }
   .demo-cap { font-size: 12px; padding-inline: 4px; }
-  .keys, .plans { grid-template-columns: minmax(0, 1fr); }
+  .keys, .plans, .caps, .flow ol { grid-template-columns: minmax(0, 1fr); }
   .fact b { font-size: 22px; }
   section { padding-block: 80px 0; }
   .foot .ver { margin-left: 0; }
   .page-hero { padding-block: 48px 0; }
   .page-hero .dl-row { margin-inline: 0; }
   .cta { margin-top: 80px; }
+  .fmt-tools label { flex: 1 1 100%; }
+  .compare-table td { padding-inline: 8px; }
+  .compare-table thead th:not(:first-child) { width: 64px; padding-inline: 8px; }
+  #fmt-table, #fmt-table tbody, #fmt-table tr, #fmt-table tbody th, #fmt-table td { display: block; width: auto !important; min-width: 0; }
+  #fmt-table thead { display: none; }
+  #fmt-table tbody tr { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  #fmt-table tbody th, #fmt-table td { padding: 0; border: 0 !important; }
+  #fmt-table td { margin-top: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; scroll-behavior: auto !important; }
 }
 </style>
+<script src="/config.js"></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -294,22 +440,84 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
   <symbol id="i-logo" viewBox="0 0 20 20"><rect x="1" y="1" width="10" height="11" rx="2" fill="#ff6363"/><rect x="12" y="1" width="7" height="6" rx="1.5" fill="#e6e6e6"/><rect x="12" y="8" width="7" height="4" rx="1.2" fill="#63a1ff"/><rect x="1" y="13" width="6" height="6" rx="1.5" fill="#e6e6e6"/><rect x="8" y="13" width="5" height="6" rx="1.2" fill="#6a6b6c"/><rect x="14" y="13" width="5" height="6" rx="1.2" fill="#ff6363" opacity=".55"/></symbol>
 </svg>
 
+<a class="skip" href="#top">Skip to content</a>
 <header class="nav">
   <div class="wrap">
     <nav class="nav-bar" aria-label="Main">
       <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
-      <div class="nav-links">
-        <a href="/#features">Features</a>
-        <a href="/formats" aria-current="page">File previews</a>
-        <a href="/ai-models">AI models</a>
-        <a href="/vfx">VFX and 3D</a>
-        <a href="/#pricing">Pricing</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links"><span class="sr">Menu</span><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      <div class="nav-links" id="nav-links">
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-product">Product</button>
+          <ul class="nav-menu" id="m-product">
+            <li><a href="/#features">File manager and storage maps<small>Two panes, a zoomable treemap, duplicates, snapshots</small></a></li>
+            <li><a href="/formats" aria-current="page">File previews<small>Look inside hundreds of formats, free</small></a></li>
+            <li><a href="/ai-models">AI models<small>Find, inspect and run local models</small></a></li>
+            <li><a href="/#pricing">Pricing<small>Free, or Pro once for <span class="js-price">$4.99</span></small></a></li>
+          </ul>
+        </div>
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-solutions">Solutions</button>
+          <ul class="nav-menu" id="m-solutions">
+            <li><a href="/vfx">VFX, 3D and creative<small>Frame sequences, EXR and DPX, splats</small></a></li>
+          </ul>
+        </div>
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-resources">Resources</button>
+          <ul class="nav-menu" id="m-resources">
+            <li><a href="/whats-new">What's new<small>Every version and what changed</small></a></li>
+            <li><a href="/#download">Downloads<small>Windows, macOS and Linux</small></a></li>
+            <li><a href="/formats" aria-current="page">Supported formats<small>Every format and what it shows</small></a></li>
+            <li><a href="/mac">Opening it on a Mac<small>The one-time Gatekeeper step</small></a></li>
+          </ul>
+        </div>
+        <div class="nav-group">
+          <button class="nav-top" type="button" aria-expanded="false" aria-controls="m-company">Company</button>
+          <ul class="nav-menu" id="m-company">
+            <li><a href="/about">About Filescape<small>What it is and what we believe</small></a></li>
+            <li><a href="/security">Security<small>What the app sends, and when</small></a></li>
+            <li><a href="/contact">Contact and support<small>Questions, problems and licences</small></a></li>
+            <li><a href="https://account.filescape.app/">Your licence<small>Your computers, serial and receipts</small></a></li>
+            <li><a href="/privacy">Privacy<small>What Filescape collects and why</small></a></li>
+            <li><a href="/terms">Terms</a></li>
+            <li><a href="/refunds">Refunds<small>14 days, no questions asked</small></a></li>
+          </ul>
+        </div>
       </div>
-      <a class="btn btn-key btn-sm" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
+      <a class="btn btn-key btn-sm nav-dl" href="/#download"><svg aria-hidden="true"><use href="#i-dl"/></svg>Download</a>
     </nav>
   </div>
 </header>
-
+<script>
+(() => {
+  // Dropdowns: open on click (and keyboard), close on Escape, outside click or leaving the group.
+  const bar = document.querySelector(".nav-bar");
+  const tops = [...bar.querySelectorAll(".nav-top")];
+  const close = except => tops.forEach(b => { if (b !== except) b.setAttribute("aria-expanded", "false"); });
+  tops.forEach(b => b.addEventListener("click", () => {
+    const open = b.getAttribute("aria-expanded") !== "true";
+    close(b); b.setAttribute("aria-expanded", String(open));
+  }));
+  const toggle = bar.querySelector(".nav-toggle");
+  toggle.addEventListener("click", () => {
+    const open = toggle.getAttribute("aria-expanded") !== "true";
+    toggle.setAttribute("aria-expanded", String(open));
+    document.documentElement.classList.toggle("menu-open", open);
+  });
+  document.addEventListener("click", e => { if (!bar.contains(e.target)) close(); });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    const open = tops.find(b => b.getAttribute("aria-expanded") === "true");
+    if (open) { close(); open.focus(); }
+    else if (toggle.getAttribute("aria-expanded") === "true") { toggle.click(); toggle.focus(); }
+  });
+  bar.addEventListener("focusout", e => { if (!bar.contains(e.relatedTarget)) close(); });
+  // A link inside the phone menu closes it (same-page anchors don't reload).
+  bar.querySelectorAll(".nav-menu a").forEach(a => a.addEventListener("click", () => {
+    close(); if (toggle.getAttribute("aria-expanded") === "true") toggle.click();
+  }));
+})();
+</script>
 <main id="top">
   <div class="page-hero">
     <div class="hero-glow" aria-hidden="true"></div>
@@ -363,71 +571,104 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Supported formats</span>
-        <h2>53 kinds of file, 319 extensions.</h2>
-        <p class="lede">This list comes from the app's own Help Centre (Help › Supported Formats), so it matches what Filescape really previews. Other files still show their details, and a file with a missing or wrong extension is previewed by what it really is when Filescape can tell from its first bytes.</p>
+        <h2>54 kinds of file, 320 extensions.</h2>
+        <p class="lede">This list is built from the app's own format list and Help Centre (Help › Supported Formats), so it matches what Filescape really previews. Search by name or extension, or narrow it by kind of file and how deep the preview goes. Other files still show their details, and a file with a missing or wrong extension is previewed by what it really is when Filescape can tell from its first bytes.</p>
       </div>
-      <div class="fmt" role="region" aria-label="Every format Filescape previews">
+      <form class="fmt-tools" role="search" aria-label="Filter the formats" onsubmit="return false">
+        <label class="fmt-q"><span class="sr">Search by name or extension</span><input type="search" id="fmt-q" placeholder="Search: .exr, raw, blender…" autocomplete="off"></label>
+        <label><span class="sr">Kind of file</span><select id="fmt-group"><option value="">All kinds of file</option><option value="images">Images and photos</option><option value="design">Design, fonts and creative apps</option><option value="documents">Documents and books</option><option value="media">Audio, video and music</option><option value="3d">3D, CAD and splats</option><option value="data">Code, text and data</option><option value="mail">Mail, contacts and calendars</option><option value="maps">Maps</option><option value="archives">Archives and disk images</option></select></label>
+        <label><span class="sr">Preview depth</span><select id="fmt-level"><option value="">Any preview</option><option value="rendered">Rendered</option><option value="embedded">Saved preview</option><option value="content">Contents</option><option value="details">Details only</option></select></label>
+        <output id="fmt-count" class="fmt-count" aria-live="polite"></output>
+      </form>
+      <ul class="lvl-legend"><li><span class="lvl lvl-rendered">Rendered</span> The picture, page, drawing, model, sound or video itself.</li><li><span class="lvl lvl-embedded">Saved preview</span> The preview picture the app that made it saved inside the file.</li><li><span class="lvl lvl-content">Contents</span> The text, cells, tables, tracks or files inside, laid out by Filescape.</li><li><span class="lvl lvl-details">Details only</span> What the file says about itself, without drawing it.</li></ul>
+      <div class="fmt" role="region" aria-label="Every format Filescape previews" tabindex="0">
         <div class="fmt-scroll">
-          <table>
-            <thead><tr><th scope="col">Format</th><th scope="col">Extensions</th><th scope="col">What you see</th></tr></thead>
+          <table id="fmt-table">
+            <thead><tr><th scope="col">Format</th><th scope="col">Extensions</th><th scope="col">What you see</th><th scope="col">Preview</th></tr></thead>
             <tbody>
-<tr><th scope="row">JPEG image</th><td class="exts"><code>.jpg</code> <code>.jpeg</code> <code>.jpe</code></td><td>The picture, including 12-bit and arithmetic-coded JPEGs; channels one by one</td></tr>
-<tr><th scope="row">GIF image</th><td class="exts"><code>.gif</code></td><td>The picture; channels one by one</td></tr>
-<tr><th scope="row">WebP image</th><td class="exts"><code>.webp</code></td><td>The picture; channels one by one</td></tr>
-<tr><th scope="row">JPEG XL image</th><td class="exts"><code>.jxl</code></td><td>The picture; channels one by one</td></tr>
-<tr><th scope="row">JPEG 2000 image</th><td class="exts"><code>.jp2</code> <code>.j2k</code> <code>.j2c</code> <code>.jpc</code> <code>.jpf</code> <code>.jpg2</code></td><td>The picture; channels one by one</td></tr>
-<tr><th scope="row">TIFF image</th><td class="exts"><code>.tif</code> <code>.tiff</code></td><td>The picture; channels one by one</td></tr>
-<tr><th scope="row">BMP image</th><td class="exts"><code>.bmp</code></td><td>The picture; channels one by one</td></tr>
-<tr><th scope="row">Targa image</th><td class="exts"><code>.tga</code></td><td>The picture; channels one by one</td></tr>
-<tr><th scope="row">Windows icon</th><td class="exts"><code>.ico</code></td><td>The picture; channels one by one</td></tr>
-<tr><th scope="row">QOI image</th><td class="exts"><code>.qoi</code></td><td>The picture; channels one by one</td></tr>
-<tr><th scope="row">Netpbm image</th><td class="exts"><code>.pbm</code> <code>.pgm</code> <code>.ppm</code> <code>.pnm</code></td><td>The picture; channels one by one</td></tr>
-<tr><th scope="row">Camera RAW photo</th><td class="exts"><code>.cr2</code> <code>.cr3</code> <code>.crw</code> <code>.nef</code> <code>.nrw</code> <code>.arw</code> <code>.srf</code> <code>.sr2</code> <code>.dng</code> <code>.raf</code> <code>.orf</code> <code>.rw2</code> <code>.rwl</code> <code>.pef</code> <code>.srw</code> <code>.erf</code> <code>.3fr</code> <code>.fff</code> <code>.iiq</code> <code>.mos</code> <code>.mef</code> <code>.mrw</code> <code>.x3f</code> <code>.kdc</code> <code>.dcr</code></td><td>The camera's own preview, and the camera, lens and exposure</td></tr>
-<tr><th scope="row">Photoshop document</th><td class="exts"><code>.psd</code> <code>.psb</code></td><td>The flattened picture, with its layers, groups, text and smart objects listed</td></tr>
-<tr><th scope="row">HEIC or AVIF picture</th><td class="exts"><code>.heic</code> <code>.heif</code> <code>.hif</code> <code>.avif</code></td><td>The picture</td></tr>
-<tr><th scope="row">OpenEXR image</th><td class="exts"><code>.exr</code></td><td>The picture with an exposure slider; every layer of a multilayer EXR</td></tr>
-<tr><th scope="row">Radiance HDR image</th><td class="exts"><code>.hdr</code></td><td>The picture with an exposure slider; every layer of a multilayer EXR</td></tr>
-<tr><th scope="row">SVG drawing</th><td class="exts"><code>.svg</code> <code>.svgz</code></td><td>The drawing, with its source a click away</td></tr>
-<tr><th scope="row">Font</th><td class="exts"><code>.ttf</code> <code>.otf</code> <code>.ttc</code> <code>.otc</code></td><td>A specimen: the alphabet and sample text</td></tr>
-<tr><th scope="row">Markdown</th><td class="exts"><code>.md</code> <code>.markdown</code></td><td>Formatted text, with the source a click away</td></tr>
-<tr><th scope="row">Text, code and settings</th><td class="exts"><code>.txt</code> <code>.rst</code> <code>.log</code> <code>.json</code> <code>.jsonl</code> <code>.xml</code> <code>.yaml</code> <code>.yml</code> <code>.toml</code> <code>.ini</code> <code>.cfg</code> <code>.conf</code> <code>.rs</code> <code>.py</code> <code>.js</code> <code>.mjs</code> <code>.ts</code> <code>.tsx</code> <code>.jsx</code> <code>.c</code> <code>.h</code> <code>.cpp</code> <code>.hpp</code> <code>.cc</code> <code>.cs</code> <code>.java</code> <code>.kt</code> <code>.go</code> <code>.rb</code> <code>.php</code> <code>.swift</code> <code>.m</code> <code>.mm</code> <code>.sh</code> <code>.bash</code> <code>.zsh</code> <code>.fish</code> <code>.ps1</code> <code>.psm1</code> <code>.bat</code> <code>.cmd</code> <code>.lua</code> <code>.sql</code> <code>.html</code> <code>.htm</code> <code>.css</code> <code>.scss</code> <code>.less</code> <code>.vue</code> <code>.svelte</code> <code>.glsl</code> <code>.hlsl</code> <code>.wgsl</code> <code>.osl</code> <code>.vex</code> <code>.mel</code> <code>.nk</code> <code>.usda</code> <code>.mtl</code> <code>.gitignore</code> <code>.dockerfile</code> <code>.makefile</code> <code>.cmake</code> <code>.gradle</code> <code>.properties</code> <code>.env</code> <code>.srt</code> <code>.vtt</code> <code>.tex</code> <code>.bib</code> <code>.r</code> <code>.jl</code> <code>.dart</code> <code>.zig</code> <code>.nim</code> <code>.ex</code> <code>.exs</code> <code>.erl</code> <code>.hs</code> <code>.ml</code> <code>.clj</code> <code>.scala</code> <code>.pl</code> <code>.pm</code> <code>.tcl</code> <code>.diff</code> <code>.patch</code> <code>.lock</code></td><td>The text, in syntax colours for code (about 200 languages)</td></tr>
-<tr><th scope="row">Video</th><td class="exts"><code>.mp4</code> <code>.m4v</code> <code>.mov</code> <code>.mkv</code> <code>.avi</code> <code>.wmv</code> <code>.webm</code> <code>.mpg</code> <code>.mpeg</code> <code>.m2ts</code> <code>.mts</code> <code>.3gp</code> <code>.flv</code> <code>.mxf</code></td><td>A frame, playback and a filmstrip</td></tr>
-<tr><th scope="row">Sound</th><td class="exts"><code>.mp3</code> <code>.wav</code> <code>.flac</code> <code>.m4a</code> <code>.aac</code> <code>.ogg</code> <code>.oga</code> <code>.opus</code> <code>.wma</code> <code>.aif</code> <code>.aiff</code> <code>.alac</code></td><td>Cover, waveform, tags and playback</td></tr>
-<tr><th scope="row">CSV or TSV table</th><td class="exts"><code>.csv</code> <code>.tsv</code> <code>.tab</code></td><td>A table, with column names from the first row</td></tr>
-<tr><th scope="row">SQLite database</th><td class="exts"><code>.sqlite</code> <code>.sqlite3</code> <code>.db</code> <code>.db3</code> <code>.s3db</code> <code>.sl3</code></td><td>Each table's columns, first rows, row count and size in the file, largest first; read-only</td></tr>
-<tr><th scope="row">3D model</th><td class="exts"><code>.stl</code> <code>.obj</code> <code>.ply</code> <code>.gltf</code> <code>.glb</code> <code>.3mf</code> <code>.fbx</code> <code>.dae</code> <code>.abc</code></td><td>A shaded model to turn about; PLY point clouds are drawn as points and Gaussian splat scenes as splats, with their details</td></tr>
-<tr><th scope="row">Gaussian splat scene (SPZ)</th><td class="exts"><code>.spz</code></td><td>The splats drawn on the graphics chip to turn, move and zoom about (points where it can't), with its splat count, colour detail, size and checks for stray or invisible splats</td></tr>
-<tr><th scope="row">Gaussian splat scene (SPLAT, KSPLAT, SOG, LCC, LCC2)</th><td class="exts"><code>.splat</code> <code>.ksplat</code> <code>.sog</code> <code>.lcc</code> <code>.lcc2</code></td><td>The splats drawn on the graphics chip to turn, move and zoom about (points where it can't), with its splat count, colour detail, size and checks for stray or invisible splats</td></tr>
-<tr><th scope="row">DXF drawing</th><td class="exts"><code>.dxf</code></td><td>The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size</td></tr>
-<tr><th scope="row">CAD model (DWG, STEP, IGES)</th><td class="exts"><code>.dwg</code> <code>.step</code> <code>.stp</code> <code>.p21</code> <code>.iges</code> <code>.igs</code></td><td>DWG: the drawing (lines, curves and blocks; text isn't drawn). STEP and IGES: the program that made it, units, author and parts (not drawn)</td></tr>
-<tr><th scope="row">Pages, Numbers and Keynote</th><td class="exts"><code>.pages</code> <code>.numbers</code> <code>.key</code></td><td>The picture the app saved inside the file, and the version that saved it</td></tr>
-<tr><th scope="row">Design and 3D app files (Sketch, Affinity, CorelDRAW, SketchUp, Blender, Cinema 4D, 3ds Max, Maya, Houdini)</th><td class="exts"><code>.sketch</code> <code>.afdesign</code> <code>.afphoto</code> <code>.afpub</code> <code>.aftemplate</code> <code>.cdr</code> <code>.skp</code> <code>.blend</code> <code>.c4d</code> <code>.max</code> <code>.ma</code> <code>.mb</code> <code>.hip</code> <code>.hipnc</code> <code>.hiplc</code></td><td>The picture the app saved inside the file, and the version that saved it</td></tr>
-<tr><th scope="row">Craft Apps files (PhotoCraft, VectorCraft, EffectCraft, FigCraft, DesignCraft, TextureCraft, DeckCraft, AniCraft, MaterialCraft, FilmCraft, SoundCraft)</th><td class="exts"><code>.pcraft</code> <code>.vectorcraft</code> <code>.drawcraft</code> <code>.vctemplate</code> <code>.ecproj</code> <code>.ectemplate</code> <code>.figcraft</code> <code>.designcraft</code> <code>.tcraft</code> <code>.deckcraft</code> <code>.anicraft</code> <code>.mcraft</code> <code>.fcproj</code> <code>.scraft</code> <code>.scraftz</code></td><td>The picture the app saved inside the file, with its pages, layers, size, length and the version that saved it</td></tr>
-<tr><th scope="row">After Effects project</th><td class="exts"><code>.aep</code> <code>.aepx</code></td><td>The version that saved it, its compositions and the footage files it uses, marking any missing</td></tr>
-<tr><th scope="row">Painting app files (Krita, OpenRaster, Figma export)</th><td class="exts"><code>.kra</code> <code>.krz</code> <code>.ora</code> <code>.fig</code></td><td>The picture the app saved inside the file, with its size, colours and layers</td></tr>
-<tr><th scope="row">GIMP and Paint.NET pictures</th><td class="exts"><code>.xcf</code> <code>.xcf.gz</code> <code>.pdn</code></td><td>The picture, drawn from its layers, with its size, colours and layers</td></tr>
-<tr><th scope="row">Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo, Logic Pro)</th><td class="exts"><code>.als</code> <code>.rpp</code> <code>.flp</code> <code>.cpr</code> <code>.npr</code> <code>.logicx</code></td><td>The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones)</td></tr>
-<tr><th scope="row">DICOM medical image</th><td class="exts"><code>.dcm</code> <code>.dicom</code></td><td>The scan (uncompressed, RLE, JPEG including 12-bit, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown</td></tr>
-<tr><th scope="row">Disk image</th><td class="exts"><code>.iso</code> <code>.img</code> <code>.dmg</code> <code>.vhd</code> <code>.vhdx</code> <code>.avhdx</code> <code>.vmdk</code> <code>.qcow2</code> <code>.qcow</code> <code>.vdi</code> <code>.wim</code> <code>.esd</code></td><td>A disc's files and folders with sizes (ISO 9660 and UDF); a virtual disk's size, type and partitions; a Windows image's editions</td></tr>
-<tr><th scope="row">FITS astronomy image</th><td class="exts"><code>.fits</code> <code>.fit</code> <code>.fts</code></td><td>The first picture, stretched so faint detail shows, with the object, telescope and exposure</td></tr>
-<tr><th scope="row">Map data (GeoJSON, GPX, KML)</th><td class="exts"><code>.geojson</code> <code>.gpx</code> <code>.kml</code> <code>.kmz</code></td><td>The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks</td></tr>
-<tr><th scope="row">MIDI music</th><td class="exts"><code>.mid</code> <code>.midi</code> <code>.kar</code></td><td>A piano roll, with tempo and instruments</td></tr>
-<tr><th scope="row">PDF document</th><td class="exts"><code>.pdf</code></td><td>Every page</td></tr>
-<tr><th scope="row">Word document</th><td class="exts"><code>.docx</code> <code>.docm</code> <code>.dotx</code></td><td>Formatted text: headings, lists, tables</td></tr>
-<tr><th scope="row">Spreadsheet</th><td class="exts"><code>.xlsx</code> <code>.xlsm</code> <code>.xlsb</code> <code>.xls</code> <code>.xltx</code> <code>.xltm</code> <code>.ods</code> <code>.ots</code></td><td>Each sheet's cells, as last saved</td></tr>
-<tr><th scope="row">OpenDocument text</th><td class="exts"><code>.odt</code> <code>.ott</code></td><td>Formatted text: headings, lists, tables</td></tr>
-<tr><th scope="row">PowerPoint presentation</th><td class="exts"><code>.pptx</code> <code>.pptm</code> <code>.ppsx</code> <code>.potx</code></td><td>Each slide's title and points</td></tr>
-<tr><th scope="row">OpenDocument presentation</th><td class="exts"><code>.odp</code> <code>.otp</code></td><td>Each slide's title and points</td></tr>
-<tr><th scope="row">EPUB book</th><td class="exts"><code>.epub</code></td><td>Chapters, formatted; the cover in Icons view</td></tr>
-<tr><th scope="row">Email message</th><td class="exts"><code>.eml</code> <code>.emlx</code></td><td>Sender, recipients, date, the text (HTML as plain text, nothing loaded) and a list of attachments</td></tr>
-<tr><th scope="row">Mailbox</th><td class="exts"><code>.mbox</code> <code>.mbx</code></td><td>A list of the messages: date, sender and subject</td></tr>
-<tr><th scope="row">Contact cards (vCard)</th><td class="exts"><code>.vcf</code> <code>.vcard</code></td><td>A contact card, or a list of contacts</td></tr>
-<tr><th scope="row">Calendar (iCalendar)</th><td class="exts"><code>.ics</code> <code>.ical</code> <code>.ifb</code></td><td>An event's time, place and details, or a list of events and to-dos</td></tr>
-<tr><th scope="row">Archives</th><td class="exts"><code>.zip</code> <code>.7z</code> <code>.tar</code> <code>.tar.gz</code> <code>.tgz</code> <code>.tar.xz</code> <code>.txz</code> <code>.tar.bz2</code> <code>.tbz2</code></td><td>A tree of what's inside, with sizes and how much was saved</td></tr>
+<tr data-group="images" data-level="rendered" data-search="png image .png"><th scope="row">PNG image<span class="grp">Images and photos</span></th><td class="exts"><code>.png</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="jpeg image .jpg .jpeg .jpe"><th scope="row">JPEG image<span class="grp">Images and photos</span></th><td class="exts"><code>.jpg</code> <code>.jpeg</code> <code>.jpe</code></td><td>The picture, including 12-bit and arithmetic-coded JPEGs; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="gif image .gif"><th scope="row">GIF image<span class="grp">Images and photos</span></th><td class="exts"><code>.gif</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="webp image .webp"><th scope="row">WebP image<span class="grp">Images and photos</span></th><td class="exts"><code>.webp</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="jpeg xl image .jxl"><th scope="row">JPEG XL image<span class="grp">Images and photos</span></th><td class="exts"><code>.jxl</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="jpeg 2000 image .jp2 .j2k .j2c .jpc .jpf .jpg2"><th scope="row">JPEG 2000 image<span class="grp">Images and photos</span></th><td class="exts"><code>.jp2</code> <code>.j2k</code> <code>.j2c</code> <code>.jpc</code> <code>.jpf</code> <code>.jpg2</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="tiff image .tif .tiff"><th scope="row">TIFF image<span class="grp">Images and photos</span></th><td class="exts"><code>.tif</code> <code>.tiff</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="bmp image .bmp"><th scope="row">BMP image<span class="grp">Images and photos</span></th><td class="exts"><code>.bmp</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="targa image .tga"><th scope="row">Targa image<span class="grp">Images and photos</span></th><td class="exts"><code>.tga</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="windows icon .ico"><th scope="row">Windows icon<span class="grp">Images and photos</span></th><td class="exts"><code>.ico</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="qoi image .qoi"><th scope="row">QOI image<span class="grp">Images and photos</span></th><td class="exts"><code>.qoi</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="netpbm image .pbm .pgm .ppm .pnm"><th scope="row">Netpbm image<span class="grp">Images and photos</span></th><td class="exts"><code>.pbm</code> <code>.pgm</code> <code>.ppm</code> <code>.pnm</code></td><td>The picture; channels one by one</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="embedded" data-search="camera raw photo .cr2 .cr3 .crw .nef .nrw .arw .srf .sr2 .dng .raf .orf .rw2 .rwl .pef .srw .erf .3fr .fff .iiq .mos .mef .mrw .x3f .kdc .dcr"><th scope="row">Camera RAW photo<span class="grp">Images and photos</span></th><td class="exts"><code>.cr2</code> <code>.cr3</code> <code>.crw</code> <code>.nef</code> <code>.nrw</code> <code>.arw</code> <code>.srf</code> <code>.sr2</code> <code>.dng</code> <code>.raf</code> <code>.orf</code> <code>.rw2</code> <code>.rwl</code> <code>.pef</code> <code>.srw</code> <code>.erf</code> <code>.3fr</code> <code>.fff</code> <code>.iiq</code> <code>.mos</code> <code>.mef</code> <code>.mrw</code> <code>.x3f</code> <code>.kdc</code> <code>.dcr</code></td><td>The camera's own preview, and the camera, lens and exposure</td><td><span class="lvl lvl-embedded" title="The preview picture the app that made it saved inside the file">Saved preview</span></td></tr>
+<tr data-group="design" data-level="embedded" data-search="photoshop document .psd .psb"><th scope="row">Photoshop document<span class="grp">Design, fonts and creative apps</span></th><td class="exts"><code>.psd</code> <code>.psb</code></td><td>The flattened picture, with its layers, groups, text and smart objects listed</td><td><span class="lvl lvl-embedded" title="The preview picture the app that made it saved inside the file">Saved preview</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="heic or avif picture .heic .heif .hif .avif"><th scope="row">HEIC or AVIF picture<span class="grp">Images and photos</span></th><td class="exts"><code>.heic</code> <code>.heif</code> <code>.hif</code> <code>.avif</code></td><td>The picture</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="openexr image .exr"><th scope="row">OpenEXR image<span class="grp">Images and photos</span></th><td class="exts"><code>.exr</code></td><td>The picture with an exposure slider; every layer of a multilayer EXR</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="radiance hdr image .hdr"><th scope="row">Radiance HDR image<span class="grp">Images and photos</span></th><td class="exts"><code>.hdr</code></td><td>The picture with an exposure slider; every layer of a multilayer EXR</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="design" data-level="rendered" data-search="svg drawing .svg .svgz"><th scope="row">SVG drawing<span class="grp">Design, fonts and creative apps</span></th><td class="exts"><code>.svg</code> <code>.svgz</code></td><td>The drawing, with its source a click away</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="design" data-level="rendered" data-search="font .ttf .otf .ttc .otc"><th scope="row">Font<span class="grp">Design, fonts and creative apps</span></th><td class="exts"><code>.ttf</code> <code>.otf</code> <code>.ttc</code> <code>.otc</code></td><td>A specimen: the alphabet and sample text</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="documents" data-level="content" data-search="markdown .md .markdown"><th scope="row">Markdown<span class="grp">Documents and books</span></th><td class="exts"><code>.md</code> <code>.markdown</code></td><td>Formatted text, with the source a click away</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="data" data-level="content" data-search="text, code and settings .txt .rst .log .json .jsonl .xml .yaml .yml .toml .ini .cfg .conf .rs .py .js .mjs .ts .tsx .jsx .c .h .cpp .hpp .cc .cs .java .kt .go .rb .php .swift .m .mm .sh .bash .zsh .fish .ps1 .psm1 .bat .cmd .lua .sql .html .htm .css .scss .less .vue .svelte .glsl .hlsl .wgsl .osl .vex .mel .nk .usda .mtl .gitignore .dockerfile .makefile .cmake .gradle .properties .env .srt .vtt .tex .bib .r .jl .dart .zig .nim .ex .exs .erl .hs .ml .clj .scala .pl .pm .tcl .diff .patch .lock"><th scope="row">Text, code and settings<span class="grp">Code, text and data</span></th><td class="exts"><code>.txt</code> <code>.rst</code> <code>.log</code> <code>.json</code> <code>.jsonl</code> <code>.xml</code> <code>.yaml</code> <code>.yml</code> <code>.toml</code> <code>.ini</code> <code>.cfg</code> <code>.conf</code> <code>.rs</code> <code>.py</code> <code>.js</code> <code>.mjs</code> <code>.ts</code> <code>.tsx</code> <code>.jsx</code> <code>.c</code> <code>.h</code> <code>.cpp</code> <code>.hpp</code> <code>.cc</code> <code>.cs</code> <code>.java</code> <code>.kt</code> <code>.go</code> <code>.rb</code> <code>.php</code> <code>.swift</code> <code>.m</code> <code>.mm</code> <code>.sh</code> <code>.bash</code> <code>.zsh</code> <code>.fish</code> <code>.ps1</code> <code>.psm1</code> <code>.bat</code> <code>.cmd</code> <code>.lua</code> <code>.sql</code> <code>.html</code> <code>.htm</code> <code>.css</code> <code>.scss</code> <code>.less</code> <code>.vue</code> <code>.svelte</code> <code>.glsl</code> <code>.hlsl</code> <code>.wgsl</code> <code>.osl</code> <code>.vex</code> <code>.mel</code> <code>.nk</code> <code>.usda</code> <code>.mtl</code> <code>.gitignore</code> <code>.dockerfile</code> <code>.makefile</code> <code>.cmake</code> <code>.gradle</code> <code>.properties</code> <code>.env</code> <code>.srt</code> <code>.vtt</code> <code>.tex</code> <code>.bib</code> <code>.r</code> <code>.jl</code> <code>.dart</code> <code>.zig</code> <code>.nim</code> <code>.ex</code> <code>.exs</code> <code>.erl</code> <code>.hs</code> <code>.ml</code> <code>.clj</code> <code>.scala</code> <code>.pl</code> <code>.pm</code> <code>.tcl</code> <code>.diff</code> <code>.patch</code> <code>.lock</code></td><td>The text, in syntax colours for code (about 200 languages)</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="media" data-level="rendered" data-search="video .mp4 .m4v .mov .mkv .avi .wmv .webm .mpg .mpeg .m2ts .mts .3gp .flv .mxf"><th scope="row">Video<span class="grp">Audio, video and music</span></th><td class="exts"><code>.mp4</code> <code>.m4v</code> <code>.mov</code> <code>.mkv</code> <code>.avi</code> <code>.wmv</code> <code>.webm</code> <code>.mpg</code> <code>.mpeg</code> <code>.m2ts</code> <code>.mts</code> <code>.3gp</code> <code>.flv</code> <code>.mxf</code></td><td>A frame, playback and a filmstrip</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="media" data-level="rendered" data-search="sound .mp3 .wav .flac .m4a .aac .ogg .oga .opus .wma .aif .aiff .alac"><th scope="row">Sound<span class="grp">Audio, video and music</span></th><td class="exts"><code>.mp3</code> <code>.wav</code> <code>.flac</code> <code>.m4a</code> <code>.aac</code> <code>.ogg</code> <code>.oga</code> <code>.opus</code> <code>.wma</code> <code>.aif</code> <code>.aiff</code> <code>.alac</code></td><td>Cover, waveform, tags and playback</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="data" data-level="content" data-search="csv or tsv table .csv .tsv .tab"><th scope="row">CSV or TSV table<span class="grp">Code, text and data</span></th><td class="exts"><code>.csv</code> <code>.tsv</code> <code>.tab</code></td><td>A table, with column names from the first row</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="data" data-level="content" data-search="sqlite database .sqlite .sqlite3 .db .db3 .s3db .sl3"><th scope="row">SQLite database<span class="grp">Code, text and data</span></th><td class="exts"><code>.sqlite</code> <code>.sqlite3</code> <code>.db</code> <code>.db3</code> <code>.s3db</code> <code>.sl3</code></td><td>Each table's columns, first rows, row count and size in the file, largest first; read-only</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="3d" data-level="rendered" data-search="3d model .stl .obj .ply .gltf .glb .3mf .fbx .dae .abc"><th scope="row">3D model<span class="grp">3D, CAD and splats</span></th><td class="exts"><code>.stl</code> <code>.obj</code> <code>.ply</code> <code>.gltf</code> <code>.glb</code> <code>.3mf</code> <code>.fbx</code> <code>.dae</code> <code>.abc</code></td><td>A shaded model to turn about; PLY point clouds are drawn as points and Gaussian splat scenes as splats, with their details</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="3d" data-level="rendered" data-search="gaussian splat scene (spz) .spz"><th scope="row">Gaussian splat scene (SPZ)<span class="grp">3D, CAD and splats</span></th><td class="exts"><code>.spz</code></td><td>The splats drawn on the graphics chip to turn, move and zoom about (points where it can't), with its splat count, colour detail, size and checks for stray or invisible splats</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="3d" data-level="rendered" data-search="gaussian splat scene (splat, ksplat, sog, lcc, lcc2) .splat .ksplat .sog .lcc .lcc2"><th scope="row">Gaussian splat scene (SPLAT, KSPLAT, SOG, LCC, LCC2)<span class="grp">3D, CAD and splats</span></th><td class="exts"><code>.splat</code> <code>.ksplat</code> <code>.sog</code> <code>.lcc</code> <code>.lcc2</code></td><td>The splats drawn on the graphics chip to turn, move and zoom about (points where it can't), with its splat count, colour detail, size and checks for stray or invisible splats</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="3d" data-level="rendered" data-search="dxf drawing .dxf"><th scope="row">DXF drawing<span class="grp">3D, CAD and splats</span></th><td class="exts"><code>.dxf</code></td><td>The drawing (lines, curves and blocks; text isn't drawn), with its units, layers and size</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="3d" data-level="rendered details" data-search="cad model (dwg, step, iges) .dwg .step .stp .p21 .iges .igs"><th scope="row">CAD model (DWG, STEP, IGES)<span class="grp">3D, CAD and splats</span></th><td class="exts"><code>.dwg</code> <code>.step</code> <code>.stp</code> <code>.p21</code> <code>.iges</code> <code>.igs</code></td><td>DWG: the drawing (lines, curves and blocks; text isn't drawn). STEP and IGES: the program that made it, units, author and parts (not drawn)</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span><span class="lvl lvl-details" title="What the file says about itself, without drawing it">Details only</span></td></tr>
+<tr data-group="documents" data-level="embedded" data-search="pages, numbers and keynote .pages .numbers .key"><th scope="row">Pages, Numbers and Keynote<span class="grp">Documents and books</span></th><td class="exts"><code>.pages</code> <code>.numbers</code> <code>.key</code></td><td>The picture the app saved inside the file, and the version that saved it</td><td><span class="lvl lvl-embedded" title="The preview picture the app that made it saved inside the file">Saved preview</span></td></tr>
+<tr data-group="design" data-level="embedded" data-search="design and 3d app files (sketch, affinity, coreldraw, sketchup, blender, cinema 4d, 3ds max, maya, houdini) .sketch .afdesign .afphoto .afpub .aftemplate .cdr .skp .blend .c4d .max .ma .mb .hip .hipnc .hiplc"><th scope="row">Design and 3D app files (Sketch, Affinity, CorelDRAW, SketchUp, Blender, Cinema 4D, 3ds Max, Maya, Houdini)<span class="grp">Design, fonts and creative apps</span></th><td class="exts"><code>.sketch</code> <code>.afdesign</code> <code>.afphoto</code> <code>.afpub</code> <code>.aftemplate</code> <code>.cdr</code> <code>.skp</code> <code>.blend</code> <code>.c4d</code> <code>.max</code> <code>.ma</code> <code>.mb</code> <code>.hip</code> <code>.hipnc</code> <code>.hiplc</code></td><td>The picture the app saved inside the file, and the version that saved it</td><td><span class="lvl lvl-embedded" title="The preview picture the app that made it saved inside the file">Saved preview</span></td></tr>
+<tr data-group="design" data-level="embedded" data-search="craft apps files (photocraft, vectorcraft, effectcraft, figcraft, designcraft, texturecraft, deckcraft, anicraft, materialcraft, filmcraft, soundcraft) .pcraft .vectorcraft .drawcraft .vctemplate .ecproj .ectemplate .figcraft .designcraft .tcraft .deckcraft .anicraft .mcraft .fcproj .scraft .scraftz"><th scope="row">Craft Apps files (PhotoCraft, VectorCraft, EffectCraft, FigCraft, DesignCraft, TextureCraft, DeckCraft, AniCraft, MaterialCraft, FilmCraft, SoundCraft)<span class="grp">Design, fonts and creative apps</span></th><td class="exts"><code>.pcraft</code> <code>.vectorcraft</code> <code>.drawcraft</code> <code>.vctemplate</code> <code>.ecproj</code> <code>.ectemplate</code> <code>.figcraft</code> <code>.designcraft</code> <code>.tcraft</code> <code>.deckcraft</code> <code>.anicraft</code> <code>.mcraft</code> <code>.fcproj</code> <code>.scraft</code> <code>.scraftz</code></td><td>The picture the app saved inside the file, with its pages, layers, size, length and the version that saved it</td><td><span class="lvl lvl-embedded" title="The preview picture the app that made it saved inside the file">Saved preview</span></td></tr>
+<tr data-group="design" data-level="content" data-search="after effects project .aep .aepx"><th scope="row">After Effects project<span class="grp">Design, fonts and creative apps</span></th><td class="exts"><code>.aep</code> <code>.aepx</code></td><td>The version that saved it, its compositions and the footage files it uses, marking any missing</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="design" data-level="embedded" data-search="painting app files (krita, openraster, figma export) .kra .krz .ora .fig"><th scope="row">Painting app files (Krita, OpenRaster, Figma export)<span class="grp">Design, fonts and creative apps</span></th><td class="exts"><code>.kra</code> <code>.krz</code> <code>.ora</code> <code>.fig</code></td><td>The picture the app saved inside the file, with its size, colours and layers</td><td><span class="lvl lvl-embedded" title="The preview picture the app that made it saved inside the file">Saved preview</span></td></tr>
+<tr data-group="design" data-level="rendered" data-search="gimp and paint.net pictures .xcf .xcf.gz .pdn"><th scope="row">GIMP and Paint.NET pictures<span class="grp">Design, fonts and creative apps</span></th><td class="exts"><code>.xcf</code> <code>.xcf.gz</code> <code>.pdn</code></td><td>The picture, drawn from its layers, with its size, colours and layers</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="media" data-level="content" data-search="music project (ableton live, reaper, fl studio, cubase, nuendo, logic pro) .als .rpp .flp .cpr .npr .logicx"><th scope="row">Music project (Ableton Live, REAPER, FL Studio, Cubase, Nuendo, Logic Pro)<span class="grp">Audio, video and music</span></th><td class="exts"><code>.als</code> <code>.rpp</code> <code>.flp</code> <code>.cpr</code> <code>.npr</code> <code>.logicx</code></td><td>The version that saved it, tempo, tracks, plugins, and the sound files it uses (marking missing ones)</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="dicom medical image .dcm .dicom"><th scope="row">DICOM medical image<span class="grp">Images and photos</span></th><td class="exts"><code>.dcm</code> <code>.dicom</code></td><td>The scan (uncompressed, RLE, JPEG including 12-bit, JPEG-LS or JPEG 2000) in its window, and what kind of scan it is; patient details are never shown</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="archives" data-level="content" data-search="disk image .iso .img .dmg .vhd .vhdx .avhdx .vmdk .qcow2 .qcow .vdi .wim .esd"><th scope="row">Disk image<span class="grp">Archives and disk images</span></th><td class="exts"><code>.iso</code> <code>.img</code> <code>.dmg</code> <code>.vhd</code> <code>.vhdx</code> <code>.avhdx</code> <code>.vmdk</code> <code>.qcow2</code> <code>.qcow</code> <code>.vdi</code> <code>.wim</code> <code>.esd</code></td><td>A disc's files and folders with sizes (ISO 9660 and UDF); a virtual disk's size, type and partitions; a Windows image's editions</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="images" data-level="rendered" data-search="fits astronomy image .fits .fit .fts"><th scope="row">FITS astronomy image<span class="grp">Images and photos</span></th><td class="exts"><code>.fits</code> <code>.fit</code> <code>.fts</code></td><td>The first picture, stretched so faint detail shows, with the object, telescope and exposure</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="maps" data-level="rendered" data-search="map data (geojson, gpx, kml) .geojson .gpx .kml .kmz"><th scope="row">Map data (GeoJSON, GPX, KML)<span class="grp">Maps</span></th><td class="exts"><code>.geojson</code> <code>.gpx</code> <code>.kml</code> <code>.kmz</code></td><td>The shapes, tracks and places drawn (no map behind them), with distance, climb and times for tracks</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="media" data-level="rendered" data-search="midi music .mid .midi .kar"><th scope="row">MIDI music<span class="grp">Audio, video and music</span></th><td class="exts"><code>.mid</code> <code>.midi</code> <code>.kar</code></td><td>A piano roll, with tempo and instruments</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="documents" data-level="rendered" data-search="pdf document .pdf"><th scope="row">PDF document<span class="grp">Documents and books</span></th><td class="exts"><code>.pdf</code></td><td>Every page</td><td><span class="lvl lvl-rendered" title="The picture, page, drawing, model, sound or video itself">Rendered</span></td></tr>
+<tr data-group="documents" data-level="content" data-search="word document .docx .docm .dotx"><th scope="row">Word document<span class="grp">Documents and books</span></th><td class="exts"><code>.docx</code> <code>.docm</code> <code>.dotx</code></td><td>Formatted text: headings, lists, tables</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="data" data-level="content" data-search="spreadsheet .xlsx .xlsm .xlsb .xls .xltx .xltm .ods .ots"><th scope="row">Spreadsheet<span class="grp">Code, text and data</span></th><td class="exts"><code>.xlsx</code> <code>.xlsm</code> <code>.xlsb</code> <code>.xls</code> <code>.xltx</code> <code>.xltm</code> <code>.ods</code> <code>.ots</code></td><td>Each sheet's cells, as last saved</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="documents" data-level="content" data-search="opendocument text .odt .ott"><th scope="row">OpenDocument text<span class="grp">Documents and books</span></th><td class="exts"><code>.odt</code> <code>.ott</code></td><td>Formatted text: headings, lists, tables</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="documents" data-level="content" data-search="powerpoint presentation .pptx .pptm .ppsx .potx"><th scope="row">PowerPoint presentation<span class="grp">Documents and books</span></th><td class="exts"><code>.pptx</code> <code>.pptm</code> <code>.ppsx</code> <code>.potx</code></td><td>Each slide's title and points</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="documents" data-level="content" data-search="opendocument presentation .odp .otp"><th scope="row">OpenDocument presentation<span class="grp">Documents and books</span></th><td class="exts"><code>.odp</code> <code>.otp</code></td><td>Each slide's title and points</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="documents" data-level="content" data-search="epub book .epub"><th scope="row">EPUB book<span class="grp">Documents and books</span></th><td class="exts"><code>.epub</code></td><td>Chapters, formatted; the cover in Icons view</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="mail" data-level="content" data-search="email message .eml .emlx"><th scope="row">Email message<span class="grp">Mail, contacts and calendars</span></th><td class="exts"><code>.eml</code> <code>.emlx</code></td><td>Sender, recipients, date, the text (HTML as plain text, nothing loaded) and a list of attachments</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="mail" data-level="content" data-search="mailbox .mbox .mbx"><th scope="row">Mailbox<span class="grp">Mail, contacts and calendars</span></th><td class="exts"><code>.mbox</code> <code>.mbx</code></td><td>A list of the messages: date, sender and subject</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="mail" data-level="content" data-search="contact cards (vcard) .vcf .vcard"><th scope="row">Contact cards (vCard)<span class="grp">Mail, contacts and calendars</span></th><td class="exts"><code>.vcf</code> <code>.vcard</code></td><td>A contact card, or a list of contacts</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="mail" data-level="content" data-search="calendar (icalendar) .ics .ical .ifb"><th scope="row">Calendar (iCalendar)<span class="grp">Mail, contacts and calendars</span></th><td class="exts"><code>.ics</code> <code>.ical</code> <code>.ifb</code></td><td>An event's time, place and details, or a list of events and to-dos</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
+<tr data-group="archives" data-level="content" data-search="archives .zip .7z .tar .tar.gz .tgz .tar.xz .txz .tar.bz2 .tbz2"><th scope="row">Archives<span class="grp">Archives and disk images</span></th><td class="exts"><code>.zip</code> <code>.7z</code> <code>.tar</code> <code>.tar.gz</code> <code>.tgz</code> <code>.tar.xz</code> <code>.txz</code> <code>.tar.bz2</code> <code>.tbz2</code></td><td>A tree of what's inside, with sizes and how much was saved</td><td><span class="lvl lvl-content" title="The text, cells, tables, tracks or files inside, laid out by Filescape">Contents</span></td></tr>
             </tbody>
           </table>
+          <p class="fmt-none" id="fmt-none" hidden>Nothing matches. Filescape still shows any file's size, dates and kind, and opens it in its own app. <a href="/contact?topic=feature">Ask for a format</a>.</p>
         </div>
       </div>
+      <script>
+      (() => {
+        const q = document.getElementById("fmt-q"), g = document.getElementById("fmt-group"), l = document.getElementById("fmt-level");
+        const rows = [...document.querySelectorAll("#fmt-table tbody tr")], count = document.getElementById("fmt-count"), none = document.getElementById("fmt-none");
+        const params = new URLSearchParams(location.search);
+        q.value = params.get("q") || ""; g.value = params.get("kind") || ""; l.value = params.get("preview") || "";
+        const run = () => {
+          const words = q.value.toLowerCase().split(/[\s,]+/).map(w => w.replace(/^\./, "")).filter(Boolean);
+          let n = 0;
+          for (const r of rows) {
+            const show = (!g.value || r.dataset.group === g.value) && (!l.value || r.dataset.level.split(" ").includes(l.value))
+              && words.every(w => r.dataset.search.includes(w));
+            r.hidden = !show; n += show;
+          }
+          count.textContent = n === rows.length ? `${n} formats` : `${n} of ${rows.length} formats`;
+          none.hidden = n > 0;
+          const u = new URLSearchParams();
+          if (q.value) u.set("q", q.value); if (g.value) u.set("kind", g.value); if (l.value) u.set("preview", l.value);
+          history.replaceState(null, "", (u.toString() ? "?" + u : location.pathname) + location.hash);
+        };
+        [q, g, l].forEach(e => e.addEventListener("input", run));
+        run();
+      })();
+      </script>
       <p class="small" style="margin-top:12px">HEIC, AVIF and video use your system's own decoders: built into macOS; on Windows, the free HEIF and AV1 extensions from the Microsoft Store; on Linux, libheif or ffmpeg.</p>
 
       <div class="cta">
@@ -438,19 +679,55 @@ footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 32
     </div>
   </section>
 </main>
+
 <footer>
-  <div class="wrap foot">
-    <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
-    <a href="/formats">Supported formats</a>
-    <a href="/ai-models">AI models</a>
-    <a href="/vfx">VFX and 3D</a>
-    <a href="https://account.filescape.app/">Your licence</a>
-    <a href="/terms">Terms</a>
-    <a href="/privacy">Privacy</a>
-    <a href="/refunds">Refunds</a>
-    <a href="/contact">Contact</a>
-    <span class="ver">© 2026 Filescape</span>
+  <div class="wrap">
+    <div class="foot-cols">
+      <div class="foot-brand">
+        <a class="brand" href="/"><svg aria-hidden="true"><use href="#i-logo"/></svg>Filescape</a>
+        <p>See your files differently. Free for Windows, macOS and Linux.</p>
+      </div>
+      <nav class="foot-col" aria-label="Product">
+        <h2>Product</h2>
+        <a href="/#features">Features</a>
+        <a href="/formats">File previews</a>
+        <a href="/ai-models">AI models</a>
+        <a href="/#pricing">Pricing</a>
+      </nav>
+      <nav class="foot-col" aria-label="Solutions">
+        <h2>Solutions</h2>
+        <a href="/vfx">VFX, 3D and creative</a>
+      </nav>
+      <nav class="foot-col" aria-label="Resources">
+        <h2>Resources</h2>
+        <a href="/whats-new">What's new</a>
+        <a href="/#download">Downloads</a>
+        <a href="/formats">Supported formats</a>
+        <a href="/mac">Opening it on a Mac</a>
+      </nav>
+      <nav class="foot-col" aria-label="Company">
+        <h2>Company</h2>
+        <a href="/about">About</a>
+        <a href="/security">Security</a>
+        <a href="/contact">Contact and support</a>
+        <a href="https://account.filescape.app/">Your licence</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/refunds">Refunds</a>
+      </nav>
+    </div>
+    <p class="ver">© 2026 Filescape</p>
   </div>
 </footer>
+<script>
+// Prices come from /config.js on every page, so ending the launch price is one edit there.
+(() => {
+  const c = window.FILESCAPE || {};
+  if (!c.priceLabel) return;
+  document.querySelectorAll(".js-price").forEach(e => { e.textContent = c.priceLabel; });
+  if (!c.listPriceLabel) document.querySelectorAll(".js-list, .js-launch").forEach(e => e.remove());
+  else document.querySelectorAll(".js-list").forEach(e => { e.textContent = c.listPriceLabel; });
+})();
+</script>
 </body>
 </html>
