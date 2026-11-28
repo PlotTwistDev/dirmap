@@ -12,6 +12,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 #[cfg(target_os = "macos")]
 mod mac;
+pub mod desktop;
+mod linux;
 pub mod lnk;
 pub mod pe;
 
@@ -38,10 +40,14 @@ pub enum Bundle {
     WinApp,
     /// A Windows shortcut (`.lnk`).
     Shortcut,
+    /// A Linux application launcher (`.desktop`).
+    Launcher,
+    /// A Linux application packed in one file (`.AppImage`).
+    AppImage,
 }
 
 impl Bundle {
-    const ALL: [Bundle; 16] = [
+    const ALL: [Bundle; 18] = [
         Bundle::App,
         Bundle::Framework,
         Bundle::Plugin,
@@ -58,6 +64,8 @@ impl Bundle {
         Bundle::Service,
         Bundle::WinApp,
         Bundle::Shortcut,
+        Bundle::Launcher,
+        Bundle::AppImage,
     ];
 
     /// By the folder's extension alone (any case).
@@ -109,6 +117,8 @@ impl Bundle {
             Bundle::Service => "Service",
             Bundle::WinApp => "Application",
             Bundle::Shortcut => "Shortcut",
+            Bundle::Launcher => "Application launcher",
+            Bundle::AppImage => "Application",
         }
     }
 
@@ -225,8 +235,9 @@ pub fn parts(app: &crate::scan::Node) -> Vec<(&'static str, &'static str, u64)> 
     out
 }
 
-/// What a file is by its name: a Windows program or shortcut (code as in [`Bundle::code`]), 0
-/// for anything else. Just the name, so listings stay as fast as before.
+/// What a file is by its name: a Windows program or shortcut, a Linux launcher or AppImage (code
+/// as in [`Bundle::code`]), 0 for anything else. Just the name, so listings stay as fast as
+/// before.
 pub fn file_code(name: &str) -> u8 {
     let n = name.as_bytes();
     let ends = |ext: &[u8]| n.len() > ext.len() && n[n.len() - ext.len()..].eq_ignore_ascii_case(ext);
@@ -234,15 +245,51 @@ pub fn file_code(name: &str) -> u8 {
         Bundle::WinApp.code()
     } else if ends(b".lnk") {
         Bundle::Shortcut.code()
+    } else if ends(b".desktop") {
+        Bundle::Launcher.code()
+    } else if ends(b".appimage") {
+        Bundle::AppImage.code()
     } else {
         0
     }
 }
 
 /// Items drawn with their own icon and shown with application details: Mac applications,
-/// Windows programs and shortcuts.
+/// Windows programs and shortcuts, Linux launchers and AppImages.
 pub fn own_icon(code: u8) -> bool {
-    matches!(of(code), Some(Bundle::App | Bundle::WinApp | Bundle::Shortcut))
+    matches!(of(code), Some(Bundle::App | Bundle::WinApp | Bundle::Shortcut | Bundle::Launcher | Bundle::AppImage))
+}
+
+/// Which system an application item is made for, when it isn't this one: "Windows", "macOS" or
+/// "Linux". Such items are labelled but never run (opening one shows why instead).
+pub fn foreign(code: u8) -> Option<&'static str> {
+    let made_for = match of(code)? {
+        Bundle::App => "macOS",
+        Bundle::WinApp | Bundle::Shortcut => "Windows",
+        Bundle::Launcher | Bundle::AppImage => "Linux",
+        _ => return None,
+    };
+    let here = if cfg!(windows) {
+        "Windows"
+    } else if cfg!(target_os = "macos") {
+        "macOS"
+    } else {
+        "Linux"
+    };
+    (made_for != here).then_some(made_for)
+}
+
+/// What opening an application made for another system says.
+pub fn foreign_note(code: u8) -> Option<String> {
+    let os = foreign(code)?;
+    let what = match of(code)? {
+        Bundle::Shortcut => "a Windows shortcut",
+        Bundle::Launcher => "a Linux application launcher",
+        Bundle::App => "a macOS application",
+        _ if os == "Windows" => "a Windows program",
+        _ => "a Linux application",
+    };
+    Some(format!("This is {what}: it can only be opened on {os}."))
 }
 
 /// What the user chose under Settings > Files > Applications & Executables. Kept here (not
@@ -290,10 +337,21 @@ pub fn is_app(code: u8) -> bool {
 /// Applications run only on the system they were made for.
 pub const CAN_LAUNCH: bool = cfg!(target_os = "macos");
 
-/// Opening this entry (double-click, Enter, Open) launches it rather than going inside.
+/// Mac applications and Linux launchers and AppImages this computer can launch (Windows
+/// programs are opened by Windows itself, through the usual Open).
+pub fn can_launch(code: u8) -> bool {
+    match of(code) {
+        Some(Bundle::App) => CAN_LAUNCH,
+        Some(Bundle::Launcher | Bundle::AppImage) => cfg!(target_os = "linux"),
+        _ => false,
+    }
+}
+
+/// Opening this entry (double-click, Enter, Open) launches it rather than going inside (or,
+/// for a launcher, opening it as text).
 pub fn launches(code: u8) -> bool {
     let p = prefs();
-    CAN_LAUNCH && is_app(code) && !p.as_folders && p.double_click
+    can_launch(code) && !p.as_folders && p.double_click
 }
 
 /// The name to show: "Safari" for `Safari.app` when extensions are hidden.
@@ -376,6 +434,15 @@ pub fn launch(app: &Path) -> Result<(), String> {
     if crate::fsys::remote::is_remote(app) || crate::fsys::archive::inside(app) {
         return Err("Applications can only be launched from a drive on this computer.".into());
     }
+    let name = app.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    match Bundle::from_code(file_code(&name)) {
+        Some(Bundle::Launcher) if cfg!(target_os = "linux") => return linux::launch_entry(app),
+        Some(Bundle::AppImage) if cfg!(target_os = "linux") => return linux::launch_appimage(app),
+        Some(b @ (Bundle::Launcher | Bundle::AppImage | Bundle::WinApp | Bundle::Shortcut)) => {
+            return Err(foreign_note(b.code()).unwrap_or_else(|| "This can't be launched here.".into()));
+        }
+        _ => {}
+    }
     if !CAN_LAUNCH {
         return Err("This is a macOS application. It can only be launched on a Mac.".into());
     }
@@ -403,7 +470,12 @@ pub fn icon(app: &Path, size: u32) -> Option<(u32, u32, Vec<u8>)> {
     let name = app.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let code = file_code(&name);
     if code != 0 {
-        let img = if code == Bundle::WinApp.code() { pe::icon_file(app, size) } else { shortcut_icon(app, size) };
+        let img = match Bundle::from_code(code) {
+            Some(Bundle::WinApp) => pe::icon_file(app, size),
+            Some(Bundle::Shortcut) => shortcut_icon(app, size),
+            Some(Bundle::Launcher) => desktop::icon_file(app, size),
+            _ => None,
+        };
         return img.map(|i| (i.width(), i.height(), i.into_raw()));
     }
     #[cfg(target_os = "macos")]
@@ -501,6 +573,10 @@ pub struct Details {
     pub console: bool,
     /// For a shortcut: what it says (the details above are its target's).
     pub shortcut: Option<lnk::Shortcut>,
+    /// For a Linux launcher: what it says.
+    pub launcher: Option<desktop::Entry>,
+    /// For an AppImage: its type (1 or 2).
+    pub appimage: Option<u8>,
 }
 
 impl Details {
@@ -526,6 +602,8 @@ pub fn details(app: &Path) -> Details {
     match Bundle::from_code(file_code(&name)) {
         Some(Bundle::WinApp) => return program_details(app),
         Some(Bundle::Shortcut) => return shortcut_details(app),
+        Some(Bundle::Launcher) => return launcher_details(app),
+        Some(Bundle::AppImage) => return appimage_details(app),
         _ => {}
     }
     let info = info(app);
@@ -595,6 +673,62 @@ fn shortcut_details(link: &Path) -> Details {
     }
     d.size = size;
     d.shortcut = Some(sc);
+    d
+}
+
+/// A Linux launcher's details: what it says, and whether it can be launched.
+fn launcher_details(file: &Path) -> Details {
+    let size = std::fs::metadata(file).map_or((0, 0, 1), |m| (m.len(), alloc_of(&m), 1));
+    let text = std::fs::metadata(file).ok().filter(|m| m.len() <= 1 << 20).and_then(|_| std::fs::read_to_string(file).ok());
+    let Some(e) = text.as_deref().and_then(desktop::entry) else {
+        return Details { size, problem: Some("This launcher is damaged: it has no [Desktop Entry] section.".into()), ..Default::default() };
+    };
+    let info = Info { name: e.name.clone(), version: e.version.clone(), description: e.comment.clone().or_else(|| e.generic_name.clone()), ..Default::default() };
+    let mut d = Details { info: Some(info), size, ..Default::default() };
+    d.problem = launcher_problem(file, &e);
+    d.launcher = Some(e);
+    d
+}
+
+/// Why a launcher can't be launched here, if it can't.
+fn launcher_problem(file: &Path, e: &desktop::Entry) -> Option<String> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    match e.kind.as_str() {
+        "Application" => {
+            let cmd = e.exec.as_deref().and_then(|x| desktop::command(x, e, file));
+            let Some(cmd) = cmd else { return Some("It doesn't say which program to run.".into()) };
+            if let Some(t) = &e.try_exec
+                && desktop::which(t).is_none()
+            {
+                return Some(format!("Its program, {t}, isn't installed."));
+            }
+            if desktop::which(&cmd[0]).is_none() {
+                return Some(format!("Its program, {}, isn't installed.", cmd[0]));
+            }
+        }
+        "Link" if e.url.is_some() => {}
+        "Link" => return Some("It doesn't say which address to open.".into()),
+        _ => return Some("This launcher opens a menu folder, not an application.".into()),
+    }
+    (!desktop::trusted(file)).then(|| {
+        "It isn't marked as trusted, so it isn't launched: a launcher can run any command. If you trust it, allow it to run as a program in its Properties, then launch it.".into()
+    })
+}
+
+/// An AppImage's details, from its header.
+fn appimage_details(file: &Path) -> Details {
+    let size = std::fs::metadata(file).map_or((0, 0, 1), |m| (m.len(), alloc_of(&m), 1));
+    let name = file.file_stem().map(|n| n.to_string_lossy().into_owned());
+    let Some(elf) = desktop::elf_file(file) else {
+        return Details { size, problem: Some("This isn't a Linux program, or it's damaged.".into()), ..Default::default() };
+    };
+    let info = Info { name, ..Default::default() };
+    let mut d = Details { info: Some(info), arch: elf.arch.map(|a| format!("Linux, {a}")), size, appimage: elf.appimage.or(Some(0)), ..Default::default() };
+    if cfg!(target_os = "linux") && !desktop::executable(file) {
+        d.problem = Some("It isn't allowed to run as a program yet. If you trust it, allow that in its Properties (or run chmod +x on it), then launch it.".into());
+    }
     d
 }
 
@@ -961,6 +1095,62 @@ pub(crate) mod tests {
         assert_eq!(parts[0].0, "Frameworks", "{parts:?}");
         assert_eq!(parts.iter().map(|p| p.0).collect::<Vec<_>>(), ["Frameworks", "Program", "Resources", "Other"]);
         assert_eq!(parts.iter().map(|p| p.2).sum::<u64>(), t.at(slack).unwrap().size, "the parts add up to the app");
+    }
+
+    #[test]
+    fn linux_launchers_and_appimages() {
+        let _g = PREFS_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let launcher = Bundle::Launcher.code();
+        let appimage = Bundle::AppImage.code();
+        assert_eq!(file_code("paint.desktop"), launcher);
+        assert_eq!(file_code("Paint-2.1-x86_64.AppImage"), appimage);
+        assert_eq!(file_code("desktop"), 0);
+        assert!(own_icon(launcher) && own_icon(appimage));
+        assert_eq!(foreign(launcher).is_some(), !cfg!(target_os = "linux"));
+        assert_eq!(foreign(Bundle::WinApp.code()).is_some(), !cfg!(windows));
+        assert_eq!(foreign(Bundle::Framework.code()), None);
+        assert_eq!(can_launch(appimage), cfg!(target_os = "linux"));
+        assert!(foreign_note(Bundle::Shortcut.code()).is_none_or(|n| n.contains("Windows shortcut")));
+
+        let dir = std::env::temp_dir().join(format!("fs-linuxapps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("paint.desktop");
+        std::fs::write(&file, desktop::tests::SAMPLE).unwrap();
+        let d = details(&file);
+        let e = d.launcher.as_ref().unwrap();
+        assert_eq!(e.icon.as_deref(), Some("acme-paint"));
+        assert_eq!(d.info.as_ref().unwrap().version.as_deref(), Some("2.1"));
+        if cfg!(target_os = "linux") {
+            // Its program (env) is installed, but it isn't trusted: refused, with the reason.
+            assert!(d.problem.as_deref().unwrap().contains("trusted"), "{:?}", d.problem);
+            assert!(launch(&file).unwrap_err().contains("trusted"));
+            std::fs::write(&file, "[Desktop Entry]\nType=Application\nName=Gone\nExec=no-such-program-here --x\n").unwrap();
+            assert!(details(&file).problem.unwrap().contains("no-such-program-here"));
+        }
+        std::fs::write(&file, "not a launcher").unwrap();
+        assert!(details(&file).problem.unwrap().contains("damaged"));
+
+        let img = dir.join("Paint.AppImage");
+        let mut h = vec![0u8; 64];
+        h[..4].copy_from_slice(b"\x7fELF");
+        h[5] = 1;
+        h[8..11].copy_from_slice(b"AI\x02");
+        h[18] = 0x3e;
+        std::fs::write(&img, &h).unwrap();
+        let d = details(&img);
+        assert_eq!(d.appimage, Some(2));
+        assert_eq!(d.arch.as_deref(), Some("Linux, 64-bit x86-64"));
+        assert_eq!(d.info.unwrap().name.as_deref(), Some("Paint"));
+        if cfg!(target_os = "linux") {
+            // Not allowed to run, and never made so.
+            assert!(d.problem.unwrap().contains("allowed to run"));
+            assert!(launch(&img).is_err());
+            assert!(!desktop::executable(&img));
+        }
+        std::fs::write(&img, b"MZ").unwrap();
+        assert!(details(&img).problem.unwrap().contains("damaged"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

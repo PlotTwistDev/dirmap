@@ -125,6 +125,10 @@ pub(super) struct Look {
     pub download_ok: std::collections::HashSet<PathBuf>,
     /// A video playing in the preview.
     pub video: Option<VideoView>,
+    /// The app's frame count, and the frame a preview last drew: a sound or video nothing
+    /// shows any more is stopped (see `stop_unseen_media`).
+    pub tick: u64,
+    seen: u64,
     /// Frames from across the video being previewed.
     strip: Option<StripView>,
     /// Quick Look's own window: where it opened this time (kept while it's open, so the system
@@ -132,6 +136,21 @@ pub(super) struct Look {
     /// next time.
     win_home: Option<(egui::Pos2, Vec2)>,
     win_last: Option<(egui::Pos2, Vec2)>,
+}
+
+impl Look {
+    /// Stop the sound or video playing in the preview.
+    pub fn stop_media(&mut self) {
+        self.player = None;
+        self.video = None;
+    }
+
+    /// Close Quick Look. What it was playing stops, rather than carrying on in the preview pane.
+    pub fn close(&mut self) {
+        self.open = false;
+        self.full = false;
+        self.stop_media();
+    }
 }
 
 /// A video's filmstrip: being read, then its frames.
@@ -903,6 +922,16 @@ pub(super) fn ask_ok(path: &Path) -> bool {
 }
 
 impl App {
+    /// At the start of a frame: stop a sound or video that no preview drew last frame (the pane
+    /// was closed, or the view changed), so it doesn't play on unseen.
+    pub(super) fn stop_unseen_media(&mut self) {
+        let look = &mut self.files.look;
+        if look.seen != look.tick && (look.player.is_some() || look.video.is_some()) {
+            look.stop_media();
+        }
+        look.tick += 1;
+    }
+
     /// The item a preview shows: the cursor's item in the focused pane.
     pub(super) fn look_target(&self) -> Option<(PathBuf, Entry)> {
         if self.files.look.from_map {
@@ -921,14 +950,13 @@ impl App {
             return;
         }
         let Some((path, e)) = self.look_target() else {
-            self.files.look.open = false;
+            self.files.look.close();
             return;
         };
         let typing = ctx.egui_wants_keyboard_input();
         let close = !typing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) || i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
         if close {
-            self.files.look.open = false;
-            self.files.look.full = false;
+            self.files.look.close();
             return;
         }
         if !typing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
@@ -997,8 +1025,7 @@ impl App {
             self.open_files_ask(Some(path.clone()));
         }
         if !open {
-            self.files.look.open = false;
-            self.files.look.full = false;
+            self.files.look.close();
         }
         if step != 0 {
             self.files_move_cursor(|pos, _| pos.map(|p| p as i64 + step).unwrap_or(0), false);
@@ -1085,8 +1112,7 @@ impl App {
             self.open_files_ask(Some(path.clone()));
         }
         if close {
-            self.files.look.open = false;
-            self.files.look.full = false;
+            self.files.look.close();
             self.files.look.win_home = None;
         }
         if step != 0 && !self.files.look.from_map {
@@ -1113,7 +1139,7 @@ impl App {
             }
             // A sequence row stands for all its frames.
             let (kind, size) = match t.seqs.get(&i) {
-                Some(s) => (format!("{} sequence", s.seq.extension().to_uppercase()), s.seq.bytes),
+                Some(s) => (format!("{} {}", s.seq.extension().to_uppercase(), if s.seq.is_pictures() { "sequence" } else { "numbered set" }), s.seq.bytes),
                 // A folder's size is known only from an analysis that covers it.
                 None if e.is_dir => (browser::entry_kind(e), t.sizes.as_ref().and_then(|s| s.1.get(&e.name)).map_or(0, |s| s.0)),
                 None => (browser::kind_for(&e.name, false), e.size),
@@ -1275,6 +1301,15 @@ impl App {
                     {
                         app.files.reveal(dir.to_path_buf(), vec![name.to_string_lossy().into()]);
                     }
+                } else if matches!(kind, Some(crate::apps::Bundle::Launcher | crate::apps::Bundle::AppImage)) {
+                    // A Linux launcher or AppImage: launched only when it's trusted, never made so.
+                    let ready = cfg!(target_os = "linux") && app_info.as_ref().is_some_and(|d| d.problem.is_none());
+                    let r = ui.add_enabled_ui(ready, |ui| kit::button(ui, K::Primary, Some(Icon::External), "Launch Application")).inner;
+                    if r.clicked() {
+                        app.launch_apps(vec![path.clone()]);
+                    }
+                    let why = if cfg!(target_os = "linux") { "It can't be launched: see Problem below." } else { "This is a Linux application: it can only be launched on Linux." };
+                    r.on_hover_text("Start it, as the desktop's menu would").on_disabled_hover_text(why);
                 } else if kind == Some(crate::apps::Bundle::App) {
                     // An application: launch it (never just by selecting or previewing it).
                     let r = ui.add_enabled_ui(crate::apps::CAN_LAUNCH, |ui| kit::button(ui, K::Primary, Some(Icon::External), "Launch Application")).inner;
@@ -1578,6 +1613,15 @@ impl App {
 
     fn preview_main(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
         let pal = style::pal(ui);
+        // A sound or video stops when the preview moves on to another item (a folder or an app
+        // too), and carries on only while a preview shows it.
+        if self.files.look.player.as_ref().is_some_and(|p| p.path != path) {
+            self.files.look.player = None;
+        }
+        if self.files.look.video.as_ref().is_some_and(|v| v.video.path != path) {
+            self.files.look.video = None;
+        }
+        self.files.look.seen = self.files.look.tick;
         if crate::apps::own_icon(e.bundle) {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             let side = (r.width().min(r.height()) * 0.6).clamp(64.0, 256.0);
@@ -1591,13 +1635,6 @@ impl App {
         }
         let ctx = ui.ctx().clone();
         let tint = self.colors.get(e.ext()).copied().unwrap_or(Color32::GRAY);
-        // A sound stops when the preview moves on to another file.
-        if self.files.look.player.as_ref().is_some_and(|p| p.path != path) {
-            self.files.look.player = None;
-        }
-        if self.files.look.video.as_ref().is_some_and(|v| v.video.path != path) {
-            self.files.look.video = None;
-        }
         if self.files.look.view_of.as_deref() != Some(path) {
             self.files.look.view_of = Some(path.to_path_buf());
             self.files.look.zoom = None;
@@ -2315,8 +2352,11 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
     // The same scene can be on screen twice (Quick Look over the preview pane), sharing one
     // picture. Only the bigger view draws; the other shows its picture stretched, so the two
     // don't take turns asking for their own size for ever.
+    // Quick Look in a window of its own is a separate viewport with its own pass count, drawn
+    // inside the main window's pass: both views go by the main window's count, or each takes
+    // the other's claim for an old one and they both draw, fighting over the picture.
     let claim_id = egui::Id::new(("splat-claim", path));
-    let pass = ui.ctx().cumulative_pass_nr();
+    let pass = ui.ctx().cumulative_pass_nr_for(egui::ViewportId::ROOT);
     let claim: Option<(u64, usize)> = ui.data(|d| d.get_temp(claim_id));
     let follower = claim.is_some_and(|(p, area)| p + 1 >= pass && area > px[0] * px[1]);
     if !follower {
@@ -3206,8 +3246,31 @@ pub(super) fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
     if let Some(n) = i.name.clone() {
         row("Name", n);
     }
+    if let Some(t) = d.appimage {
+        row("Package", if t == 0 { "A Linux program (not an AppImage)".into() } else { format!("AppImage (type {t}): runs without installing") });
+    }
     if let Some(n) = i.description.clone() {
         row("Description", n);
+    }
+    if let Some(e) = &d.launcher {
+        match e.kind.as_str() {
+            "Link" => row("Opens", e.url.clone().unwrap_or_else(|| "Not said".into())),
+            "Application" => {
+                // The command as it runs with no files given (without %U and the like).
+                let cmd = e.exec.as_deref().map(|x| x.split_whitespace().filter(|w| !(w.len() == 2 && w.starts_with('%'))).collect::<Vec<_>>().join(" ")).unwrap_or_else(|| "Not said".into());
+                row("Runs", if e.terminal { format!("{cmd}, in a terminal") } else { cmd });
+            }
+            k => row("Type", k.to_string()),
+        }
+        if let Some(p) = e.path.clone() {
+            row("Start in", p);
+        }
+        if !e.categories.is_empty() {
+            row("Categories", e.categories.join(", "));
+        }
+        if e.hidden {
+            row("Menus", "Hidden from the applications menu".into());
+        }
     }
     if let Some(p) = d.publisher() {
         row("Publisher", p);

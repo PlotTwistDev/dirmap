@@ -64,6 +64,11 @@ pub fn decode(path: &Path, scale: u32) -> Result<Frame, String> {
     Ok(Frame { w, h, px, enc, info })
 }
 
+/// Whether the player can decode frames with this extension (no dot, any case).
+pub fn can_play(ext: &str) -> bool {
+    ext.eq_ignore_ascii_case("dpx") || image::ImageFormat::from_extension(ext).is_some_and(|f| f.reading_enabled())
+}
+
 type Decoded = (u32, u32, Vec<f32>, Encoding, String);
 
 fn decode_image(bytes: &[u8], path: &Path) -> Result<Decoded, String> {

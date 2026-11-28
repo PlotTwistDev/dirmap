@@ -14,6 +14,13 @@
 - Every Ask AI conversation ends with the same note: **Private · Local processing · Read-only**,
   "Local AI models can make mistakes…", and an **ⓘ** that explains the limits.
 
+### Numbered data files aren't treated as frames
+
+- Numbered files that aren't pictures, such as NumPy `.npz` archives, still group into one row in
+  Files but show as a plain numbered set: no **Play**, and skipped numbers are a neutral note
+  instead of an orange "missing frames" warning. See
+  [Image sequences](../views/file-manager.md#image-sequences).
+
 ### Eject drives
 
 - External drives, USB sticks, SD cards and disk images can be ejected from Filescape on macOS,

@@ -378,9 +378,10 @@ impl FTab {
         out
     }
 
-    /// A sequence row, ready for the player.
+    /// A sequence row, ready for the player. None for a numbered set of data files, which
+    /// the player can't show.
     pub(super) fn clip_of(&self, i: u32) -> Option<crate::player::Clip> {
-        let (dir, l, s) = (self.here().dir()?, self.listing.as_ref()?, self.seqs.get(&i)?);
+        let (dir, l, s) = (self.here().dir()?, self.listing.as_ref()?, self.seqs.get(&i).filter(|s| s.seq.playable())?);
         let names: Vec<&str> = s.members.iter().map(|&m| &*l.entries[m as usize].name).collect();
         Some(crate::player::Clip::from_names(s.label.clone(), dir, &s.seq, &names))
     }
@@ -389,6 +390,12 @@ impl FTab {
     pub(super) fn chosen_clips(&self) -> Vec<crate::player::Clip> {
         let Some(l) = self.listing.as_ref() else { return Vec::new() };
         self.order.iter().filter(|&&i| self.seqs.contains_key(&i) && self.selected.contains(&l.entries[i as usize].name)).filter_map(|&i| self.clip_of(i)).collect()
+    }
+
+    /// The selected sequence rows the player can't show (numbered data files).
+    pub(super) fn chosen_unplayable(&self) -> Option<&super::views::SeqRow> {
+        let l = self.listing.as_ref()?;
+        self.order.iter().filter(|i| self.selected.contains(&l.entries[**i as usize].name)).find_map(|i| self.seqs.get(i).filter(|s| !s.seq.playable()))
     }
 
     /// The paths a row stands for: its item, or every frame of a sequence row.
@@ -1595,7 +1602,7 @@ impl App {
             }
             if ui
                 .add(egui::Button::selectable(p.sequences, style::mi("Group Image Sequences")))
-                .on_hover_text("Show numbered frames (shot.1001.exr, shot.1002.exr…) as one row. Enter or a double-click plays the sequence")
+                .on_hover_text("Show numbered frames (shot.1001.exr, shot.1002.exr…) as one row. Enter or a double-click plays a sequence of pictures; numbered data files group too, without the player")
                 .clicked()
             {
                 p.sequences = !p.sequences;
@@ -2775,9 +2782,15 @@ impl App {
                                 let mut after = g.right();
                                 if let Some(s) = seq {
                                     // The frame range after the name, and a warning for missing frames.
-                                    let gaps = if s.seq.missing > 0 { format!("  ⚠ {} missing", group(s.seq.missing)) } else { String::new() };
+                                    // Numbered data files often skip numbers on purpose: a plain note.
+                                    let warn = s.seq.missing > 0 && s.seq.is_pictures();
+                                    let gaps = match s.seq.missing {
+                                        0 => String::new(),
+                                        n if warn => format!("  ⚠ {}", s.seq.missing_text(&group(n))),
+                                        n => format!("  · {}", s.seq.missing_text(&group(n))),
+                                    };
                                     let note = format!("  {}{gaps}", s.seq.range_text());
-                                    after = p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(g.right(), cy), Align2::LEFT_CENTER, note, font.clone(), if s.seq.missing > 0 && !selected { vis.warn_fg_color } else { weak }).right();
+                                    after = p.with_clip_rect(clip.intersect(p.clip_rect())).text(pos2(g.right(), cy), Align2::LEFT_CENTER, note, font.clone(), if warn && !selected { vis.warn_fg_color } else { weak }).right();
                                 }
                                 if let Some(m) = mark {
                                     marksui::paint_tags(&p.with_clip_rect(clip.intersect(p.clip_rect())), pos2(after + 8.0, cy), m, weak);
@@ -2788,7 +2801,11 @@ impl App {
                             }
                             Some(FSort::Type) if seq.is_some() => {
                                 let s = seq.unwrap();
-                                let kind = format!("{} sequence, {} frames", s.seq.extension().to_uppercase(), group(s.seq.frames));
+                                let kind = if s.seq.is_pictures() {
+                                    format!("{} sequence, {} frames", s.seq.extension().to_uppercase(), group(s.seq.frames))
+                                } else {
+                                    format!("{} numbered set, {} files", s.seq.extension().to_uppercase(), group(s.seq.frames))
+                                };
                                 p.with_clip_rect(cell.shrink2(vec2(6.0, 0.0)).intersect(p.clip_rect())).text(pos2(cell.left() + 8.0, cy), Align2::LEFT_CENTER, kind, font.clone(), weak);
                             }
                             Some(FSort::Modified) if seq.is_some_and(|s| s.modified > 0) => {
@@ -3084,7 +3101,7 @@ impl App {
         if !t.seqs.is_empty() {
             let frames: usize = t.seqs.values().map(|s| s.members.len()).sum();
             let n = t.seqs.len();
-            text.push_str(&format!(", {} frames in {} sequence{}", group(frames as u64), group(n as u64), if n == 1 { "" } else { "s" }));
+            text.push_str(&format!(", {} numbered files in {} sequence{}", group(frames as u64), group(n as u64), if n == 1 { "" } else { "s" }));
         }
         let left_out = if current { (l.entries.len() - shown).saturating_sub(folded) } else { 0 };
         if left_out > 0 {
@@ -3446,6 +3463,10 @@ impl App {
                     self.files_new_folder(d);
                 }
             }
+            Do::Act(FAction::Open) if self.files.cur().chosen_unplayable().is_some() => {
+                let why = self.files.cur().chosen_unplayable().map(|s| not_playable(&s.seq)).unwrap_or_default();
+                self.ops.notice = Some((why, false));
+            }
             Do::Act(FAction::Open) if !self.files.cur().chosen_clips().is_empty() => {
                 let clips = self.files.cur().chosen_clips();
                 self.play_sequences(clips);
@@ -3558,6 +3579,8 @@ impl App {
             let t = self.files.cur();
             if let Some(c) = t.clip_of(i) {
                 self.play_sequences(vec![c]);
+            } else if let Some(why) = t.seqs.get(&i).map(|s| not_playable(&s.seq)) {
+                self.ops.notice = Some((why, false));
             } else if let (Some(e), Some(dir)) = (t.entry(i), t.here().dir()) {
                 let path = dir.join(&*e.name);
                 if crate::apps::launches(e.bundle) && !archive::inside(&path) && !remote::is_remote(&path) {
@@ -3612,7 +3635,7 @@ impl App {
         let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
         let colour = self.files.marks.get(disk).and_then(|m| m.colour);
         let caps = crate::fsys::remote::is_remote(disk).then(|| crate::fsys::remote::caps(disk));
-        let m = RowMenu { is_dir, app: false, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some(), splats: false };
+        let m = RowMenu { is_dir, app: false, linux_app: false, count: 1, seq: false, play: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some(), splats: false };
         let ext = disk
             .file_name()
             .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
@@ -3621,10 +3644,7 @@ impl App {
         match a {
             FAction::Open if is_dir || (archive && self.premium(crate::licence::Feature::Archives)) => self.files.go(Location::Dir(disk.to_path_buf())),
             FAction::Open if archive => {}
-            FAction::Open => {
-                let p = disk.to_path_buf();
-                self.files.spawn(move || actions::open(&p));
-            }
+            FAction::Open => self.open_file(disk.to_path_buf()),
             a => self.files_action(a, vec![disk.to_path_buf()]),
         }
         ui.close();
@@ -3653,6 +3673,13 @@ impl App {
 
     /// Open a file in its app. One inside an archive is taken out to a temporary folder first.
     pub(super) fn open_file(&mut self, p: PathBuf) {
+        // An application made for another system is labelled, never run (a Windows program
+        // could otherwise start under Wine, or a launcher run its command).
+        let code = p.file_name().map_or(0, |n| crate::apps::file_code(&n.to_string_lossy()));
+        if let Some(why) = crate::apps::foreign_note(code) {
+            self.ops.notice = Some((why, true));
+            return;
+        }
         self.files.spawn(move || {
             if archive::inside(&p) {
                 let tmp = archive_temp(&p).map_err(|e| format!("Couldn't take it out of the archive: {e}"))?;
@@ -3944,9 +3971,13 @@ pub(super) struct RowMenu {
     pub is_dir: bool,
     /// The item is an application (Open Application, Show Package Contents).
     pub app: bool,
+    /// The item is a Linux launcher or AppImage (Launch Application).
+    pub linux_app: bool,
     pub count: usize,
-    /// The row is an image sequence.
+    /// The row is a sequence (numbered files shown as one row).
     pub seq: bool,
+    /// The sequence is pictures the player can show (Play).
+    pub play: bool,
     /// The item's colour, if it has one.
     pub colour: Option<u8>,
     pub pinned: bool,
@@ -4032,10 +4063,12 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     }
     let read_only = archive::inside(&path);
     let seq = t.seqs.contains_key(&i);
+    // Play when every selected sequence (or this one) is pictures the player can show.
+    let play = seq && if selected { t.chosen_unplayable().is_none() } else { t.seqs[&i].seq.playable() };
     let colour = c.marks.get(&path).and_then(|m| m.colour);
     let caps = crate::fsys::remote::is_remote(dir).then(|| crate::fsys::remote::caps(dir));
     let server = caps.is_some();
-    let ctx_menu = RowMenu { is_dir, app: !server && !read_only && crate::apps::is_app(e.bundle), count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some(), splats: false };
+    let ctx_menu = RowMenu { is_dir, app: !server && !read_only && crate::apps::is_app(e.bundle), linux_app: !server && !read_only && matches!(crate::apps::of(e.bundle), Some(crate::apps::Bundle::Launcher | crate::apps::Bundle::AppImage)), count, seq, play, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some(), splats: false };
     let ctx_menu = RowMenu {
         cloud: !server && !read_only && crate::cloudops::supported() && (e.flags & scan::store::ON_DEMAND != 0 || (e.is_dir && super::cloud::on_demand_dir(&path))),
         // By name only here (it's worked out every frame); Compare Scenes looks inside.
@@ -4072,12 +4105,20 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     let as_app = m.app && !many;
     let launches = as_app && crate::apps::launches(crate::apps::Bundle::App.code());
     if m.seq {
-        item(ui, true, if m.count == 2 { "Play and Compare (A/B)" } else { "Play" }, k(M::NONE, Key::Enter), FAction::Play);
+        if m.play {
+            item(ui, true, if m.count == 2 { "Play and Compare (A/B)" } else { "Play" }, k(M::NONE, Key::Enter), FAction::Play);
+        }
     } else if as_app {
         let (run_key, inside_key) = if launches { (k(M::NONE, Key::Enter), String::new()) } else { (String::new(), k(M::NONE, Key::Enter)) };
         let label = if crate::apps::CAN_LAUNCH { "Open Application" } else { "Open Application (on a Mac)" };
         item(ui, crate::apps::CAN_LAUNCH, label, run_key, FAction::LaunchApp);
         item(ui, true, "Show Package Contents", inside_key, FAction::ShowContents);
+        item(ui, true, "Get Application Info", String::new(), FAction::AppInfo);
+    } else if m.linux_app && !many {
+        // A Linux launcher or AppImage: launched by Enter where this is Linux, never elsewhere.
+        let can = crate::apps::can_launch(crate::apps::Bundle::AppImage.code());
+        let key = if crate::apps::launches(crate::apps::Bundle::AppImage.code()) { k(M::NONE, Key::Enter) } else { String::new() };
+        item(ui, can, if can { "Launch Application" } else { "Launch Application (on Linux)" }, key, FAction::LaunchApp);
         item(ui, true, "Get Application Info", String::new(), FAction::AppInfo);
     } else {
         item(ui, true, &open, k(M::NONE, Key::Enter), FAction::Open);
@@ -4121,7 +4162,7 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
     }
     ui.separator();
     let rename = if m.seq && !many {
-        "Rename Frames…".to_string()
+        if m.play { "Rename Frames…" } else { "Rename Files…" }.to_string()
     } else if many {
         format!("Rename {} Items…", m.count)
     } else {
@@ -4570,5 +4611,15 @@ mod tests {
             let c = crumbs_of(&Location::Dir(PathBuf::from(r"\\server\share\x")));
             assert_eq!(c.last().unwrap().1, Location::Dir(PathBuf::from(r"\\server\share\x")));
         }
+    }
+}
+
+/// Why Enter didn't play a numbered set of data files.
+fn not_playable(s: &crate::sequences::Sequence) -> String {
+    let what = if s.extension().is_empty() { "files without an extension".to_string() } else { format!(".{} files", s.extension()) };
+    if s.is_pictures() {
+        format!("The player can't read {what} yet. Turn off View > Group Image Sequences to open single frames.")
+    } else {
+        format!("These are numbered {what}, not pictures, so there's nothing to play. Turn off View > Group Image Sequences to open single files.")
     }
 }

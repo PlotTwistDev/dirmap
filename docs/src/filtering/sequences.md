@@ -46,6 +46,10 @@ So that unrelated numbered files aren't lumped together, a sequence must:
 - be **reasonably dense**: the frame numbers must cover at least a quarter of their range, and
   the step between frame numbers can't be more than 100. This keeps out photos named by timestamp or ID numbers.
 
+Numbered files that aren't pictures (NumPy `.npz`, `.json`, simulation caches…) are listed
+too, but as files rather than frames: `1,000 files · 739–2958`, with `1,233 numbers skipped` in
+place of missing frames, since data sets often skip numbers on purpose.
+
 Frames rendered "on twos" (1001, 1003, 1005…) are recognised with a step of 2, and only frames
 missing on that step count as missing.
 

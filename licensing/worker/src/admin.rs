@@ -4,10 +4,12 @@
 //! every change is recorded in the licence's history with the admin's email.
 
 use crate::db::LicenceRow;
+use crate::maintenance::{GrantRow, NewGrant, Outcome, length};
 use crate::store::{ListFilter, describe};
 use crate::web::{Form, date, encode, esc, iso_day, opt_date, page, parse_day};
 use crate::{Ctx, Db, Net, Req, Resp, mail};
-use filescape_licence::model::{LicenceKind, Status, Validity};
+use filescape_licence::maintenance::{self as mt, Grant, GrantKind, MaintenanceStatus};
+use filescape_licence::model::{Licence, LicenceKind, Status, Validity};
 use filescape_licence::release::{self, Downloads, ReleaseManifest};
 use filescape_licence::rules::{IssueError, TemporaryOptions};
 use filescape_licence::{DEFAULT_MAX_ACTIVATIONS, DEFAULT_TEMPORARY_DAYS, SHARING_FLAG_MACHINES, SHARING_WINDOW_DAYS};
@@ -21,7 +23,7 @@ impl A<'_> {
     fn nav(&self) -> String {
         let b = self.base;
         format!(
-            "<b>Filescape admin</b><a href=\"{b}/\">Licences</a><a href=\"{b}/issue\">Create temporary licence</a><a href=\"{b}/activations\">Activations</a><a href=\"{b}/messages\">Messages</a><a href=\"{b}/releases\">Releases</a><a href=\"{b}/settings\">Settings</a><span class=\"mute\" style=\"margin-left:auto\">{}</span>",
+            "<b>Filescape admin</b><a href=\"{b}/\">Licences</a><a href=\"{b}/issue\">Create temporary licence</a><a href=\"{b}/activations\">Activations</a><a href=\"{b}/maintenance\">Maintenance</a><a href=\"{b}/messages\">Messages</a><a href=\"{b}/releases\">Releases</a><a href=\"{b}/settings\">Settings</a><span class=\"mute\" style=\"margin-left:auto\">{}</span>",
             esc(self.actor)
         )
     }
@@ -42,6 +44,8 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
         ("GET", ["issue"]) => Ok(issue_form(&a, None)),
         ("POST", ["issue"]) => issue(cx, &a, &form).await,
         ("GET", ["activations"]) => activations(cx, &a).await,
+        ("GET", ["maintenance"]) => Ok(bulk_form(&a, req.query_param("msg").as_deref())),
+        ("POST", ["maintenance"]) => bulk_extend(cx, &a, &form).await,
         ("GET", ["messages"]) => messages(cx, &a, req.query_param("f").as_deref() == Some("all")).await,
         ("GET", ["messages", id]) => message(cx, &a, id, req.query_param("msg").as_deref()).await,
         ("POST", ["messages", id, action]) => message_action(cx, &a, id, action, &form).await,
@@ -201,7 +205,11 @@ async fn licence<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, id: &str, msg: Op
     for (k, v) in rows {
         body.push_str(&format!("<tr><th style=\"width:180px\">{k}</th><td>{v}</td></tr>"));
     }
-    body.push_str("</table></div><h2>Actions</h2><div class=\"card\">");
+    body.push_str("</table></div>");
+    if l.kind() == LicenceKind::Perpetual {
+        body.push_str(&maintenance_section(cx, a, l).await?);
+    }
+    body.push_str("<h2>Actions</h2><div class=\"card\">");
     let act = |name: &str, inner: &str, button: &str, class: &str| {
         format!("<form method=\"post\" action=\"{b}/licence/{}/{name}\" class=\"row\" style=\"margin:8px 0\">{inner}<button class=\"{class}\">{button}</button></form>", esc(&l.id))
     };
@@ -294,7 +302,7 @@ async fn licence<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, id: &str, msg: Op
 async fn licence_action<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, id: &str, action: &str, form: &Form) -> Result<Resp, String> {
     let Some(row) = cx.licence(id).await? else { return Ok(Resp::text(404, "No such licence.")) };
     let reason = form.get("reason");
-    let needs_reason = matches!(action, "revoke" | "reinstate" | "reset" | "limit" | "void" | "reveal");
+    let needs_reason = matches!(action, "revoke" | "reinstate" | "reset" | "limit" | "void" | "reveal" | "extend" | "reverse-grant");
     let msg: String = if needs_reason && reason.is_empty() {
         "Give a reason: it goes in the licence's history.".into()
     } else {
@@ -324,6 +332,20 @@ async fn licence_action<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, id: &str, 
                 cx.void_activation(id, &form.get("activation"), form.has("give_back"), &reason, a.actor).await?;
                 "Activation voided.".into()
             }
+            "extend" => {
+                let months: u32 = form.get("months").parse().unwrap_or(0);
+                let days: u32 = form.get("days").parse().unwrap_or(0);
+                if months == 0 && days == 0 || months > 60 || days > 3650 {
+                    "Give a length: up to 60 months and 3650 days.".into()
+                } else {
+                    let g = NewGrant { grant: Grant::complimentary(cx.now, months, days), txn: None, amount: None, currency: None, actor: a.actor, reason: &reason };
+                    outcome_text(&cx.add_grant(id, &g, None).await?)
+                }
+            }
+            "reverse-grant" => match form.get("grant").parse::<i64>() {
+                Ok(gid) => outcome_text(&cx.reverse_grant(id, gid, false, a.actor, &reason).await?),
+                Err(_) => "No such grant.".into(),
+            },
             "clear-refund" => {
                 cx.clear_refund_flag(id, a.actor).await?;
                 "Refund flag cleared.".into()
@@ -678,4 +700,123 @@ async fn message_action<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, id: &str, 
         }
         _ => Ok(Resp::html(404, page("Not found", &a.nav(), "<h1>Not found</h1>"))),
     }
+}
+
+fn outcome_text(o: &Outcome) -> String {
+    match o {
+        Outcome::Applied { before, after } => format!("Maintenance changed: updates included until {} (was {}).", day(*after), day(*before)),
+        Outcome::AlreadyDone => "Nothing to do: that was already done.".into(),
+        Outcome::Refused(r) => r.message().into(),
+        Outcome::NotFound => "No such licence or grant (temporary licences have no maintenance).".into(),
+        Outcome::NotReversible => "Only complimentary extensions can be reversed here. Paid renewals are reversed by a refund in Paddle; the purchase never is.".into(),
+    }
+}
+
+fn day(t: i64) -> String {
+    date(t).split(',').next().unwrap_or_default().to_string()
+}
+
+fn grant_paid(g: &GrantRow) -> String {
+    match (&g.amount, &g.currency) {
+        (Some(a), Some(c)) => format!("{} {}", esc(a), esc(c)),
+        (Some(a), None) => esc(a),
+        _ => "—".into(),
+    }
+}
+
+/// The licence page's Maintenance card: status, the ledger, and the complimentary extension form.
+async fn maintenance_section<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, l: &Licence) -> Result<String, String> {
+    let b = a.base;
+    let until = l.validity.updates_until().unwrap_or(0);
+    let state = match mt::status(until, cx.now) {
+        MaintenanceStatus::Active { days_left, .. } => format!("<span class=\"pill good\">Active</span> {days_left} days left"),
+        MaintenanceStatus::Ended { .. } => "<span class=\"pill\">Ended</span> <span class=\"mute\">the licence stays valid; releases up to this date keep Pro</span>".into(),
+    };
+    let grants = cx.grants_of(&l.id).await?;
+    let mut s = format!("<h2>Maintenance</h2><div class=\"card\"><p>Updates included until <b>{}</b> {state}</p>", day(until));
+    if grants.is_empty() {
+        s.push_str("<p class=\"mute\">No ledger yet: the purchase grant is added with the current date at the first change.</p>");
+    } else {
+        s.push_str("<div class=\"scroll\"><table><tr><th>When</th><th>Grant</th><th>Paid</th><th>Until before → after</th><th>By</th><th>Reason</th><th></th></tr>");
+        for g in &grants {
+            let what = match g.grant.kind {
+                GrantKind::Purchase => "Purchase".to_string(),
+                k => format!("{} {}", k.label(), length(g.grant.months, g.grant.days)),
+            };
+            let txn = g.txn.as_deref().map(|t| format!("<div class=\"mute mono\" style=\"font-size:12px\">{}</div>", esc(t))).unwrap_or_default();
+            let span = match (g.before_until, g.after_until) {
+                (Some(x), Some(y)) => format!("{} → {}", day(x), day(y)),
+                (None, Some(y)) => day(y),
+                _ => "—".into(),
+            };
+            let last = if let Some(t) = g.reversed_at {
+                format!("<span class=\"bad\">reversed {}</span><br><span class=\"mute\">{} · {}</span>", date(t), esc(g.reversed_by.as_deref().unwrap_or("")), esc(g.reverse_reason.as_deref().unwrap_or("")))
+            } else if g.grant.admin_reversible() {
+                format!(
+                    "<form method=\"post\" action=\"{b}/licence/{}/reverse-grant\" class=\"row\"><input type=\"hidden\" name=\"grant\" value=\"{}\"><input name=\"reason\" required placeholder=\"Reason\" size=\"14\"><button class=\"danger\">Reverse</button></form>",
+                    esc(&l.id),
+                    g.id
+                )
+            } else {
+                String::new()
+            };
+            s.push_str(&format!(
+                "<tr><td>{}</td><td>{what}{txn}</td><td>{}</td><td>{span}</td><td class=\"mute\">{}</td><td>{}</td><td>{last}</td></tr>",
+                date(g.grant.at),
+                grant_paid(g),
+                esc(&g.actor),
+                esc(g.reason.as_deref().unwrap_or("")),
+            ));
+        }
+        s.push_str("</table></div>");
+    }
+    if l.revoked_at.is_none() {
+        s.push_str(&format!(
+            "<form method=\"post\" action=\"{b}/licence/{}/extend\" class=\"row\" style=\"margin:8px 0\"><label>Months<input name=\"months\" type=\"number\" min=\"0\" max=\"60\" value=\"0\" style=\"width:70px\"></label><label>Days<input name=\"days\" type=\"number\" min=\"0\" max=\"3650\" value=\"30\" style=\"width:80px\"></label><label>Reason<input name=\"reason\" required size=\"30\" placeholder=\"e.g. support gesture\"></label><button>Add complimentary maintenance</button></form>\
+             <p class=\"mute\" style=\"margin:-4px 0 0\">Extends from the current end date, or from today if maintenance has ended. Recorded with your email, the reason and the dates before and after. Only complimentary grants can be reversed here, so paid time can't be removed by mistake.</p>",
+            esc(&l.id)
+        ));
+    }
+    s.push_str("</div>");
+    Ok(s)
+}
+
+fn bulk_form(a: &A<'_>, msg: Option<&str>) -> Resp {
+    let m = msg.map(|m| format!("<div class=\"card\" style=\"white-space:pre-wrap\">{}</div>", esc(m))).unwrap_or_default();
+    a.page(
+        "Maintenance",
+        &format!(
+            "<h1>Complimentary maintenance for several licences</h1>{m}<div class=\"card\"><form method=\"post\" action=\"{}/maintenance\">\
+             <label>Licence IDs, one per line<textarea name=\"ids\" rows=\"8\" style=\"width:100%\" required></textarea></label>\
+             <div class=\"row\"><label>Months<input name=\"months\" type=\"number\" min=\"0\" max=\"60\" value=\"0\" style=\"width:70px\"></label><label>Days<input name=\"days\" type=\"number\" min=\"0\" max=\"3650\" value=\"30\" style=\"width:80px\"></label>\
+             <label>Reason<input name=\"reason\" required size=\"40\"></label><button>Extend all</button></div></form>\
+             <p class=\"mute\">Each licence gets its own complimentary grant, extending from its own end date (or from today if it has ended). Temporary licences are skipped. At most 500 at once.</p></div>",
+            a.base
+        ),
+    )
+}
+
+async fn bulk_extend<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, form: &Form) -> Result<Resp, String> {
+    let reason = form.get("reason");
+    let months: u32 = form.get("months").parse().unwrap_or(0);
+    let days: u32 = form.get("days").parse().unwrap_or(0);
+    let mut ids: Vec<String> = form.get("ids").split(|c: char| c.is_whitespace() || c == ',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
+    let mut seen = std::collections::HashSet::new();
+    ids.retain(|i| seen.insert(i.clone()));
+    let msg = if reason.is_empty() {
+        "Give a reason: it goes in each licence's history.".to_string()
+    } else if months == 0 && days == 0 || months > 60 || days > 3650 {
+        "Give a length: up to 60 months and 3650 days.".into()
+    } else if ids.is_empty() || ids.len() > 500 {
+        "List between 1 and 500 licence IDs.".into()
+    } else {
+        let done = cx.extend_many(&ids, months, days, a.actor, &reason).await?;
+        let ok = done.iter().filter(|(_, o)| matches!(o, Outcome::Applied { .. })).count();
+        let mut m = format!("Extended {ok} of {} licences ({}).", done.len(), length(months, days));
+        for (id, o) in done.iter().filter(|(_, o)| !matches!(o, Outcome::Applied { .. })) {
+            m.push_str(&format!("\n{id}: {}", outcome_text(o)));
+        }
+        m
+    };
+    Ok(Resp::redirect(&format!("{}/maintenance?msg={}", a.base, encode(&msg))))
 }

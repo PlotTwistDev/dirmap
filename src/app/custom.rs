@@ -692,9 +692,9 @@ impl App {
                 let clip = Rect::from_min_max(rect.left_top(), pos2(rect.right() - 80.0, rect.bottom()));
                 let p = ui.painter().with_clip_rect(clip.intersect(ui.clip_rect()));
                 p.text(pos2(rect.left() + 4.0, top), Align2::LEFT_CENTER, s.display(), font.clone(), vis.strong_text_color());
-                let mut info = format!("{} frames · {} · avg {}", group(s.frames), s.range_text(), scan::human(s.average()));
+                let mut info = format!("{} {} · {} · avg {}", group(s.frames), s.unit(), s.range_text(), scan::human(s.average()));
                 if s.missing > 0 {
-                    info.push_str(&format!(" · {} missing", group(s.missing)));
+                    info.push_str(&format!(" · {}", s.missing_text(&group(s.missing))));
                 }
                 ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())).text(
                     pos2(rect.left() + 4.0, bottom),
@@ -709,7 +709,10 @@ impl App {
                     let pad = s.padding.map_or("not padded".to_string(), |w| format!("{w} digits"));
                     ui.label(format!(".{} · {pad}", s.extension()));
                     if s.missing > 0 {
-                        ui.label(format!("Missing: {}", s.gaps_text()));
+                        ui.label(format!("{}: {}", if s.is_pictures() { "Missing" } else { "Skipped" }, s.gaps_text()));
+                    }
+                    if !s.is_pictures() {
+                        ui.weak("Numbered data files, not pictures: shown as a numbered set");
                     }
                     ui.weak("Click to filter the map to this sequence");
                 });
