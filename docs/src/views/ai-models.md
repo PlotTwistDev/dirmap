@@ -40,8 +40,8 @@ A strip above the list adds things up:
 | Total | Meaning |
 |---|---|
 | **Models** | Models found, not counting Ollama downloads no model uses. |
-| **On disk** | Space the model files take on the drive. A file shared under two names (a hard link, as sharing copies in [Freeing space](#freeing-space) makes) is counted once, so this can be less than the sizes in the list added up. |
-| **Recoverable** | Space in extra copies of a model kept elsewhere and in unused Ollama downloads. **Free up space** opens Storage, which also finds unfinished downloads and old versions. |
+| **On disk** | Space the model files take on the drive. A file shared under two names (a hard link) is counted once, so this can be less than the sizes in the list added up. |
+| **Recoverable** | Space in unused Ollama downloads. **Free up space** opens Storage, which also finds unfinished downloads and old versions. Extra copies are marked in the list but not counted, since Filescape doesn't remove them. |
 | **Locations** | Folders models were found in. |
 | **Runs in Filescape** | Whole GGUF models on this computer, which Ask AI and the Lab can load. |
 
@@ -291,8 +291,14 @@ can be freed:
 - **Older Hugging Face versions**: Hugging Face keeps every version of a model a program
   downloaded. Programs use the current one (the one its `refs` point to); the older ones, and
   files no version uses, can go.
-- **Extra copies**: model files that are byte-for-byte the same as files another model keeps, such
-  as the same GGUF file in LM Studio and in Downloads.
+
+Under them, folded away, **Extra copies, for information** lists model files that are
+byte-for-byte the same as files another model keeps, such as the same GGUF file in LM Studio and
+in Downloads, or the same model inside two apps. They're listed only: Filescape doesn't remove
+them or share them as one file, because an app or editor extension may load either copy from
+where it is, and an update to it may rewrite its copy in place. **Inside** names the app,
+extension or program whose own files a copy is in, and **Details** shows where the other copy is.
+They aren't counted in **Can be freed**.
 
 Each item is marked **Safe to remove** or **Probably unused**, and **Why** lists what that rests
 on (hover over the mark to see the same list):
@@ -314,14 +320,9 @@ is emptied), or **Delete for good** to get the space back straight away. Removin
 time is free; ticking several and pressing **Remove N items…** is part of managing models in bulk,
 in Filescape Professional.
 
-**Share as one file…** (for copies on the same drive) keeps both names but only one file on disk,
-so every app keeps finding its model and the space is freed straight away. Filescape compares the
-two files once more first, then makes the copy a second name of the file it's the same as (a
-*hard link*). Removing either name later keeps the other. A loose copy can also be moved to the
-Trash; a copy an app keeps can only be shared, since removing it would take the model from that
-app. Copies on different drives can't be shared. Sharing several at once is Professional, like
-removing several; **Share all N as one file each…** beside **Extra copies** does every copy that
-can be shared in one go, after the same confirmation listing each pair.
+After a removal the page stays where it was: a note at the top says what was freed and what can
+still be freed below, and a section the removal emptied keeps a line saying **cleared** while
+Filescape looks again.
 
 Filescape only calls something unused when the app's own records say so. If Ollama's list of
 models or Hugging Face's version records can't be read, nothing in that folder is offered.
@@ -338,7 +339,8 @@ goes before anything happens:
 
 If Ollama is downloading a model, let it finish first. If another model links to the files (a
 tool can link an Ollama download into LM Studio's folder, for example), Filescape doesn't remove
-it and says which link would stop working.
+it and says which link would stop working. A model inside an app, an editor extension or another
+program's own folder isn't removed either, since that program may load it from there.
 
 ## Moving models to another drive
 

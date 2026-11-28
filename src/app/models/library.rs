@@ -571,9 +571,9 @@ impl App {
         let t = kit::tokens(ui);
         let fp: Footprint = self.models.footprint;
         let count = list.iter().filter(|m| !m.orphan).count() as u64;
-        let extra: u64 = list.iter().map(|m| m.extra).sum();
+        // Extra copies aren't counted: Filescape doesn't remove them (an app may load either one).
         let unused: u64 = list.iter().filter(|m| m.orphan).map(|m| m.size).sum();
-        let recoverable = extra + unused;
+        let recoverable = unused;
         let runnable = list.iter().filter(|m| m.runnable() && m.extra == 0).count();
         let used_places = {
             let mut s = HashSet::new();
@@ -603,8 +603,7 @@ impl App {
                 "Recoverable",
                 &scan::human(recoverable),
                 &format!(
-                    "{} in extra copies of a model kept elsewhere, and {} in Ollama downloads no model uses. Storage also finds unfinished downloads and old versions.",
-                    scan::human(extra),
+                    "{} in Ollama downloads no model uses. Storage also finds unfinished downloads and old versions. Extra copies are marked but not counted: an app may load either copy.",
                     scan::human(unused)
                 ),
                 (recoverable > 0).then_some(t.success),
@@ -972,7 +971,7 @@ fn statuses(m: &Model) -> Vec<(Tone, String)> {
         v.push((Tone::Warn, "Unused download".to_string()));
     }
     if m.extra > 0 {
-        v.push((Tone::Warn, format!("Extra copy · {} recoverable", scan::human(m.extra))));
+        v.push((Tone::Neutral, format!("Extra copy · {}", scan::human(m.extra))));
     } else if !m.copies.is_empty() {
         v.push((Tone::Neutral, "Also kept elsewhere".to_string()));
     }

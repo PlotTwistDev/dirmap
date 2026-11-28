@@ -65,6 +65,9 @@ pub struct Item {
     pub sure: Sure,
     /// The evidence, one plain sentence each, for the list and the confirmation.
     pub reasons: Vec<String>,
+    /// For copies inside an app, an extension or another program's own folder: that program.
+    /// Such a copy is listed but never removed or shared, since the program loads it from there.
+    pub used_by: Option<String>,
 }
 
 /// How sure Filescape is that something can go.
@@ -400,6 +403,7 @@ fn ollama_items(store: &Path, out: &mut Vec<Item>) {
             let info = crate::models::gguf_info(&path);
             let title = info.as_ref().and_then(|i| i.name.clone()).unwrap_or_else(|| short_digest(&name));
             out.push(Item {
+                used_by: None,
                 kind: Kind::Unused,
                 sure: Sure::Certain,
                 reasons: vec![
@@ -425,6 +429,7 @@ fn ollama_items(store: &Path, out: &mut Vec<Item>) {
         paths.sort();
         let (sure, reasons) = stopped(&paths[0], "Its name ends in \u{201C}-partial\u{201D}: Ollama hadn't finished it");
         out.push(Item {
+            used_by: None,
             kind: Kind::Partial,
             sure,
             reasons,
@@ -470,6 +475,7 @@ pub fn plan(m: &Model) -> Result<Item, String> {
             let bytes = paths.iter().map(|p| size(p)).sum();
             let tags = gone.len();
             Ok(Item {
+                used_by: None,
                 kind: Kind::Model,
                 sure: Sure::Certain,
                 reasons: Vec::new(),
@@ -500,6 +506,7 @@ pub fn plan(m: &Model) -> Result<Item, String> {
                 }
             }
             Ok(Item {
+                used_by: None,
                 kind: Kind::Model,
                 sure: Sure::Certain,
                 reasons: Vec::new(),
@@ -517,6 +524,7 @@ pub fn plan(m: &Model) -> Result<Item, String> {
         _ => {
             let within = common_parent(m.files.iter().map(|f| f.path.as_path())).ok_or("These files have no common folder.")?;
             Ok(Item {
+                used_by: None,
                 kind: Kind::Model,
                 sure: Sure::Certain,
                 reasons: Vec::new(),
@@ -568,6 +576,7 @@ fn hf_items(repo: &Path, out: &mut Vec<Item>) {
     if !partial.is_empty() {
         let (sure, reasons) = stopped(&partial[0], "Hugging Face names files \u{201C}.incomplete\u{201D} until they finish");
         out.push(Item {
+            used_by: None,
             kind: Kind::Partial,
             sure,
             reasons,
@@ -651,6 +660,7 @@ fn hf_items(repo: &Path, out: &mut Vec<Item>) {
         reasons.push(format!("{} of files no version links to at all", crate::scan::human(loose)));
     }
     out.push(Item {
+        used_by: None,
         kind: Kind::OldVersion,
         // Unreferenced versions are only probably unused (see above); stray blobs certainly are.
         sure: if n > 0 { Sure::Likely } else { Sure::Certain },
@@ -696,6 +706,7 @@ fn partial_files(root: &Path, dir: &Path, depth: u32, out: &mut Vec<Item>) {
             let p = e.path();
             let (sure, reasons) = stopped(&p, "Its name ends the way unfinished downloads do");
             out.push(Item {
+                used_by: None,
                 kind: Kind::Partial,
                 sure,
                 reasons,
@@ -721,22 +732,26 @@ fn copies(models: &[Model], out: &mut Vec<Item>) {
             continue;
         }
         let pairs: Vec<(&crate::models::File, &PathBuf)> = m.same_as.iter().filter_map(|(fi, k)| m.files.get(*fi).map(|f| (f, k))).collect();
-        let can_trash = m.source == Source::Folder && m.extra >= m.size;
-        let can_share = pairs.iter().all(|(f, k)| same_drive(&f.path, k));
-        if !can_trash && !can_share {
-            continue;
-        }
+        // Shown for information only: an app or extension may load either copy from where it is,
+        // and an update may rewrite one in place, so neither removing nor sharing is offered.
+        let used_by = pairs.iter().find_map(|(f, _)| app_owner(&f.path));
+        let kept_by = pairs.iter().find_map(|(_, k)| app_owner(k));
+        let (can_trash, can_share) = (false, false);
         let Some(within) = common_parent(pairs.iter().map(|(f, _)| f.path.as_path())) else { continue };
         let other = m.copies.iter().filter_map(|&i| models.get(i)).next();
         let bytes: u64 = pairs.iter().map(|(f, _)| f.size).sum();
         let whole = bytes >= m.size;
         let mut reasons = vec!["Same size and the same contents, compared in full".to_string()];
         if let Some(k) = pairs.first().map(|(_, k)| k) {
-            reasons.push(format!("The copy kept: {}", k.display()));
+            reasons.push(format!("The other copy: {}", k.display()));
         }
-        if !can_trash {
-            reasons.push(format!("{} keeps this copy itself, so it can only be shared, not removed", m.source.label()));
+        if let Some(who) = &used_by {
+            reasons.push(format!("This copy is inside {who}'s own files, and {who} may load it from there"));
         }
+        if let Some(who) = kept_by.as_ref().filter(|w| Some(*w) != used_by.as_ref()) {
+            reasons.push(format!("The other copy is inside {who}'s own files"));
+        }
+        reasons.push("Listed for information: Filescape doesn't remove or share copies, since the app that loads either one may stop working".into());
         out.push(Item {
             kind: Kind::Copy,
             sure: Sure::Certain,
@@ -757,9 +772,65 @@ fn copies(models: &[Model], out: &mut Vec<Item>) {
             keep: pairs.iter().map(|(_, k)| (*k).clone()).collect(),
             can_trash,
             can_share,
+            used_by,
             within,
         });
     }
+}
+
+/// Bundle endings: a folder with one of these is an app, or a part an app loads.
+const BUNDLES: [&str; 8] = [".app", ".appex", ".framework", ".bundle", ".plugin", ".kext", ".xpc", ".mlmodelc"];
+
+/// The app, extension or program whose own files this path is inside, if it's one: an app bundle,
+/// an editor's extensions, a program's settings or data folder (a dot folder at home,
+/// Application Support, AppData, .config, .local/share), or a package folder. Folders that only
+/// store models (Ollama, LM Studio, Hugging Face's cache) aren't owners: models there are the
+/// point of them.
+pub fn app_owner(p: &Path) -> Option<String> {
+    let parts: Vec<String> = p.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
+    let lower: Vec<String> = parts.iter().map(|c| c.to_ascii_lowercase()).collect();
+    let stem = |s: &str| s.rsplit_once('.').map_or(s, |(a, _)| a).to_string();
+    // The outermost app bundle names the app; .mlmodelc alone is a compiled model, not an owner.
+    if let Some(i) = lower.iter().position(|c| BUNDLES[..7].iter().any(|e| c.ends_with(e) && c.len() > e.len())) {
+        let outer = lower.iter().position(|c| c.ends_with(".app") && c.len() > 4).unwrap_or(i);
+        return Some(stem(&parts[outer]));
+    }
+    let next = |i: usize| parts.get(i + 1).filter(|n| i + 2 < parts.len() || !n.contains('.')).cloned();
+    for (i, c) in lower.iter().enumerate() {
+        match c.as_str() {
+            "extensions" | "node_modules" | "site-packages" | "dist-packages" => {
+                if let Some(n) = parts.get(i + 1) {
+                    if i + 1 < parts.len() - 1 {
+                        return Some(n.clone());
+                    }
+                }
+            }
+            "application support" | "containers" | "group containers" if i > 0 && lower[i - 1] == "library" => return next(i),
+            "appdata" => {
+                if matches!(lower.get(i + 1).map(String::as_str), Some("roaming" | "local" | "locallow")) {
+                    let n = next(i + 1)?;
+                    return (!is_store(&n)).then_some(n);
+                }
+            }
+            ".config" | ".local" | ".cache" => {
+                let at = if c == ".local" && lower.get(i + 1).map(String::as_str) == Some("share") { i + 1 } else { i };
+                let n = next(at)?;
+                return (!is_store(&n)).then_some(n);
+            }
+            "program files" | "program files (x86)" if i <= 1 => return next(i),
+            _ if c.starts_with('.') && c.len() > 1 && i + 1 < parts.len() => {
+                let n = parts[i].trim_start_matches('.').to_string();
+                return (!is_store(&n)).then_some(n);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Folders whose whole job is keeping models, whatever app writes them.
+fn is_store(name: &str) -> bool {
+    matches!(name.to_ascii_lowercase().as_str(), "ollama" | "lmstudio" | "lm-studio" | "lm studio" | "huggingface" | "models")
 }
 
 /// Identifies a file on its drive: two names with the same id are one file (hard links).
@@ -786,7 +857,9 @@ pub fn file_id(_: &Path) -> Option<(u64, u64)> {
     None
 }
 
-/// Both on one drive, so one can be a hard link to the other.
+/// Both on one drive, so one can be a hard link to the other. Unused while sharing copies is
+/// turned off (Rich, 28 Nov: too risky inside apps and extensions).
+#[allow(dead_code)]
 fn same_drive(a: &Path, b: &Path) -> bool {
     matches!((file_id(a), file_id(b)), (Some(x), Some(y)) if x.0 == y.0 && x != y)
 }
@@ -877,6 +950,26 @@ pub fn remove(item: &Item, trash: bool) -> Vec<Removed> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn files_inside_apps_are_theirs() {
+        let o = |p: &str| app_owner(Path::new(p));
+        assert_eq!(o("/Users/r/.antigravity/extensions/devsense.intelli-php-0.12/out/models/intelliphp_v3/model.onnx").as_deref(), Some("antigravity"));
+        assert_eq!(o("/Applications/Logic Pro.app/Contents/Resources/mBERT.bundle/model.bin").as_deref(), Some("Logic Pro"));
+        assert_eq!(o("/Users/r/Music/Plug-ins/mBERT.bundle/weights.bin").as_deref(), Some("mBERT"));
+        assert_eq!(o("/Users/r/Library/Application Support/Topaz/models/a.onnx").as_deref(), Some("Topaz"));
+        assert_eq!(o("C:/Users/r/AppData/Roaming/Krita/models/a.onnx").as_deref(), Some("Krita"));
+        assert_eq!(o("/home/r/.local/share/audacity/models/a.onnx").as_deref(), Some("audacity"));
+        assert_eq!(o("/home/r/.cache/torch/hub/a.pt").as_deref(), Some("torch"));
+        assert_eq!(o("/home/r/venv/lib/python3.12/site-packages/rembg/u2net.onnx").as_deref(), Some("rembg"));
+        // Model stores, and the user's own folders, belong to no app.
+        assert_eq!(o("/home/r/.ollama/models/blobs/sha256-ab"), None);
+        assert_eq!(o("/home/r/.cache/huggingface/hub/models--a--b/blobs/x"), None);
+        assert_eq!(o("/home/r/.lmstudio/models/a/b.gguf"), None);
+        assert_eq!(o("/home/r/Downloads/qwen.gguf"), None);
+        assert_eq!(o("/home/r/Models/sd/x.mlmodelc/weights.bin"), None);
+    }
+
     use std::fs;
 
     /// A fresh folder for one test, removed when dropped.
@@ -1096,6 +1189,7 @@ mod tests {
         write(&copy, 5000);
         assert!(same_drive(&copy, &keep));
         let item = Item {
+            used_by: None,
             kind: Kind::Copy,
             sure: Sure::Certain,
             reasons: Vec::new(),
@@ -1141,7 +1235,7 @@ mod tests {
         let outside = d.path().join("out/y.gguf");
         write(&inside, 10);
         write(&outside, 10);
-        let item = Item { kind: Kind::Copy, sure: Sure::Certain, reasons: vec![], keep: vec![], can_trash: true, can_share: false, title: "x".into(), detail: String::new(), app: "Folder", paths: vec![inside.clone(), outside.clone()], bytes: 20, within: d.path().join("in") };
+        let item = Item { kind: Kind::Copy, sure: Sure::Certain, reasons: vec![], used_by: None, keep: vec![], can_trash: true, can_share: false, title: "x".into(), detail: String::new(), app: "Folder", paths: vec![inside.clone(), outside.clone()], bytes: 20, within: d.path().join("in") };
         let r = remove(&item, false);
         assert!(r[0].result.is_ok() && r[1].result.is_err());
         assert!(!inside.exists() && outside.exists());
