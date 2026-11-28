@@ -64,6 +64,21 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
             let msg = if form.has("withdraw") {
                 cx.set_latest_release(None, actor).await?;
                 "Filescape no longer announces a new release.".to_string()
+            } else if form.has("hide") || form.has("show") {
+                let (v, listed) = if form.has("show") { (form.get("show"), true) } else { (form.get("hide"), false) };
+                if cx.set_listed(&v, listed, actor).await? {
+                    format!("Filescape {v} is {} the download lists.", if listed { "back on" } else { "now hidden from" })
+                } else {
+                    format!("There's no version {v}.")
+                }
+            } else if form.has("list_only") {
+                match release_from_form(&form, cx.now) {
+                    Ok(m) => {
+                        cx.add_release(&m, actor).await?;
+                        format!("Filescape {} is on the download lists. It isn't announced to copies of Filescape.", m.version)
+                    }
+                    Err(e) => e,
+                }
             } else {
                 match release_from_form(&form, cx.now) {
                     Ok(m) => {
@@ -537,6 +552,26 @@ async fn releases<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, msg: Option<&str
     };
     let v = |f: fn(&ReleaseManifest) -> Option<&str>| esc(cur.as_ref().and_then(f).unwrap_or(""));
     let today = iso_day(cx.now);
+    let mut rows = String::new();
+    for e in cx.catalogue(true).await? {
+        let toggle = if e.listed {
+            format!("<button name=\"hide\" value=\"{}\">Hide</button>", esc(&e.m.version))
+        } else {
+            format!("<span class=\"pill\">Hidden</span> <button name=\"show\" value=\"{}\">Show</button>", esc(&e.m.version))
+        };
+        let links = e.links().iter().map(|(l, u)| format!("<a href=\"{}\">{l}</a>", esc(u))).collect::<Vec<_>>().join(" · ");
+        rows.push_str(&format!(
+            "<tr><td><b>{}</b></td><td>{}</td><td style=\"font-size:13px\">{links}</td><td><form method=\"post\" action=\"{}/releases\">{toggle}</form></td></tr>",
+            esc(&e.m.version),
+            date(e.m.released_at),
+            a.base
+        ));
+    }
+    let catalogue = if rows.is_empty() {
+        "<p class=\"mute\">No versions yet. Announcing a release adds it here.</p>".to_string()
+    } else {
+        format!("<p class=\"mute\">Customers see the listed versions on account.filescape.app/versions and, signed in, which ones their licence unlocks.</p><div class=\"scroll\"><table><tr><th>Version</th><th>Released</th><th>Downloads</th><th></th></tr>{rows}</table></div>")
+    };
     let body = format!(
         "<h1>Releases</h1>{m}<h2>Announced now</h2>{current}\
          <h2>Announce a release</h2><p class=\"mute\">Upload the downloads to R2 first (SETUP.md step 9). Every copy of Filescape asks for this at launch and, when the version is newer than its own, shows a notice saying whether the person's licence covers it. The signature is made by this server; nothing else is needed.</p>\
@@ -547,7 +582,9 @@ async fn releases<D: Db, N: Net>(cx: &Ctx<'_, D, N>, a: &A<'_>, msg: Option<&str
          <label>Release notes link <span class=\"mute\">(optional, https on filescape.app)</span><input name=\"notes_url\" value=\"{}\" style=\"width:100%\"></label>\
          <details><summary>Download links <span class=\"mute\">(leave empty for downloads.filescape.app/latest/&lt;os&gt;, or the website's download section on Linux)</span></summary>\
          <label>Windows<input name=\"windows\" value=\"{}\" style=\"width:100%\"></label><label>macOS<input name=\"macos\" value=\"{}\" style=\"width:100%\"></label><label>Linux<input name=\"linux\" value=\"{}\" style=\"width:100%\"></label></details>\
-         <div><button class=\"primary\">Announce</button></div></form>",
+         <div class=\"row\"><button class=\"primary\">Announce</button><button name=\"list_only\" value=\"1\">Add to the download lists only</button></div>\
+         <p class=\"mute\" style=\"margin:0\">Use <b>Add to the download lists only</b> for an older version, so customers whose maintenance ended can still download the newest version their licence unlocks. Each version's files go in R2 under <span class=\"mono\">&lt;version&gt;/&lt;os&gt;</span> as well as <span class=\"mono\">latest/&lt;os&gt;</span> (SETUP.md step 9).</p></form>\
+         <h2>All versions</h2>{catalogue}",
         v(|r| r.summary.as_deref()),
         v(|r| r.notes()),
         v(|r| r.downloads.windows.as_deref()),

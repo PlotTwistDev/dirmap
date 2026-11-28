@@ -18,6 +18,7 @@ pub mod access;
 pub mod account;
 pub mod admin;
 pub mod api;
+pub mod catalogue;
 pub mod contact;
 pub mod db;
 pub mod mail;

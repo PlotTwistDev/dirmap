@@ -10,10 +10,10 @@ use crate::web::{Form, date, esc, page};
 use crate::{Ctx, Db, Net, Req, Resp, mail};
 use filescape_licence::maintenance::MaintenanceStatus;
 use filescape_licence::model::{LicenceKind, Validity};
-use filescape_licence::release::{ReleaseManifest, default_download};
+use filescape_licence::release::ReleaseManifest;
 
 fn nav(base: &str) -> String {
-    format!("<b>Filescape</b><a href=\"{base}/\">Your licence</a><a href=\"{base}/activate\">Offline activation</a><a href=\"https://filescape.app/contact\">Contact</a><a href=\"https://filescape.app/\">filescape.app</a>")
+    format!("<b>Filescape</b><a href=\"{base}/\">Your licence</a><a href=\"{base}/versions\">Downloads</a><a href=\"{base}/activate\">Offline activation</a><a href=\"https://filescape.app/contact\">Contact</a><a href=\"https://filescape.app/\">filescape.app</a>")
 }
 
 /// A form posted from this site (not another one). Session cookies are SameSite=Lax as well.
@@ -102,6 +102,7 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str, bas
                 None => Ok(Resp::redirect(&format!("{base}/?msg={}", crate::web::encode("That receipt isn't available right now. Paddle also emailed it to you when you paid.")))),
             }
         }
+        ("GET", "/versions") => versions_page(cx, base).await,
         ("GET", "/activate") => Ok(offline_page(base, None)),
         ("POST", "/activate") => offline(cx, base, req).await,
         ("GET", "/thanks") => Ok(show(
@@ -244,6 +245,7 @@ struct View<'a> {
     /// The renewal price label, when renewals can be bought.
     offer: Option<&'a str>,
     latest: Option<&'a ReleaseManifest>,
+    catalogue: &'a [crate::catalogue::Entry],
     /// Receipts can be fetched from Paddle.
     receipts: bool,
 }
@@ -252,25 +254,77 @@ fn tile(label: &str, value: &str, sub: &str, extra: &str) -> String {
     format!("<div><span>{label}</span><b>{value}</b><small>{sub}</small>{extra}</div>")
 }
 
+fn link_list(links: &[crate::catalogue::Link]) -> String {
+    links.iter().map(|(l, u)| format!("<a href=\"{}\">{l}</a>", esc(u))).collect::<Vec<_>>().join(" · ")
+}
+
 fn downloads(v: &View, updates_until: Option<filescape_licence::Ts>) -> String {
     let Some(m) = v.latest else {
-        return "<p class=\"mute\">Download Filescape from <a href=\"https://filescape.app/#download\">filescape.app</a>.</p>".into();
+        return format!("<p class=\"mute\">Download Filescape from <a href=\"https://filescape.app/#download\">filescape.app</a>, or see <a href=\"{}/versions\">every version</a>.</p>", v.base);
     };
-    let links = [("macOS", "macos", &m.downloads.macos), ("Windows", "windows", &m.downloads.windows), ("Linux", "linux", &m.downloads.linux)]
-        .iter()
-        .map(|(name, os, url)| format!("<a href=\"{}\">{name}</a>", esc(&url.as_ref().map_or_else(|| default_download(os), |u| u.to_string()))))
-        .collect::<Vec<_>>()
-        .join(" · ");
-    let notes = m.notes_url.as_deref().map(|u| format!(" · <a href=\"{}\">What's new</a>", esc(u))).unwrap_or_default();
+    let links = [("macOS", "macos"), ("Windows", "windows"), ("Linux", "linux")].iter().map(|(name, os)| format!("<a href=\"{}\">{name}</a>", esc(&m.download_for(os)))).collect::<Vec<_>>().join(" · ");
+    let notes = m.notes().map(|u| format!(" · <a href=\"{}\">What's new</a>", esc(u))).unwrap_or_default();
     let head = format!("<b>Filescape {}</b> <span class=\"mute\">released {}</span>", esc(&m.version), day(m.released_at));
-    match updates_until {
-        Some(u) if m.released_at > u => format!(
-            "<p>{head} <span class=\"pill\">Not included</span><br>It came out after your maintenance ended, so it runs with the free features until you extend maintenance. Versions released up to {} keep Pro for good.<br>Download: {links}{notes}</p>",
-            day(u)
-        ),
+    let latest = match updates_until {
+        Some(u) if m.released_at > u => {
+            let unlocked = match crate::catalogue::newest_unlocked(v.catalogue, u) {
+                Some(e) => format!(
+                    "<p>The newest version your licence unlocks: <b>Filescape {}</b> <span class=\"mute\">released {}</span> <span class=\"pill good\">Included</span><br>Download: {}</p>",
+                    esc(&e.m.version),
+                    day(e.m.released_at),
+                    link_list(&e.links())
+                ),
+                None => String::new(),
+            };
+            format!(
+                "<p>{head} <span class=\"pill\">Not included</span><br>It came out after your maintenance ended, so it runs with the free features until you extend maintenance. Versions released up to {} keep Pro for good.<br>Download: {links}{notes}</p>{unlocked}",
+                day(u)
+            )
+        }
         Some(_) => format!("<p>{head} <span class=\"pill good\">Included</span><br>Download: {links}{notes}</p>"),
         None => format!("<p>{head}<br>Download: {links}{notes}</p>"),
+    };
+    let older: Vec<_> = v.catalogue.iter().filter(|e| e.m.version != m.version).collect();
+    if older.is_empty() {
+        return latest;
     }
+    let rows: String = older
+        .iter()
+        .map(|e| {
+            let badge = match updates_until {
+                Some(u) if e.m.released_at > u => " <span class=\"pill\">Not included</span>",
+                Some(_) => " <span class=\"pill good\">Included</span>",
+                None => "",
+            };
+            format!("<tr><td><b>{}</b>{badge}</td><td>{}</td><td style=\"font-size:13px\">{}</td></tr>", esc(&e.m.version), day(e.m.released_at), link_list(&e.links()))
+        })
+        .collect();
+    format!("{latest}<details><summary>Earlier versions</summary><div class=\"scroll\"><table><tr><th>Version</th><th>Released</th><th>Download</th></tr>{rows}</table></div></details>")
+}
+
+/// account.filescape.app/versions: every listed version, for anyone.
+async fn versions_page<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str) -> Result<Resp, String> {
+    let rows: String = cx
+        .catalogue(false)
+        .await?
+        .iter()
+        .map(|e| {
+            let notes = e.m.notes().map(|u| format!(" · <a href=\"{}\">What's new</a>", esc(u))).unwrap_or_default();
+            format!("<tr><td><b>{}</b></td><td>{}</td><td style=\"font-size:13px\">{}{notes}</td></tr>", esc(&e.m.version), day(e.m.released_at), link_list(&e.links()))
+        })
+        .collect();
+    let table = if rows.is_empty() {
+        "<p>Get the current version from <a href=\"https://filescape.app/#download\">filescape.app</a>.</p>".to_string()
+    } else {
+        format!("<div class=\"scroll\"><table><tr><th>Version</th><th>Released</th><th>Download</th></tr>{rows}</table></div>")
+    };
+    Ok(show(
+        base,
+        "Every version",
+        &format!(
+            "<h1>Every Filescape version</h1><div class=\"card\"><p>A perpetual licence unlocks Filescape Professional in every version released before its software maintenance ends, for good. If yours has ended, install the newest version released before that date. <a href=\"{base}/\">Sign in</a> to see which versions your licence unlocks.</p>{table}</div>"
+        ),
+    ))
 }
 
 fn history(v: &View, l: &filescape_licence::model::Licence, grants: &[GrantRow]) -> String {
@@ -403,7 +457,8 @@ async fn signed_in<D: Db, N: Net>(cx: &Ctx<'_, D, N>, base: &str, email: &str, m
     let settings = cx.renewal_settings().await?;
     let offer = if cx.cfg.paddle.as_ref().is_some_and(|p| p.client_token.is_some()) { settings.offered().map(|p| p.label.clone()) } else { None };
     let latest = cx.latest_release().await?;
-    let view = View { base, now: cx.now, offer: offer.as_deref(), latest: latest.as_ref(), receipts: cx.cfg.paddle.as_ref().is_some_and(|p| p.api_key.is_some()) };
+    let catalogue = cx.catalogue(false).await?;
+    let view = View { base, now: cx.now, offer: offer.as_deref(), latest: latest.as_ref(), catalogue: &catalogue, receipts: cx.cfg.paddle.as_ref().is_some_and(|p| p.api_key.is_some()) };
     let mut cards = String::new();
     for o in &owned {
         let grants = if o.row.lic.kind() == LicenceKind::Perpetual { cx.grants_of(&o.row.lic.id).await? } else { Vec::new() };

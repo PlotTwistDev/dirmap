@@ -186,6 +186,21 @@ address into **URL inspection** at the top and press **Request indexing**.
    npx wrangler@4 r2 object put filescape-downloads/latest/linux --file Filescape-linux.tar.gz --ct application/gzip --cd "attachment; filename=Filescape-linux.tar.gz" --remote
    ```
    Uploading again replaces the file. The GitHub release keeps the same files as a mirror.
+
+   Upload each release a second time under its version number as well, so customers whose
+   maintenance has ended can still download the newest version their licence unlocks (the
+   account site lists every version at account.filescape.app/versions). Same commands with
+   `latest/` replaced by the version, for example:
+   ```
+   V=0.3.0
+   npx wrangler@4 r2 object put filescape-downloads/$V/windows --file Filescape-windows.zip --ct application/zip --cd "attachment; filename=Filescape-$V-windows.zip" --remote
+   npx wrangler@4 r2 object put filescape-downloads/$V/macos --file Filescape-macos.dmg --ct application/x-apple-diskimage --cd "attachment; filename=Filescape-$V-macos.dmg" --remote
+   npx wrangler@4 r2 object put filescape-downloads/$V/linux-appimage --file Filescape-linux.AppImage --ct application/vnd.appimage --cd "attachment; filename=Filescape-$V-linux.AppImage" --remote
+   npx wrangler@4 r2 object put filescape-downloads/$V/linux-deb --file Filescape-linux.deb --ct application/vnd.debian.binary-package --cd "attachment; filename=filescape_${V}_amd64.deb" --remote
+   npx wrangler@4 r2 object put filescape-downloads/$V/linux-rpm --file Filescape-linux.rpm --ct application/x-rpm --cd "attachment; filename=filescape-$V.x86_64.rpm" --remote
+   npx wrangler@4 r2 object put filescape-downloads/$V/linux --file Filescape-linux.tar.gz --ct application/gzip --cd "attachment; filename=Filescape-$V-linux.tar.gz" --remote
+   ```
+   These are never replaced: a version's files stay as they were released.
 4. Check each link downloads with the right name: `curl -sI https://downloads.filescape.app/latest/linux-deb`
    shows the `content-disposition` line.
 5. Publish checksums, so people can check their download. In the folder with the six files, name
@@ -236,11 +251,17 @@ shows nothing.
    `downloads.filescape.app/latest/windows` and `/latest/macos`, and on Linux to the website's
    download section, where people pick the AppImage, .deb, .rpm or .tar.gz.
 6. Copies of Filescape show the notice the next time they start (answers are cached for up to 5
-   minutes). A licence whose updates ended before the release date is told so, with a link to buy;
+   minutes). A licence whose maintenance ended before the release date is told so, with Extend
+   Maintenance;
    free and evaluation users are told it's a free update.
 
 **Stop announcing it** on the same page withdraws the notice, for example if a release has to be
 pulled.
+
+Announcing also adds the version to **All versions** on the same page, which is the list customers
+download from at account.filescape.app/versions. **Hide** takes a pulled version off that list.
+To list a version released before the catalogue existed, fill in the form and press **Add to the
+download lists only** (it isn't announced), after uploading its files under `<version>/` in R2.
 
 ## 11. Try a real purchase
 
@@ -339,6 +360,17 @@ old one). Sign-in and "email my serial numbers" are limited to 10 an hour per ne
 
 Receipt links need `PADDLE_API_KEY` with permission to read transactions; without it the
 history says Paddle emailed the receipt.
+
+## Updating a server for the release catalogue
+
+Stage 5 (28 Nov 2026) keeps every version, not only the newest, so customers can download the
+newest version their licence unlocks.
+
+1. `npx wrangler@4 d1 migrations apply filescape-licences --remote` (applies
+   `0007_release_catalogue.sql`; the release announced now becomes the first entry).
+2. Deploy the Worker (step 6).
+3. Upload the current release's files again under its version number (step 9), so the version
+   links work.
 
 ## Local development
 
