@@ -511,7 +511,7 @@ impl App {
         let can_paste = self.can_paste();
         let two_panes = self.files.panes.len() > 1;
         let files = &mut self.files;
-        let (panes, thumb_cache, favourites, marks, apps) = (&files.panes, &mut files.thumbs, &files.prefs.favourites, &files.marks, &files.prefs.apps);
+        let (panes, thumb_cache, favourites, marks, apps) = (&files.panes, &mut files.thumbs, &files.prefs.favourites, &files.marks, &files.prefs);
         let icons = &mut self.icons;
         let colors = &self.colors;
         let color_for = |ext: &str| colors.get(ext).or_else(|| colors.get(&ext.to_lowercase())).copied().unwrap_or(Color32::GRAY);

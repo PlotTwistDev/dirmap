@@ -550,9 +550,8 @@ impl App {
                     self.launch_apps(vec![path.to_path_buf()]);
                 }
                 r.on_hover_text("Open it, as Finder would").on_disabled_hover_text("This is a macOS application: it can only be launched on a Mac.");
-            } else if kit::button(ui, Kind::Secondary, Some(Icon::External), "Open").on_hover_text("Open it with its usual app").clicked() {
-                let p = path.to_path_buf();
-                self.files.spawn(move || crate::actions::open(&p));
+            } else {
+                self.open_button(ui, path, is_dir);
             }
             if !is_dir && kit::button(ui, Kind::Secondary, Some(Icon::Eye), "Quick Look").on_hover_text("A large preview (Space)").clicked() {
                 self.files.look.open = true;

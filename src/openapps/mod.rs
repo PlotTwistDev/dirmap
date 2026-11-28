@@ -53,6 +53,16 @@ impl Type {
             Type::Unknown => "this file".into(),
         }
     }
+
+    /// How it's kept in settings: "txt", or "(text)" and "(folder)", which no extension is.
+    pub fn key(&self) -> Option<String> {
+        match self {
+            Type::Ext(e) => Some(e.clone()),
+            Type::Text => Some("(text)".into()),
+            Type::Folder => Some("(folder)".into()),
+            Type::Unknown => None,
+        }
+    }
 }
 
 /// Bytes read from a file with no extension to tell what it is.
@@ -219,6 +229,8 @@ mod tests {
         assert_eq!(identify(&dir.join("blob"), false), Type::Unknown);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(Type::Ext("md".into()).label(), ".md files");
+        assert_eq!(Type::Text.key().as_deref(), Some("(text)"));
+        assert_eq!(Type::Unknown.key(), None);
     }
 
     #[test]
