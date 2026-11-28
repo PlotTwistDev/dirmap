@@ -763,6 +763,26 @@ as data, never by running them, so it works on a Windows drive looked at from a 
 computer too (there the **Launch Application** button is off, since Windows programs only run on
 Windows).
 
+### Linux launchers and AppImages
+
+An application launcher (`.desktop`) shows the icon and name it gives, looked up in the icon
+theme as the desktop's menu does, with **Application launcher** in the Kind column. An AppImage
+shows as an **Application**. On Linux, double-click either, or press **Enter**, to launch it.
+
+Filescape only launches what you've allowed to run, the same rule as GNOME and KDE: a launcher
+must be installed (in an `applications` folder) or allowed to run as a program, and an AppImage
+must be allowed to run as a program. Anything else shows why under **Problem** in the preview
+pane's **Details** tab, which says how to allow it in the item's Properties. Filescape never
+changes that permission itself, and never runs anything with more rights than you have.
+
+The **Details** tab shows a launcher's name, description, the command it runs (and whether in a
+terminal), its **Start in** folder and categories, or the address a web link launcher opens. For an
+AppImage it shows what it runs on (x86-64, ARM64 and so on) and its AppImage type.
+
+Applications made for another system are labelled but never run: opening a Windows program or
+shortcut on a Mac or Linux, or a Linux launcher or AppImage on Windows or a Mac, says where it can
+be opened instead.
+
 Icons are read from the system (or from the app's icon file) in the background and kept while
 Filescape is open, so a folder of hundreds of apps opens as fast as any other. Nothing inside an
 app is ever run to find its icon or name, and apps in cloud folders keep a plain icon so nothing

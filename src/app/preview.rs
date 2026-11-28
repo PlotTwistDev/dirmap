@@ -1227,6 +1227,15 @@ impl App {
                     {
                         app.files.reveal(dir.to_path_buf(), vec![name.to_string_lossy().into()]);
                     }
+                } else if matches!(kind, Some(crate::apps::Bundle::Launcher | crate::apps::Bundle::AppImage)) {
+                    // A Linux launcher or AppImage: launched only when it's trusted, never made so.
+                    let ready = cfg!(target_os = "linux") && app_info.as_ref().is_some_and(|d| d.problem.is_none());
+                    let r = ui.add_enabled_ui(ready, |ui| kit::button(ui, K::Primary, Some(Icon::External), "Launch Application")).inner;
+                    if r.clicked() {
+                        app.launch_apps(vec![path.clone()]);
+                    }
+                    let why = if cfg!(target_os = "linux") { "It can't be launched: see Problem below." } else { "This is a Linux application: it can only be launched on Linux." };
+                    r.on_hover_text("Start it, as the desktop's menu would").on_disabled_hover_text(why);
                 } else if kind == Some(crate::apps::Bundle::App) {
                     // An application: launch it (never just by selecting or previewing it).
                     let r = ui.add_enabled_ui(crate::apps::CAN_LAUNCH, |ui| kit::button(ui, K::Primary, Some(Icon::External), "Launch Application")).inner;
@@ -3155,8 +3164,31 @@ pub(super) fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
     if let Some(n) = i.name.clone() {
         row("Name", n);
     }
+    if let Some(t) = d.appimage {
+        row("Package", if t == 0 { "A Linux program (not an AppImage)".into() } else { format!("AppImage (type {t}): runs without installing") });
+    }
     if let Some(n) = i.description.clone() {
         row("Description", n);
+    }
+    if let Some(e) = &d.launcher {
+        match e.kind.as_str() {
+            "Link" => row("Opens", e.url.clone().unwrap_or_else(|| "Not said".into())),
+            "Application" => {
+                // The command as it runs with no files given (without %U and the like).
+                let cmd = e.exec.as_deref().map(|x| x.split_whitespace().filter(|w| !(w.len() == 2 && w.starts_with('%'))).collect::<Vec<_>>().join(" ")).unwrap_or_else(|| "Not said".into());
+                row("Runs", if e.terminal { format!("{cmd}, in a terminal") } else { cmd });
+            }
+            k => row("Type", k.to_string()),
+        }
+        if let Some(p) = e.path.clone() {
+            row("Start in", p);
+        }
+        if !e.categories.is_empty() {
+            row("Categories", e.categories.join(", "));
+        }
+        if e.hidden {
+            row("Menus", "Hidden from the applications menu".into());
+        }
     }
     if let Some(p) = d.publisher() {
         row("Publisher", p);

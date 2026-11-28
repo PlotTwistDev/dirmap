@@ -64,7 +64,7 @@ fn group_of(e: &Entry, g: FGroup, today: chrono::NaiveDate) -> (i64, String) {
     match g {
         FGroup::None => (0, String::new()),
         FGroup::Type => {
-            if matches!(crate::apps::of(e.bundle), Some(crate::apps::Bundle::App | crate::apps::Bundle::WinApp)) {
+            if matches!(crate::apps::of(e.bundle), Some(crate::apps::Bundle::App | crate::apps::Bundle::WinApp | crate::apps::Bundle::AppImage | crate::apps::Bundle::Launcher)) {
                 (0, "Applications".into())
             } else if e.is_dir {
                 (0, "Folders".into())

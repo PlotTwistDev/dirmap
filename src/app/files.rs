@@ -3602,7 +3602,7 @@ impl App {
         let archive = !is_dir && disk.file_name().is_some_and(|n| archive::is_archive(&n.to_string_lossy()));
         let colour = self.files.marks.get(disk).and_then(|m| m.colour);
         let caps = crate::fsys::remote::is_remote(disk).then(|| crate::fsys::remote::caps(disk));
-        let m = RowMenu { is_dir, app: false, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some(), splats: false };
+        let m = RowMenu { is_dir, app: false, linux_app: false, count: 1, seq: false, colour, pinned: self.files.is_pinned(disk), two: self.files.panes.len() > 1, can_paste: self.can_paste(), archive, read_only: false, server: caps.is_some(), ssh: caps.is_some_and(|c| c.ssh), cloud: caps.is_none() && crate::cloudops::supported() && super::cloud::on_demand_dir(disk), known: caps.is_none() && crate::known::about(disk).is_some(), splats: false };
         let ext = disk
             .file_name()
             .map(|n| crate::scan::ext_of(&n.to_string_lossy()).to_string())
@@ -3611,10 +3611,7 @@ impl App {
         match a {
             FAction::Open if is_dir || (archive && self.premium(crate::licence::Feature::Archives)) => self.files.go(Location::Dir(disk.to_path_buf())),
             FAction::Open if archive => {}
-            FAction::Open => {
-                let p = disk.to_path_buf();
-                self.files.spawn(move || actions::open(&p));
-            }
+            FAction::Open => self.open_file(disk.to_path_buf()),
             a => self.files_action(a, vec![disk.to_path_buf()]),
         }
         ui.close();
@@ -3643,6 +3640,13 @@ impl App {
 
     /// Open a file in its app. One inside an archive is taken out to a temporary folder first.
     pub(super) fn open_file(&mut self, p: PathBuf) {
+        // An application made for another system is labelled, never run (a Windows program
+        // could otherwise start under Wine, or a launcher run its command).
+        let code = p.file_name().map_or(0, |n| crate::apps::file_code(&n.to_string_lossy()));
+        if let Some(why) = crate::apps::foreign_note(code) {
+            self.ops.notice = Some((why, true));
+            return;
+        }
         self.files.spawn(move || {
             if archive::inside(&p) {
                 let tmp = archive_temp(&p).map_err(|e| format!("Couldn't take it out of the archive: {e}"))?;
@@ -3934,6 +3938,8 @@ pub(super) struct RowMenu {
     pub is_dir: bool,
     /// The item is an application (Open Application, Show Package Contents).
     pub app: bool,
+    /// The item is a Linux launcher or AppImage (Launch Application).
+    pub linux_app: bool,
     pub count: usize,
     /// The row is an image sequence.
     pub seq: bool,
@@ -4025,7 +4031,7 @@ pub(super) fn item_actions(ui: &egui::Ui, resp: egui::Response, i: u32, c: &Item
     let colour = c.marks.get(&path).and_then(|m| m.colour);
     let caps = crate::fsys::remote::is_remote(dir).then(|| crate::fsys::remote::caps(dir));
     let server = caps.is_some();
-    let ctx_menu = RowMenu { is_dir, app: !server && !read_only && crate::apps::is_app(e.bundle), count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some(), splats: false };
+    let ctx_menu = RowMenu { is_dir, app: !server && !read_only && crate::apps::is_app(e.bundle), linux_app: !server && !read_only && matches!(crate::apps::of(e.bundle), Some(crate::apps::Bundle::Launcher | crate::apps::Bundle::AppImage)), count, seq, colour, pinned, two: c.two, can_paste: c.can_paste && !read_only, archive: !is_dir && archive::is_archive(&e.name) && !read_only, read_only, server, ssh: caps.is_some_and(|c| c.ssh), cloud: false, known: !server && !read_only && crate::known::about(&path).is_some(), splats: false };
     let ctx_menu = RowMenu {
         cloud: !server && !read_only && crate::cloudops::supported() && (e.flags & scan::store::ON_DEMAND != 0 || (e.is_dir && super::cloud::on_demand_dir(&path))),
         // By name only here (it's worked out every frame); Compare Scenes looks inside.
@@ -4068,6 +4074,12 @@ fn item_menu(ui: &mut egui::Ui, m: &RowMenu, apps: &[openwith::UserApp], ext: &s
         let label = if crate::apps::CAN_LAUNCH { "Open Application" } else { "Open Application (on a Mac)" };
         item(ui, crate::apps::CAN_LAUNCH, label, run_key, FAction::LaunchApp);
         item(ui, true, "Show Package Contents", inside_key, FAction::ShowContents);
+        item(ui, true, "Get Application Info", String::new(), FAction::AppInfo);
+    } else if m.linux_app && !many {
+        // A Linux launcher or AppImage: launched by Enter where this is Linux, never elsewhere.
+        let can = crate::apps::can_launch(crate::apps::Bundle::AppImage.code());
+        let key = if crate::apps::launches(crate::apps::Bundle::AppImage.code()) { k(M::NONE, Key::Enter) } else { String::new() };
+        item(ui, can, if can { "Launch Application" } else { "Launch Application (on Linux)" }, key, FAction::LaunchApp);
         item(ui, true, "Get Application Info", String::new(), FAction::AppInfo);
     } else {
         item(ui, true, &open, k(M::NONE, Key::Enter), FAction::Open);
