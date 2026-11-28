@@ -101,3 +101,17 @@ pub fn login_message(link: &str, to: &str) -> Message {
         reply_to: None,
     }
 }
+
+pub fn renewal_message(row: &LicenceRow, until: filescape_licence::Ts, to: &str) -> Message {
+    let hello = row.lic.owner.as_deref().map_or("Hello,".to_string(), |o| format!("Hello {o},"));
+    let day = date(until).split(',').next().unwrap_or_default().to_string();
+    Message {
+        to: to.into(),
+        subject: "Your Filescape maintenance is extended".into(),
+        text: format!(
+            "{hello}\n\nThank you for renewing. Software maintenance on your Filescape licence (serial ending {}) now runs until {day}: every Filescape release published until then is included.\n\nYour serial number, your activated computers and everything your licence already covered stay as they are. Filescape picks up the new date at its next weekly licence check; to see it at once, choose Help > Licence and press Check now, or deactivate and activate again.\n\nYour receipt comes from Paddle, our reseller, in a separate email. You can see your licences and download eligible versions at https://account.filescape.app.\n\nQuestions? Write to us at https://filescape.app/contact (replies to this email aren't read).\n\nFilescape (filescape.app)",
+            row.lic.serial_hint
+        ),
+        reply_to: None,
+    }
+}

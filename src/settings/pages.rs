@@ -96,6 +96,14 @@ pub fn files(ui: &mut egui::Ui, cx: &mut PageCx) {
             kit::toggle_row(ui, "Treat application bundles as folders", Some("For developers and administrators: double-click and Enter go inside applications like any folder, and the right-click menu has the folder commands too. Applications keep their icons and names."), &mut d.app_as_folders);
         });
     });
+    kit::section(ui, Icon::Ai, "Ask AI", f.of("ask-ai"), |ui| {
+        kit::toggle_row(
+            ui,
+            "Show Ask AI in Files",
+            Some("The Ask AI tab beside Preview and Details, and the Ask AI buttons in the preview pane and Quick Look. Off hides them; Ask AI is still in the AI Models workspace. It runs on this computer and never changes your files."),
+            &mut d.ask_in_files,
+        );
+    });
 }
 
 fn updates(ui: &mut egui::Ui, cx: &mut PageCx, licence: &mut crate::licence::Licensing) {

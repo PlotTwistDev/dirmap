@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 const T0: i64 = 1_795_392_000; // 23 Nov 2026
-const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql")];
+const SCHEMA: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_seats_and_account.sql"), include_str!("../migrations/0003_contact_messages.sql"), include_str!("../migrations/0004_maintenance.sql"), include_str!("../migrations/0005_renewals.sql")];
 
 /// Gives way once, so two requests run with `join` interleave like concurrent Workers.
 struct YieldOnce(bool);
@@ -144,6 +144,8 @@ fn world() -> World {
                 api_base: "https://sandbox-api.paddle.com".into(),
                 price_ids: vec!["pri_filescape".into()],
                 update_months: 12,
+                client_token: Some("test_client_token".into()),
+                sandbox: true,
             }),
             mail: Some(MailConfig { resend_key: "re_test".into(), from: "Filescape <licences@filescape.app>".into(), reply_to: None }),
             access: None,
@@ -887,4 +889,372 @@ fn contact_form_checks_turnstile_when_configured() {
     let r = w.contact(&format!("{MSG}&cf-turnstile-response=tok"), true, "203.0.113.9");
     assert_eq!(r.status, 500);
     assert!(w.message_ids().is_empty());
+}
+
+// ---- Maintenance ----
+
+fn bought(w: &World, txn: &str) -> (String, String) {
+    assert_eq!(w.webhook(&purchase(txn, 1)).status, 200);
+    let m: serde_json::Value = serde_json::from_str(w.net.emails().last().unwrap()).unwrap();
+    let text = m["text"].as_str().unwrap();
+    let i = text.find("FSP-").unwrap();
+    let serial = text[i..i + 27].to_string();
+    let id = pollster::block_on(w.cx().licence_by_order(txn)).unwrap().unwrap().lic.id;
+    (serial, id)
+}
+
+fn until_of(w: &World, id: &str) -> i64 {
+    let r = pollster::block_on(w.cx().licence(id)).unwrap().unwrap();
+    let u = r.lic.validity.updates_until().unwrap();
+    let col = w.db.0.query_row("SELECT maintenance_until FROM licences WHERE id = ?1", [id], |r| r.get::<_, i64>(0)).unwrap();
+    assert_eq!(u, col, "the cached column follows the certificate date");
+    u
+}
+
+fn renew(w: &World, id: &str, txn: &str) -> filescape_licence_server::maintenance::Outcome {
+    use filescape_licence::maintenance::Grant;
+    use filescape_licence_server::maintenance::NewGrant;
+    let g = NewGrant { grant: Grant::renewal(w.now.get(), 12), txn: Some(txn), amount: Some("2.99"), currency: Some("USD"), actor: "paddle", reason: "" };
+    pollster::block_on(w.cx().add_grant(id, &g, Some(730))).unwrap()
+}
+
+#[test]
+fn a_purchase_records_twelve_calendar_months_of_maintenance() {
+    let w = world();
+    let (_, id) = bought(&w, "txn_m1");
+    assert_eq!(until_of(&w, &id), filescape_licence::maintenance::add_months(T0, 12));
+    let g = pollster::block_on(w.cx().grants_of(&id)).unwrap();
+    assert_eq!(g.len(), 1);
+    assert_eq!(g[0].grant.kind, filescape_licence::maintenance::GrantKind::Purchase);
+    assert_eq!(g[0].after_until, Some(until_of(&w, &id)));
+}
+
+#[test]
+fn renewals_extend_the_same_licence_and_reach_installed_apps_at_the_weekly_check() {
+    use filescape_licence::maintenance::add_months;
+    use filescape_licence_server::maintenance::Outcome;
+    let w = world();
+    let (serial, id) = bought(&w, "txn_m2");
+    let first = ok(&w.activate(&serial, "m1", "act-m1-00001"));
+    let c: ActivationCert = w.verifier().verify(&first.activation, Purpose::Activation).unwrap();
+    let end = add_months(T0, 12);
+    assert_eq!(c.updates_until, Some(end));
+
+    // Renew before expiry: +12 months on the end date.
+    w.now.set(T0 + 100 * DAY);
+    assert_eq!(renew(&w, &id, "txn_r1"), Outcome::Applied { before: end, after: add_months(end, 12) });
+    // The same payment again (resent, or a second delivery) changes nothing.
+    assert_eq!(renew(&w, &id, "txn_r1"), Outcome::AlreadyDone);
+    // Stacked while active.
+    assert_eq!(renew(&w, &id, "txn_r2"), Outcome::Applied { before: add_months(end, 12), after: add_months(end, 24) });
+    // More than 2 years ahead: refused.
+    assert!(matches!(renew(&w, &id, "txn_r3"), Outcome::Refused(filescape_licence::maintenance::RenewRefusal::TooFarAhead)));
+
+    // Same serial, same activation: the weekly check returns the new date.
+    let v = ok(&w.api("/v1/validate", &serde_json::json!({ "activation_id": "act-m1-00001", "device_hash": device_hash("m1") })));
+    let c: ActivationCert = w.verifier().verify(&v.activation, Purpose::Activation).unwrap();
+    assert_eq!((c.updates_until, c.activation_id.as_str(), c.activations_used), (Some(add_months(end, 24)), "act-m1-00001", 1));
+    let lic = pollster::block_on(w.cx().licence(&id)).unwrap().unwrap();
+    assert_eq!(lic.lic.serial_hint, filescape_licence::serial::hint(&serial));
+    assert_eq!(pollster::block_on(w.cx().activations_of(&id)).unwrap().len(), 1, "devices untouched");
+}
+
+#[test]
+fn renewing_after_a_gap_starts_from_the_payment_and_on_the_last_day_still_extends() {
+    use filescape_licence::maintenance::add_months;
+    use filescape_licence_server::maintenance::Outcome;
+    let w = world();
+    let (_, id) = bought(&w, "txn_m3");
+    let end = add_months(T0, 12);
+    // On the expiry date, a few hours after the end time.
+    w.now.set(end + 3 * 3600);
+    assert_eq!(renew(&w, &id, "txn_g1"), Outcome::Applied { before: end, after: add_months(end, 12) });
+    // Two years after that ended: a new period from today, nothing owed for the gap.
+    let later = add_months(end, 12) + 2 * 365 * DAY;
+    w.now.set(later);
+    assert_eq!(renew(&w, &id, "txn_g2"), Outcome::Applied { before: add_months(end, 12), after: add_months(later, 12) });
+}
+
+#[test]
+fn temporary_and_revoked_licences_cannot_be_renewed() {
+    use filescape_licence::maintenance::RenewRefusal;
+    use filescape_licence_server::maintenance::Outcome;
+    let w = world();
+    let tmp = w.temp_serial(30, 3);
+    let tid = st_licence(&w, &tmp);
+    assert_eq!(renew(&w, &tid, "txn_t1"), Outcome::Refused(RenewRefusal::Temporary));
+    let (_, id) = bought(&w, "txn_m4");
+    w.admin(&format!("/licence/{id}/revoke"), "reason=refunded");
+    assert_eq!(renew(&w, &id, "txn_t2"), Outcome::Refused(RenewRefusal::Revoked));
+    assert!(pollster::block_on(w.cx().grant_by_txn("txn_t2")).unwrap().is_none());
+}
+
+#[test]
+fn a_refunded_renewal_comes_out_of_the_ledger_and_never_the_purchase() {
+    use filescape_licence::maintenance::add_months;
+    use filescape_licence_server::maintenance::Outcome;
+    let w = world();
+    let (_, id) = bought(&w, "txn_m5");
+    let end = add_months(T0, 12);
+    w.now.set(T0 + 10 * DAY);
+    renew(&w, &id, "txn_a");
+    renew(&w, &id, "txn_b");
+    assert_eq!(until_of(&w, &id), add_months(end, 24));
+    let (lid, o) = pollster::block_on(w.cx().reverse_txn("txn_a", "paddle", "refund")).unwrap().unwrap();
+    assert_eq!(lid, id);
+    assert_eq!(o, Outcome::Applied { before: add_months(end, 24), after: add_months(end, 12) });
+    assert_eq!(pollster::block_on(w.cx().reverse_txn("txn_a", "paddle", "refund")).unwrap().unwrap().1, Outcome::AlreadyDone);
+    // An admin can't reverse the purchase or a paid renewal.
+    let grants = pollster::block_on(w.cx().grants_of(&id)).unwrap();
+    for g in &grants {
+        if g.reversed_at.is_none() {
+            let r = w.admin(&format!("/licence/{id}/reverse-grant"), &format!("grant={}&reason=oops", g.id));
+            assert!(r.header("location").unwrap().contains("Only%20complimentary"), "{:?}", r.header("location"));
+        }
+    }
+    assert_eq!(until_of(&w, &id), add_months(end, 12));
+}
+
+#[test]
+fn admins_add_and_reverse_complimentary_maintenance_with_a_reason() {
+    use filescape_licence::maintenance::add_months;
+    let w = world();
+    let (_, id) = bought(&w, "txn_m6");
+    let (_, id2) = bought(&w, "txn_m7");
+    let end = add_months(T0, 12);
+    let r = w.admin(&format!("/licence/{id}/extend"), "months=0&days=30&reason=");
+    assert!(r.header("location").unwrap().contains("Give%20a%20reason"));
+    let r = w.admin(&format!("/licence/{id}/extend"), "months=0&days=30&reason=support+gesture");
+    assert!(r.header("location").unwrap().contains("Maintenance%20changed"), "{:?}", r.header("location"));
+    assert_eq!(until_of(&w, &id), end + 30 * DAY);
+    let page = w.call("GET", "localhost", &format!("/admin/licence/{id}"), &[], "");
+    assert!(page.body.contains("Complimentary extension +30 days") && page.body.contains("support gesture"), "{}", page.body);
+    let ev = pollster::block_on(w.cx().events_of(&id)).unwrap();
+    assert!(ev.iter().any(|e| e.what == "maintenance" && e.detail.contains("→") && e.actor.as_deref() == Some("dev")));
+    // Reverse it: back to the purchased date, not below.
+    let g = pollster::block_on(w.cx().grants_of(&id)).unwrap().into_iter().find(|g| g.grant.admin_reversible()).unwrap();
+    w.admin(&format!("/licence/{id}/reverse-grant"), &format!("grant={}&reason=wrong+licence", g.id));
+    assert_eq!(until_of(&w, &id), end);
+    // Bulk: each licence from its own date; temporary and unknown IDs are reported, not extended.
+    let tmp = st_licence(&w, &w.temp_serial(30, 3));
+    let r = w.admin("/maintenance", &format!("ids={id}%0A{id2}%0A{id2}%0A{tmp}%0Anope&months=1&days=0&reason=outage"));
+    let loc = r.header("location").unwrap().to_string();
+    assert!(loc.contains("Extended%202%20of%204"), "{loc}");
+    assert_eq!(until_of(&w, &id), add_months(end, 1));
+    assert_eq!(until_of(&w, &id2), add_months(end, 1));
+}
+
+#[test]
+fn the_migration_keeps_existing_licences_dates() {
+    // A database as it was before 0004, with one perpetual licence issued on the old 30.44-day rule.
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    for m in &SCHEMA[..3] {
+        conn.execute_batch(m).unwrap();
+    }
+    let old_until = T0 + 12 * 2_629_746;
+    conn.execute(
+        "INSERT INTO licences (id, serial_hash, serial_hint, kind, validity, issued_at, max_activations) VALUES ('L1', 'h1', 'AAAA', 'perpetual', ?1, ?2, 3), ('L2', 'h2', 'BBBB', 'temporary', '{\"mode\":\"first_activation\",\"days\":30}', ?2, 3)",
+        rusqlite::params![format!("{{\"mode\":\"perpetual\",\"updates_until\":{old_until}}}"), T0],
+    )
+    .unwrap();
+    conn.execute_batch(SCHEMA[3]).unwrap();
+    let (u, n): (i64, i64) = conn.query_row("SELECT maintenance_until, (SELECT count(*) FROM maintenance_grants) FROM licences WHERE id = 'L1'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((u, n), (old_until, 1));
+    let g: (String, i64, i64) = conn.query_row("SELECT kind, at, until FROM maintenance_grants WHERE licence_id = 'L1'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+    assert_eq!(g, ("purchase".to_string(), T0, old_until));
+    let t: Option<i64> = conn.query_row("SELECT maintenance_until FROM licences WHERE id = 'L2'", [], |r| r.get(0)).unwrap();
+    assert_eq!(t, None);
+}
+
+#[test]
+fn two_deliveries_of_one_renewal_at_once_extend_once() {
+    use filescape_licence::maintenance::{Grant, add_months};
+    use filescape_licence_server::maintenance::NewGrant;
+    let w = world();
+    let (_, id) = bought(&w, "txn_m8");
+    let cx = w.cx();
+    let g = NewGrant { grant: Grant::renewal(T0, 12), txn: Some("txn_dup"), amount: None, currency: None, actor: "paddle", reason: "" };
+    let (a, b) = pollster::block_on(futures::future::join(cx.add_grant(&id, &g, None), cx.add_grant(&id, &g, None)));
+    let applied = [a.unwrap(), b.unwrap()].iter().filter(|o| matches!(o, filescape_licence_server::maintenance::Outcome::Applied { .. })).count();
+    assert_eq!(applied, 1);
+    assert_eq!(until_of(&w, &id), add_months(add_months(T0, 12), 12));
+}
+
+// ---- Renewals through Paddle ----
+
+fn offer_renewals(w: &World) {
+    let r = w.admin("/renewals", "enabled=1&standard_id=pri_renew&standard_label=%242.99&promo_id=&promo_label=&enterprise_id=&enterprise_label=");
+    assert!(r.header("location").unwrap().contains("saved"), "{:?}", r.header("location"));
+}
+
+fn renewal_paid(txn: &str, token: &str, event: &str) -> serde_json::Value {
+    serde_json::json!({
+        "event_id": event, "event_type": "transaction.completed",
+        "data": { "id": txn, "status": "completed", "customer_id": "ctm_1", "currency_code": "USD",
+                  "custom_data": { "renewal": token },
+                  "details": { "totals": { "grand_total": "299" } },
+                  "items": [ { "price": { "id": "pri_renew" }, "quantity": 1 } ] }
+    })
+}
+
+fn sign_in(w: &World) -> String {
+    let acc = |path: &str, body: &str| w.call("POST", "account.filescape.app", path, &[("origin", "https://account.filescape.app")], body);
+    acc("/login", "email=ada%40example.com");
+    let m: serde_json::Value = serde_json::from_str(w.net.emails().last().unwrap()).unwrap();
+    let body = m["text"].as_str().unwrap();
+    let i = body.find("/signin?t=").unwrap() + "/signin?t=".len();
+    let t: String = body[i..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    session_cookie(&acc("/signin", &format!("t={t}")))
+}
+
+fn token_from(location: &str) -> String {
+    location.split("t=").nth(1).unwrap().to_string()
+}
+
+#[test]
+fn renewals_are_admin_priced_and_never_use_a_purchase_price() {
+    let w = world();
+    let r = w.admin("/renewals", "enabled=1&standard_id=pri_filescape&standard_label=%242.99");
+    assert!(r.header("location").unwrap().contains("purchase%20price"), "{:?}", r.header("location"));
+    let r = w.admin("/renewals", "enabled=1&standard_id=pri_renew&standard_label=");
+    assert!(r.header("location").unwrap().contains("label"));
+    let r = w.admin("/renewals", "enabled=1");
+    assert!(r.header("location").unwrap().contains("set%20the%20standard%20price"));
+    offer_renewals(&w);
+    // Switching to a promotional price keeps the old one accepted for open checkouts.
+    w.admin("/renewals", "enabled=1&standard_id=pri_renew2&standard_label=%242.99&promo_id=pri_promo&promo_label=%241.99&use_promo=1");
+    let s = pollster::block_on(w.cx().renewal_settings()).unwrap();
+    assert_eq!(s.offered().unwrap().price_id, "pri_promo");
+    assert!(s.accepted().contains(&"pri_renew".to_string()) && s.accepted().contains(&"pri_renew2".to_string()));
+    let page = w.call("GET", "localhost", "/admin/renewals", &[], "");
+    assert!(page.body.contains("Offered") && page.body.contains("$1.99"), "{}", page.body);
+}
+
+#[test]
+fn a_customer_renews_from_the_account_page_and_paddle_extends_the_same_licence() {
+    use filescape_licence::maintenance::add_months;
+    let w = world();
+    let (serial, id) = bought(&w, "txn_buy1");
+    ok(&w.activate(&serial, "m1", "act-m1-00001"));
+    let cookie = sign_in(&w);
+    let acc = |method: &str, path: &str, body: &str| w.call(method, "account.filescape.app", path, &[("cookie", &cookie), ("origin", "https://account.filescape.app")], body);
+    // Not offered yet: no button, and asking anyway says so.
+    let home = acc("GET", "/", "");
+    assert!(home.body.contains("Software maintenance:") && !home.body.contains("Extend maintenance by"), "{}", home.body);
+    assert!(acc("POST", "/renew", &format!("licence={id}")).header("location").unwrap().contains("aren%27t%20available"));
+    offer_renewals(&w);
+    assert!(acc("GET", "/", "").body.contains("Extend maintenance by 12 months · $2.99"));
+    // Someone else's licence can't be renewed from this account.
+    let (_, other) = bought(&w, "txn_buy2");
+    pollster::block_on(w.cx().set_owner(&other, "Bob", "bob@example.com", "dev")).unwrap();
+    assert!(acc("POST", "/renew", &format!("licence={other}")).header("location").unwrap().contains("isn%27t%20registered"));
+    // Ada's: a checkout page with Paddle allowed on it only.
+    let r = acc("POST", "/renew", &format!("licence={id}"));
+    let loc = r.header("location").unwrap().to_string();
+    assert!(loc.starts_with("/renew?t="), "{loc}");
+    let t = token_from(&loc);
+    let page = w.call("GET", "account.filescape.app", &loc, &[], "");
+    assert!(page.body.contains("cdn.paddle.com/paddle/v2/paddle.js") && page.body.contains("pri_renew") && page.body.contains(&t));
+    assert!(page.body.contains(&serial[serial.len() - 4..]) && page.body.contains("non-refundable"));
+    assert!(page.header("content-security-policy").unwrap().contains("https://buy.paddle.com"));
+    assert!(!acc("GET", "/", "").header("content-security-policy").unwrap().contains("paddle"), "other pages stay locked down");
+    // Paddle confirms: 12 months on the same licence, recorded with the amount, emailed once.
+    w.now.set(T0 + 20 * DAY);
+    let before = w.net.emails().len();
+    let r = w.webhook(&renewal_paid("txn_ren1", &t, "evt_ren1"));
+    assert!(r.body.contains("renewed"), "{}", r.body);
+    assert_eq!(until_of(&w, &id), add_months(add_months(T0, 12), 12));
+    let g = pollster::block_on(w.cx().grant_by_txn("txn_ren1")).unwrap().unwrap().1;
+    assert_eq!((g.amount.as_deref(), g.currency.as_deref()), (Some("2.99"), Some("USD")));
+    assert_eq!(w.net.emails().len(), before + 1);
+    assert!(w.net.emails().last().unwrap().contains("maintenance is extended"));
+    // Resent as a new event: nothing changes, no second email. No new licence either.
+    let r = w.webhook(&renewal_paid("txn_ren1", &t, "evt_ren1b"));
+    assert!(r.body.contains("already applied"), "{}", r.body);
+    assert_eq!(w.net.emails().len(), before + 1);
+    assert_eq!(pollster::block_on(w.cx().list("", Default::default(), 100)).unwrap().len(), 2);
+    // The same activation's weekly check now carries the new date.
+    let v = ok(&w.api("/v1/validate", &serde_json::json!({ "activation_id": "act-m1-00001", "device_hash": device_hash("m1") })));
+    let c: ActivationCert = w.verifier().verify(&v.activation, Purpose::Activation).unwrap();
+    assert_eq!(c.updates_until, Some(add_months(add_months(T0, 12), 12)));
+    // Admin sees it.
+    assert!(w.call("GET", "localhost", "/admin/renewals", &[], "").body.contains("txn_ren1"));
+    // The link stops opening the checkout after a day.
+    w.now.set(T0 + 22 * DAY);
+    assert!(w.call("GET", "account.filescape.app", &loc, &[], "").body.contains("expired"));
+}
+
+#[test]
+fn the_app_gets_a_renewal_link_for_its_own_live_activation_only() {
+    let w = world();
+    let (serial, _) = bought(&w, "txn_buy3");
+    ok(&w.activate(&serial, "m1", "act-m1-00001"));
+    let link = |id: &str, m: &str| w.api("/v1/renew", &serde_json::json!({ "activation_id": id, "device_hash": device_hash(m) }));
+    let r = link("act-m1-00001", "m1");
+    assert_eq!(r.status, 403, "not offered yet: {}", r.body);
+    offer_renewals(&w);
+    let r = link("act-m1-00001", "m1");
+    assert_eq!(r.status, 200, "{}", r.body);
+    let url = serde_json::from_str::<serde_json::Value>(&r.body).unwrap()["url"].as_str().unwrap().to_string();
+    assert!(url.starts_with("http://localhost:8787/account/renew?t="), "{url}");
+    assert_eq!(rejection(&link("act-m1-00001", "someone-else")), Rejection::ActivationIdConflict);
+    assert_eq!(rejection(&link("act-nope-0001", "m1")), Rejection::NotFound);
+    // Temporary licences: refused.
+    let tmp = w.temp_serial(30, 3);
+    ok(&w.activate(&tmp, "m2", "act-m2-00001"));
+    let r = link("act-m2-00001", "m2");
+    assert!(r.status == 403 && r.body.contains("can't be renewed"), "{}", r.body);
+    // A deactivated computer can't ask.
+    w.api("/v1/deactivate", &serde_json::json!({ "activation_id": "act-m1-00001", "device_hash": device_hash("m1") }));
+    assert_eq!(rejection(&link("act-m1-00001", "m1")), Rejection::Deactivated);
+}
+
+#[test]
+fn a_renewal_payment_without_a_valid_token_extends_nothing_and_is_shown_to_the_admin() {
+    let w = world();
+    let (_, id) = bought(&w, "txn_buy4");
+    offer_renewals(&w);
+    let before = until_of(&w, &id);
+    let r = w.webhook(&renewal_paid("txn_forged", "not-a-real-token", "evt_forged"));
+    assert_eq!(r.status, 200);
+    assert!(r.body.contains("renewal problem"), "{}", r.body);
+    assert_eq!(until_of(&w, &id), before);
+    assert_eq!(pollster::block_on(w.cx().list("", Default::default(), 100)).unwrap().len(), 1, "no licence issued for a renewal price");
+    assert!(w.call("GET", "localhost", "/admin/renewals", &[], "").body.contains("txn_forged"));
+    // A renewal of a licence revoked after the checkout opened: flagged for a refund.
+    let t = pollster::block_on(w.cx().start_renewal(&id, "account", None)).unwrap().unwrap();
+    w.admin(&format!("/licence/{id}/revoke"), "reason=refunded");
+    let r = w.webhook(&renewal_paid("txn_late", &t, "evt_late"));
+    assert!(r.body.contains("renewal problem") && r.body.contains("Refund it"), "{}", r.body);
+    assert!(pollster::block_on(w.cx().events_of(&id)).unwrap().iter().any(|e| e.what == "renewal problem"));
+}
+
+#[test]
+fn a_refunded_or_charged_back_renewal_gives_its_months_back_and_a_reversal_restores_them() {
+    use filescape_licence::maintenance::add_months;
+    let w = world();
+    let (_, id) = bought(&w, "txn_buy5");
+    offer_renewals(&w);
+    let adj = |evt: &str, action: &str, status: &str, txn: &str| {
+        w.webhook(&serde_json::json!({ "event_id": evt, "event_type": "adjustment.updated",
+            "data": { "id": format!("adj_{evt}"), "action": action, "status": status, "type": "full", "transaction_id": txn } }))
+    };
+    let end = add_months(T0, 12);
+    let t = pollster::block_on(w.cx().start_renewal(&id, "account", None)).unwrap().unwrap();
+    w.webhook(&renewal_paid("txn_r_a", &t, "evt_a"));
+    assert_eq!(until_of(&w, &id), add_months(end, 12));
+    assert!(adj("ea1", "refund", "pending_approval", "txn_r_a").body.contains("flagged"));
+    assert_eq!(until_of(&w, &id), add_months(end, 12));
+    assert!(adj("ea2", "refund", "approved", "txn_r_a").body.contains("renewal reversed"));
+    assert_eq!(until_of(&w, &id), end);
+    let lic = pollster::block_on(w.cx().licence(&id)).unwrap().unwrap();
+    assert!(lic.lic.revoked_at.is_none(), "the licence itself stays valid");
+    // A chargeback, then its reversal.
+    w.webhook(&renewal_paid("txn_r_b", &t, "evt_b"));
+    adj("eb1", "chargeback", "approved", "txn_r_b");
+    assert_eq!(until_of(&w, &id), end);
+    assert!(adj("eb2", "chargeback_reverse", "approved", "txn_r_b").body.contains("restored"));
+    assert_eq!(until_of(&w, &id), add_months(end, 12));
+    // A refund of the purchase still revokes the licence, as before.
+    assert!(adj("ec1", "refund", "approved", "txn_buy5").body.contains("revoked"));
 }

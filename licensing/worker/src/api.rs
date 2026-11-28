@@ -73,6 +73,12 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str) -> 
             Err(resp) => Ok(resp),
         },
         ("POST", "/v1/paddle") => crate::paddle::webhook(cx, req).await,
+        // Extend maintenance from the app: its live activation on this computer proves which
+        // licence, and the answer is a checkout link for that licence only.
+        ("POST", "/v1/renew") => match body::<ByActivation>(req) {
+            Ok(b) => renew_link(cx, &b).await,
+            Err(resp) => Ok(resp),
+        },
         // The contact form on filescape.app.
         (_, "/v1/contact") => crate::contact::route(cx, req).await,
         // The app's update check at launch. A plain GET: nothing about the user or the computer
@@ -86,7 +92,24 @@ pub async fn route<D: Db, N: Net>(cx: &Ctx<'_, D, N>, req: &Req, path: &str) -> 
             resp.headers.push(("cache-control".into(), "public, max-age=300".into()));
             Ok(resp)
         }
-        (_, "/v1/activate" | "/v1/offline" | "/v1/validate" | "/v1/deactivate" | "/v1/paddle" | "/v1/release") => Ok(Resp::text(405, "Method not allowed.")),
+        (_, "/v1/activate" | "/v1/offline" | "/v1/validate" | "/v1/deactivate" | "/v1/paddle" | "/v1/release" | "/v1/renew") => Ok(Resp::text(405, "Method not allowed.")),
         _ => Ok(Resp::text(404, "Not found.")),
+    }
+}
+
+async fn renew_link<D: Db, N: Net>(cx: &Ctx<'_, D, N>, b: &ByActivation) -> Result<Resp, String> {
+    let Some(a) = cx.activation(&b.activation_id).await? else { return Ok(rejected(Rejection::NotFound)) };
+    if a.a.device_hash != b.device_hash {
+        return Ok(rejected(Rejection::ActivationIdConflict));
+    }
+    if !a.a.is_live() {
+        return Ok(rejected(Rejection::Deactivated));
+    }
+    match cx.start_renewal(&a.a.licence_id, "app", Some(&a.a.activation_id)).await? {
+        Ok(t) => {
+            let url = if cx.cfg.dev { format!("http://localhost:8787/account/renew?t={t}") } else { format!("https://{}/renew?t={t}", cx.cfg.hosts.account) };
+            Ok(Resp::json(200, &serde_json::json!({ "url": url })))
+        }
+        Err(e) => Ok(Resp::json(403, &serde_json::json!({ "error": "renewal_unavailable", "message": e.message() }))),
     }
 }

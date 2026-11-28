@@ -2,6 +2,48 @@
 
 ## Next version
 
+### Ask AI in Files
+
+- The Files preview pane has an **Ask AI** tab beside **Preview** and **Details**, and **Ask AI**
+  buttons under the preview and in Quick Look. The selected file or folder is what you're asking
+  about, with suggested questions for what it is: a licence, a log, code, a spreadsheet, a folder.
+  It shares the loaded model with the AI Models workspace and has its own conversation, which
+  **Open in AI Models** carries over. Picking something else mid-conversation asks before changing
+  what the chat is about. See [Ask AI in Files](../views/ask-ai.md#ask-ai-in-files).
+- Right-click a file, folder or several items for an **Ask AI** submenu: summarise, explain, compare,
+  understand a folder's structure, what a project is for, storage use, possibly unnecessary files
+  and related files. Selecting several items asks about all of them, with no limit on how many.
+  See [From the right-click menu](../views/ask-ai.md#from-the-right-click-menu).
+- Ask AI can now read PDFs (page by page), EPUB books, Word, PowerPoint, OpenDocument and Excel
+  files, as well as plain text.
+- When the model wasn't given everything, a **⚠ Partly included** line under the answer says
+  what was left out, such as "pages 1 to 6 of 40" of a PDF, documents not read for lack of room,
+  or "listed 40 of 1,250 items" of a large folder, and **Measured by Filescape** shows the sizes and dates Filescape
+  measured itself, apart from the model's answer. See
+  [Asking about files and folders](../views/ask-ai.md#asking-about-files-and-folders).
+- Answers cite files and lines, like `[config.yaml:12]`, and **Cited** under the answer checks
+  each one against what the model was given: real ones link to the file and show the line,
+  made-up ones are crossed out. See
+  [Asking about files and folders](../views/ask-ai.md#asking-about-files-and-folders).
+- Ask AI can look at pictures with a model that can see, such as Gemma 3 or Qwen2.5-VL: Filescape
+  loads its vision projector (the `mmproj` file beside it, or an Ollama model's projector) with it,
+  and a selected picture gets **Describe this picture** and **What text is in it?**. See
+  [Asking about pictures](../views/ask-ai.md#asking-about-pictures).
+- Asking about an AI model file gives the model what Filescape reads from it (family, size,
+  precision, context) and whether this computer could run it, instead of a guess from its name.
+- Large folders: Ask AI describes a folder's shape first, the folders inside it up to three
+  levels down, then its largest items, and never reads more files than fit in the model's
+  context.
+- Every Ask AI conversation ends with the same note: **Private · Local processing · Read-only**,
+  "Local AI models can make mistakes…", and an **ⓘ** that explains the limits.
+
+### Numbered data files aren't treated as frames
+
+- Numbered files that aren't pictures, such as NumPy `.npz` archives, still group into one row in
+  Files but show as a plain numbered set: no **Play**, and skipped numbers are a neutral note
+  instead of an orange "missing frames" warning. See
+  [Image sequences](../views/file-manager.md#image-sequences).
+
 ### Eject drives
 
 - External drives, USB sticks, SD cards and disk images can be ejected from Filescape on macOS,

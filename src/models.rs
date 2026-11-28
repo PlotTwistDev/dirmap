@@ -753,6 +753,35 @@ fn mark_copies(models: &mut [Model], progress: &Progress) -> Option<()> {
     Some(())
 }
 
+/// The vision projector that gives a GGUF model its eyes, if it has one: for Ollama a projector
+/// blob among the model's own files, otherwise an mmproj GGUF in the model's folder (how LM Studio
+/// and Hugging Face downloads keep them). Several in the folder: the one closest in name.
+pub fn projector(m: &Model) -> Option<PathBuf> {
+    let is_eyes = |p: &Path| gguf_info(p).is_some_and(|i| i.companion && i.arch.as_deref() == Some("vision projector"));
+    if let Some(f) = m.files.iter().skip(1).find(|f| !f.not_local && is_eyes(&f.path)) {
+        return Some(f.path.clone());
+    }
+    if m.source == Source::Ollama {
+        return None;
+    }
+    let main = m.files.first()?;
+    let dir = main.path.parent()?;
+    let stem = main.path.file_stem()?.to_string_lossy().to_lowercase();
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p != &main.path && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("gguf")) && is_eyes(p))
+        .collect();
+    // The longest shared start of the name wins ("gemma-3-4b-mmproj" for "gemma-3-4b-Q4").
+    let shared = |p: &PathBuf| {
+        let n = p.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+        n.chars().zip(stem.chars()).take_while(|(a, b)| a == b).count()
+    };
+    found.sort_by_key(|p| std::cmp::Reverse(shared(p)));
+    found.into_iter().next()
+}
+
 // ---------- GGUF ----------
 
 /// What a GGUF file says about itself, from its metadata (the tensor directory isn't read).
@@ -854,7 +883,7 @@ fn safetensors_params(path: &Path) -> Option<(u64, HashMap<String, u64>)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::Write;
 
@@ -940,6 +969,25 @@ mod tests {
         assert_eq!(config_hint(&d.join("transformer")).as_deref(), Some("diffusers:FluxPipeline"));
     }
 
+    /// A vision model's projector sits beside it (LM Studio, Hugging Face): the closest name wins,
+    /// and a GGUF that isn't a projector doesn't count.
+    #[test]
+    fn pairs_a_projector_beside_the_model() {
+        let d = dir("projector");
+        let model = d.join("gemma-3-4b-it-Q4_K_M.gguf");
+        write_gguf(&model, &[("general.architecture", "gemma3")], &[], 1024);
+        let m = Model { name: "g".into(), source: Source::LmStudio, format: Format::Gguf, info: Info::default(), files: vec![File { path: model.clone(), size: 1024, not_local: false }], size: 1024, copies: Vec::new(), extra: 0, same_as: Vec::new(), orphan: false };
+        assert_eq!(projector(&m), None);
+        write_gguf(&d.join("gemma-3-4b-it-Q8_0.gguf"), &[("general.architecture", "gemma3")], &[], 1024);
+        assert_eq!(projector(&m), None);
+        write_gguf(&d.join("mmproj-other-f16.gguf"), &[("general.architecture", "clip")], &[], 1024);
+        write_gguf(&d.join("gemma-3-4b-it-mmproj-f16.gguf"), &[("general.architecture", "clip")], &[], 1024);
+        assert_eq!(projector(&m), Some(d.join("gemma-3-4b-it-mmproj-f16.gguf")));
+        // Ollama keeps its projector among the model's own files, never beside it.
+        let o = Model { source: Source::Ollama, ..m };
+        assert_eq!(projector(&o), None);
+    }
+
     #[test]
     fn names_and_shards() {
         assert_eq!(shard_stem("model-00001-of-00004.safetensors"), "model");
@@ -1012,6 +1060,7 @@ mod tests {
         assert_eq!(llava.files.len(), 2);
         assert_eq!(llava.info.quant.as_deref(), Some("Q4_0"));
         assert!(llava.runnable());
+        assert_eq!(projector(llava), Some(ol.join("blobs/sha256-bbbb")));
         let orphan = models.iter().find(|m| m.orphan).unwrap();
         assert_eq!(orphan.files[0].path, ol.join("blobs/sha256-cccc"));
         assert!(!orphan.runnable());

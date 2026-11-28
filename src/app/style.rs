@@ -229,6 +229,7 @@ const MENU_ICON_W: f32 = 20.0;
 /// come before the words they contain.
 const MENU_ICONS: &[(&str, &str)] = &[
     ("Ask AI", "💬"),
+    ("Open in Ask AI", "💬"),
     // Opening and viewing.
     ("Open in New Tab", "🗗"),
     ("Open in Other Pane", "⬌"),

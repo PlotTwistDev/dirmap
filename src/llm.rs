@@ -4,7 +4,7 @@
 //! or changes anything on disk because of what a model writes.
 
 use std::num::NonZeroU32;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
@@ -13,6 +13,9 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
+use llama_cpp_2::mtmd::{
+    MtmdBitmap, MtmdContext, MtmdContextParams, MtmdInputText, mtmd_default_marker,
+};
 use llama_cpp_2::model::{LlamaChatMessage, LlamaChatTemplate, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
@@ -63,12 +66,15 @@ pub struct LoadRequest {
     /// How many of the model's layers to put on the graphics chip: all of them (`u32::MAX`) on
     /// Apple silicon, as many as fit on a graphics card, 0 for the processor only.
     pub gpu_layers: u32,
+    /// The model's vision projector (mmproj), which lets it see pictures, if it has one.
+    pub projector: Option<PathBuf>,
 }
 
 pub enum Request {
     Load(LoadRequest),
-    /// Answer the last message of a conversation.
-    Ask { conversation: Vec<Message>, sampling: Sampling },
+    /// Answer the last message of a conversation. `pictures` go with the messages they name
+    /// (by index), for a model that can see; they're ignored by one that can't.
+    Ask { conversation: Vec<Message>, sampling: Sampling, pictures: Vec<(usize, PathBuf)> },
     /// The Lab: write up to `steps` tokens after `text` (as a chat message when `chat`, then
     /// `continuation`), one at a time, reporting each token's probabilities.
     Predict { text: String, chat: bool, continuation: String, steps: u32, settings: crate::lab::Settings },
@@ -103,7 +109,8 @@ pub enum Event {
     /// Loaded, with its context length and number of layers.
     /// The model is ready: its context length, how long loading took, its layers and how many of
     /// them are on the graphics chip (0 when it runs on the processor).
-    Loaded { context: u32, seconds: f32, layers: u32, gpu_layers: u32 },
+    /// `vision` when it can see pictures (its projector loaded).
+    Loaded { context: u32, seconds: f32, layers: u32, gpu_layers: u32, vision: bool },
     /// More of the answer.
     Text(String),
     Done(Stats),
@@ -287,7 +294,13 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
             }
         };
         let template = model.chat_template(None).ok();
-        let _ = tx.send(Event::Loaded { context, seconds: t.elapsed().as_secs_f32(), layers: model.n_layer(), gpu_layers });
+        // The eyes, when the model has them. A projector that won't load leaves a model that
+        // still reads text.
+        let mut eyes = req.projector.as_ref().and_then(|p| {
+            let params = MtmdContextParams { use_gpu: gpu_layers > 0, print_timings: false, n_threads: threads, ..MtmdContextParams::default() };
+            MtmdContext::init_from_file(p.to_str()?, &model, &params).ok().filter(|m| m.support_vision())
+        });
+        let _ = tx.send(Event::Loaded { context, seconds: t.elapsed().as_secs_f32(), layers: model.n_layer(), gpu_layers, vision: eyes.is_some() });
         // Tokens already in the context, from the previous turn.
         let mut cached: Vec<LlamaToken> = Vec::new();
         // The Lab's last look inside, and the model's last steps (read when first needed).
@@ -295,8 +308,17 @@ fn worker(rx: mpsc::Receiver<Request>, tx: mpsc::Sender<Event>, stop: Arc<Atomic
         let mut head: Option<Result<crate::lens::Head, String>> = None;
         loop {
             match rx.recv() {
-                Ok(Request::Ask { conversation, sampling }) => {
-                    let ev = answer(&model, &mut ctx, template.as_ref(), &conversation, sampling, &mut cached, &stop, &tx);
+                Ok(Request::Ask { conversation, sampling, pictures }) => {
+                    let ev = match eyes.as_mut() {
+                        Some(e) if !pictures.is_empty() => {
+                            let r = look_and_answer(&model, &mut ctx, e, template.as_ref(), &conversation, &pictures, sampling, &stop, &tx);
+                            // What the pictures left in the context isn't text the next turn can reuse.
+                            cached.clear();
+                            ctx.clear_kv_cache();
+                            r
+                        }
+                        _ => answer(&model, &mut ctx, template.as_ref(), &conversation, sampling, &mut cached, &stop, &tx),
+                    };
                     let _ = tx.send(match ev {
                         Ok(s) => Event::Done(s),
                         Err(e) => {
@@ -413,7 +435,6 @@ fn answer(
     // Room kept for the answer when fitting the conversation in; the answer may use more, up to
     // the end of the context.
     let room = (sampling.max_tokens as usize).min((n_ctx / 4).max(128));
-    let limit = sampling.max_tokens as usize;
     // Leave out the oldest messages (keeping a system message) until the prompt and an answer fit.
     let mut conv = conv.to_vec();
     let mut trimmed = false;
@@ -436,6 +457,110 @@ fn answer(
         return Ok(Stats { prompt_tokens: tokens.len(), cut_short: true, trimmed, ..Default::default() });
     };
     let prompt_seconds = t.elapsed().as_secs_f32();
+    let last = batch.n_tokens() - 1;
+    let pos = cached.len();
+    let (n, cut_short, seconds) = write(model, ctx, pos, Some((cached, last)), sampling, n_ctx, stop, tx)?;
+    Ok(Stats {
+        prompt_tokens: tokens.len(),
+        reused: same,
+        tokens: n,
+        prompt_seconds,
+        seconds,
+        cut_short,
+        trimmed,
+    })
+}
+
+/// The longest side a picture is shrunk to before the model sees it: projectors work at a few
+/// hundred pixels, and a phone photo at full size would only cost memory.
+const PICTURE_SIDE: u32 = 1024;
+/// Picture files larger than this aren't opened.
+const PICTURE_FILE_MAX: u64 = 64 << 20;
+
+/// A picture's pixels for the model: RGB, no larger than [`PICTURE_SIDE`] either way.
+pub fn picture(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+    let size = std::fs::metadata(path).map_err(|e| format!("couldn't read it: {e}"))?.len();
+    if size > PICTURE_FILE_MAX {
+        return Err(format!("it's too large to look at ({})", crate::scan::human(size)));
+    }
+    jxl_oxide::integration::register_image_decoding_hook();
+    let mut reader = image::ImageReader::open(path).and_then(|r| r.with_guessed_format()).map_err(|e| format!("couldn't open it: {e}"))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(512 << 20);
+    reader.limits(limits);
+    let img = reader.decode().map_err(|_| "it isn't a picture Filescape can read".to_string())?;
+    let img = if img.width().max(img.height()) > PICTURE_SIDE { img.thumbnail(PICTURE_SIDE, PICTURE_SIDE) } else { img };
+    let rgb = img.to_rgb8();
+    Ok((rgb.width(), rgb.height(), rgb.into_raw()))
+}
+
+/// Answers a conversation with pictures in it: the pictures go where their messages are, read
+/// through the projector, then the answer is written as usual. The context starts empty.
+#[allow(clippy::too_many_arguments)]
+fn look_and_answer(
+    model: &LlamaModel,
+    ctx: &mut llama_cpp_2::context::LlamaContext,
+    eyes: &mut MtmdContext,
+    template: Option<&LlamaChatTemplate>,
+    conv: &[Message],
+    pictures: &[(usize, PathBuf)],
+    sampling: Sampling,
+    stop: &AtomicBool,
+    tx: &mpsc::Sender<Event>,
+) -> Result<Stats, String> {
+    let t = Instant::now();
+    let n_ctx = ctx.n_ctx() as usize;
+    let room = (sampling.max_tokens as usize).min((n_ctx / 4).max(128));
+    let marker = mtmd_default_marker();
+    let mut bitmaps = Vec::new();
+    let mut conv = conv.to_vec();
+    for (i, p) in pictures {
+        let Some(m) = conv.get_mut(*i) else { continue };
+        let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let (w, h, px) = picture(p).map_err(|e| format!("{name} couldn't be shown to the model: {e}."))?;
+        bitmaps.push(MtmdBitmap::from_image_data(w, h, &px).map_err(|e| format!("{name} couldn't be shown to the model: {e}"))?);
+        m.text = format!("{marker}\n{}", m.text);
+    }
+    let text = prompt(model, template, &conv);
+    let refs: Vec<&MtmdBitmap> = bitmaps.iter().collect();
+    let chunks = eyes
+        .tokenize(MtmdInputText { text, add_special: true, parse_special: true }, &refs)
+        .map_err(|e| format!("The pictures couldn't be prepared for the model: {e}"))?;
+    let prompt_tokens = chunks.total_tokens();
+    if prompt_tokens + room > n_ctx {
+        return Err(format!(
+            "The pictures and question need about {prompt_tokens} tokens, more than this model's context ({n_ctx}) leaves room for. Choose a longer context, or ask about fewer pictures."
+        ));
+    }
+    ctx.clear_kv_cache();
+    if stop.load(Ordering::Relaxed) {
+        return Ok(Stats { prompt_tokens, cut_short: true, ..Default::default() });
+    }
+    let n_past = chunks
+        .eval_chunks(eyes, ctx, 0, 0, ctx.n_batch() as i32, true)
+        .map_err(|e| format!("The model couldn't look at the pictures: {e}"))?;
+    let prompt_seconds = t.elapsed().as_secs_f32();
+    let (n, cut_short, seconds) = write(model, ctx, n_past as usize, None, sampling, n_ctx, stop, tx)?;
+    Ok(Stats { prompt_tokens, reused: 0, tokens: n, prompt_seconds, seconds, cut_short, trimmed: false })
+}
+
+/// Writes the answer after what's in the context (`pos` tokens of it), sending each piece as it
+/// comes. The last read token's scores are ready (at `last` in the batch, or the last output).
+/// Returns how many tokens were written, whether it stopped before the model ended it, and the
+/// seconds it took. Written tokens are added to `cached` when given.
+#[allow(clippy::too_many_arguments)]
+fn write(
+    model: &LlamaModel,
+    ctx: &mut llama_cpp_2::context::LlamaContext,
+    mut pos: usize,
+    mut cached: Option<(&mut Vec<LlamaToken>, i32)>,
+    sampling: Sampling,
+    n_ctx: usize,
+    stop: &AtomicBool,
+    tx: &mpsc::Sender<Event>,
+) -> Result<(usize, bool, f32), String> {
     let mut sampler = if sampling.temperature <= 0.0 {
         LlamaSampler::greedy()
     } else {
@@ -447,15 +572,17 @@ fn answer(
             LlamaSampler::dist(rand_seed()),
         ])
     };
+    let mut batch = LlamaBatch::new(1, 1);
     let mut decoder = Utf8Stream::default();
     let mut n = 0usize;
     let mut cut_short = true;
-    let gen_start = Instant::now();
-    while n < limit && cached.len() < n_ctx {
+    let start = Instant::now();
+    let mut idx = cached.as_ref().map_or(-1, |c| c.1);
+    while n < sampling.max_tokens as usize && pos < n_ctx {
         if stop.load(Ordering::Relaxed) {
             break;
         }
-        let tok = sampler.sample(ctx, batch.n_tokens() - 1);
+        let tok = sampler.sample(ctx, idx);
         sampler.accept(tok);
         if model.vocab().is_eog(tok) {
             cut_short = false;
@@ -466,23 +593,19 @@ fn answer(
             let _ = tx.send(Event::Text(s));
         }
         batch.clear();
-        batch.add(tok, cached.len() as i32, &[0], true).map_err(|e| e.to_string())?;
+        batch.add(tok, pos as i32, &[0], true).map_err(|e| e.to_string())?;
         ctx.decode(&mut batch).map_err(|e| format!("The model stopped: {e}"))?;
-        cached.push(tok);
+        idx = 0;
+        if let Some((c, _)) = cached.as_mut() {
+            c.push(tok);
+        }
+        pos += 1;
         n += 1;
     }
     if let Some(s) = decoder.finish() {
         let _ = tx.send(Event::Text(s));
     }
-    Ok(Stats {
-        prompt_tokens: tokens.len(),
-        reused: same,
-        tokens: n,
-        prompt_seconds,
-        seconds: gen_start.elapsed().as_secs_f32(),
-        cut_short,
-        trimmed,
-    })
+    Ok((n, cut_short, start.elapsed().as_secs_f32()))
 }
 
 /// Reads `tokens` into the context, keeping what's already there from an earlier turn. The last
@@ -729,6 +852,23 @@ pub fn split_thinking(text: &str) -> (Option<&str>, &str) {
 mod tests {
     use super::*;
 
+    /// Pictures are shrunk to what a projector takes, and a file that isn't one is refused.
+    #[test]
+    fn pictures_shrink_and_refuse_non_pictures() {
+        let d = std::env::temp_dir().join(format!("filescape-llm-picture-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let big = d.join("big.png");
+        image::RgbaImage::from_pixel(3000, 1500, image::Rgba([10, 20, 30, 255])).save(&big).unwrap();
+        let (w, h, px) = picture(&big).unwrap();
+        assert_eq!((w, h), (PICTURE_SIDE, PICTURE_SIDE / 2));
+        assert_eq!(px.len(), (w * h * 3) as usize);
+        assert_eq!(&px[..3], &[10, 20, 30]);
+        let fake = d.join("fake.png");
+        std::fs::write(&fake, "not a picture").unwrap();
+        assert!(picture(&fake).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn split_characters_wait_until_whole() {
         let mut d = Utf8Stream::default();
@@ -761,7 +901,7 @@ mod tests {
     fn predicts_with_probabilities() {
         let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
         let e = Engine::start();
-        e.send(Request::Load(LoadRequest { path: path.into(), context: 512, gpu_layers: 0 }));
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 512, gpu_layers: 0, projector: None }));
         let settings = crate::lab::Settings { temperature: 0.0, ..Default::default() };
         let run = |e: &Engine, continuation: &str, steps| {
             e.send(Request::Predict { text: "Hello there".into(), chat: false, continuation: continuation.into(), steps, settings });
@@ -793,7 +933,7 @@ mod tests {
     fn looks_inside() {
         let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
         let e = Engine::start();
-        e.send(Request::Load(LoadRequest { path: path.into(), context: 512, gpu_layers: 0 }));
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 512, gpu_layers: 0, projector: None }));
         let next = |e: &Engine| loop {
             match e.rx.recv_timeout(std::time::Duration::from_secs(120)).unwrap() {
                 Event::Error(err) => panic!("{err}"),
@@ -828,7 +968,7 @@ mod tests {
     fn speed_test_runs() {
         let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
         let e = Engine::start();
-        e.send(Request::Load(LoadRequest { path: path.into(), context: 1024, gpu_layers: 0 }));
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 1024, gpu_layers: 0, projector: None }));
         e.send(Request::Bench(crate::lab::BenchSettings { read: 128, write: 16, runs: 3 }));
         let mut runs = 0;
         loop {
@@ -866,8 +1006,8 @@ mod tests {
     fn runs_a_model() {
         let Ok(path) = std::env::var("FILESCAPE_TEST_GGUF") else { return };
         let e = Engine::start();
-        e.send(Request::Load(LoadRequest { path: path.into(), context: 1024, gpu_layers: 0 }));
-        e.send(Request::Ask { conversation: vec![Message { role: Role::User, text: "Say hello.".into() }], sampling: Sampling { temperature: 0.0, max_tokens: 16 } });
+        e.send(Request::Load(LoadRequest { path: path.into(), context: 1024, gpu_layers: 0, projector: None }));
+        e.send(Request::Ask { conversation: vec![Message { role: Role::User, text: "Say hello.".into() }], sampling: Sampling { temperature: 0.0, max_tokens: 16 }, pictures: vec![] });
         let mut text = String::new();
         loop {
             match e.rx.recv_timeout(std::time::Duration::from_secs(120)).unwrap() {
@@ -888,6 +1028,7 @@ mod tests {
                 Message { role: Role::User, text: "Again.".into() },
             ],
             sampling: Sampling { temperature: 0.0, max_tokens: 8 },
+            pictures: vec![],
         });
         loop {
             match e.rx.recv_timeout(std::time::Duration::from_secs(120)).unwrap() {

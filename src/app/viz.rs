@@ -478,26 +478,45 @@ impl App {
         }
         let mut go = None;
         let last = names.len() - 1;
-        // Long paths keep the first part and the last three, with the rest in a ⋯ menu.
-        let hidden = if names.len() > 4 { 1..names.len() - 3 } else { 0..0 };
+        // Long paths keep the first part and as many of the last ones as fit (three at most),
+        // with the rest in a … menu.
         ui.spacing_mut().item_spacing.x = 2.0;
-        for (k, name) in names.iter().enumerate() {
-            if hidden.contains(&k) {
-                if k == hidden.start {
-                    let r = ui.add(egui::Button::new(RichText::new("…").color(t.weak)).frame_when_inactive(false));
-                    egui::Popup::menu(&r).show(|ui| {
-                        for j in hidden.clone() {
-                            if ui.button(&names[j]).clicked() {
-                                go = Some(j);
-                            }
-                        }
-                    });
+        let label = |k: usize, name: &str| if k == last { RichText::new(format!("{name}  ⏷")).strong().color(t.strong) } else { RichText::new(name).color(t.text) };
+        let measure = |ui: &egui::Ui, r: RichText| egui::WidgetText::from(r).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button).size().x;
+        let pad = ui.spacing().button_padding.x * 2.0;
+        let gap = ui.spacing().item_spacing.x;
+        let widths: Vec<f32> = names.iter().enumerate().map(|(k, n)| measure(ui, label(k, n)) + pad).collect();
+        let sep = measure(ui, RichText::new("/")) + gap * 2.0;
+        let more = measure(ui, RichText::new("…")) + pad + sep;
+        let mut shown = super::browser::fit_crumbs(&widths, sep, more, ui.available_width());
+        if shown.len() > 4 {
+            let tail = shown.split_off(shown.len() - 3);
+            shown.truncate(usize::from(shown[0] == 0));
+            shown.extend(tail);
+        }
+        let clip = ui.clip_rect().intersect(ui.max_rect());
+        ui.set_clip_rect(clip);
+        let mut next = 0;
+        for (j, &k) in shown.iter().enumerate() {
+            if k > next {
+                if j > 0 {
                     ui.label(RichText::new("/").color(t.weak));
                 }
-                continue;
+                let r = ui.add(egui::Button::new(RichText::new("…").color(t.weak)).frame_when_inactive(false));
+                egui::Popup::menu(&r).show(|ui| {
+                    for h in next..k {
+                        if ui.button(&names[h]).clicked() {
+                            go = Some(h);
+                        }
+                    }
+                });
             }
+            if j > 0 || k > 0 {
+                ui.label(RichText::new("/").color(t.weak));
+            }
+            next = k + 1;
             if k == last {
-                let r = ui.add(egui::Button::new(RichText::new(format!("{name}  ⏷")).strong().color(t.strong)).frame_when_inactive(false));
+                let r = ui.add(egui::Button::new(label(k, &names[k])).frame_when_inactive(false).truncate());
                 // No tree to walk while the first scan runs (or "Only matches" is being worked out).
                 let at = if self.shown_tree().is_some() { self.full_path(&self.zoom) } else { self.scanned_path.clone() };
                 let r = r.on_hover_text(format!("{}\n\nClick to scan another folder or drive.", at.shown()));
@@ -505,12 +524,8 @@ impl App {
                     ui.set_min_width(460.0);
                     ui.horizontal(|ui| self.scan_controls(ui, 260.0));
                 });
-            } else {
-                let r = ui.add(egui::Button::new(RichText::new(name).color(t.text)).frame_when_inactive(false));
-                if r.clicked() {
-                    go = Some(k);
-                }
-                ui.label(RichText::new("/").color(t.weak));
+            } else if ui.add(egui::Button::new(label(k, &names[k])).frame_when_inactive(false)).clicked() {
+                go = Some(k);
             }
         }
         if let Some(k) = go {
@@ -923,7 +938,7 @@ impl App {
         if !pro {
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("🔒 Filtering by type, place, size or age is part of Filescape Professional. Filters already on can always be cleared.").size(kit::DESC).color(t.weak));
+                ui.label(RichText::new("🔒 Filtering by type, place, size or age is part of Filescape Professional (Applications is free). Filters already on can always be cleared.").size(kit::DESC).color(t.weak));
             });
         }
 
@@ -949,7 +964,7 @@ impl App {
             for c in Category::ALL {
                 let on = self.filter.kinds & c.bit() != 0;
                 // Applications are free, like everything else about them.
-                if choice(ui, on, plain(c.label()), c.tooltip()).clicked() && (c == Category::Applications || gate(self, on)) {
+                if choice(ui, on, plain(c.label()), c.tooltip()).clicked() && (!crate::categories::adds_pro_kind(self.filter.kinds, self.filter.kinds ^ c.bit()) || gate(self, on)) {
                     self.filter.kinds ^= c.bit();
                 }
             }

@@ -125,6 +125,10 @@ pub(super) struct Look {
     pub download_ok: std::collections::HashSet<PathBuf>,
     /// A video playing in the preview.
     pub video: Option<VideoView>,
+    /// The app's frame count, and the frame a preview last drew: a sound or video nothing
+    /// shows any more is stopped (see `stop_unseen_media`).
+    pub tick: u64,
+    seen: u64,
     /// Frames from across the video being previewed.
     strip: Option<StripView>,
     /// Quick Look's own window: where it opened this time (kept while it's open, so the system
@@ -132,6 +136,21 @@ pub(super) struct Look {
     /// next time.
     win_home: Option<(egui::Pos2, Vec2)>,
     win_last: Option<(egui::Pos2, Vec2)>,
+}
+
+impl Look {
+    /// Stop the sound or video playing in the preview.
+    pub fn stop_media(&mut self) {
+        self.player = None;
+        self.video = None;
+    }
+
+    /// Close Quick Look. What it was playing stops, rather than carrying on in the preview pane.
+    pub fn close(&mut self) {
+        self.open = false;
+        self.full = false;
+        self.stop_media();
+    }
 }
 
 /// A video's filmstrip: being read, then its frames.
@@ -896,9 +915,25 @@ fn look_viewport() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("quick-look")
 }
 
+/// Whether Ask AI can be asked about `path` from a preview: a file on this computer (not on a
+/// server or inside an archive).
+pub(super) fn ask_ok(path: &Path) -> bool {
+    !crate::fsys::remote::is_remote(path) && !crate::fsys::archive::inside(path)
+}
+
 impl App {
+    /// At the start of a frame: stop a sound or video that no preview drew last frame (the pane
+    /// was closed, or the view changed), so it doesn't play on unseen.
+    pub(super) fn stop_unseen_media(&mut self) {
+        let look = &mut self.files.look;
+        if look.seen != look.tick && (look.player.is_some() || look.video.is_some()) {
+            look.stop_media();
+        }
+        look.tick += 1;
+    }
+
     /// The item a preview shows: the cursor's item in the focused pane.
-    fn look_target(&self) -> Option<(PathBuf, Entry)> {
+    pub(super) fn look_target(&self) -> Option<(PathBuf, Entry)> {
         if self.files.look.from_map {
             return self.map_target().filter(|(_, e)| !e.is_dir);
         }
@@ -915,14 +950,13 @@ impl App {
             return;
         }
         let Some((path, e)) = self.look_target() else {
-            self.files.look.open = false;
+            self.files.look.close();
             return;
         };
         let typing = ctx.egui_wants_keyboard_input();
         let close = !typing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) || i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
         if close {
-            self.files.look.open = false;
-            self.files.look.full = false;
+            self.files.look.close();
             return;
         }
         if !typing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
@@ -940,6 +974,7 @@ impl App {
         let full = self.files.look.full;
         let mut open = true;
         let mut step = 0i64;
+        let mut ask_here = false;
         let mut win = egui::Window::new(egui::RichText::new(format!("{}", e.name)).strong())
             // A window of its own when full, so it comes back to its old size and place.
             .id(egui::Id::new(("quick-look", full)))
@@ -957,6 +992,9 @@ impl App {
                         if ui.button("Open").clicked() {
                             let p = path.clone();
                             self.files.spawn(move || crate::actions::open(&p));
+                        }
+                        if self.ask_in_files() && !self.files.look.from_map && ask_ok(&path) && crate::kit::button(ui, crate::kit::Kind::Ghost, Some(crate::kit::Icon::Ai), "Ask AI").on_hover_text("Ask AI about this file, in the preview pane beside the list").clicked() {
+                            ask_here = true;
                         }
                         let (icon, tip) = if full { ("Window", "Back to a window (F)") } else { ("Full screen", "Fill the window (F)") };
                         if ui.button(icon).on_hover_text(tip).clicked() {
@@ -980,9 +1018,14 @@ impl App {
                 let avail = ui.available_size();
                 self.preview_body(ui, &path, &e, avail);
             });
+        if ask_here {
+            // Ask AI sits in the preview pane: Quick Look closes so the answer can be read beside
+            // the list.
+            open = false;
+            self.open_files_ask(Some(path.clone()));
+        }
         if !open {
-            self.files.look.open = false;
-            self.files.look.full = false;
+            self.files.look.close();
         }
         if step != 0 {
             self.files_move_cursor(|pos, _| pos.map(|p| p as i64 + step).unwrap_or(0), false);
@@ -1007,7 +1050,7 @@ impl App {
             .with_inner_size(home.1)
             .with_min_inner_size([320.0, 240.0]);
         let full = self.files.look.full;
-        let (mut close, mut step, mut toggle) = (false, 0i64, false);
+        let (mut close, mut step, mut toggle, mut ask_here) = (false, 0i64, false, false);
         ctx.show_viewport_immediate(id, builder, |ctx, _class| {
             let (closing, outer, inner) = ctx.input(|i| (i.viewport().close_requested(), i.viewport().outer_rect, i.viewport().inner_rect));
             close |= closing;
@@ -1036,6 +1079,9 @@ impl App {
                             let p = path.clone();
                             self.files.spawn(move || crate::actions::open(&p));
                         }
+                        if self.ask_in_files() && !self.files.look.from_map && ask_ok(&path) && crate::kit::button(ui, crate::kit::Kind::Ghost, Some(crate::kit::Icon::Ai), "Ask AI").on_hover_text("Ask AI about this file, in the preview pane beside the list").clicked() {
+                            ask_here = true;
+                        }
                         let (label, tip) = if full { ("Window", "Back to a window (F)") } else { ("Full screen", "Fill the screen (F)") };
                         if ui.button(label).on_hover_text(tip).clicked() {
                             toggle = true;
@@ -1061,9 +1107,12 @@ impl App {
             self.files.look.full = !full;
             ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Fullscreen(!full));
         }
+        if ask_here {
+            close = true;
+            self.open_files_ask(Some(path.clone()));
+        }
         if close {
-            self.files.look.open = false;
-            self.files.look.full = false;
+            self.files.look.close();
             self.files.look.win_home = None;
         }
         if step != 0 && !self.files.look.from_map {
@@ -1090,7 +1139,7 @@ impl App {
             }
             // A sequence row stands for all its frames.
             let (kind, size) = match t.seqs.get(&i) {
-                Some(s) => (format!("{} sequence", s.seq.extension().to_uppercase()), s.seq.bytes),
+                Some(s) => (format!("{} {}", s.seq.extension().to_uppercase(), if s.seq.is_pictures() { "sequence" } else { "numbered set" }), s.seq.bytes),
                 // A folder's size is known only from an analysis that covers it.
                 None if e.is_dir => (browser::entry_kind(e), t.sizes.as_ref().and_then(|s| s.1.get(&e.name)).map_or(0, |s| s.0)),
                 None => (browser::kind_for(&e.name, false), e.size),
@@ -1142,18 +1191,33 @@ impl App {
         ui.separator();
     }
 
-    /// The preview pane at the right of the list, laid out as Storage Analysis's: Preview and
-    /// Details tabs, the preview taking all the room the facts under it leave in the pane
-    /// (`tall` points high), so they sit at the bottom and pictures and videos get the space.
-    pub(super) fn preview_pane(&mut self, ui: &mut egui::Ui, tall: f32) {
+    /// The Files preview pane's tabs: Preview, Details and (unless turned off in Settings) Ask AI,
+    /// with the button that closes the pane.
+    pub(super) fn preview_tabs(&mut self, ui: &mut egui::Ui) {
         use super::rails::PreviewTab;
-        use crate::kit::{self, Icon, Kind as K};
-        let pal = style::pal(ui);
+        use crate::kit::{self, Icon};
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            let mut tab = self.files.prefs.map_preview_tab;
-            kit::segmented(ui, &mut tab, &[(PreviewTab::Preview, "Preview"), (PreviewTab::Details, "Details")], false);
-            self.files.prefs.map_preview_tab = tab;
+            let ask = self.ask_in_files();
+            // 0 Preview, 1 Details, 2 Ask AI.
+            let mut tab = match (self.files.prefs.ask_tab && ask, self.files.prefs.map_preview_tab) {
+                (true, _) => 2,
+                (_, PreviewTab::Details) => 1,
+                _ => 0,
+            };
+            let before = tab;
+            if ask {
+                kit::segmented(ui, &mut tab, &[(0, "Preview"), (1, "Details"), (2, "Ask AI")], false)
+                    .on_hover_text("Ask AI: ask a model running on this computer about the selected file or folder");
+            } else {
+                kit::segmented(ui, &mut tab, &[(0, "Preview"), (1, "Details")], false);
+            }
+            if tab != before {
+                self.files.prefs.ask_tab = tab == 2;
+                if tab < 2 {
+                    self.files.prefs.map_preview_tab = if tab == 1 { PreviewTab::Details } else { PreviewTab::Preview };
+                }
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if kit::icon_button(ui, Icon::FoldRight, "Close the preview pane (Alt+P)").clicked() {
                     self.files.prefs.preview = false;
@@ -1161,6 +1225,16 @@ impl App {
             });
         });
         ui.add_space(4.0);
+    }
+
+    /// The preview pane at the right of the list, laid out as Storage Analysis's: Preview and
+    /// Details tabs, the preview taking all the room the facts under it leave in the pane
+    /// (`tall` points high), so they sit at the bottom and pictures and videos get the space.
+    pub(super) fn preview_pane(&mut self, ui: &mut egui::Ui, tall: f32) {
+        use super::rails::PreviewTab;
+        use crate::kit::{self, Icon, Kind as K};
+        let pal = style::pal(ui);
+        self.preview_tabs(ui);
         let details = self.files.prefs.map_preview_tab == PreviewTab::Details;
         self.selection_tally(ui);
         let Some((path, e)) = self.look_target() else {
@@ -1180,7 +1254,7 @@ impl App {
         // like a file.
         if details {
             // The Details tab: no big preview, everything known about it.
-        } else if crate::apps::is_app(e.bundle) {
+        } else if crate::apps::own_icon(e.bundle) {
             let (r, _) = ui.allocate_exact_size(vec2(w, 112.0), Sense::hover());
             self.icons.paint_app(ui, Rect::from_center_size(r.center(), vec2(96.0, 96.0)), &path, e.modified);
         } else if e.is_dir && !crate::packages::is_package(&path, &e.name) {
@@ -1197,12 +1271,46 @@ impl App {
         ui.add_space(8.0);
         ui.add(egui::Label::new(egui::RichText::new(crate::apps::shown_name(&e.name, e.bundle)).strong()).wrap());
         ui.add_space(4.0);
-        let is_app = crate::apps::is_app(e.bundle) && !crate::fsys::remote::is_remote(&path) && !crate::fsys::archive::inside(&path);
+        let local = !crate::fsys::remote::is_remote(&path) && !crate::fsys::archive::inside(&path);
+        let is_app = crate::apps::own_icon(e.bundle) && local;
         let app_info = if is_app { self.files.app_info.get(ui.ctx(), &path, e.modified) } else { None };
+        let kind = crate::apps::of(e.bundle).filter(|_| local);
+        // Where a shortcut points, on this computer.
+        let original = app_info.as_ref().and_then(|d| d.shortcut.as_ref()?.target.clone()).map(|t| PathBuf::from(crate::apps::lnk::expand(&t))).filter(|t| cfg!(windows) && t.exists());
         let actions = |app: &mut Self, ui: &mut egui::Ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-                if is_app {
+                if kind == Some(crate::apps::Bundle::WinApp) {
+                    // A Windows program: Windows runs it, so SmartScreen and UAC still have their say.
+                    let r = ui.add_enabled_ui(cfg!(windows), |ui| kit::button(ui, K::Primary, Some(Icon::External), "Launch Application")).inner;
+                    if r.clicked() {
+                        let p = path.clone();
+                        app.files.spawn(move || crate::actions::open(&p));
+                    }
+                    r.on_hover_text("Run it, as Explorer would").on_disabled_hover_text("This is a Windows program: it can only be run on Windows.");
+                } else if kind == Some(crate::apps::Bundle::Shortcut) {
+                    let r = ui.add_enabled_ui(cfg!(windows), |ui| kit::button(ui, K::Primary, Some(Icon::External), "Open")).inner;
+                    if r.clicked() {
+                        let p = path.clone();
+                        app.files.spawn(move || crate::actions::open(&p));
+                    }
+                    r.on_hover_text("Open what it points to").on_disabled_hover_text("This is a Windows shortcut: it can only be followed on Windows.");
+                    if let Some(t) = original.clone()
+                        && kit::button(ui, K::Secondary, Some(Icon::Folder), "Show Original").on_hover_text("Show what it points to, selected in its folder").clicked()
+                        && let (Some(dir), Some(name)) = (t.parent(), t.file_name())
+                    {
+                        app.files.reveal(dir.to_path_buf(), vec![name.to_string_lossy().into()]);
+                    }
+                } else if matches!(kind, Some(crate::apps::Bundle::Launcher | crate::apps::Bundle::AppImage)) {
+                    // A Linux launcher or AppImage: launched only when it's trusted, never made so.
+                    let ready = cfg!(target_os = "linux") && app_info.as_ref().is_some_and(|d| d.problem.is_none());
+                    let r = ui.add_enabled_ui(ready, |ui| kit::button(ui, K::Primary, Some(Icon::External), "Launch Application")).inner;
+                    if r.clicked() {
+                        app.launch_apps(vec![path.clone()]);
+                    }
+                    let why = if cfg!(target_os = "linux") { "It can't be launched: see Problem below." } else { "This is a Linux application: it can only be launched on Linux." };
+                    r.on_hover_text("Start it, as the desktop's menu would").on_disabled_hover_text(why);
+                } else if kind == Some(crate::apps::Bundle::App) {
                     // An application: launch it (never just by selecting or previewing it).
                     let r = ui.add_enabled_ui(crate::apps::CAN_LAUNCH, |ui| kit::button(ui, K::Primary, Some(Icon::External), "Launch Application")).inner;
                     if r.clicked() {
@@ -1219,6 +1327,9 @@ impl App {
                 if !e.is_dir && kit::button(ui, K::Secondary, Some(Icon::Eye), "Quick Look").on_hover_text("A large preview (Space)").clicked() {
                     app.files.look.open = true;
                     app.files.look.from_map = false;
+                }
+                if app.ask_in_files() && local && kit::button(ui, K::Secondary, Some(Icon::Ai), "Ask AI").on_hover_text("Ask a model running on this computer about it").clicked() {
+                    app.open_files_ask(Some(path.clone()));
                 }
                 let r = kit::icon_button(ui, Icon::More, "More");
                 egui::Popup::menu(&r).show(|ui| {
@@ -1502,7 +1613,16 @@ impl App {
 
     fn preview_main(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
         let pal = style::pal(ui);
-        if crate::apps::is_app(e.bundle) {
+        // A sound or video stops when the preview moves on to another item (a folder or an app
+        // too), and carries on only while a preview shows it.
+        if self.files.look.player.as_ref().is_some_and(|p| p.path != path) {
+            self.files.look.player = None;
+        }
+        if self.files.look.video.as_ref().is_some_and(|v| v.video.path != path) {
+            self.files.look.video = None;
+        }
+        self.files.look.seen = self.files.look.tick;
+        if crate::apps::own_icon(e.bundle) {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             let side = (r.width().min(r.height()) * 0.6).clamp(64.0, 256.0);
             self.icons.paint_app(ui, Rect::from_center_size(r.center(), vec2(side, side)), path, e.modified);
@@ -1515,13 +1635,6 @@ impl App {
         }
         let ctx = ui.ctx().clone();
         let tint = self.colors.get(e.ext()).copied().unwrap_or(Color32::GRAY);
-        // A sound stops when the preview moves on to another file.
-        if self.files.look.player.as_ref().is_some_and(|p| p.path != path) {
-            self.files.look.player = None;
-        }
-        if self.files.look.video.as_ref().is_some_and(|v| v.video.path != path) {
-            self.files.look.video = None;
-        }
         if self.files.look.view_of.as_deref() != Some(path) {
             self.files.look.view_of = Some(path.to_path_buf());
             self.files.look.zoom = None;
@@ -2239,8 +2352,11 @@ fn splat_view(ui: &mut egui::Ui, path: &Path, scene: &Arc<crate::splat::Scene>, 
     // The same scene can be on screen twice (Quick Look over the preview pane), sharing one
     // picture. Only the bigger view draws; the other shows its picture stretched, so the two
     // don't take turns asking for their own size for ever.
+    // Quick Look in a window of its own is a separate viewport with its own pass count, drawn
+    // inside the main window's pass: both views go by the main window's count, or each takes
+    // the other's claim for an old one and they both draw, fighting over the picture.
     let claim_id = egui::Id::new(("splat-claim", path));
-    let pass = ui.ctx().cumulative_pass_nr();
+    let pass = ui.ctx().cumulative_pass_nr_for(egui::ViewportId::ROOT);
     let claim: Option<(u64, usize)> = ui.data(|d| d.get_temp(claim_id));
     let follower = claim.is_some_and(|(p, area)| p + 1 >= pass && area > px[0] * px[1]);
     if !follower {
@@ -3114,9 +3230,47 @@ pub(super) fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
         row("Details", "Reading…".into());
         return;
     };
+    if let Some(sc) = &d.shortcut {
+        row("Points to", sc.target.clone().or_else(|| sc.relative.clone()).unwrap_or_else(|| "Not said".into()));
+        if let Some(a) = sc.arguments.clone() {
+            row("Arguments", a);
+        }
+        if let Some(w) = sc.working_dir.clone() {
+            row("Start in", w);
+        }
+        if let Some(c) = sc.comment.clone() {
+            row("Comment", c);
+        }
+    }
     let i = d.info.clone().unwrap_or_default();
     if let Some(n) = i.name.clone() {
         row("Name", n);
+    }
+    if let Some(t) = d.appimage {
+        row("Package", if t == 0 { "A Linux program (not an AppImage)".into() } else { format!("AppImage (type {t}): runs without installing") });
+    }
+    if let Some(n) = i.description.clone() {
+        row("Description", n);
+    }
+    if let Some(e) = &d.launcher {
+        match e.kind.as_str() {
+            "Link" => row("Opens", e.url.clone().unwrap_or_else(|| "Not said".into())),
+            "Application" => {
+                // The command as it runs with no files given (without %U and the like).
+                let cmd = e.exec.as_deref().map(|x| x.split_whitespace().filter(|w| !(w.len() == 2 && w.starts_with('%'))).collect::<Vec<_>>().join(" ")).unwrap_or_else(|| "Not said".into());
+                row("Runs", if e.terminal { format!("{cmd}, in a terminal") } else { cmd });
+            }
+            k => row("Type", k.to_string()),
+        }
+        if let Some(p) = e.path.clone() {
+            row("Start in", p);
+        }
+        if !e.categories.is_empty() {
+            row("Categories", e.categories.join(", "));
+        }
+        if e.hidden {
+            row("Menus", "Hidden from the applications menu".into());
+        }
     }
     if let Some(p) = d.publisher() {
         row("Publisher", p);
@@ -3131,13 +3285,17 @@ pub(super) fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
         row("Identifier", id);
     }
     if let Some(a) = d.arch.clone() {
-        row("Runs on", a);
+        row("Runs on", if d.console { format!("{a}, in a command window") } else { a });
     }
     if let Some(m) = i.min_os.clone() {
         row("Needs", format!("macOS {m} or later"));
     }
     let (bytes, alloc, files) = d.size;
-    row("Size", format!("{} on disk, {} of data, in {} files", crate::scan::human(alloc), crate::scan::human(bytes), group(files)));
+    if files == 1 {
+        row("Size", format!("{} on disk, {} of data", crate::scan::human(alloc), crate::scan::human(bytes)));
+    } else {
+        row("Size", format!("{} on disk, {} of data, in {} files", crate::scan::human(alloc), crate::scan::human(bytes), group(files)));
+    }
     if let Some(s) = d.signed.clone() {
         row("Signed", s);
     }
@@ -3145,7 +3303,10 @@ pub(super) fn app_facts(ui: &mut egui::Ui, d: Option<&crate::apps::Details>) {
         row("Gatekeeper", g);
     }
     if d.quarantined {
-        row("Downloaded", "From the internet, not opened yet: macOS will ask before it first opens".into());
+        row(
+            "Downloaded",
+            if cfg!(windows) { "From the internet: Windows SmartScreen checks it when it's opened".into() } else { "From the internet, not opened yet: macOS will ask before it first opens".into() },
+        );
     }
     if let Some(p) = d.problem.clone() {
         row("Problem", p);

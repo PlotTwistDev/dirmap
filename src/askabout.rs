@@ -6,7 +6,7 @@
 
 use crate::scan::{self, Node, store};
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 /// One file or folder, as described to the model.
@@ -23,6 +23,18 @@ pub struct Item {
     pub online_only: bool,
 }
 
+/// Files' contents, read for a question: the text for the model, and a line for the user on
+/// each file that was only partly read or not read, so an answer never seems to cover more
+/// than it does.
+#[derive(Clone, Debug, Default)]
+pub struct Read {
+    pub text: String,
+    pub notes: Vec<String>,
+    /// Text files sent with their lines numbered, and how many lines were sent: what a
+    /// reference such as "notes.txt:12" in the answer can be checked against.
+    pub lines: Vec<(PathBuf, usize)>,
+}
+
 /// What the model is told, ready to send.
 #[derive(Clone, Debug, Default)]
 pub struct Facts {
@@ -35,6 +47,9 @@ pub struct Facts {
     pub readable: Vec<PathBuf>,
     /// The files and folders asked about, listed as the answer's sources.
     pub paths: Vec<PathBuf>,
+    /// A line for the user on each folder only partly described, so an answer never seems to
+    /// cover more than the model was told.
+    pub notes: Vec<String>,
 }
 
 /// Where what came from the user's files starts and ends in a message to the model. The system
@@ -55,13 +70,16 @@ pub fn from_disk(paths: &[PathBuf], budget: usize) -> Facts {
     for p in paths {
         let Ok(md) = std::fs::symlink_metadata(p) else { continue };
         let it = item_from(p, &md);
-        if !it.is_dir && !it.online_only && md.is_file() {
+        if !it.is_dir && !it.online_only && md.is_file() && !is_picture(p) {
             readable.push(p.clone());
         }
-        let inside = it.is_dir.then(|| listing(p));
-        parts.push(Part { path: p.clone(), item: it, inside, types: None });
+        let (inside, unlisted) = if it.is_dir { let (v, more) = listing(p); (Some(v), more) } else { (None, false) };
+        let outline = if it.is_dir { outline_disk(p) } else { Vec::new() };
+        parts.push(Part { path: p.clone(), item: it, inside, types: None, outline, unlisted });
     }
-    render(parts, readable, budget, false)
+    let mut f = render(parts, readable, budget, false);
+    add_models(&mut f, budget);
+    f
 }
 
 /// Facts about `paths` from a scan: sizes include everything inside folders, and folders get a
@@ -71,7 +89,7 @@ pub fn from_tree(nodes: &[(PathBuf, &Node)], budget: usize) -> Facts {
     let mut readable = Vec::new();
     for (p, n) in nodes {
         let it = item_of(n);
-        if !n.is_dir && !it.online_only {
+        if !n.is_dir && !it.online_only && !is_picture(p) {
             readable.push(p.clone());
         }
         let (inside, types) = if n.is_dir {
@@ -79,9 +97,12 @@ pub fn from_tree(nodes: &[(PathBuf, &Node)], budget: usize) -> Facts {
         } else {
             (None, None)
         };
-        parts.push(Part { path: p.clone(), item: it, inside, types });
+        let outline = if n.is_dir { outline_tree(n) } else { Vec::new() };
+        parts.push(Part { path: p.clone(), item: it, inside, types, outline, unlisted: false });
     }
-    render(parts, readable, budget, true)
+    let mut f = render(parts, readable, budget, true);
+    add_models(&mut f, budget);
+    f
 }
 
 struct Part {
@@ -89,6 +110,10 @@ struct Part {
     item: Item,
     inside: Option<Vec<Item>>,
     types: Option<Vec<(String, u64, u64)>>,
+    /// The folders below a folder, a few levels down, as indented lines.
+    outline: Vec<String>,
+    /// Items in the folder that weren't looked at (a very large folder on disk).
+    unlisted: bool,
 }
 
 fn item_of(n: &Node) -> Item {
@@ -115,10 +140,147 @@ fn item_from(p: &Path, md: &std::fs::Metadata) -> Item {
     }
 }
 
-/// What a folder holds directly. Only metadata: nothing is opened.
-fn listing(dir: &Path) -> Vec<Item> {
-    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
-    rd.flatten().take(5000).filter_map(|e| e.metadata().ok().map(|md| item_from(&e.path(), &md))).collect()
+/// What Filescape reads from an AI model file asked about (GGUF or safetensors): its own
+/// description of itself, and whether this computer could run it. These are measured facts, so
+/// the model answering doesn't have to guess from the file name.
+fn add_models(f: &mut Facts, budget: usize) {
+    let models: Vec<PathBuf> = f.paths.iter().filter(|p| is_model_file(p)).take(4).cloned().collect();
+    let room = budget / 3 / models.len().max(1);
+    for p in models {
+        let Some(text) = model_facts(&p) else { continue };
+        let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let block = format!("\nWhat Filescape read from the model file {name}:\n{text}");
+        if block.len() <= room.max(600) {
+            f.text.push_str(&block);
+        } else {
+            f.text.push_str(&block.chars().take(room.max(600)).collect::<String>());
+            f.text.push_str("\n");
+            f.notes.push(format!("{name}: only some of what Filescape read from the model was included"));
+        }
+    }
+}
+
+fn is_model_file(p: &Path) -> bool {
+    let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().to_ascii_lowercase());
+    matches!(scan::ext_of(&name), "gguf" | "safetensors") && p.is_file()
+}
+
+/// The facts the model inspector reads from one model file, one per line, and the memory to
+/// run it here. Nothing is run; cloud-only files aren't read.
+pub fn model_facts(p: &Path) -> Option<String> {
+    use crate::models::{File, Format, Model, Source};
+    let md = std::fs::metadata(p).ok()?;
+    let not_local = scan::on_disk(&md, || p.to_path_buf(), 4096).1 & store::ONLINE_ONLY != 0;
+    if not_local {
+        return Some("It's in the cloud only, so it wasn't read (reading it would download it).\n".into());
+    }
+    let name = p.file_name()?.to_string_lossy().into_owned();
+    let format = if scan::ext_of(&name).eq_ignore_ascii_case("gguf") { Format::Gguf } else { Format::Safetensors };
+    let info = if format == Format::Gguf { crate::models::gguf_info(p).unwrap_or_default() } else { Default::default() };
+    let file = File { path: p.to_path_buf(), size: md.len(), not_local: false };
+    let m = Model { name, source: Source::Folder, format, info, files: vec![file], size: md.len(), copies: Vec::new(), extra: 0, same_as: Vec::new(), orphan: false };
+    let d = crate::inspect::inspect(&m);
+    if let Some(why) = &d.unread {
+        return Some(format!("{why}\n"));
+    }
+    let mut out = String::new();
+    for f in d.facts.iter().take(16) {
+        let how = match f.how {
+            crate::inspect::How::Verified => "",
+            crate::inspect::How::Calculated => " (worked out from the file)",
+            crate::inspect::How::Documented => " (stated in the publisher's files, not checked)",
+        };
+        out.push_str(&format!("- {}: {}{how}\n", f.label, f.value));
+    }
+    if m.info.companion {
+        out.push_str("- It's an add-on (a vision projector or adapter) that goes with another model; it doesn't run on its own.\n");
+        return Some(out);
+    }
+    let weights: u64 = d.tensors.iter().map(|t| t.bytes).sum::<u64>().max(md.len());
+    let ctx = 4096;
+    if let Some(n) = crate::fit::need(&d, weights, ctx, 2.0) {
+        let hw = crate::fit::detect();
+        let verdict = match crate::fit::verdict_here(&n, &hw) {
+            crate::fit::Verdict::Gpu => "fits on this computer's graphics chip, so it should run quickly".to_string(),
+            crate::fit::Verdict::Split(_) | crate::fit::Verdict::Cpu => "fits in this computer's memory and would run on the processor, more slowly".to_string(),
+            crate::fit::Verdict::TooBig => format!("is more than this computer can give it ({} usable)", scan::human(hw.usable_here().max(hw.usable_ram()))),
+        };
+        out.push_str(&format!("- Memory to run it with {} tokens of context: about {}; that {verdict}.\n", crate::fit::tokens(ctx), scan::human(n.total())));
+    }
+    if format == Format::Gguf {
+        out.push_str("- Filescape can run GGUF models itself, in AI Models.\n");
+    }
+    Some(out)
+}
+
+/// The least room worth giving one file's contents, in characters.
+const MIN_READ: usize = 300;
+
+/// Items looked at in one folder on disk.
+const LISTING_MAX: usize = 5000;
+/// How deep the outline of a folder's folders goes, and its most lines.
+const OUTLINE_DEPTH: usize = 3;
+const OUTLINE_LINES: usize = 400;
+
+/// What a folder holds directly, and whether there was more than was looked at. Only
+/// metadata: nothing is opened.
+fn listing(dir: &Path) -> (Vec<Item>, bool) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return (Vec::new(), false) };
+    let mut rd = rd.flatten();
+    let v: Vec<Item> = rd.by_ref().take(LISTING_MAX).filter_map(|e| e.metadata().ok().map(|md| item_from(&e.path(), &md))).collect();
+    let more = v.len() == LISTING_MAX && rd.next().is_some();
+    (v, more)
+}
+
+/// The folders inside `n`, a few levels down, largest first, with their sizes and file
+/// counts: the shape of the folder before any detail.
+fn outline_tree(n: &Node) -> Vec<String> {
+    fn walk(n: &Node, depth: usize, out: &mut Vec<String>) {
+        let mut dirs: Vec<&Node> = n.children.iter().filter(|c| c.is_dir).collect();
+        dirs.sort_by(|a, b| b.logical.cmp(&a.logical).then(a.name.cmp(&b.name)));
+        for d in dirs {
+            if out.len() >= OUTLINE_LINES {
+                return;
+            }
+            out.push(format!("{}{}/ ({}, {})", "  ".repeat(depth), d.name, scan::human(d.logical), count(d.files, "file")));
+            if depth + 1 < OUTLINE_DEPTH {
+                walk(d, depth + 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(n, 0, &mut out);
+    out
+}
+
+/// The folders inside `dir` on disk, a few levels down, by name, with how many items each
+/// holds directly. Sizes would mean reading every folder to the bottom, so they're left out;
+/// stops after a few thousand folders are listed or a second and a half.
+fn outline_disk(dir: &Path) -> Vec<String> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<String>, seen: &mut usize, until: std::time::Instant) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut dirs: Vec<(String, PathBuf)> = rd
+            .flatten()
+            .take(LISTING_MAX)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
+            .collect();
+        dirs.sort_by_key(|d| d.0.to_lowercase());
+        for (name, path) in dirs {
+            if out.len() >= OUTLINE_LINES || *seen > 3000 || std::time::Instant::now() > until {
+                return;
+            }
+            *seen += 1;
+            let items = std::fs::read_dir(&path).map(|r| r.take(LISTING_MAX).count()).unwrap_or(0);
+            out.push(format!("{}{name}/ ({})", "  ".repeat(depth), count(items as u64, "item")));
+            if depth + 1 < OUTLINE_DEPTH {
+                walk(&path, depth + 1, out, seen, until);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, 0, &mut out, &mut 0, std::time::Instant::now() + std::time::Duration::from_millis(1500));
+    out
 }
 
 /// Bytes and files by extension, largest first.
@@ -193,8 +355,10 @@ fn render(parts: Vec<Part>, readable: Vec<PathBuf>, budget: usize, whole: bool) 
         }
     };
     text.push_str(if parts.len() == 1 { "The user is asking about this item on their computer:\n" } else { "The user is asking about these items on their computer:\n" });
-    // Each item gets a fair share of the room; what doesn't fit is summed up.
+    // Each item gets a fair share of the room; what doesn't fit is summed up, and the user is
+    // told.
     let share = budget / parts.len().max(1);
+    let mut notes = Vec::new();
     for p in &parts {
         let start = text.len();
         text.push_str(&format!("\n{} ({})\n", p.path.display(), describe(&p.item)));
@@ -205,6 +369,22 @@ fn render(parts: Vec<Part>, readable: Vec<PathBuf>, budget: usize, whole: bool) 
             let t: Vec<String> = types.iter().take(8).map(|(e, b, f)| format!("{e} {} ({})", scan::human(*b), count(*f, "file"))).collect();
             text.push_str(&t.join(", "));
             text.push('\n');
+        }
+        // The shape first: the folders inside, a few levels down, in up to a third of the room.
+        if !p.outline.is_empty() && p.outline.iter().any(|l| l.starts_with("  ")) {
+            text.push_str(&format!("Folders inside it, {} levels down{}:\n", OUTLINE_DEPTH, if whole { ", largest first" } else { "" }));
+            let mut shown = 0;
+            for l in &p.outline {
+                if text.len() - start + l.len() + 3 > share / 3 {
+                    break;
+                }
+                text.push_str(&format!("- {l}\n"));
+                shown += 1;
+            }
+            if shown < p.outline.len() {
+                text.push_str(&format!("- and {} more folders\n", p.outline.len() - shown));
+                notes.push(format!("{}: outlined {} of {} folders inside it", p.item.name, shown, p.outline.len()));
+            }
         }
         if let Some(inside) = &p.inside {
             let mut v: Vec<&Item> = inside.iter().collect();
@@ -234,33 +414,251 @@ fn render(parts: Vec<Part>, readable: Vec<PathBuf>, budget: usize, whole: bool) 
                 let rest = &v[shown..];
                 let bytes: u64 = rest.iter().filter_map(|i| i.size).sum();
                 text.push_str(&format!("- and {} more items ({})\n", rest.len(), scan::human(bytes)));
+                notes.push(format!("{}: listed {} of {} items by name, the rest only counted", p.item.name, shown, v.len()));
+            }
+            if p.unlisted {
+                text.push_str(&format!("- it holds more than {LISTING_MAX} items; only the first {LISTING_MAX} were looked at\n"));
+                notes.push(format!("{}: only the first {LISTING_MAX} items were looked at", p.item.name));
             }
         }
     }
-    Facts { label, summary, text, readable, paths }
+    Facts { label, summary, text, readable, paths, notes }
 }
 
-/// The text of `files`, at most `budget` characters in all, for a question the user ticked
+/// The text of `files`, at most `budget` characters in all (see [`fit`]), for a question the user ticked
 /// "Include file contents" on. Files that aren't text, or are only in the cloud, are named
 /// but not read.
-pub fn contents(files: &[PathBuf], budget: usize) -> String {
-    let mut out = String::new();
-    let share = budget / files.len().max(1);
-    for f in files {
+pub fn contents(files: &[PathBuf], budget: usize) -> Read {
+    let mut out = Read::default();
+    let mut skipped = Vec::new();
+    for (k, f) in files.iter().enumerate() {
         let name = f.file_name().map_or_else(|| f.display().to_string(), |n| n.to_string_lossy().to_string());
+        // What's left is shared among the files still to read, so room a short file didn't use
+        // goes to the next. Once there's too little left to be useful, the rest are listed as
+        // skipped rather than squeezed in or allowed to overrun the model's context.
+        let left = budget.saturating_sub(out.text.len());
+        if left < MIN_READ && k > 0 {
+            skipped.extend(files[k..].iter().map(|f| f.file_name().map_or_else(|| f.display().to_string(), |n| n.to_string_lossy().to_string())));
+            break;
+        }
+        // Never less than is useful, never more than is left.
+        let share = (left / (files.len() - k)).max(MIN_READ).min(left.max(MIN_READ));
         let Ok(md) = std::fs::metadata(f) else { continue };
+        let mut note = |n: String| out.notes.push(format!("{name}: {n}"));
         if scan::on_disk(&md, || f.clone(), 4096).1 & store::ONLINE_ONLY != 0 {
-            out.push_str(&format!("\n{name} is in the cloud only, so it wasn't read.\n"));
+            out.text.push_str(&format!("\n{name} is in the cloud only, so it wasn't read.\n"));
+            note("in the cloud only, so it wasn't downloaded or read".into());
             continue;
         }
-        let Some(t) = read_text(f, share.max(200)) else {
-            out.push_str(&format!("\n{name} isn't a text file, so its contents weren't read.\n"));
+        let room = share.max(MIN_READ);
+        match extract(f, room) {
+            Some(Ok(mut t)) => {
+                let (fitted, cut) = fit(&t.text, room);
+                if cut {
+                    t.text = fitted;
+                    t.cut = true;
+                }
+                if t.text.trim().is_empty() {
+                    let why = if t.pages.is_some() { "it has no text to read (its pages may be pictures, such as scans)" } else { "it has no text to read" };
+                    out.text.push_str(&format!("\n{name}: {why}.\n"));
+                    note(why.into());
+                    continue;
+                }
+                let (part, n) = match t.pages {
+                    Some((r, n)) if r < n || t.cut => {
+                        let pages = if r <= 1 { format!("page 1 of {n}") } else { format!("pages 1 to {r} of {n}") };
+                        (format!(" (the start only: {pages})"), format!("read the start only, {pages}"))
+                    }
+                    _ if t.cut => (" (the start only)".into(), "read the start only".into()),
+                    _ => (String::new(), String::new()),
+                };
+                if !n.is_empty() {
+                    note(n);
+                }
+                out.text.push_str(&format!("\nText of {name}{part}:\n```\n{}\n```\n", t.text));
+                continue;
+            }
+            Some(Err(e)) => {
+                out.text.push_str(&format!("\n{name} wasn't read: {e}.\n"));
+                note(format!("not read, {e}"));
+                continue;
+            }
+            None => {}
+        }
+        let Some(t) = read_text(f, room) else {
+            out.text.push_str(&format!("\n{name} isn't a text file, so its contents weren't read.\n"));
+            note("not a text file, so it wasn't read".into());
             continue;
         };
-        let cut = t.len() as u64 + 4 < md.len();
-        out.push_str(&format!("\nContents of {name}{}:\n```\n{t}\n```\n", if cut { " (the start only)" } else { "" }));
+        // Lines are numbered so the model can point at them; the numbers take some of the room.
+        let (t, fitted) = fit(&t, room - room / 8);
+        let cut = fitted || t.len() as u64 + 4 < md.len();
+        if cut {
+            note("read the start only".into());
+        }
+        let (t, n) = numbered(&t, cut);
+        out.lines.push((f.clone(), n));
+        out.text.push_str(&format!("\nContents of {name}{}, lines numbered:\n```\n{t}\n```\n", if cut { " (the start only)" } else { "" }));
+    }
+    if !skipped.is_empty() {
+        let names = skipped.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+        let more = if skipped.len() > 5 { format!(" and {} more", skipped.len() - 5) } else { String::new() };
+        out.text.push_str(&format!("\n{} not read, for lack of room: {names}{more}.\n", count(skipped.len() as u64, "more file")));
+        out.notes.push(format!("{} not read, for lack of room in the model's context: {names}{more}", count(skipped.len() as u64, "file")));
     }
     out
+}
+
+/// Where `p` is in a scan of `root`, as child indexes, if the scan covers it.
+pub fn tree_index(tree: &Node, root: &Path, p: &Path) -> Option<Vec<u32>> {
+    let rest = p.strip_prefix(root).ok()?;
+    let mut at = Vec::new();
+    let mut n = tree;
+    for part in rest.components() {
+        let name = part.as_os_str().to_string_lossy();
+        let i = n.children.iter().position(|c| *c.name == *name)?;
+        at.push(i as u32);
+        n = &n.children[i];
+    }
+    Some(at)
+}
+
+/// The files directly in `dir` whose text Filescape can read, smallest first so more of them
+/// fit, at most 200. Only names are listed here: nothing is read until a question is sent.
+pub fn documents_in(dir: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut v: Vec<(u64, PathBuf)> = rd
+        .flatten()
+        .take(5000)
+        .filter_map(|e| {
+            let md = e.metadata().ok()?;
+            (md.is_file() && md.len() > 0).then(|| (md.len(), e.path()))
+        })
+        .collect();
+    v.sort();
+    v.into_iter().map(|(_, p)| p).filter(|p| can_read(p)).take(200).collect()
+}
+
+/// A picture, by its name: it has no text to read, but a model that can see may be shown it.
+fn is_picture(p: &Path) -> bool {
+    let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    crate::asksuggest::sort_of(&name, false) == crate::asksuggest::Sort::Image
+}
+
+/// A picture a vision model can be shown: a format Filescape decodes itself (see
+/// [`crate::llm::picture`]). HEIC and camera raw files aren't, nor online-only cloud files, which
+/// would have to be downloaded.
+pub fn can_show(p: &Path) -> bool {
+    let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tif" | "tiff" | "tga" | "qoi" | "jxl" | "ppm" | "pgm" | "pnm" | "ico") {
+        return false;
+    }
+    let Ok(md) = std::fs::metadata(p) else { return false };
+    md.is_file() && md.len() > 0 && scan::on_disk(&md, || p.to_path_buf(), 4096).1 & store::ONLINE_ONLY == 0
+}
+
+/// Whether Filescape can give the model the text of `p`: a text file, or a document or
+/// spreadsheet it reads itself. Online-only cloud files can't be read without downloading them.
+pub fn can_read(p: &Path) -> bool {
+    let Ok(md) = std::fs::metadata(p) else { return false };
+    if !md.is_file() || scan::on_disk(&md, || p.to_path_buf(), 4096).1 & store::ONLINE_ONLY != 0 {
+        return false;
+    }
+    let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    crate::officedoc::kind_of(&name).is_some() || is_workbook(&name) || (is_pdf(&name) && looks_like(p, b"%PDF", 1024)) || (is_epub(&name) && looks_like(p, b"PK", 2)) || md.len() == 0 || read_text(p, 512).is_some()
+}
+
+fn is_pdf(name: &str) -> bool {
+    crate::scan::ext_of(name).eq_ignore_ascii_case("pdf")
+}
+
+/// Whether the file starts the way its kind does: "%PDF" near the start of a PDF, a zip
+/// header for a book. Saves offering to read a file that only has the name.
+fn looks_like(p: &Path, magic: &[u8], within: usize) -> bool {
+    let mut buf = vec![0; within];
+    let Ok(n) = std::fs::File::open(p).and_then(|mut f| f.read(&mut buf)) else { return false };
+    buf[..n].windows(magic.len()).any(|w| w == magic)
+}
+
+fn is_epub(name: &str) -> bool {
+    crate::scan::ext_of(name).eq_ignore_ascii_case("epub")
+}
+
+fn is_workbook(name: &str) -> bool {
+    matches!(crate::scan::ext_of(name).to_ascii_lowercase().as_str(), "xlsx" | "xlsm" | "xls" | "xlsb" | "ods")
+}
+
+/// Text Filescape took out of a document.
+struct Extracted {
+    text: String,
+    /// Cut short at the budget.
+    cut: bool,
+    /// For a PDF: pages read, and pages in it.
+    pages: Option<(usize, usize)>,
+}
+
+/// The text of a document Filescape reads itself (PDF, EPUB, Word, PowerPoint, OpenDocument,
+/// Excel), at most `chars` characters. `None` for other files; an error says why one couldn't
+/// be read, in a few words.
+fn extract(p: &Path, chars: usize) -> Option<Result<Extracted, String>> {
+    let name = p.file_name()?.to_string_lossy().into_owned();
+    let text = if is_pdf(&name) {
+        return Some(crate::pdfview::read_text(p, chars).map(|t| {
+            let cut = t.text.chars().count() > chars;
+            Extracted { text: t.text.chars().take(chars).collect(), cut, pages: Some((t.read, t.pages)) }
+        }));
+    } else if is_epub(&name) {
+        match crate::epub::open(p, 4000) {
+            Ok(b) => crate::officedoc::plain_text(&b.blocks),
+            Err(_) => return Some(Err("it couldn't be opened as a book".into())),
+        }
+    } else if let Some(k) = crate::officedoc::kind_of(&name) {
+        match crate::officedoc::read(p, k) {
+            Ok(d) => crate::officedoc::plain_text(&d),
+            Err(_) => return Some(Err("it couldn't be opened (it may be damaged)".into())),
+        }
+    } else if is_workbook(&name) {
+        let Ok(book) = crate::sheets::read(p, 200, 40) else { return Some(Err("it couldn't be opened (it may be damaged)".into())) };
+        let mut t = String::new();
+        for sh in &book.sheets {
+            t.push_str(&format!("Sheet {} ({} rows, {} columns):\n", sh.name, sh.size.0, sh.size.1));
+            for r in &sh.rows {
+                t.push_str(&r.iter().map(|c| c.replace(['\n', '\t'], " ")).collect::<Vec<_>>().join("\t"));
+                t.push('\n');
+            }
+        }
+        t
+    } else {
+        return None;
+    };
+    let cut = text.chars().count() > chars;
+    Some(Ok(Extracted { text: text.chars().take(chars).collect(), cut, pages: None }))
+}
+
+/// `text` with each line numbered from 1 ("12: …"), and how many lines there are. When the
+/// text was cut short, its last line may be partial, so it's left out.
+fn numbered(text: &str, cut: bool) -> (String, usize) {
+    let mut lines: Vec<&str> = text.lines().collect();
+    if cut && lines.len() > 1 && !text.ends_with('\n') {
+        lines.pop();
+    }
+    let out = lines.iter().enumerate().map(|(i, l)| format!("{}: {l}", i + 1)).collect::<Vec<_>>().join("\n");
+    (out, lines.len())
+}
+
+/// The start of `text` that fits in `room`, counting each character outside ASCII as four:
+/// a model's tokens hold about four English letters but often only one character of Chinese,
+/// Japanese, Korean or other scripts, so non-English text would otherwise overrun the model's
+/// context. Also whether it was cut.
+fn fit(text: &str, room: usize) -> (String, bool) {
+    let mut used = 0;
+    for (i, c) in text.char_indices() {
+        used += if c.is_ascii() { 1 } else { 4 };
+        if used > room {
+            return (text[..i].to_string(), true);
+        }
+    }
+    (text.to_string(), false)
 }
 
 /// Up to `chars` characters of a file, if it looks like text.
@@ -282,6 +680,19 @@ fn read_text(p: &Path, chars: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A picture has no text to read: it's never offered for reading, only (with a model that
+    /// can see) for showing.
+    #[test]
+    fn pictures_are_shown_not_read() {
+        let d = tmp("pictures");
+        let png = d.join("photo.png");
+        image::RgbImage::new(4, 4).save(&png).unwrap();
+        let f = from_disk(std::slice::from_ref(&png), 4000);
+        assert!(f.readable.is_empty());
+        assert!(can_show(&png));
+        assert!(!can_show(&d.join("photo.heic")));
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("filescape-askabout-{name}-{}", std::process::id()));
@@ -363,11 +774,104 @@ mod tests {
         std::fs::write(d.join("a.txt"), "héllo world").unwrap();
         std::fs::write(d.join("b.bin"), [0u8, 1, 2, 3]).unwrap();
         std::fs::write(d.join("long.txt"), "y".repeat(10_000)).unwrap();
-        let c = contents(&[d.join("a.txt"), d.join("b.bin"), d.join("long.txt")], 3000);
-        assert!(c.contains("Contents of a.txt:\n```\nhéllo world\n```"), "{c}");
+        let r = contents(&[d.join("a.txt"), d.join("b.bin"), d.join("long.txt")], 3000);
+        let c = &r.text;
+        assert!(c.contains("Contents of a.txt, lines numbered:\n```\n1: héllo world\n```"), "{c}");
+        assert_eq!(r.lines.iter().map(|(p, n)| (p.file_name().unwrap().to_str().unwrap(), *n)).collect::<Vec<_>>(), vec![("a.txt", 1), ("long.txt", 1)]);
         assert!(c.contains("b.bin isn't a text file"), "{c}");
         assert!(c.contains("Contents of long.txt (the start only)"), "{c}");
         assert!(c.len() < 3300, "{}", c.len());
+        // The user is told which files weren't read in full; a.txt was.
+        assert_eq!(r.notes, vec!["b.bin: not a text file, so it wasn't read".to_string(), "long.txt: read the start only".to_string()]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn reads_pdf_text_and_says_how_much() {
+        let d = tmp("pdf");
+        let long = "Quarterly report on storage use across every drive in the office this year ".repeat(4);
+        let pages = [long.as_str(), "Second page words", "Third page words"];
+        std::fs::write(d.join("r.pdf"), crate::pdfview::tests::with_text(&pages)).unwrap();
+        assert!(can_read(&d.join("r.pdf")));
+        let all = contents(&[d.join("r.pdf")], 3000);
+        assert!(all.text.contains("[Page 1]\nQuarterly report"), "{}", all.text);
+        assert!(all.text.contains("Third page words"), "{}", all.text);
+        assert!(all.notes.is_empty(), "{:?}", all.notes);
+        // A small budget reads the first page only, and says so.
+        let some = contents(&[d.join("r.pdf")], 20);
+        assert!(!some.text.contains("Third"), "{}", some.text);
+        assert!(some.text.contains("(the start only: page"), "{}", some.text);
+        assert_eq!(some.notes.len(), 1);
+        assert!(some.notes[0].starts_with("r.pdf: read the start only, page"), "{:?}", some.notes);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn many_files_share_the_room_and_the_rest_are_named() {
+        let d = tmp("many");
+        let mut files = Vec::new();
+        for i in 0..40 {
+            let p = d.join(format!("n{i:02}.txt"));
+            std::fs::write(&p, format!("note {i} ").repeat(30)).unwrap();
+            files.push(p);
+        }
+        let r = contents(&files, 3000);
+        // Never past the room (plus one file's headings), however many files there are.
+        assert!(r.text.len() < 3000 + 400, "{}", r.text.len());
+        assert!(r.text.contains("Contents of n00.txt"), "{}", r.text);
+        assert!(!r.text.contains("Contents of n39.txt"), "{}", r.text);
+        let last = r.notes.last().unwrap();
+        assert!(last.contains("not read, for lack of room") && last.contains("n39.txt") || last.contains("more"), "{last}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn deep_folders_are_outlined_and_cuts_are_noted() {
+        let d = tmp("outline");
+        std::fs::create_dir_all(d.join("src/app/widgets")).unwrap();
+        std::fs::create_dir_all(d.join("docs")).unwrap();
+        for i in 0..60 {
+            std::fs::write(d.join(format!("file{i:02}.txt")), "x").unwrap();
+        }
+        let f = from_disk(&[d.clone()], 1500);
+        assert!(f.text.contains("Folders inside it, 3 levels down:"), "{}", f.text);
+        assert!(f.text.contains("- src/ (1 item)\n- app/ (1 item)") || f.text.contains("  app/ (1 item)"), "{}", f.text);
+        assert!(f.text.contains("    widgets/ (0 items)"), "{}", f.text);
+        // 62 items don't fit in 1,500 characters: the user is told.
+        assert!(f.notes.iter().any(|n| n.contains("listed") && n.contains("of 62 items")), "{:?}", f.notes);
+        // A folder with nothing nested gets no outline, only its listing.
+        let g = from_disk(&[d.join("docs")], 1500);
+        assert!(!g.text.contains("Folders inside it"), "{}", g.text);
+        assert!(g.notes.is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn model_files_are_described_from_their_headers() {
+        let d = tmp("model");
+        let p = d.join("tiny-chat.gguf");
+        crate::models::tests::write_gguf(&p, &[("general.architecture", "llama"), ("general.name", "Tiny Chat"), ("general.size_label", "1B")], &[("llama.context_length", 8192)], 4096);
+        let f = from_disk(&[p.clone()], 4000);
+        assert!(f.text.contains("What Filescape read from the model file tiny-chat.gguf:"), "{}", f.text);
+        assert!(f.text.contains("Tiny Chat") || f.text.contains("llama"), "{}", f.text);
+        assert!(f.text.contains("Filescape can run GGUF models itself"), "{}", f.text);
+        // Not a model file: nothing added.
+        std::fs::write(d.join("a.txt"), "x").unwrap();
+        assert!(!from_disk(&[d.join("a.txt")], 4000).text.contains("What Filescape read"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn other_scripts_take_more_room() {
+        assert_eq!(fit("abcdef", 4), ("abcd".to_string(), true));
+        assert_eq!(fit("abc", 4), ("abc".to_string(), false));
+        // Each of these counts as four.
+        assert_eq!(fit("文件管理器", 9), ("文件".to_string(), true));
+        let d = tmp("scripts");
+        std::fs::write(d.join("zh.txt"), "文".repeat(1000)).unwrap();
+        let r = contents(&[d.join("zh.txt")], 400);
+        assert_eq!(r.text.matches('文').count(), 87, "{}", r.text);
+        assert_eq!(r.notes, vec!["zh.txt: read the start only".to_string()]);
         let _ = std::fs::remove_dir_all(&d);
     }
 
