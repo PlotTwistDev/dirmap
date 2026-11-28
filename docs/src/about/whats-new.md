@@ -14,7 +14,12 @@
   understand a folder's structure, what a project is for, storage use, possibly unnecessary files
   and related files. Selecting several items asks about all of them, with no limit on how many.
   See [From the right-click menu](../views/ask-ai.md#from-the-right-click-menu).
-- Ask AI can now read Word, PowerPoint, OpenDocument and Excel files, as well as plain text.
+- Ask AI can now read PDFs (page by page), EPUB books, Word, PowerPoint, OpenDocument and Excel
+  files, as well as plain text.
+- When a file is only partly read, a **⚠ Partly read** line under the answer says how much, such
+  as "pages 1 to 6 of 40", and **Measured by Filescape** shows the sizes and dates Filescape
+  measured itself, apart from the model's answer. See
+  [Asking about files and folders](../views/ask-ai.md#asking-about-files-and-folders).
 - Every Ask AI conversation ends with the same note: **Private · Local processing · Read-only**,
   "Local AI models can make mistakes…", and an **ⓘ** that explains the limits.
 

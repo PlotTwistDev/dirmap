@@ -6,7 +6,7 @@
 
 use crate::scan::{self, Node, store};
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 /// One file or folder, as described to the model.
@@ -21,6 +21,15 @@ pub struct Item {
     pub modified: Option<i64>,
     /// In the cloud only: its data isn't on this computer.
     pub online_only: bool,
+}
+
+/// Files' contents, read for a question: the text for the model, and a line for the user on
+/// each file that was only partly read or not read, so an answer never seems to cover more
+/// than it does.
+#[derive(Clone, Debug, Default)]
+pub struct Read {
+    pub text: String,
+    pub notes: Vec<String>,
 }
 
 /// What the model is told, ready to send.
@@ -240,29 +249,67 @@ fn render(parts: Vec<Part>, readable: Vec<PathBuf>, budget: usize, whole: bool) 
     Facts { label, summary, text, readable, paths }
 }
 
-/// The text of `files`, at most `budget` characters in all, for a question the user ticked
+/// The text of `files`, at most `budget` characters in all (see [`fit`]), for a question the user ticked
 /// "Include file contents" on. Files that aren't text, or are only in the cloud, are named
 /// but not read.
-pub fn contents(files: &[PathBuf], budget: usize) -> String {
-    let mut out = String::new();
+pub fn contents(files: &[PathBuf], budget: usize) -> Read {
+    let mut out = Read::default();
     let share = budget / files.len().max(1);
     for f in files {
         let name = f.file_name().map_or_else(|| f.display().to_string(), |n| n.to_string_lossy().to_string());
         let Ok(md) = std::fs::metadata(f) else { continue };
+        let mut note = |n: String| out.notes.push(format!("{name}: {n}"));
         if scan::on_disk(&md, || f.clone(), 4096).1 & store::ONLINE_ONLY != 0 {
-            out.push_str(&format!("\n{name} is in the cloud only, so it wasn't read.\n"));
+            out.text.push_str(&format!("\n{name} is in the cloud only, so it wasn't read.\n"));
+            note("in the cloud only, so it wasn't downloaded or read".into());
             continue;
         }
-        if let Some(t) = extract(f, share.max(200)) {
-            out.push_str(&format!("\nText of {name}{}:\n```\n{}\n```\n", if t.1 { " (the start only)" } else { "" }, t.0));
-            continue;
+        let room = share.max(200);
+        match extract(f, room) {
+            Some(Ok(mut t)) => {
+                let (fitted, cut) = fit(&t.text, room);
+                if cut {
+                    t.text = fitted;
+                    t.cut = true;
+                }
+                if t.text.trim().is_empty() {
+                    let why = if t.pages.is_some() { "it has no text to read (its pages may be pictures, such as scans)" } else { "it has no text to read" };
+                    out.text.push_str(&format!("\n{name}: {why}.\n"));
+                    note(why.into());
+                    continue;
+                }
+                let (part, n) = match t.pages {
+                    Some((r, n)) if r < n || t.cut => {
+                        let pages = if r <= 1 { format!("page 1 of {n}") } else { format!("pages 1 to {r} of {n}") };
+                        (format!(" (the start only: {pages})"), format!("read the start only, {pages}"))
+                    }
+                    _ if t.cut => (" (the start only)".into(), "read the start only".into()),
+                    _ => (String::new(), String::new()),
+                };
+                if !n.is_empty() {
+                    note(n);
+                }
+                out.text.push_str(&format!("\nText of {name}{part}:\n```\n{}\n```\n", t.text));
+                continue;
+            }
+            Some(Err(e)) => {
+                out.text.push_str(&format!("\n{name} wasn't read: {e}.\n"));
+                note(format!("not read, {e}"));
+                continue;
+            }
+            None => {}
         }
-        let Some(t) = read_text(f, share.max(200)) else {
-            out.push_str(&format!("\n{name} isn't a text file, so its contents weren't read.\n"));
+        let Some(t) = read_text(f, room) else {
+            out.text.push_str(&format!("\n{name} isn't a text file, so its contents weren't read.\n"));
+            note("not a text file, so it wasn't read".into());
             continue;
         };
-        let cut = t.len() as u64 + 4 < md.len();
-        out.push_str(&format!("\nContents of {name}{}:\n```\n{t}\n```\n", if cut { " (the start only)" } else { "" }));
+        let (t, fitted) = fit(&t, room);
+        let cut = fitted || t.len() as u64 + 4 < md.len();
+        if cut {
+            note("read the start only".into());
+        }
+        out.text.push_str(&format!("\nContents of {name}{}:\n```\n{t}\n```\n", if cut { " (the start only)" } else { "" }));
     }
     out
 }
@@ -305,21 +352,60 @@ pub fn can_read(p: &Path) -> bool {
         return false;
     }
     let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    crate::officedoc::kind_of(&name).is_some() || is_workbook(&name) || md.len() == 0 || read_text(p, 512).is_some()
+    crate::officedoc::kind_of(&name).is_some() || is_workbook(&name) || (is_pdf(&name) && looks_like(p, b"%PDF", 1024)) || (is_epub(&name) && looks_like(p, b"PK", 2)) || md.len() == 0 || read_text(p, 512).is_some()
+}
+
+fn is_pdf(name: &str) -> bool {
+    crate::scan::ext_of(name).eq_ignore_ascii_case("pdf")
+}
+
+/// Whether the file starts the way its kind does: "%PDF" near the start of a PDF, a zip
+/// header for a book. Saves offering to read a file that only has the name.
+fn looks_like(p: &Path, magic: &[u8], within: usize) -> bool {
+    let mut buf = vec![0; within];
+    let Ok(n) = std::fs::File::open(p).and_then(|mut f| f.read(&mut buf)) else { return false };
+    buf[..n].windows(magic.len()).any(|w| w == magic)
+}
+
+fn is_epub(name: &str) -> bool {
+    crate::scan::ext_of(name).eq_ignore_ascii_case("epub")
 }
 
 fn is_workbook(name: &str) -> bool {
     matches!(crate::scan::ext_of(name).to_ascii_lowercase().as_str(), "xlsx" | "xlsm" | "xls" | "xlsb" | "ods")
 }
 
-/// The text of a document or spreadsheet Filescape reads itself (Word, PowerPoint, OpenDocument,
-/// Excel), at most `chars` characters, and whether it was cut short. `None` for other files.
-fn extract(p: &Path, chars: usize) -> Option<(String, bool)> {
+/// Text Filescape took out of a document.
+struct Extracted {
+    text: String,
+    /// Cut short at the budget.
+    cut: bool,
+    /// For a PDF: pages read, and pages in it.
+    pages: Option<(usize, usize)>,
+}
+
+/// The text of a document Filescape reads itself (PDF, EPUB, Word, PowerPoint, OpenDocument,
+/// Excel), at most `chars` characters. `None` for other files; an error says why one couldn't
+/// be read, in a few words.
+fn extract(p: &Path, chars: usize) -> Option<Result<Extracted, String>> {
     let name = p.file_name()?.to_string_lossy().into_owned();
-    let text = if let Some(k) = crate::officedoc::kind_of(&name) {
-        crate::officedoc::plain_text(&crate::officedoc::read(p, k).ok()?)
+    let text = if is_pdf(&name) {
+        return Some(crate::pdfview::read_text(p, chars).map(|t| {
+            let cut = t.text.chars().count() > chars;
+            Extracted { text: t.text.chars().take(chars).collect(), cut, pages: Some((t.read, t.pages)) }
+        }));
+    } else if is_epub(&name) {
+        match crate::epub::open(p, 4000) {
+            Ok(b) => crate::officedoc::plain_text(&b.blocks),
+            Err(_) => return Some(Err("it couldn't be opened as a book".into())),
+        }
+    } else if let Some(k) = crate::officedoc::kind_of(&name) {
+        match crate::officedoc::read(p, k) {
+            Ok(d) => crate::officedoc::plain_text(&d),
+            Err(_) => return Some(Err("it couldn't be opened (it may be damaged)".into())),
+        }
     } else if is_workbook(&name) {
-        let book = crate::sheets::read(p, 200, 40).ok()?;
+        let Ok(book) = crate::sheets::read(p, 200, 40) else { return Some(Err("it couldn't be opened (it may be damaged)".into())) };
         let mut t = String::new();
         for sh in &book.sheets {
             t.push_str(&format!("Sheet {} ({} rows, {} columns):\n", sh.name, sh.size.0, sh.size.1));
@@ -333,7 +419,22 @@ fn extract(p: &Path, chars: usize) -> Option<(String, bool)> {
         return None;
     };
     let cut = text.chars().count() > chars;
-    Some((text.chars().take(chars).collect(), cut))
+    Some(Ok(Extracted { text: text.chars().take(chars).collect(), cut, pages: None }))
+}
+
+/// The start of `text` that fits in `room`, counting each character outside ASCII as four:
+/// a model's tokens hold about four English letters but often only one character of Chinese,
+/// Japanese, Korean or other scripts, so non-English text would otherwise overrun the model's
+/// context. Also whether it was cut.
+fn fit(text: &str, room: usize) -> (String, bool) {
+    let mut used = 0;
+    for (i, c) in text.char_indices() {
+        used += if c.is_ascii() { 1 } else { 4 };
+        if used > room {
+            return (text[..i].to_string(), true);
+        }
+    }
+    (text.to_string(), false)
 }
 
 /// Up to `chars` characters of a file, if it looks like text.
@@ -436,11 +537,48 @@ mod tests {
         std::fs::write(d.join("a.txt"), "héllo world").unwrap();
         std::fs::write(d.join("b.bin"), [0u8, 1, 2, 3]).unwrap();
         std::fs::write(d.join("long.txt"), "y".repeat(10_000)).unwrap();
-        let c = contents(&[d.join("a.txt"), d.join("b.bin"), d.join("long.txt")], 3000);
+        let r = contents(&[d.join("a.txt"), d.join("b.bin"), d.join("long.txt")], 3000);
+        let c = &r.text;
         assert!(c.contains("Contents of a.txt:\n```\nhéllo world\n```"), "{c}");
         assert!(c.contains("b.bin isn't a text file"), "{c}");
         assert!(c.contains("Contents of long.txt (the start only)"), "{c}");
         assert!(c.len() < 3300, "{}", c.len());
+        // The user is told which files weren't read in full; a.txt was.
+        assert_eq!(r.notes, vec!["b.bin: not a text file, so it wasn't read".to_string(), "long.txt: read the start only".to_string()]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn reads_pdf_text_and_says_how_much() {
+        let d = tmp("pdf");
+        let long = "Quarterly report on storage use across every drive in the office this year ".repeat(4);
+        let pages = [long.as_str(), "Second page words", "Third page words"];
+        std::fs::write(d.join("r.pdf"), crate::pdfview::tests::with_text(&pages)).unwrap();
+        assert!(can_read(&d.join("r.pdf")));
+        let all = contents(&[d.join("r.pdf")], 3000);
+        assert!(all.text.contains("[Page 1]\nQuarterly report"), "{}", all.text);
+        assert!(all.text.contains("Third page words"), "{}", all.text);
+        assert!(all.notes.is_empty(), "{:?}", all.notes);
+        // A small budget reads the first page only, and says so.
+        let some = contents(&[d.join("r.pdf")], 20);
+        assert!(!some.text.contains("Third"), "{}", some.text);
+        assert!(some.text.contains("(the start only: page"), "{}", some.text);
+        assert_eq!(some.notes.len(), 1);
+        assert!(some.notes[0].starts_with("r.pdf: read the start only, page"), "{:?}", some.notes);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn other_scripts_take_more_room() {
+        assert_eq!(fit("abcdef", 4), ("abcd".to_string(), true));
+        assert_eq!(fit("abc", 4), ("abc".to_string(), false));
+        // Each of these counts as four.
+        assert_eq!(fit("文件管理器", 9), ("文件".to_string(), true));
+        let d = tmp("scripts");
+        std::fs::write(d.join("zh.txt"), "文".repeat(1000)).unwrap();
+        let r = contents(&[d.join("zh.txt")], 400);
+        assert_eq!(r.text.matches('文').count(), 100, "{}", r.text);
+        assert_eq!(r.notes, vec!["zh.txt: read the start only".to_string()]);
         let _ = std::fs::remove_dir_all(&d);
     }
 

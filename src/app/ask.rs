@@ -76,7 +76,7 @@ pub(super) struct Chat {
     /// Files or folders to ask about with the next question.
     pub(super) about: Option<About>,
     /// Reading files' contents for the question just sent, before it goes to the model.
-    pub(super) reading: Option<mpsc::Receiver<String>>,
+    pub(super) reading: Option<mpsc::Receiver<askabout::Read>>,
     /// The answer being written.
     pub(super) answering: Option<String>,
     pub(super) draft: String,
@@ -119,6 +119,10 @@ pub(super) struct Attached {
     pub(super) paths: Vec<PathBuf>,
     /// The files' contents were read for it, not only their names, sizes and dates.
     pub(super) read: bool,
+    /// How much of `text` is what Filescape measured (names, sizes, dates), before any contents.
+    pub(super) measured: usize,
+    /// A line for each file only partly read or not read.
+    pub(super) notes: Vec<String>,
 }
 
 /// Files or folders the next question is about.
@@ -206,11 +210,12 @@ impl App {
             }
             if let Some(rx) = &c.reading {
                 match rx.try_recv() {
-                    Ok(text) => {
+                    Ok(read) => {
                         c.reading = None;
                         let i = c.conversation.len().saturating_sub(1);
                         if let Some(a) = c.attached.get_mut(&i) {
-                            a.text.push_str(&text);
+                            a.text.push_str(&read.text);
+                            a.notes = read.notes;
                         }
                         self.dispatch(w);
                     }
@@ -532,7 +537,7 @@ impl App {
         if let Some(About { facts: Some(f), read, .. }) = c.about.take() {
             let i = c.conversation.len() - 1;
             let reads = read && !f.readable.is_empty();
-            c.attached.insert(i, Attached { label: f.label.clone(), text: f.text.clone(), paths: f.paths.clone(), read: reads });
+            c.attached.insert(i, Attached { label: f.label.clone(), text: f.text.clone(), paths: f.paths.clone(), read: reads, measured: f.text.len(), notes: Vec::new() });
             if reads {
                 reading = Some(f.readable);
             }
@@ -815,7 +820,7 @@ impl App {
                     && let Some(a) = i.checked_sub(1).and_then(|q| self.ask.main.attached.get(&q))
                     && !a.paths.is_empty()
                 {
-                    sources(ui, a, &mut reveal);
+                    sources(ui, i, a, &mut reveal);
                 }
                 ui.add_space(10.0);
             }
@@ -925,8 +930,10 @@ impl App {
     }
 }
 
-/// The files and folders an answer was based on, each opening in Files.
-pub(super) fn sources(ui: &mut egui::Ui, a: &Attached, reveal: &mut Option<PathBuf>) {
+/// The files and folders an answer was based on, each opening in Files; which files were only
+/// partly read; and what Filescape measured itself, apart from what the model made of it.
+/// `i` is the answer's place in the conversation.
+pub(super) fn sources(ui: &mut egui::Ui, i: usize, a: &Attached, reveal: &mut Option<PathBuf>) {
     let t = kit::tokens(ui);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -946,6 +953,29 @@ pub(super) fn sources(ui: &mut egui::Ui, a: &Attached, reveal: &mut Option<PathB
         }
         ui.label(egui::RichText::new(if a.read { "· names, sizes and contents" } else { "· names, sizes and dates" }).size(11.0).color(t.weak));
     });
+    if !a.notes.is_empty() {
+        let first = a.notes.iter().take(3).cloned().collect::<Vec<_>>().join(" · ");
+        let more = if a.notes.len() > 3 { format!(" · and {} more", a.notes.len() - 3) } else { String::new() };
+        ui.label(egui::RichText::new(format!("⚠ Partly read: {first}{more}")).size(11.0).color(t.warn))
+            .on_hover_text(format!("The answer is based only on what was read. Ask about a file on its own to give it more room.\n\n{}", a.notes.join("\n")));
+    }
+    let measured = &a.text[..a.measured.min(a.text.len())];
+    if !measured.trim().is_empty() {
+        egui::CollapsingHeader::new(egui::RichText::new("Measured by Filescape").size(11.0).color(t.weak))
+            .id_salt(("ask-measured", i, a.paths.len()))
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Names, sizes, dates and counts that Filescape read from the disk itself. The answer above is the model's interpretation.").size(11.0).color(t.weak));
+                // The facts, without the line that introduces them to the model.
+                let lines: Vec<&str> = measured.lines().filter(|l| !l.trim().is_empty() && !l.starts_with("The user is asking about")).collect();
+                for l in lines.iter().take(30) {
+                    ui.label(egui::RichText::new(*l).size(11.5));
+                }
+                if lines.len() > 30 {
+                    ui.weak(format!("and {} more lines", lines.len() - 30));
+                }
+            });
+    }
 }
 
 impl App {
