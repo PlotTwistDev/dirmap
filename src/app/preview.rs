@@ -125,6 +125,10 @@ pub(super) struct Look {
     pub download_ok: std::collections::HashSet<PathBuf>,
     /// A video playing in the preview.
     pub video: Option<VideoView>,
+    /// The app's frame count, and the frame a preview last drew: a sound or video nothing
+    /// shows any more is stopped (see `stop_unseen_media`).
+    pub tick: u64,
+    seen: u64,
     /// Frames from across the video being previewed.
     strip: Option<StripView>,
     /// Quick Look's own window: where it opened this time (kept while it's open, so the system
@@ -132,6 +136,21 @@ pub(super) struct Look {
     /// next time.
     win_home: Option<(egui::Pos2, Vec2)>,
     win_last: Option<(egui::Pos2, Vec2)>,
+}
+
+impl Look {
+    /// Stop the sound or video playing in the preview.
+    pub fn stop_media(&mut self) {
+        self.player = None;
+        self.video = None;
+    }
+
+    /// Close Quick Look. What it was playing stops, rather than carrying on in the preview pane.
+    pub fn close(&mut self) {
+        self.open = false;
+        self.full = false;
+        self.stop_media();
+    }
 }
 
 /// A video's filmstrip: being read, then its frames.
@@ -897,6 +916,16 @@ fn look_viewport() -> egui::ViewportId {
 }
 
 impl App {
+    /// At the start of a frame: stop a sound or video that no preview drew last frame (the pane
+    /// was closed, or the view changed), so it doesn't play on unseen.
+    pub(super) fn stop_unseen_media(&mut self) {
+        let look = &mut self.files.look;
+        if look.seen != look.tick && (look.player.is_some() || look.video.is_some()) {
+            look.stop_media();
+        }
+        look.tick += 1;
+    }
+
     /// The item a preview shows: the cursor's item in the focused pane.
     fn look_target(&self) -> Option<(PathBuf, Entry)> {
         if self.files.look.from_map {
@@ -915,14 +944,13 @@ impl App {
             return;
         }
         let Some((path, e)) = self.look_target() else {
-            self.files.look.open = false;
+            self.files.look.close();
             return;
         };
         let typing = ctx.egui_wants_keyboard_input();
         let close = !typing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) || i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
         if close {
-            self.files.look.open = false;
-            self.files.look.full = false;
+            self.files.look.close();
             return;
         }
         if !typing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
@@ -981,8 +1009,7 @@ impl App {
                 self.preview_body(ui, &path, &e, avail);
             });
         if !open {
-            self.files.look.open = false;
-            self.files.look.full = false;
+            self.files.look.close();
         }
         if step != 0 {
             self.files_move_cursor(|pos, _| pos.map(|p| p as i64 + step).unwrap_or(0), false);
@@ -1062,8 +1089,7 @@ impl App {
             ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Fullscreen(!full));
         }
         if close {
-            self.files.look.open = false;
-            self.files.look.full = false;
+            self.files.look.close();
             self.files.look.win_home = None;
         }
         if step != 0 && !self.files.look.from_map {
@@ -1536,6 +1562,15 @@ impl App {
 
     fn preview_main(&mut self, ui: &mut egui::Ui, path: &Path, e: &Entry, mut size: Vec2) {
         let pal = style::pal(ui);
+        // A sound or video stops when the preview moves on to another item (a folder or an app
+        // too), and carries on only while a preview shows it.
+        if self.files.look.player.as_ref().is_some_and(|p| p.path != path) {
+            self.files.look.player = None;
+        }
+        if self.files.look.video.as_ref().is_some_and(|v| v.video.path != path) {
+            self.files.look.video = None;
+        }
+        self.files.look.seen = self.files.look.tick;
         if crate::apps::own_icon(e.bundle) {
             let (r, _) = ui.allocate_exact_size(size, Sense::hover());
             let side = (r.width().min(r.height()) * 0.6).clamp(64.0, 256.0);
@@ -1549,13 +1584,6 @@ impl App {
         }
         let ctx = ui.ctx().clone();
         let tint = self.colors.get(e.ext()).copied().unwrap_or(Color32::GRAY);
-        // A sound stops when the preview moves on to another file.
-        if self.files.look.player.as_ref().is_some_and(|p| p.path != path) {
-            self.files.look.player = None;
-        }
-        if self.files.look.video.as_ref().is_some_and(|v| v.video.path != path) {
-            self.files.look.video = None;
-        }
         if self.files.look.view_of.as_deref() != Some(path) {
             self.files.look.view_of = Some(path.to_path_buf());
             self.files.look.zoom = None;
