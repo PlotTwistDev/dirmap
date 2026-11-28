@@ -26,6 +26,7 @@ pub mod maintenance;
 pub mod paddle;
 pub mod portal;
 pub mod profile;
+pub mod reminders;
 pub mod renewal;
 pub mod secret;
 pub mod store;

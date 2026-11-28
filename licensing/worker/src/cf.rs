@@ -130,3 +130,21 @@ async fn fetch(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     }
     Ok(Response::from_bytes(out.body.into_bytes())?.with_status(out.status).with_headers(h))
 }
+
+/// The daily Cron trigger (`[triggers] crons` in wrangler.toml): maintenance reminder emails.
+#[event(scheduled)]
+async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    let cfg = match config(&env) {
+        Ok(c) => c,
+        Err(e) => return console_error!("configuration: {e}"),
+    };
+    let Ok(d1) = env.d1("DB") else { return console_error!("no DB binding") };
+    let db = D1(d1);
+    let net = WebNet;
+    let now = (Date::now().as_millis() / 1000) as i64;
+    let cx = Ctx::new(&db, &net, &cfg, now);
+    match cx.send_reminders().await {
+        Ok(n) => console_log!("maintenance reminders sent: {n}"),
+        Err(e) => console_error!("maintenance reminders: {e}"),
+    }
+}
