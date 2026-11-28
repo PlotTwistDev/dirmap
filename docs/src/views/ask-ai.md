@@ -99,7 +99,7 @@ From the top, the tab shows:
   **Find the errors**; code gets **Explain this code** and **Find possible issues**; a spreadsheet
   gets **Explain the columns**; a folder gets **What is this folder?** and **What's using the
   space?**. Questions that need a file's text are only offered when Filescape can read it: plain
-  text, code, Word, PowerPoint, OpenDocument and Excel files. Describing what's in a picture needs a
+  text, code, PDF, EPUB, Word, PowerPoint, OpenDocument and Excel files. Describing what's in a picture needs a
   model that can see images, which Filescape can't run yet.
 - **The conversation**, with **Copy** and **Based on** under each answer, as below.
 - **The question box**. **Enter** sends; follow-up questions keep what the chat is about. **…**
@@ -173,9 +173,11 @@ What the model is told:
   there's also a breakdown by file type.
 - **Not** what's inside the files, unless you tick **Include the file's contents**. That box
   appears when you ask about files, and applies to that one question: Filescape then reads the
-  start of each chosen text file, or the text of a Word, PowerPoint, OpenDocument or Excel file,
-  as much as fits in the model's context. Other files,
-  and files that are only in the cloud, aren't read, so asking never downloads anything.
+  start of each chosen text file, or the text of a PDF, EPUB book, Word, PowerPoint, OpenDocument
+  or Excel file, as much as fits in the model's context. A PDF is read page by page from the
+  first. Other files, and files that are only in the cloud, aren't read, so asking never
+  downloads anything. PDFs over 256 MB, password-protected PDFs and scanned pages (pictures of
+  text, with no text in them) can't be read either.
 
 Press **×** to ask without them. After you send the question, **📎 About …** stays above it; hover
 it to see exactly what the model was told. Follow-up questions in the same chat can refer back to
@@ -183,6 +185,15 @@ it.
 
 Under the answer, **Based on** lists the files and folders it was given, and whether the model saw
 only their names, sizes and dates or the text of the files too. Click one to show it in Files.
+
+When a file was only partly read, or not read at all, a **⚠ Partly read** line under **Based on**
+says so, such as "report.pdf: read the start only, pages 1 to 6 of 40". The answer covers only
+what was read. Hover the line for every file; ask about a long file on its own to give it more
+room.
+
+**Measured by Filescape** under an answer opens the names, sizes, dates and counts Filescape read
+from the disk itself. Those are facts; the answer above them is the model's interpretation of
+them.
 
 What comes from your files is marked off from your question, and the model is told it is material
 to answer about, not instructions. A document that says "ignore your instructions" is read as part

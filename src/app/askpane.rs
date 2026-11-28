@@ -389,7 +389,7 @@ impl App {
                     && let Some(a) = (0..i).rev().find_map(|q| c.attached.get(&q))
                     && !a.paths.is_empty()
                 {
-                    ask::sources(ui, a, &mut reveal);
+                    ask::sources(ui, i, a, &mut reveal);
                 }
                 ui.add_space(8.0);
             }
